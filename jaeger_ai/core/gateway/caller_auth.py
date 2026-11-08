@@ -181,7 +181,7 @@ PREFIXED_READ_ROUTES = frozenset({
     "/v1/agent-messages", "/v1/agent-threads/{thread}",
     "/v1/agent-goals/{goal_id}",
     "/v1/sessions/{id}", "/v1/sessions/{id}/stream", "/v1/sessions/{id}/events",
-    "/v1/sessions/{id}/requests/{request_id}", "/v1/sessions/{id}/queue",
+    "/v1/sessions/{id}/requests/{request_id}", "/v1/sessions/{id}/requests/{request_id}/steer", "/v1/sessions/{id}/queue",
     "/v1/sessions/{id}/attachments", "/v1/sessions/{id}/activity", "/v1/stop",
     "/v1/sessions/{id}/messages",
     # Status of one approval; the handler limits it to the caller's sessions.

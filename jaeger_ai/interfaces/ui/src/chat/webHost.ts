@@ -30,6 +30,7 @@ function holdApprovedTools(source: PersistedPart[], parts: ChatPart[]) {
 
 function persistedToPart(p: PersistedPart, agentName: (id: string) => string): ChatPart | null {
   switch (p.type) {
+    case "steer": return {kind:"userGuidance",text:p.text,steeringId:p.steering_id};
     case "plan":
     case "progress":
     case "checkpoint":

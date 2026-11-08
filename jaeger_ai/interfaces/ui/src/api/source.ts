@@ -102,7 +102,8 @@ export interface QueuedRequest extends RequestSnapshot { input_text: string; que
 export interface SessionQueue {
   list(sessionId: string): Promise<{ session_id: string; items: QueuedRequest[] }>;
   enqueue(sessionId: string, text: string, requestId: string): Promise<{ session_id: string; request_id: string; status: string }>;
-  steer?(sessionId: string, requestId: string, text: string): Promise<{ session_id: string; request_id: string; steered: boolean }>;
+  steer?(sessionId: string, requestId: string, text: string, steeringId?: string): Promise<{ session_id: string; request_id: string; steered: boolean; steering_id?: string }>;
+  steeringStatus?(sessionId: string, requestId: string, steeringId: string): Promise<{ session_id: string; request_id: string; steered: boolean; steering_id: string; text: string }>;
   update(sessionId: string, requestId: string, body: { text?: string; status?: "queued" | "paused"; expected_updated_at: number }): Promise<unknown>;
   reorder(sessionId: string, order: string[]): Promise<unknown>;
   status(sessionId: string, requestId: string): Promise<RequestSnapshot>;

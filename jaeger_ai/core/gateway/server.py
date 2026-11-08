@@ -1659,6 +1659,7 @@ class JaegerGatewayApp:
         self.app.router.add_delete("/v1/sessions/{id}/queue/{request_id}", self.handle_delete_queue)
         self.app.router.add_post("/v1/sessions/{id}/cancel", self.handle_cancel_turn)
         self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/steer", self.handle_steer_request)
+        self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}/steer", self.handle_steer_request)
         self.app.router.add_post("/v1/sessions/{id}/reconcile", self.handle_reconcile)
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}", self.handle_get_request)
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}/changes", self.handle_file_changes)
@@ -6238,18 +6239,29 @@ class JaegerGatewayApp:
         """
         session_id = request.match_info["id"]
         request_id = request.match_info["request_id"]
-        body = await request.json() if request.can_read_body else {}
+        reading = getattr(request, 'method', 'POST') == 'GET'
+        body = dict(request.query) if reading else await request.json() if request.can_read_body else {}
         text = str(body.get("text") or "").strip()
-        if not text:
-            return web.json_response({"error": "Steering text is required"}, status=400)
+        steering_id = str(body.get("steering_id") or "").strip()
+        if not reading and not steering_id:
+            steering_id = uuid.uuid4().hex
+        if len(steering_id) > 128 or len(text) > 64000:
+            return web.json_response({"error": "Steering message is too large"}, status=400)
         row = self.store.get_request(request_id)
         if row is None or row.get("session_id") != session_id:
             return web.json_response({"error": "Request not found"}, status=404)
+        if steering_id:
+            original = self.store.steering_record(session_id, request_id, steering_id)
+            if original:
+                if not reading and original.get('text') != text:
+                    return web.json_response({'error': 'Steering identity already used for different text'}, status=409)
+                return web.json_response({**original, 'session_id': session_id, 'steered': True})
+        if reading:
+            return web.json_response({'error': 'Steering receipt not found'}, status=404)
+        if not text:
+            return web.json_response({"error": "Steering text is required"}, status=400)
         if row.get("status") in {"completed", "failed", "cancelled", "execution_unknown"}:
-            return web.json_response(
-                {"error": "Request is already terminal", "request_id": request_id},
-                status=409,
-            )
+            return web.json_response({"error": "Request is already terminal", "request_id": request_id}, status=409)
         agent = self._active_agents.get(request_id)
         if agent is None:
             return web.json_response(
@@ -6270,12 +6282,12 @@ class JaegerGatewayApp:
             "request_id": request_id,
             "text": text,
             "queued": True,
+            **({"steering_id": steering_id} if steering_id else {}),
         })
         return web.json_response({
-            "session_id": session_id,
-            "request_id": request_id,
-            "steered": True,
-            "queued": True,
+            "session_id": session_id, "request_id": request_id,
+            "steered": True, "queued": True,
+            **({"steering_id": steering_id} if steering_id else {}),
         })
 
     async def handle_reconcile(self, request: web.Request) -> web.Response:

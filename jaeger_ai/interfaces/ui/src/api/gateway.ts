@@ -61,7 +61,8 @@ export class GatewayClient implements JaegerSource {
   sessionQueue: SessionQueue = {
     list: id => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`),
     enqueue: (id, text, request_id) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`, { text, request_id }),
-    steer: (id, requestId, text) => this.json(`/v1/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(requestId)}/steer`, { text }),
+    steer: (id, requestId, text, steeringId) => this.json(`/v1/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(requestId)}/steer`, { text, ...(steeringId ? {steering_id:steeringId} : {}) }),
+    steeringStatus: (id, requestId, steeringId) => this.json(`/v1/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(requestId)}/steer?steering_id=${encodeURIComponent(steeringId)}`),
     update: (id, requestId, body) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(requestId)}`, body, "PATCH"),
     reorder: (id, order) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/reorder`, { order }),
     status: (id, requestId) => this.requestStatus(id, requestId),

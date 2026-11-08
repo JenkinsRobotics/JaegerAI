@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 _TOOL_END = {"tool.completed": "done", "tool.done": "done", "tool.failed": "error", "tool.error": "error"}
 _HANDOFF = {"agent.handoff": "to", "agent.handoff.finished": "from"}
-PART_EVENTS = ("turn.delta", "turn.reasoning", "turn.reasoning.done", "tool.started", "agent.knowledge", "turn.context", "turn.model",
+PART_EVENTS = ("turn.delta", "turn.steer", "turn.reasoning", "turn.reasoning.done", "tool.started", "agent.knowledge", "turn.context", "turn.model",
                *_TOOL_END, "turn.plan", "turn.progress", "turn.checkpoint", "sources", "search.count", "follow_ups", *_HANDOFF)
 
 
@@ -20,7 +20,10 @@ def project_parts(events: Iterable[dict[str, Any]], final_text: str | None = Non
     for evt in events:
         name, data, ts = evt.get("event"), evt.get("data") or {}, evt.get("timestamp")
         last = parts[-1] if parts else None
-        if name == "turn.delta":
+        if name == "turn.steer":
+            parts.append({'type': 'steer', 'text': str(data.get('text') or ''),
+                          'steering_id': data.get('steering_id') or str(evt.get('event_id') or ts or len(parts))})
+        elif name == "turn.delta":
             text = str(data.get("delta") or "")
             role = str(data.get("content_type") or data.get("channel") or "provisional")
             item_id = str(data.get("item_id") or "") or None

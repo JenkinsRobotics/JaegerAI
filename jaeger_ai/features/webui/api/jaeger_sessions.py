@@ -595,6 +595,11 @@ def route(handler, parsed, method: str) -> bool:
             handler, "POST", f"/v1/sessions/{session_id}/clarify/{parts[2]}", _body_bytes(handler),
         )
 
+    # Live steering and read-only receipt reconciliation share Gateway ownership.
+    if len(parts) == 4 and parts[1] == 'requests' and parts[3] == 'steer' and method in {'GET', 'POST'}:
+        return _proxy(handler, method, f'/v1/sessions/{session_id}/requests/{parts[2]}/steer{query}',
+                      _body_bytes(handler) if method == 'POST' else None)
+
     # /v1/sessions/{id}/requests/{request_id}
     if len(parts) == 3 and parts[1] == "requests" and method == "GET":
         return _proxy(
