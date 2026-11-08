@@ -51,6 +51,11 @@ python -m pytest -q \
 Synthetic provider detection and token fixtures are not real provider/account
 acceptance. Full source/client qualification remains separate.
 
+The historical independent counts above were recorded in reviewer command
+outputs, not separate retained log files. Their control files are included.
+The later transaction report includes a fresh exact-final independent rerun
+with complete saved logs.
+
 ## Separate concurrent-save follow-up
 
 Independent controls reproduce stale read-modify-write loss and shared temporary

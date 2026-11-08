@@ -2,10 +2,13 @@
 
 ## Candidate and boundaries
 
-The isolated branch preserves nineteen commits over canonical master
-ff71bb769bc56e4c6d7be6d540a86be73e291e07. The last increments add actual
-owned-process loss qualification, verified default-artifact scope and immutable
-retry identity. The final source is identified by its frozen Python manifest. The bundle README and
+The isolated branch preserves twenty-three commits over review base
+ff71bb769bc56e4c6d7be6d540a86be73e291e07. The last four increments add
+real default-report delivery qualification and provider settings preservation,
+type validation and concurrent-save protection. The separately inspected latest
+master adds only two CI/documentation commits; see the
+[upstream check](assistant-core-upstream-check-20261108.md). No combined upstream
+revision was executed. The final source is identified by its frozen Python manifest. The bundle README and
 commits.txt identify its final commit/tree and cumulative patch hash.
 
 No runtime machine edit, build, restart, installation or deployment took place.
@@ -18,9 +21,13 @@ remain preserved outside this isolated checkout.
 - Repository verification: 430 passed; production-path: 75 passed.
 - Security: 203 passed, with 2 platform skips.
 - Durable/recovery/artifact: 558 passed; agent runtime/commitment: 120 passed.
-- Owned HTTP/process: 50 passed, 3 established infrastructure exclusions,
-  638.80 seconds. This includes all four strengthened SIGKILL/two-restart cases.
+- Owned HTTP/process: 51 passed, 3 established infrastructure exclusions,
+  654.54 seconds. This includes all four strengthened SIGKILL/two-restart cases
+  and the real default-report delivery journey.
 - Separate real unshimmed specialist OWNER integration: 1 passed.
+- Provider settings: 80 passed. Independent final transaction review: 89 passed,
+  5 VS Code tests excluded, plus 9 hygiene checks. The main 80-case gate includes
+  the safe synthetic bridge controls. No real provider credentials were used.
 - Independent final artifact review: 97 passed; retry review: 9 new controls
   and 66 existing controls passed. Counts overlap with other evidence.
 - Unchanged UI: prior 910 tests / 201 files, theme/TypeScript/production/no-mock
@@ -28,7 +35,7 @@ remain preserved outside this isolated checkout.
   inputs. Source fingerprint:
   `36612489016ec2283f86dcc22d435be6aa80478591ab9dcb4551833c7be0fc1f`.
 - Root and jaeger-agent wheel/source archives rebuilt without installation;
-  six unchanged companions retained; all 10 archives inspected. Ten root and
+  six unchanged companions retained; all 10 archives inspected. Twelve root and
   five agent runtime modules match source byte-for-byte, with matching UI
   provenance. Critical lint, source freeze and whitespace checks pass.
 
@@ -95,8 +102,10 @@ non-core missing-smoke gates.
 The seventeenth combined source passed 49 HTTP cases and failed the existing
 immutable retry equality assertion, with 3 exclusions. Its four strengthened
 process-loss cases passed. That failed log remains http-seventeenth-final.log;
-its source and other passing gate logs remain preserved. The nineteenth gates
-above rerun the full combined source after the producer correction.
+its source and other passing gate logs remain preserved. The nineteenth run
+then passed 50 HTTP cases, with 3 exclusions, after the producer correction.
+Those logs remain included separately. The latest twenty-third run above
+reruns the combined source and adds the new report journey.
 
 Independent review also rejected the initial default-artifact patch: it could
 hash a file under root A, then re-resolve a worker path and issue trusted metadata
@@ -128,7 +137,7 @@ necessary. Evolution work is still deferred.
 
 ## Evidence and reproduction
 
-The bundle includes run-nineteenth-final.sh and per-gate logs, source hashes,
+The bundle includes run-twentythird-final.sh and per-gate logs, source hashes,
 artifact inspection, machine-readable UI results, and independent review logs.
 Invoke each runner case from the isolated clone with its recorded external venv,
 and select a fresh external basetemp for every rerun. Do not reuse pytest basetemp
@@ -141,11 +150,20 @@ four-case process result used fewer assertions. Only the final combined run
 qualifies the strengthened two-restart checks. No prior failure is relabeled a
 pass and no test deadline or safety boundary was weakened to obtain these results.
 
-## Later test-only default-report journey
+## Default-report journey and Settings corrections
 
 The [default report delivery test](assistant-core-default-report-delivery-20261108.md)
 adds actual default-mode task/approval/tool/artifact HTTP acceptance, authenticated
-download, restart/replay identity and scope-drift denial. Production bytes remain
-unchanged. Its integrated run passed separately, as did a fresh 430-check
-repository verification. The 50-case combined result above is not relabeled a
-51-case run. Research source support remains distinct from artifact-byte proof.
+download, restart/replay identity and scope-drift denial. That twentieth increment changed no production bytes. Its first integrated run
+passed separately, as did a fresh 430-check repository verification. It is now
+also included in the actual 51-case final run above. Research source support
+remains distinct from artifact-byte proof: ordinary research completion does
+not automatically enforce the existing grounded-citations procedure.
+
+The next three increments fix provider [read preservation](assistant-core-provider-settings-preservation-20261108.md),
+[input types](assistant-core-provider-settings-validation-20261108.md), and
+[revision-bound concurrent saves](assistant-core-provider-settings-transaction-20261108.md).
+They preserve unrelated values and modes, expose conflicts without retry, and
+distinguish an uncertain postcommit result from a confirmed save. Cooperating
+writers require the same canonical lock/state root. A noncooperating writer can
+still race after the final check, and no new frontend stale-form contract was added.

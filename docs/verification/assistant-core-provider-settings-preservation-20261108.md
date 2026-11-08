@@ -40,6 +40,11 @@ helpers. No actual credentials, provider executable, live account or Mac runtime
 was read or changed. Upstream auth/CSRF was source-traced, not newly exercised by
 these handler tests. Counts overlap; full integration is a separate gate.
 
+The historical independent counts above were recorded in reviewer command
+outputs, not separate retained log files. Their control files are included.
+The later transaction report includes a fresh exact-final independent rerun
+with complete saved logs.
+
 ## Remaining work at this increment
 
 Strict enabled types and invalid nested target rows are a separate validation
