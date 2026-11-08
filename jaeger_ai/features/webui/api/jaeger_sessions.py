@@ -458,6 +458,12 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path in ("/api/jaeger/runtime/models", "/api/runtime/models"):
         return _proxy(handler, "GET", "/v1/runtime/models")
 
+    # The composer reads and changes autonomy through the same authenticated
+    # Gateway as native clients. Keep the route exact; Gateway owns validation
+    # and the admin scope required for changes.
+    if path == '/v1/runtime/autonomy' and method in {'GET', 'POST'}:
+        return _proxy(handler, method, path, _body_bytes(handler) if method == 'POST' else None)
+
     if path=='/v1/runtime/mcp/configuration' and method=='GET':return _proxy(handler,method,path)
     if path=='/v1/runtime/mcp/configuration/change' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
     if path.startswith('/v1/runtime/mcp/configuration/operations/') and len(path.split('/'))==7 and method=='GET':return _proxy(handler,method,path)
