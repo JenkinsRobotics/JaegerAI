@@ -29,6 +29,15 @@ def migrate(conn):
         terminal_json TEXT, terminal_sha256 TEXT, revoked INTEGER NOT NULL DEFAULT 0)''')
 
 
+def migrate_native_enrollment(conn):
+    # Only future guarded native binds write this record. Historical task JSON
+    # is never backfilled into producer authority during an upgrade.
+    conn.execute("""CREATE TABLE IF NOT EXISTS background_native_enrollments (
+        request_id TEXT PRIMARY KEY,
+        identity_json TEXT NOT NULL, admission_json TEXT NOT NULL,
+        native_runs_json TEXT NOT NULL)""")
+
+
 def _admission(task, rid):
     # Native identities are added only by the existing transactional binder.
     return {k: v for k, v in task.payload['background_admissions'][rid].items()
@@ -94,6 +103,28 @@ def assert_open(conn, row):
             raise OwnerReceiptConflict('Sealed background producer cannot bind another run')
 
 
+def accept_native(conn, row, native, task):
+    """Append only in the guarded owner binding commit, including pre-dispatch.
+
+    A continuation can bind its old root before the resident journal begins.
+    Enrollment proves that binding; it does not grant terminal seal eligibility.
+    """
+    assert_open(conn, row)
+    rid = row['request_id']
+    raw = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (rid,)).fetchone()
+    record = conn.execute('SELECT * FROM background_native_enrollments WHERE request_id=?', (rid,)).fetchone()
+    admitted = task.payload['background_admissions'][rid].get('native_run_ids') or []
+    captured = json.loads(record['native_runs_json']) if record else []
+    if (captured != admitted or (record and
+            (record['identity_json'] != encoded(identity(raw)) or record['admission_json'] != encoded(_admission(task, rid))))):
+        raise OwnerReceiptConflict('Background native enrollment differs from its producer record')
+    if native not in captured:
+        captured.append(native)
+    conn.execute('INSERT INTO background_native_enrollments (request_id, identity_json, admission_json, native_runs_json) '
+                 'VALUES (?, ?, ?, ?) ON CONFLICT(request_id) DO UPDATE SET native_runs_json=excluded.native_runs_json',
+                 (rid, encoded(identity(raw)), encoded(_admission(task, rid)), encoded(captured)))
+
+
 def _settled(owner, task, row, task_runs=None):
     from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
     from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -117,7 +148,7 @@ def _settled(owner, task, row, task_runs=None):
 
 
 def _native_evidence(conn, task, runs):
-    """Stable operation evidence, independent of restart's lifecycle labels."""
+    """Stable operation fingerprints, with a veto for incompatible lifecycle."""
     from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger, SqliteRunStore
     from jaeger_ai.core.gateway.owner_receipts import protected_background_sources
     evidence = []
@@ -127,6 +158,10 @@ def _native_evidence(conn, task, runs):
         checkpoint = SqliteRunStore().latest_checkpoint(native)
         if run is None or checkpoint is None:
             raise OwnerReceiptConflict('Missing accepted background operation evidence')
+        from jaeger_ai.core.gateway.session_store import pid_is_alive
+        if (run.state not in {'active', 'running', 'verifying', 'completed'}
+                or (run.owner_pid not in {None, os.getpid()} and pid_is_alive(run.owner_pid))):
+            raise OwnerReceiptConflict('Accepted background native cannot safely settle as completed')
         sources = protected_background_sources(conn, native)
         for tid, rid in sources:
             raw = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (rid,)).fetchone()
@@ -151,18 +186,57 @@ def _native_evidence(conn, task, runs):
     return evidence
 
 
-def _task_scope(conn, task):
+def _task_scope(conn, task, *, require_enrollment=False):
     """Retain every earlier attempt's ownership, not only its final native."""
     runs, references = [], []
+    admissions = task.payload['background_admissions']
+    prefix = task.task_id + ':'
+    prior_requests = {row[0] for row in conn.execute('SELECT request_id FROM client_requests WHERE session_id=?', ('task:'+task.task_id,))
+                      if row[0].startswith(prefix) and row[0][len(prefix):].isdigit()
+                      and int(row[0][len(prefix):]) <= task.payload.get('attempt', 0)}
+    if prior_requests != set(admissions):
+        raise OwnerReceiptConflict('Background retained request graph is incomplete')
     for rid, admission in task.payload['background_admissions'].items():
         row = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (rid,)).fetchone()
         if (row is None or admission['attempt'] > task.payload.get('attempt', 0)
                 or receipt_error(task, {**dict(row), 'execution': json.loads(row['execution_json'])})):
             raise OwnerReceiptConflict('Background retained attempt ownership is unavailable')
+        journal = conn.execute('SELECT * FROM background_request_journal WHERE request_id=?', (rid,)).fetchone()
+        enrollment = conn.execute('SELECT * FROM background_native_enrollments WHERE request_id=?', (rid,)).fetchone()
+        captured = json.loads(enrollment['native_runs_json']) if enrollment else None
+        if ((require_enrollment and captured is None)
+                or (captured is not None and (captured != (admission.get('native_run_ids') or [])
+                    or enrollment['identity_json'] != encoded(identity(row))
+                    or enrollment['admission_json'] != encoded(_admission(task, rid))))
+                or (journal and (encoded(_admission(task, rid)) != journal['admission_json']
+                                 or encoded(identity(row)) != journal['identity_json']))):
+            raise OwnerReceiptConflict('Background retained native enrollment is missing or changed')
         references.extend((rid, row['turn_id']))
         runs.extend(admission.get('native_run_ids') or [])
     runs = list(dict.fromkeys(runs))
     return runs, list(dict.fromkeys([*references, *runs]))
+
+
+def _validate_root_lineage(native, accepted):
+    for run_id in accepted:
+        run = native.get(run_id)
+        # Actual owner continuation reuses or rotates accepted root runs.
+        # An accepted callback does not convert a delegate or foreign lineage
+        # into that contract. Parent links wholly inside the accepted root
+        # trajectory are not an unaccepted delegated child.
+        if (run is None or run.relation != 'root'
+                or (run.root_run_id and run.root_run_id not in accepted)):
+            raise OwnerReceiptConflict('Background accepted root lineage is incomplete or foreign')
+        seen = set()
+        while run is not None:
+            if run.id in seen or run.id not in accepted:
+                raise OwnerReceiptConflict('Background accepted root lineage is incomplete or foreign')
+            seen.add(run.id)
+            if not run.parent_run_id:
+                break
+            run = native.get(run.parent_run_id)
+            if run is None:
+                raise OwnerReceiptConflict('Background accepted root lineage is incomplete or foreign')
 
 
 def _has_children(conn, references, runs):
@@ -176,25 +250,7 @@ def _has_children(conn, references, runs):
     from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
     native = {run.id: run for run in SqliteRunStore().list()}
     accepted = set(runs)
-    for run_id in accepted:
-        run = native.get(run_id)
-        # Actual owner continuation reuses or rotates accepted root runs.
-        # An accepted callback does not convert a delegate or foreign lineage
-        # into that contract. Parent links wholly inside the accepted root
-        # trajectory are not an unaccepted delegated child.
-        if (run is None or run.relation != 'root'
-                or (run.root_run_id and run.root_run_id not in accepted)):
-            return True
-        seen = set()
-        while run is not None:
-            if run.id in seen or run.id not in accepted:
-                return True
-            seen.add(run.id)
-            if not run.parent_run_id:
-                break
-            run = native.get(run.parent_run_id)
-            if run is None:
-                return True
+    _validate_root_lineage(native, accepted)
     # root_run_id catches a deeper descendant even when its immediate parent
     # is outside the accepted IDs or its historical parent row is missing.
     return any(run.id not in accepted and
@@ -203,37 +259,61 @@ def _has_children(conn, references, runs):
 
 
 
-def assert_settlement_safe(conn, owner, task):
-    """An unsupported seal must not hide unresolved work in normal settlement.
+def assert_settlement_safe(conn, owner, task, *, require_enrollment=False):
+    """Qualify one completion graph before normal settlement or producer seal.
 
-    This is a veto for enrolled background producers, not recursive completion
-    authority for children. Settled trees still cannot acquire a journal seal.
+    For older no-journal tasks this is only a negative veto, never new replay or
+    seal authority. Bound child requests contribute their own native roots even
+    when those roots have no native parent link to this task.
     """
-    rid = f'{task.task_id}:{task.payload.get("attempt", 0)}'
-    if not conn.execute('SELECT 1 FROM background_request_journal WHERE request_id=?', (rid,)).fetchone():
-        return None
-    runs, references = _task_scope(conn, task)
+    runs, references = _task_scope(conn, task, require_enrollment=require_enrollment)
     evidence = _native_evidence(conn, task, runs)
     from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger, SqliteRunStore
-    native = SqliteRunStore().list()
-    owned = set(runs)
-    # Include deeper descendants even if root metadata is incomplete. An
-    # unresolved child is a veto regardless of a parent's terminal label.
+    from jaeger_agent.cognition.lifecycle import TERMINAL
+    from jaeger_ai.core.gateway.handoff_ownership import child_receipt
+    handoffs = [owner.gateway.store._handoff_row(row) for row in conn.execute('SELECT * FROM handoffs')]
+    references, seen, child_roots = set(references), set(), set()
     while True:
-        added = {run.id for run in native if run.parent_run_id in owned or run.root_run_id in owned} - owned
+        linked = [record for record in handoffs if record['id'] not in seen and
+                  (record.get('parent_run_id') in references or
+                   (record.get('metadata') or {}).get('parent_binding', {}).get('request_id') in references)]
+        if not linked:
+            break
+        for record in linked:
+            seen.add(record['id'])
+            _, _, child, bound = child_receipt(owner.gateway, record)
+            if child is None and (record.get('metadata') or {}).get('cancelled_before_admission') is True:
+                continue
+            if child is None or not bound or child['status'] not in {'completed', 'failed', 'cancelled'}:
+                raise OwnerReceiptConflict('Background child request graph is incomplete or unresolved')
+            references.update((child['request_id'], child['turn_id']))
+            if str(child.get('native_session') or '').startswith('owner:'):
+                native = child.get('native_run_id')
+                if not native or native in runs:
+                    raise OwnerReceiptConflict('Background child native identity is missing or aliases its parent')
+                enrolled = {native}
+                for table in ('owner_request_journal', 'background_native_enrollments'):
+                    row = conn.execute('SELECT native_runs_json FROM '+table+' WHERE request_id=?', (child['request_id'],)).fetchone()
+                    if row:
+                        if row[0] is None or native not in json.loads(row[0]):
+                            raise OwnerReceiptConflict('Background child native enrollment is incomplete')
+                        enrolled.update(json.loads(row[0]))
+                child_roots.update(enrolled)
+                references.update(enrolled)
+    native = {run.id: run for run in SqliteRunStore().list()}
+    _validate_root_lineage(native, set(runs))
+    owned = set(runs) | child_roots
+    while True:
+        added = {run.id for run in native.values() if run.parent_run_id in owned or run.root_run_id in owned} - owned
         if not added:
             break
         owned.update(added)
-    if (any(run.id in owned - set(runs) and run.state not in {'completed', 'failed', 'cancelled'} for run in native)
-            or any(effect.run_id in owned and effect.status == 'pending' for effect in SqliteEffectLedger().list())):
-        raise OwnerReceiptConflict('Background task tree has unresolved native work; inspect without replay')
-    from jaeger_ai.core.gateway.handoff_cancellation import status, unconfirmed_ids
-    slots = ','.join('?' for _ in references)
-    handoffs = conn.execute('SELECT * FROM handoffs WHERE parent_run_id IN (' + slots
-        + ") OR json_extract(metadata_json, '$.parent_binding.request_id') IN (" + slots + ')',
-        (*references, *references)).fetchall()
-    if unconfirmed_ids([status(owner.gateway, owner.gateway.store._handoff_row(row)) for row in handoffs]):
-        raise OwnerReceiptConflict('Background task tree has unresolved handoffs; inspect without replay')
+    for ident in owned - set(runs):
+        run = native.get(ident)
+        if run is None or run.state not in TERMINAL or SqliteRunStore().latest_checkpoint(ident) is None:
+            raise OwnerReceiptConflict('Background native child graph is incomplete or unresolved')
+    if any(effect.run_id in owned and effect.status == 'pending' for effect in SqliteEffectLedger().list()):
+        raise OwnerReceiptConflict('Background completion graph has unresolved operations')
     return evidence
 
 
@@ -258,9 +338,9 @@ def finish(owner, request_id, token, result, assistant_text, follow_ups):
                 or result.get('turn_id') != row['turn_id']):
             raise OwnerReceiptConflict('Background outcome differs from its live producer')
         runs = _settled(owner, task, row)
-        task_runs, references = _task_scope(conn, task)
+        task_runs, references = _task_scope(conn, task, require_enrollment=True)
         _settled(owner, task, row, task_runs)
-        native_evidence = assert_settlement_safe(conn, owner, task)
+        native_evidence = assert_settlement_safe(conn, owner, task, require_enrollment=True)
         # Delegated child recovery is deliberately outside this first slice.
         # A terminal child label alone is not a recursively qualified receipt.
         if _has_children(conn, references, task_runs):
@@ -275,7 +355,7 @@ def finish(owner, request_id, token, result, assistant_text, follow_ups):
             # letting the verifier mutate the caller's pending response.
             assistant_text = checked_result['text']
             result = {**checked_result, 'output': assistant_text}
-        proof = {'source': SOURCE, 'version': 2, 'status': 'completed',
+        proof = {'source': SOURCE, 'version': 3, 'status': 'completed',
             'execution_unknown': False, 'effects_settled': True,
             'request_id': request_id, 'session_id': row['session_id'], 'turn_id': row['turn_id'],
             'native_run_id': row['native_run_id'], 'native_session': row['native_session'],
@@ -301,14 +381,14 @@ def read(conn, row):
     if journal is None or journal['terminal_json'] is None:
         return None
     task = _bound(conn, row, journal)
-    task_runs, references = _task_scope(conn, task)
+    task_runs, references = _task_scope(conn, task, require_enrollment=True)
     if _has_children(conn, references, task_runs):
         raise OwnerReceiptConflict('Background delegated outcomes need separate reconciliation')
     if hashlib.sha256(journal['terminal_json'].encode()).hexdigest() != journal['terminal_sha256']:
         raise OwnerReceiptConflict('Background terminal snapshot is damaged')
     proof = json.loads(journal['terminal_json'])
     contract = task.payload['background_admissions'][row['request_id']]
-    if (proof.get('source') != SOURCE or proof.get('version') != 2 or proof.get('status') != 'completed'
+    if (proof.get('source') != SOURCE or proof.get('version') != 3 or proof.get('status') != 'completed'
             or proof.get('effects_settled') is not True or proof.get('execution_unknown') is not False
             or proof.get('admission') != contract or proof.get('native_run_ids') != contract.get('native_run_ids')
             or proof.get('task_native_run_ids') != task_runs

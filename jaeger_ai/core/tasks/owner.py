@@ -895,8 +895,13 @@ class GatewayTaskOwner:
         task = self.background_dispatch_guard(conn, row)
         if task is None:
             return
-        from .background_receipts import assert_open
+        from .background_receipts import assert_open, _task_scope
         assert_open(conn, row)
+        from jaeger_ai.core.gateway.owner_receipts import OwnerReceiptConflict
+        try:
+            _task_scope(conn, task)
+        except OwnerReceiptConflict as exc:
+            raise TaskAdmissionChanged(str(exc)) from exc
         if (native_session != 'owner:task:'+task.task_id or not native
                 or row.get('status') not in {'admitted', 'running', 'awaiting_approval'}):
             raise TaskAdmissionChanged('Background native binding is not an active owner run')
@@ -917,8 +922,10 @@ class GatewayTaskOwner:
             WHERE r.request_id<>? AND (r.native_run_id=? OR r.request_id IN (
                 SELECT admissions.key FROM durable_tasks t,
                 json_each(t.task_json, '$.payload.background_admissions') admissions,
-                json_each(admissions.value, '$.native_run_ids') runs WHERE runs.value=?))''',
-            (row['request_id'], native, native)).fetchall()
+                json_each(admissions.value, '$.native_run_ids') runs WHERE runs.value=?)
+                OR r.request_id IN (SELECT e.request_id FROM background_native_enrollments e,
+                    json_each(e.native_runs_json) runs WHERE runs.value=?))''',
+            (row['request_id'], native, native, native)).fetchall()
         if not sources and run.state not in {'active', 'running', 'verifying'}:
             raise TaskAdmissionChanged('Background native lifecycle does not authorize fresh binding')
         from jaeger_ai.core.gateway.session_store import pid_is_alive
@@ -946,6 +953,11 @@ class GatewayTaskOwner:
                            for run_id in admission.get('native_run_ids', [native]))
                     or self._background_children_unsettled(source)):
                 raise TaskAdmissionChanged('Background native run belongs to another or unsettled attempt')
+        from .background_receipts import accept_native
+        try:
+            accept_native(conn, row, native, task)
+        except OwnerReceiptConflict as exc:
+            raise TaskAdmissionChanged(str(exc)) from exc
         contract.setdefault('native_run_ids', [])
         if native not in contract['native_run_ids']:
             contract['native_run_ids'].append(native)
@@ -1334,6 +1346,19 @@ class GatewayTaskOwner:
                 authoritative_transition(current, TaskState.CANCELLED)
             elif verified:
                 try:
+                    if current.payload.get('background_admission_version') == 1:
+                        # Validate the task outcome on a copy, then settle its
+                        # native through the legal lifecycle before publishing
+                        # completed_verified. A failed native transition must
+                        # not leave a completed task and skip delivery by raising.
+                        candidate = DurableTask.from_dict(current.to_dict())
+                        authoritative_transition(candidate, TaskState.COMPLETED_VERIFIED, evidence=evidence)
+                        try:
+                            self._settle_run(candidate)
+                        except Exception:
+                            authoritative_transition(current, TaskState.PAUSED,
+                                error='Native settlement changed; inspect retained work without replay')
+                            return
                     authoritative_transition(
                         current, TaskState.COMPLETED_VERIFIED, evidence=evidence,
                     )

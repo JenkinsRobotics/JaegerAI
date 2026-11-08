@@ -127,7 +127,7 @@ async def test_every_prior_attempt_remains_in_completion_scope(env, monkeypatch,
             assert env.app.task_owner.store.get_task(env.tid).state.value == 'paused'
     if fault is None:
         proof = env.store.owner_request_receipt(env.rid)
-        assert proof['version'] == 2
+        assert proof['version'] == 3
         assert len(proof['native_run_ids']) == 1
         assert proof['task_native_run_ids'] == [earlier, prior['native_run_id']]
         assert set(proof['task_admissions']) == {prior_rid, env.rid}
