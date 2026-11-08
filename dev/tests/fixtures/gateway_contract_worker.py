@@ -58,7 +58,27 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
     # Test-local process-loss barrier. No production environment switch or
     # endpoint exists. The parent kills only this fixture's recorded child.
     fault = json.loads(os.environ.get("JAEGER_CONTRACT_RECEIPT_FAULT", "null"))
-    if fault is not None:
+    if fault is not None and fault.get('background'):
+        def barrier(request_id):
+            (state / 'receipt-fault-ready.json').write_text(json.dumps({
+                **fault, 'request_id': request_id, 'pid': os.getpid()}))
+            threading.Event().wait()
+
+        if fault['phase'] == 'before_seal' and hasattr(JaegerGatewayApp, '_commit_background_outcome'):
+            original_background = JaegerGatewayApp._commit_background_outcome
+            def fault_background(self, request_id, *args, **kwargs):
+                barrier(request_id)
+            JaegerGatewayApp._commit_background_outcome = fault_background
+        else:
+            # The same final-projection boundary exists on the unfixed baseline.
+            # Only the fixed producer has committed a background seal by here.
+            original_terminal = JaegerGatewayApp._persist_terminal
+            def fault_terminal(self, request_id, session_id, status, result, **kwargs):
+                if session_id.startswith('task:') and status == 'completed' and not result.get('halt_reason'):
+                    barrier(request_id)
+                return original_terminal(self, request_id, session_id, status, result, **kwargs)
+            JaegerGatewayApp._persist_terminal = fault_terminal
+    elif fault is not None:
         original_commit = JaegerGatewayApp._commit_owner_outcome
 
         def fault_commit(self, request_id, *args, **kwargs):

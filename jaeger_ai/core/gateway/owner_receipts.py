@@ -103,6 +103,8 @@ def begin(store: Any, request_id: str, session_id: str, lease: dict[str, Any]) -
             raise OwnerReceiptConflict('Request is not a fresh resident admission')
         if conn.execute('SELECT 1 FROM owner_request_journal WHERE request_id=?', (request_id,)).fetchone():
             raise OwnerReceiptConflict('Resident request already has a producer; never replay')
+        if conn.execute('SELECT 1 FROM background_request_journal WHERE request_id=?', (request_id,)).fetchone():
+            raise OwnerReceiptConflict('Background request cannot acquire a foreground producer')
         check_agent_identity(conn, row)
         conn.execute('INSERT INTO owner_request_journal VALUES (?, ?, ?, ?, ?, ?, NULL)',
                      (request_id, token, lease['owner_pid'], lease['started_at'], encoded(identity(row)), '[]'))
@@ -236,7 +238,8 @@ def finish(store: Any, request_id: str, token: str, runs: list[str], *, status: 
 def read(conn: Any, row: Any) -> dict[str, Any] | None:
     journal = conn.execute('SELECT * FROM owner_request_journal WHERE request_id=?', (row['request_id'],)).fetchone()
     if journal is None or journal['terminal_json'] is None:
-        return None
+        from jaeger_ai.core.tasks.background_receipts import read as read_background
+        return read_background(conn, row)
     _bound(row, journal)
     check_agent_identity(conn, row)
     proof = json.loads(journal['terminal_json'])
