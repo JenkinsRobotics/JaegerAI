@@ -26,10 +26,9 @@ def references(gateway, task):
         return []
     session_id = str(task.provenance.get('session_id') or '')
     session = gateway.store.get_session(session_id) if session_id else None
-    workspace = (task.payload.get('execution') or {}).get('workspace')
-    if not isinstance(workspace, str) or not workspace:
+    workspace = (task.payload.get('execution') or {}).get('workspace') or ''
+    if not isinstance(workspace, str):
         return []
-    root = Path(workspace).expanduser().resolve()
     result = {}
     for receipt in evidence:
         if not isinstance(receipt, dict) or receipt.get('kind') not in (None, 'file_sha256', 'owner_file_sha256'):
@@ -37,6 +36,15 @@ def references(gateway, task):
         raw, digest = receipt.get('resolved') or receipt.get('path'), receipt.get('sha256')
         if not isinstance(raw, str) or not isinstance(digest, str) or not re.fullmatch('[a-f0-9]{64}', digest):
             continue
+        scope = receipt.get('owner_artifact_scope')
+        instance = (receipt.get('kind') == 'owner_file_sha256' and isinstance(scope, dict)
+                    and scope.get('version') == 1 and scope.get('mode') == 'instance'
+                    and isinstance(scope.get('workspace'), str) and Path(scope['workspace']).is_absolute())
+        # Default-mode roots come only from newly reissued owner evidence, never
+        # current cwd, a model receipt, or a newly configured instance directory.
+        if not workspace and not instance:
+            continue
+        root = Path(scope['workspace'] if instance else workspace).expanduser().resolve()
         original = Path(raw).expanduser()
         original = original if original.is_absolute() else root / original
         original = Path(os.path.abspath(original))
@@ -52,28 +60,36 @@ def references(gateway, task):
             path = original.resolve()
             if not path.is_relative_to(root) or is_sensitive_path(path):
                 raise ValueError('Artifact target changed or is sensitive')
-            if not session or not session.get('workspace') or Path(session['workspace']).expanduser().resolve() != root:
+            if instance:
+                from jaeger_agent.core.workspace import get_effective_workspace_dir
+                execution = task.payload.get('execution') or {}
+                marker = execution.get('_instance_defaults') or {}
+                if (not session or session.get('workspace')
+                        or workspace and (marker.get('workspace') != workspace or Path(workspace).resolve() != root)
+                        or Path(get_effective_workspace_dir()).expanduser().resolve() != root):
+                    raise ValueError('Originating instance workspace changed; artifact bytes withheld')
+            elif not session or not session.get('workspace') or Path(session['workspace']).expanduser().resolve() != root:
                 raise ValueError('Originating workspace access is unavailable; artifact bytes withheld')
             size = path.stat().st_size
             if size > gateway.UPLOAD_MAX_BYTES:
                 raise ValueError('Artifact exceeds supported read size')
             if not path.is_file():
                 raise ValueError('Artifact is not a regular file')
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
             reason = 'Artifact missing or originating workspace unavailable; no new access granted'
         row = {'attachment_id': aid, 'session_id': session_id, 'original_filename': name,
                'safe_path': str(original), 'mime_type': mimetypes.guess_type(name)[0] or 'application/octet-stream',
                'size_bytes': size, 'sha256': digest, 'provenance': 'verified_task_artifact'}
         result[aid] = {'task_id': task.task_id, 'task_title': task.goal, 'session_id': session_id,
                        'attachment_id': aid, 'name': name, 'mime': row['mime_type'], 'size': size,
-                       'sha256': digest, 'readable': reason is None, 'unavailable_reason': reason, '_row': row}
+                       'sha256': digest, 'readable': reason is None, 'unavailable_reason': reason, '_row': row, '_workspace': str(root), '_instance': instance}
     return list(result.values())
 
 
 def catalog(gateway, task_id=None, session_id=None):
     task = gateway.task_owner.store.get_task(task_id) if task_id else None
     tasks = [task] if task else [] if task_id else gateway.task_owner.store.list_tasks()
-    return [{k: v for k, v in ref.items() if k != '_row'} for task in tasks for ref in references(gateway, task) if session_id is None or ref['session_id'] == session_id]
+    return [{k: v for k, v in ref.items() if not k.startswith('_')} for task in tasks for ref in references(gateway, task) if session_id is None or ref['session_id'] == session_id]
 
 
 async def read(gateway, request):
@@ -86,4 +102,8 @@ async def read(gateway, request):
     if not ref['readable']:
         return web.json_response({'error': ref['unavailable_reason']}, status=409)
     session = gateway.store.get_session(ref['session_id'])
-    return await gateway._session_file_response(request, ref['_row'], session)
+    if not session or (ref['_instance'] and session.get('workspace')):
+        return web.json_response({'error': 'Originating session scope changed; artifact bytes withheld'}, status=409)
+    # This is a read-only projection, not a session/project mutation or grant.
+    # references() just checked current scope against the owner-saved root.
+    return await gateway._session_file_response(request, ref['_row'], {**session, 'workspace': ref['_workspace']} if ref['_instance'] else session)

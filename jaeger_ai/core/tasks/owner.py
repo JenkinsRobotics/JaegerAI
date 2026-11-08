@@ -1253,10 +1253,36 @@ class GatewayTaskOwner:
 
     @staticmethod
     def verify(task, result):
+        # Capture scope once. The checked paths and the emitted provenance must
+        # describe the same root even if instance binding changes during hashing.
+        root = GatewayTaskOwner._verify_root(task)
+        verified, evidence = GatewayTaskOwner._verify_files(task, result, root)
+        if not verified:
+            return verified, evidence
+        execution = task.payload.get('execution') or {}
+        workspace = execution.get('workspace') or ''
+        marker = execution.get('_instance_defaults') or {}
+        instance = not workspace or marker.get('workspace') == workspace
+        # Reissue evidence at the owner boundary, never preserve worker metadata.
+        # Earlier worker file_sha256 receipts may contain arbitrary extra keys;
+        # only this owner's owner_file_sha256 + scope pair can reopen default files.
+        receipts = []
+        for receipt in evidence:
+            # _verify_files returns owner-resolved checked paths, not raw
+            # worker claims. Never resolve them again after the file check.
+            row = {'kind': 'owner_file_sha256', 'path': receipt['path'], 'sha256': receipt['sha256']}
+            if instance and root is not None:
+                row['owner_artifact_scope'] = {'version': 1, 'mode': 'instance', 'workspace': str(root)}
+            receipts.append(row)
+        return True, receipts
+
+    @staticmethod
+    def _verify_files(task, result, root: Path | None):
         paths = task.payload.get('artifacts') or []
         if paths:
             receipts = []
-            root = Path(task.payload['execution']['workspace']).resolve()
+            if root is None:
+                return False, 'No workspace to verify artifacts against'
             for raw in paths:
                 path = Path(raw).resolve()
                 if not path.is_relative_to(root) or not path.is_file() or path.stat().st_size == 0:
@@ -1268,9 +1294,9 @@ class GatewayTaskOwner:
         completion = result.get('task_completion') or {}
         receipts = [r for r in (completion.get('verification_receipts') or []) if r.get('kind') == 'file_sha256']
         if completion.get('ok') and receipts:
-            root = GatewayTaskOwner._verify_root(task)
             if root is None:
                 return False, 'No workspace to verify artifacts against'
+            checked = []
             for receipt in receipts:
                 raw = receipt.get('resolved') or receipt.get('path') or ''
                 path = Path(raw).expanduser()
@@ -1281,8 +1307,9 @@ class GatewayTaskOwner:
                     return False, f'Verification artifact is stale or empty: {raw}'
                 if hashlib.sha256(path.read_bytes()).hexdigest() != receipt.get('sha256'):
                     return False, f'Verification artifact changed after the receipt: {raw}'
-            return True, receipts
-        named = GatewayTaskOwner._named_path_receipts(task)
+                checked.append({'path': str(path), 'sha256': receipt['sha256']})
+            return True, checked
+        named = GatewayTaskOwner._named_path_receipts(task, root)
         if named is not None:
             return named
         return False, UNVERIFIABLE
@@ -1303,7 +1330,7 @@ class GatewayTaskOwner:
         return Path(raw).expanduser().resolve() if raw else None
 
     @staticmethod
-    def _named_path_receipts(task):
+    def _named_path_receipts(task, root: Path | None):
         """The owner checks the files the request names itself; no worker ritual needed.
 
         Every named path must exist inside the workspace, be non-empty, and at
@@ -1312,7 +1339,6 @@ class GatewayTaskOwner:
         """
         from jaeger_ai.core.runtime.autonomous_runner import _required_paths
         names = _required_paths(task.goal or '')
-        root = GatewayTaskOwner._verify_root(task)
         if not names or root is None:
             return None
         receipts, fresh = [], False
