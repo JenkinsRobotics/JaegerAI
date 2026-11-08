@@ -155,6 +155,9 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   useEffect(() => {
     let live = true;
     if (requestedAgent && !requestedSession) return;
+    // Wait for the route selection effect before validating; never validate the
+    // previous chat against a new exact-session link.
+    if (requestedSession && requestedSession !== session) return;
     Promise.all([source.agents(), session ? source.session(session) : Promise.resolve(null)]).then(([rows, snapshot]) => {
       if (live) { setAgents(rows); setActiveAgentId(snapshot?.agent_id || requestedAgent || "native:jaeger"); setReady(true); setError(""); }
     }).catch((e: unknown) => {

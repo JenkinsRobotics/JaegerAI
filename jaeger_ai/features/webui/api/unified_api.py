@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -645,25 +646,74 @@ def get_doc(did: str) -> dict:
     return d
 
 
+def _expected_doc_revision(body: dict) -> float | None:
+    expected = None
+    if "expected_updated_at" in body:
+        value = body["expected_updated_at"]
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise ApiError(400, "expected_updated_at must be a finite revision")
+        try:
+            expected = float(value)
+        except (ValueError, OverflowError):
+            raise ApiError(400, "expected_updated_at must be a finite revision") from None
+        if not math.isfinite(expected):
+            raise ApiError(400, "expected_updated_at must be a finite revision")
+    return expected
+
+
 def save_doc(did: str | None, body: dict) -> dict:
+    # Use the existing stable OS lock and unique, fsynced replacement writer.
+    # The lock covers the read and CAS as well as replacement, not just IO.
+    from jaeger_ai.core.instance.atomic_files import _file_write_lock, _write_unlocked
+
     title, text = str(body.get("title", "")).strip()[:200] or "Untitled", body.get("body", "")
     if not isinstance(text, str) or len(text) > 2_000_000:
         raise ApiError(400, "body must be text up to 2 MB")
-    now = time.time()
-    if did:
-        cur = get_doc(did)
-        if body.get("expected_updated_at") is not None and abs(float(body["expected_updated_at"]) - cur["updated_at"]) > 1e-6:
-            raise ApiError(409, "document changed elsewhere; reload it", current=cur)
-        doc = cur | {"title": title, "body": text, "updated_at": now}
-    else:
-        doc = {"id": uuid.uuid4().hex[:16], "title": title, "body": text, "created_at": now, "updated_at": now}
-    _write_json(_docs() / f"{doc['id']}.json", doc)
+    expected = _expected_doc_revision(body)
+    if did is not None and not _ID.fullmatch(did):
+        raise ApiError(404, "no such document")
+    doc_id = did if did is not None else uuid.uuid4().hex[:16]
+    path = _docs() / f"{doc_id}.json"
+    with _file_write_lock(path):
+        now = time.time()
+        if did is not None:
+            cur = get_doc(did)
+            revision = cur.get("updated_at")
+            if isinstance(revision, bool) or not isinstance(revision, (int, float)) or not math.isfinite(revision):
+                raise ApiError(409, "document has an invalid revision; current file retained")
+            # JSON float round trips are exact; tolerance would admit a stale
+            # token when two changes occur within the same clock tick.
+            if expected is not None and expected != revision:
+                raise ApiError(409, "document changed elsewhere; reload it", current=cur)
+            now = max(now, math.nextafter(revision, math.inf))
+            doc = cur | {"title": title, "body": text, "updated_at": now}
+        else:
+            if path.exists():
+                raise ApiError(409, "document ID collision; retry creation")
+            doc = {"id": doc_id, "title": title, "body": text, "created_at": now, "updated_at": now}
+        if not math.isfinite(now):
+            raise ApiError(409, "no finite document revision available; current file retained")
+        _write_unlocked(path, json.dumps(doc, indent=2, allow_nan=False))
     return doc
 
 
-def delete_doc(did: str) -> dict:
-    get_doc(did)
-    (_docs() / f"{did}.json").unlink()
+def delete_doc(did: str, body: dict | None = None) -> dict:
+    from jaeger_ai.core.instance.atomic_files import _file_write_lock
+
+    if not _ID.fullmatch(did):
+        raise ApiError(404, "no such document")
+    expected = _expected_doc_revision(body if body is not None else {})
+    path = _docs() / f"{did}.json"
+    with _file_write_lock(path):
+        current = get_doc(did)
+        if expected is not None and expected != current.get("updated_at"):
+            raise ApiError(409, "document changed elsewhere; reload it", current=current)
+        path.unlink()
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     return {"deleted": did}
 
 
@@ -918,7 +968,7 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
     if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/pipeline" or p.startswith("/v1/pipeline/") or p == "/v1/resources" or p == "/v1/jobs/runner" or p == "/v1/research/youtube" or p.startswith("/v1/research/youtube/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
         return False
     try:
-        body = read_body(handler) if method in ("POST", "PUT") else {}
+        body = read_body(handler) if method in ("POST", "PUT") or (method == "DELETE" and re.fullmatch(r"/v1/documents/[a-z0-9-]+", p)) else {}
         if not isinstance(body, dict):
             raise ApiError(400, "JSON object body required")
         m = re.match(r"^/v1/studio/assets/([a-z0-9-]+)(/file)?$", p)
@@ -1029,7 +1079,7 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
             if method == "PUT":
                 return j(handler, save_doc(md.group(1), body)) or True
             if method == "DELETE":
-                return j(handler, delete_doc(md.group(1))) or True
+                return j(handler, delete_doc(md.group(1), body)) or True
         raise ApiError(405 if p.startswith(("/v1/studio/", "/v1/models/", "/v1/documents", "/v1/compare/", "/v1/providers/cli", "/v1/pipeline")) else 404, "method not allowed")
     except ApiError as exc:
         j(handler, exc.payload, status=exc.status)

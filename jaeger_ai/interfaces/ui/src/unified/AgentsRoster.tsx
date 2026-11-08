@@ -107,6 +107,9 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
   const toast = useToast();
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
   const [model, setModel] = useState<ModelChoiceSnapshot | null | undefined>();
+  const [sessionsError, setSessionsError] = useState("");
+  const [modelError, setModelError] = useState("");
+  const [reload, setReload] = useState(0);
   const [panel, setPanel] = useState<"config" | "memory" | "knowledge" | "rename">();
   const [name, setName] = useState(label(agent));
   const [busy, setBusy] = useState(false);
@@ -114,12 +117,13 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
   const actions = source.agentActions;
   useEffect(() => {
     let live = true;
-    source.sessions({ agent_id: agent.id }).then((s) => { if (live) setSessions(s.slice(0, 6)); }, () => { if (live) setSessions([]); });
+    setSessions(null); setSessionsError(""); setModel(undefined); setModelError("");
+    source.sessions({ agent_id: agent.id }).then((s) => { if (live) setSessions(s.slice(0, 6)); }, (e: unknown) => { if (live) setSessionsError(String(e instanceof Error ? e.message : e)); });
     if (source.agentHome && source.modelSettings) {
-      source.agentHome(agent.id).then((h) => source.modelSettings!.read(h.session_id)).then((m) => { if (live) setModel(m); }, () => { if (live) setModel(null); });
+      source.agentHome(agent.id).then((h) => source.modelSettings!.read(h.session_id)).then((m) => { if (live) setModel(m); }, (e: unknown) => { if (live) { setModel(null); setModelError(String(e instanceof Error ? e.message : e)); } });
     } else setModel(null);
     return () => { live = false; };
-  }, [source, agent.id]);
+  }, [source, agent.id, reload]);
   const archived = Boolean(agent.archived || agent.presentation?.archived);
   const patch = async (body: Parameters<NonNullable<typeof actions>["patchAgent"]>[1], done: string) => {
     if (!actions) return;
@@ -148,12 +152,13 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
       </div>
       <section><h3>Overview</h3>
         <dl className="jg-ui-kv">
-          <dt>Model</dt><dd>{model === undefined ? "…" : model?.model ? `${model.model}${model.provider ? ` · ${model.provider}` : ""}` : "Gateway default"}</dd>
+          <dt>Model</dt><dd>{modelError ? "Unavailable" : !source.agentHome || !source.modelSettings ? "Not reported" : model === undefined ? "…" : model?.model ? `${model.model}${model.provider ? ` · ${model.provider}` : ""}` : "Gateway default"}</dd>
           <dt>Kind</dt><dd>{agent.kind ?? "–"}</dd>
           <dt>Runner</dt><dd>{agent.runner ? String((agent.runner as { kind?: string }).kind ?? "custom") : "Jaeger"}</dd>
           <dt>ID</dt><dd><code>{agent.id}</code></dd>
         </dl>
       </section>
+      {modelError && <p role="alert" className="jg-u-error">Couldn't load model: {modelError} <button type="button" onClick={() => setReload(n => n + 1)}>Retry model details</button></p>}
       <section><h3>Skills &amp; tools</h3>
         {agent.skills?.length ? <div className="jg-row jg-row--wrap jg-mt-2">{agent.skills.map((s) => <Badge key={s.id}>{s.name}</Badge>)}</div>
           : <p className="jg-u-note">No skills reported for this agent.{agent.delegation ? ` Tools: ${agent.delegation.tools}.` : ""}</p>}
@@ -175,9 +180,9 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
         </div>
       </section>
       <section><h3>Recent conversations</h3>
-        {!sessions ? <SkeletonRows n={2} /> : sessions.length ? (
+        {sessionsError ? <p role="alert" className="jg-u-error">Couldn't load conversations: {sessionsError} <button type="button" onClick={() => setReload(n => n + 1)}>Retry conversations</button></p> : !sessions ? <SkeletonRows n={2} /> : sessions.length ? (
           <ul className="jg-u-list">{sessions.map((s) => (
-            <li key={s.session_id}><button type="button" className="jg-u-row" onClick={() => onNavigate(`/chat?agent=${encodeURIComponent(agent.id)}`)}>
+            <li key={s.session_id}><button type="button" className="jg-u-row" onClick={() => onNavigate(`/?agent=${encodeURIComponent(agent.id)}&session=${encodeURIComponent(s.session_id)}`)}>
               <span className="jg-u-row__text"><strong>{s.title || "Conversation"}</strong><span>{when(s.created_at)}</span></span>
             </button></li>))}
           </ul>) : <p className="jg-u-note">No conversations yet.</p>}

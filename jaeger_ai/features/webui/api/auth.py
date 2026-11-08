@@ -1176,7 +1176,7 @@ def check_auth(handler, parsed) -> bool:
     session_info = ensure_trusted_auth_session(handler)
     if session_info:
         if not trusted_session_allows_active_profile(session_info):
-            if parsed.path.startswith('/api/'):
+            if parsed.path.startswith(('/api/', '/v1/')):
                 body = b'{"error":"Profile access forbidden"}'
                 handler.send_response(403)
                 handler.send_header('Content-Type', 'application/json')
@@ -1190,7 +1190,7 @@ def check_auth(handler, parsed) -> bool:
             return False
         return True
     # Not authorized
-    if parsed.path.startswith('/api/'):
+    if parsed.path.startswith(('/api/', '/v1/')):
         body = b'{"error":"Authentication required"}'
         handler.send_response(401)
         handler.send_header('Content-Type', 'application/json')

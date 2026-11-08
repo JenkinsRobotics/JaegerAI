@@ -35,7 +35,7 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 | Feed: notifications/read state | PARTIAL | CompanionPage Feed; source.notifications | Transport/UI wiring, not proof of proactive reasoning. |
 | Agents: roster, create, archive, rename, memory, knowledge, instructions | PARTIAL | AgentsRoster and source.agentActions/specialistControls/agentMemory/agentKnowledge | Agent links now resolve source.agentHome and select its durable session; failures block old-chat fallback. Provider-backed specialist execution remains unverified. |
 | Agents / Characters | PARTIAL | CharactersPage; createAgent and specialist controls | Character creation is a real mutation, not a new independent product identity. |
-| Agents / Memory & Skills | PARTIAL | KnowledgePage; source.skills/skillDetail/agentMemory/library | Read failure handling exists but some detail errors collapse to empty/no detail. |
+| Agents / Memory & Skills | PARTIAL | KnowledgePage; source.skills/skillDetail/agentMemory/library | Later [request-ownership repair](knowledge-request-ownership-20261108.md) adds explicit detail errors/retries and stale-context guards. |
 | More / Work / Pipeline | PARTIAL | HomeDashboard + PipelinePage; source.tasks and `/v1/pipeline` | Pipeline metadata is distinct from execution state. Failed refresh no longer reports a stale/zero summary; partial task/pipeline failures are retryable. |
 | Work / Backlog | PARTIAL | BacklogPage; `/v1/backlog` list/add/update/assign plus event feed | Own records, not interchangeable with Gateway tasks. |
 | Work / Tasks | PARTIAL | TasksWorkspace/TasksBoard; source.tasks/taskActions/agentHome/delegation/taskArtifacts | Proposal, approval, edit, cancel and lookup have dedicated component tests. No real side effects exercised by UI audit. |
@@ -43,7 +43,7 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 | Work / Calendar | PARTIAL | CalendarPage; source.schedules and tasks with ETA | Task and scheduler failures are now independently visible/retryable; due dates still load without scheduler support. |
 | Work / YouTube | PARTIAL | YouTubePage and YouTube HTTP API | No publishing, downloads, credentials or real account effects exercised. |
 | More / Research / Research | PARTIAL | ResearchPage; task proposals/approve/cancel, agentHome, artifacts | Proposal response is not verified research completion. |
-| Research / Documents | PARTIAL | DocumentsPage; `/v1/documents` CRUD and `/ai-edit`, model inventory | Saved revision checks exist. Unsaved draft navigation and concurrent save need follow-up. Description still emphasizes local models. |
+| Research / Documents | PARTIAL | DocumentsPage; `/v1/documents` CRUD and `/ai-edit`, model inventory | Later [document repairs](assistant-core-followup-20261108.md) add serialized backend CAS and same-tab draft recovery. Real provider/browser editing remains unverified. |
 | Research / Workspace | PARTIAL | WorkspaceBrowser; source workspace and Git controls | No operator repository mutation exercised here. |
 | More / Machine | PARTIAL | MachineControlPanel; source.computers/policySources plus native broker | Native permission/system controls are unavailable in cloud browser. Do not infer installed-host health. |
 | Settings gear | PARTIAL | Now opens `/settings/appearance`, the existing SettingsDialog implementation | Removed production access to the draft-only settings navigation. No new controls or fake saves introduced. |
@@ -73,10 +73,10 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 - Development mock selection survives destination queries/fragments and honors explicit overrides. Production no-mock validation remains required.
 - Playwright supports an explicit test Python and system Chromium, and writes artifacts/reports outside source. Vitest reports/coverage also default outside source.
 
-## Follow-up gaps (not accepted as complete)
+## Follow-up gaps and later repairs (not full acceptance)
 
-- Workspace pages currently mount only while selected; unsaved Documents edits do not have proven navigation persistence. Chat draft persistence has a dedicated browser contract.
-- Some roster session rows navigate to an agent home rather than the exact selected historic session.
+- Workspace pages mount only while selected. The later [document-draft repair](document-draft-recovery-20261108.md) adds same-tab recovery with regression evidence; it does not claim permanent unsaved drafts or browser acceptance. Chat draft persistence has a dedicated browser contract.
+- The later [historic-session repair](historic-session-navigation-20261108.md) fixes roster rows opening agent home instead of the selected historic session, with production-shell component evidence.
 - Source-backed capability presence does not prove native-host availability, real provider credentials, external connector authorization, output quality, or a completed autonomous workflow.
 
 ### Parallel workspace error-state repair
