@@ -545,3 +545,19 @@ def test_step_reports_the_tools_it_ran_and_a_state_change_gets_one_check(env, mo
                                    execution=_turn_owned(env), objective="restore the branch")
     assert len(prompts) == 2 and prompts[1].startswith("[Check step]")
     assert "r" not in env.app._request_tools
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_is_redacted_before_task_settlement(env, caplog):
+    import json
+    detail = "503 provider unavailable https://user:dummy-card-password@provider.invalid"
+    row = await _run(env, REQUEST, "r-provider-fail", worker=lambda prompt, **kw: {"error": detail})
+    [task] = env.app.task_owner.store.list_tasks()
+    assert task.state == TaskState.FAILED
+    assert row["status"] == "failed"
+    assert "503 provider unavailable" in row["result"]["error"]
+    payload = json.dumps({"request": row, "task": task.to_dict(),
+                          "events": env.app.store.replay_events("s"),
+                          "history": env.app.store.list_messages("s")})
+    assert "dummy-card-password" not in payload
+    assert "dummy-card-password" not in caplog.text

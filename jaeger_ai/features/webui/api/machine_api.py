@@ -38,6 +38,9 @@ def _logs_dir() -> Path:
 
 
 def redact(line: str) -> str:
+    from jaeger_ai.core.redaction import redact_text
+
+    line = redact_text(line)
     line = _REDACT[1].sub("[redacted]", line)
     return _REDACT[0].sub(lambda m: f"{m.group(1)}{m.group(2)}[redacted]", line)
 
