@@ -300,6 +300,20 @@
  .jg-stable-demo__inspector { position:static; width:auto; box-shadow:none; }
 }
 .jg-stable-demo__profile { flex-direction:column; gap:0; }
+.jg-stable-demo__header-start,
+.jg-stable-demo__tools { position:absolute; top:34px; z-index:3; grid-area:auto; }
+.jg-stable-demo__header-start { left:20px; }
+.jg-stable-demo__tools { right:20px; }
+@media(min-width:381px) {
+ .jg-stable-demo__profile { grid-column:2; }
+}
+@media(max-width:820px) {
+ .jg-stable-demo__header-start { left:12px; }
+ .jg-stable-demo__tools { right:12px; }
+}
+@media(max-width:520px) {
+ .jg-stable-demo__profile { margin-top:76px; }
+}
 .jg-stable-demo__profile-avatar {
  transition: width .45s ease, height .45s ease, flex-basis .45s ease;
 }
