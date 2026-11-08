@@ -15,9 +15,10 @@ import { ToastProvider } from "../unified/ui";
 import "../unified/unified.css";
 import "../unified/design.css";
 import { applyAppearance, storedAppearance, type Appearance } from "../settings/SettingsDialog";
-import { TaskArtifacts } from "../library/TaskArtifacts";
-import { WorkspaceBrowser } from "../unified/WorkspaceBrowser";
-import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, Bot, Workflow, Search, Image, Compass, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2 } from "../components/Icons";
+import { ConversationSummary } from "./ConversationSummary";
+import { ConversationWorkPanel, type WorkView } from "./ConversationWorkPanel";
+import { sendJson } from "../unified/webui";
+import { Plus, MessageSquare, FolderOpen, CheckCircle, Settings, PanelLeft, Bot, Workflow, Search, Image, Compass, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2, PanelRight } from "../components/Icons";
 import "./stableDemo.css";
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import { navigate, pathOf, useRoute, SUBTABS, type PageId } from "../shell/router";
@@ -34,9 +35,8 @@ function storedSidebarWidth() { try { return clampWidth(Number(localStorage.getI
 function projectLabel(workspace: string) { return workspace.split(/[\\/]/).filter(Boolean).pop() || workspace; }
 function sessionActivity(row: SessionRow) { return row.last_activity_at ?? row.updated_at ?? row.created_at ?? 0; }
 function SummaryGlyph() { return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6" cy="7" r="2"/><path d="M11 7h8"/><circle cx="6" cy="17" r="2"/><path d="M11 17h8"/></svg>; }
-function TabsGlyph({ count }: { count: number }) { return <span className="jg-stable-demo__tabs-glyph" aria-hidden="true"><span>{count}</span></span>; }
-type HeaderPopup = "menu" | "summary" | "tabs" | null;
-type MenuPage = "main" | "copy" | "open";
+type HeaderPopup = "menu" | "summary" | null;
+type MenuPage = "main" | "copy" | "open" | "fork";
 function ConversationRow({ row, active, pinned, selecting, selected, onOpen, onSelect, onPin, onDelete }: { row: SessionRow; active: boolean; pinned: boolean; selecting: boolean; selected: boolean; onOpen(): void; onSelect(): void; onPin(): void; onDelete(): void }) {
   const title = row.title || "Untitled conversation";
   const generic = !row.title || ["Jaeger stable chat", "New conversation"].includes(row.title);
@@ -95,7 +95,9 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const route = useRoute();
   const linkedSession = route.page === 'chat' ? route.params.get('session') : null;
   const invalidLinkedSession = linkedSession !== null && !validConversationId(linkedSession);
-  const [inspector, setInspector] = useState<"outputs" | "files" | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [workView, setWorkView] = useState<WorkView | null>(null);
+  const [forkBusy, setForkBusy] = useState(false);
   const [recent, setRecent] = useState<SessionRow[]>([]);
   const [historyError, setHistoryError] = useState("");
   const [historyReady, setHistoryReady] = useState(false);
@@ -196,12 +198,23 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   }, [ready, session, route.page, linkedSession]);
   useEffect(() => {
     if (!headerPopup) return;
-    const close = (event: MouseEvent) => { if (headerPopup !== "summary" && !toolsRef.current?.contains(event.target as Node)) setHeaderPopup(null); };
+    const close = (event: MouseEvent) => { if (!toolsRef.current?.contains(event.target as Node)) setHeaderPopup(null); };
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setHeaderPopup(null); };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [headerPopup]);
+  useEffect(() => {
+    if (headerPopup === "menu" && !renameOpen) toolsRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+  }, [headerPopup, menuPage, renameOpen]);
+  const menuKeys = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'Escape'].includes(event.key) || (event.target as HTMLElement).matches('input,textarea')) return;
+    event.preventDefault();
+    if (event.key === 'Escape') { setHeaderPopup(null); toolsRef.current?.querySelector<HTMLButtonElement>('[aria-label="Conversation actions"]')?.focus(); return; }
+    const rows = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
+    const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+    rows[event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + rows.length) % rows.length]?.focus();
+  };
   useEffect(() => {
     if (typeof matchMedia !== "function") return;
     const compact = matchMedia(COMPACT_SHELL_QUERY);
@@ -229,7 +242,6 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     }, e => { if (live) setHistoryError(String((e as Error).message)); });
     return () => { live = false; };
   }, [source, session, linkedSession]);
-  const workspaceParams = useMemo(() => new URLSearchParams({ session }), [session]);
   const selectSession = (id: string) => {
     if (id !== session) { setReady(false); setSession(id); }
     navigate(conversationPath(id, location.search));
@@ -250,6 +262,19 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const togglePopup = (popup: Exclude<HeaderPopup, null>) => {
     setHeaderPopup(value => value === popup ? null : popup);
     setMenuPage("main"); setRenameOpen(false);
+  };
+  const openWork = (view: WorkView) => { setWorkView(view); setPanelOpen(true); setHeaderPopup(null); };
+  const forkSession = async (side: boolean) => {
+    if (!session || forkBusy) return;
+    setForkBusy(true); setHistoryError("");
+    try {
+      const row = await sendJson<SessionRow>("POST", `/v1/sessions/${encodeURIComponent(session)}/branch`, { title: `${currentTitle} (fork)` });
+      if (!validConversationId(row.session_id) || row.session_id === session) throw Error("Invalid fork response");
+      setRecent(rows => [row, ...rows]); setHeaderPopup(null);
+      if (side) window.open(conversationLink(row.session_id, shareOrigin), "_blank", "noopener,noreferrer");
+      else selectSession(row.session_id);
+    } catch (e) { setHistoryError(`Fork could not be confirmed: ${String((e as Error).message || e)}. Check Recents before trying again.`); }
+    finally { setForkBusy(false); }
   };
   const togglePinnedSession = (id: string) => {
     if (!id) return;
@@ -353,8 +378,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const workspacePage = route.page !== "chat" && route.page !== "settings";
   const routeTitle: Record<PageId, string> = { library: "Library", automations: "Automations", feed: "Feed", home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Imagine", models: "Models", machine: "Machine", settings: "Settings" };
   const activeSection = route.page === "work" && route.sub === "tasks" ? "tasks" : route.page === "models" ? "studio" : route.page === "home" ? "chat" : route.page;
-  const openTabCount = (session ? 1 : 0) + (inspector ? 1 : 0);
-  return <ToastProvider><div hidden={settingsOpen}><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector || headerPopup === "summary"} data-summary={headerPopup === "summary"} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+  return <ToastProvider><div hidden={settingsOpen}><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={panelOpen} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__rail">
         <button type="button" aria-label="Close sidebar" title="Close sidebar" aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(false)}><PanelLeft size={20} /></button>
@@ -423,35 +447,32 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           <span className="jg-stable-demo__profile-copy"><strong>Jaeger<span className="jg-clip-status" role="status">{(ready && !error && avatarState === "idle" ? "Idle" : STATUS_TEXT[!ready || error ? "connecting" : avatarState])}</span></strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
         </div>
         <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
-          <button className="jg-stable-demo__top-button" type="button" aria-label="Conversation actions" data-tooltip="Conversation actions" aria-expanded={headerPopup === "menu"} onClick={() => togglePopup("menu")}><MoreHorizontal size={19} /></button>
-          <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle pinned summary" data-tooltip="Toggle pinned summary" aria-expanded={headerPopup === "summary"} onClick={() => togglePopup("summary")}><SummaryGlyph /></button>
-          <button className="jg-stable-demo__top-button" type="button" aria-label="Open tabs" data-tooltip="Tabs Jaeger is using or you shared" aria-expanded={headerPopup === "tabs"} onClick={() => togglePopup("tabs")}><TabsGlyph count={openTabCount} /></button>
-          {headerPopup === "menu" && <div className="jg-stable-demo__popover jg-stable-demo__popover--menu" role="menu" aria-label="Conversation actions menu">
-            {menuPage !== "main" && <button className="jg-stable-demo__popover-back" type="button" onClick={() => setMenuPage("main")}><ChevronLeft size={16} />{menuPage === "copy" ? "Copy" : "Open in"}</button>}
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Conversation actions" aria-haspopup="menu" data-tooltip="Conversation actions" aria-expanded={headerPopup === "menu"} onClick={() => togglePopup("menu")}><MoreHorizontal size={19} /></button>
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Conversation summary" data-tooltip="Conversation summary" aria-controls="jaeger-conversation-summary" aria-expanded={headerPopup === "summary"} onClick={() => togglePopup("summary")}><SummaryGlyph /></button>
+          <span className="jg-stable-demo__toolbar-divider" aria-hidden="true" /><button className="jg-stable-demo__top-button" type="button" aria-label="Toggle tools workspace" data-tooltip="Tools workspace" aria-expanded={panelOpen} aria-controls="jaeger-work-panel" onClick={() => { setHeaderPopup(null); setWorkView(view => view || "tools"); setPanelOpen(value => !value); }}><PanelRight size={21} /></button>
+          {headerPopup === "menu" && <div className="jg-stable-demo__popover jg-stable-demo__popover--menu" role="menu" aria-label="Conversation actions menu" onKeyDown={menuKeys}>
+            {menuPage !== "main" && <button className="jg-stable-demo__popover-back" type="button" onClick={() => setMenuPage("main")}><ChevronLeft size={16} />{menuPage === "copy" ? "Copy" : menuPage === "fork" ? "Fork" : "Open in"}</button>}
             {menuPage === "main" && <>
               {renameOpen ? <form className="jg-stable-demo__rename" onSubmit={e => { e.preventDefault(); void renameSession(); }}><label htmlFor="jaeger-rename">Conversation name</label><input id="jaeger-rename" autoFocus value={renameDraft} onChange={e => setRenameDraft(e.target.value)} /><div><button type="button" onClick={() => setRenameOpen(false)}>Cancel</button><button type="submit" disabled={!renameDraft.trim()}>Save</button></div></form> : <button role="menuitem" type="button" disabled={!session} onClick={() => { setRenameDraft(currentTitle); setRenameOpen(true); }}><Pencil size={17} />Rename</button>}
               <button role="menuitem" type="button" disabled={!session} onClick={togglePinned}><Pin size={17} />{pinnedSessions.has(session) ? "Unpin" : "Pin"}</button>
-              <button role="menuitem" type="button" disabled={!session} onClick={() => void archiveSession()}><FolderOpen size={17} />Archive</button>
               <div className="jg-stable-demo__menu-separator" />
-              <button role="menuitem" type="button" onClick={() => void shareConversation()}><Share size={17} />Share</button>
-              <button role="menuitem" type="button" onClick={() => setMenuPage("copy")}><Copy size={17} />Copy<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
+              <button role="menuitem" type="button" onClick={() => openWork("sidechat")}><MessageSquare size={19} />New side chat</button>
+              <button role="menuitem" type="button" disabled={!session || source.kind !== "live" || forkBusy} onClick={() => setMenuPage("fork")}><Workflow size={19} />Fork<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
+              <button role="menuitem" type="button" disabled={!source.schedules} onClick={() => openWork("automations")}><Clock size={19} />Add scheduled task…</button>
               <div className="jg-stable-demo__menu-separator" />
-              <button role="menuitem" type="button" disabled={!ready || busy} onClick={() => { setHeaderPopup(null); void start(); }}><MessageSquare size={17} />New side chat</button>
-              <button role="menuitem" type="button" disabled data-tooltip="Conversation forking needs Gateway support"><Workflow size={17} />Fork<span className="jg-stable-demo__soon">Gateway support needed</span></button>
-              <button role="menuitem" type="button" disabled><Clock size={17} />Add scheduled task…</button>
+              <button role="menuitem" type="button" disabled={!session} onClick={() => void shareConversation()}><Share size={19} />Share</button>
+              <button role="menuitem" type="button" onClick={() => setMenuPage("copy")}><Copy size={19} />Copy<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
               <div className="jg-stable-demo__menu-separator" />
-              <button role="menuitem" type="button" onClick={() => setMenuPage("open")}><ChevronRight size={17} />Open in<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
-              <button role="menuitem" type="button" onClick={() => window.open(location.href, "_blank", "noopener,noreferrer")}><PanelLeft size={17} />Open in new window</button>
+              <button role="menuitem" type="button" onClick={() => { window.open(location.href, "_blank", "noopener,noreferrer"); setHeaderPopup(null); }}><PanelRight size={19} />Open in new window</button>
+              <button role="menuitem" type="button" onClick={() => setMenuPage("open")}><ChevronRight size={19} />Open in<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
+              <div className="jg-stable-demo__menu-separator" />
+              <button role="menuitem" type="button" disabled={!session} onClick={() => void archiveSession()}><FolderOpen size={19} />Archive</button>
             </>}
+            {menuPage === "fork" && <><button role="menuitem" type="button" disabled={forkBusy} onClick={() => void forkSession(false)}><Workflow size={18} />Fork conversation</button><button role="menuitem" type="button" disabled={forkBusy} onClick={() => void forkSession(true)}><PanelRight size={18} />Fork in new window</button><p className="jg-stable-demo__menu-note">Copies saved history into a separate conversation. Running work stays in the original.</p></>}
             {menuPage === "copy" && <><button role="menuitem" type="button" disabled={!session} onClick={() => void copyText(conversationLink(session, shareOrigin))}><Copy size={17} />Conversation link</button><button role="menuitem" type="button" disabled={!session} onClick={() => void copyText(session)}><Copy size={17} />Conversation ID</button></>}
             {menuPage === "open" && <><button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><MessageSquare size={17} />Chat</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("work", "tasks")); setHeaderPopup(null); }}><CheckCircle size={17} />Tasks</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("agents")); setHeaderPopup(null); }}><Bot size={17} />Agents</button><button role="menuitem" type="button" onClick={() => { setSettingsOpen(true); setHeaderPopup(null); }}><Settings size={17} />Settings</button></>}
           </div>}
-          {headerPopup === "tabs" && <div className="jg-stable-demo__popover jg-stable-demo__popover--tabs" role="menu" aria-label="Open tabs menu"><h2>Working and shared tabs</h2>
-            {session && <button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><span className="jg-stable-demo__tab-mark">J</span>{currentTitle}</button>}
-            {inspector === "outputs" && <button role="menuitem" type="button" onClick={() => setHeaderPopup(null)}><FileText size={18} />Outputs and artifacts</button>}
-            {inspector === "files" && <button role="menuitem" type="button" onClick={() => setHeaderPopup(null)}><FolderOpen size={18} />Files and changes</button>}
-            {!openTabCount && <p>No tabs are currently shared with Jaeger.</p>}
-          </div>}
+          {headerPopup === "summary" && <ConversationSummary key={session} source={source} sessionId={session} workspace={currentRow?.workspace} agents={agents} onOpen={openWork} onClose={() => setHeaderPopup(null)} />}
         </div>
       </header>
       {error && <p className="jg-stable-demo__connection-alert" role="alert"><span>{error}</span><button type="button" onClick={() => location.reload()}>Reconnect</button></p>}
@@ -466,27 +487,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </section>
     </main>
 
-          {headerPopup === "summary" && <div className="jg-stable-demo__popover jg-stable-demo__popover--summary jg-stable-demo__summary-dock" role="dialog" aria-label="Pinned workspace summary">
-            <header className="jg-stable-demo__summary-heading"><strong>Conversation details</strong><button type="button" aria-label="Close summary" onClick={() => setHeaderPopup(null)}><X size={18} /></button></header><section><header><h2>Environment</h2><button type="button" aria-label="Open files and changes" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><Plus size={19} /></button></header>
-              <button type="button" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><FileText size={18} /><span>Changes</span></button>
-              <div><Cpu size={18} /><span>Connected Gateway</span></div>
-              <div><FolderOpen size={18} /><span>{currentRow?.workspace ? currentRow.workspace.split("/").pop() : "No workspace attached"}</span></div>
-            </section>
-            <section><h2>Connection and activity</h2><div><span className="jg-stable-demo__status-dot" data-ready={ready && !error} /><span>{error ? "Connection error" : ready ? "Gateway connected (transport)" : "Connecting to Gateway"}</span></div><div><Bot size={18} /><span>{(agent?.display_name || agent?.name || "Jaeger") + " · " + (ready && !error && avatarState === "idle" ? "Idle" : STATUS_TEXT[!ready || error ? "connecting" : avatarState])}</span></div></section>
-            <section><header><h2>Conversation outputs</h2><button type="button" aria-label="Open outputs" onClick={() => { setInspector("outputs"); setHeaderPopup(null); }}><Plus size={19} /></button></header><button type="button" onClick={() => { setInspector("outputs"); setHeaderPopup(null); }}><FileText size={18} /><span>Outputs and artifacts</span></button><button type="button" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><FolderOpen size={18} /><span>Files and changes</span></button>{session && source.taskArtifacts && <TaskArtifacts controls={source.taskArtifacts} sessionId={session} />}</section>
-          </div>}
-
-    {inspector && headerPopup !== "summary" && <aside id="jaeger-work-panel" className="jg-stable-demo__inspector" aria-label="Work panel">
-      <header><strong>Work panel</strong><button type="button" aria-label="Close work panel" onClick={() => setInspector(null)}><X size={18} /></button></header>
-      <div className="jg-stable-demo__tabs" role="group" aria-label="Work panel view">
-        <button type="button" aria-pressed={inspector === "outputs"} onClick={() => setInspector("outputs")}><FileText size={16} />Outputs</button>
-        <button type="button" aria-pressed={inspector === "files"} onClick={() => setInspector("files")}><FolderOpen size={16} />Files & changes</button>
-      </div>
-      <div className="jg-stable-demo__inspector-content">
-        {inspector === "outputs" ? source.taskArtifacts ? <TaskArtifacts controls={source.taskArtifacts} sessionId={session || undefined} /> : <p>Artifact previews are unavailable on this Gateway.</p> : session ? <WorkspaceBrowser key={session} source={source} params={workspaceParams} /> : <div className="jg-stable-demo__panel-empty"><FolderOpen size={28} /><h2>Your working files</h2><p>Start a conversation to browse its workspace and Git changes.</p></div>}
-      </div>
-      <p className="jg-stable-demo__panel-note">Use Refresh to check for new outputs or file changes.</p>
-    </aside>}
+    {workView && <ConversationWorkPanel source={source} sessionId={session} agents={agents} recent={recent} open={panelOpen} view={workView} onView={setWorkView} onClose={() => setPanelOpen(false)} onConversation={selectSession} />}
     {deleteConfirm && <div className="jg-stable-demo__dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !deleting) setDeleteConfirm(null); }}>
       <div className="jg-stable-demo__delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-conversations-title" aria-describedby="delete-conversations-description">
         <span className="jg-stable-demo__delete-icon"><Trash2 size={21} /></span>
