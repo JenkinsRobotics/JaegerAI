@@ -89,3 +89,14 @@ it("keeps the development mock source across internal navigation", async () => {
   navigate("chat");
   expect(location.pathname + location.search).toBe("/?mock=1");
 });
+
+it("keeps mock isolation when a destination has a query or fragment", async () => {
+  const { navigate } = await import("./router");
+  history.replaceState(null, "", "/?mock=1");
+  navigate("/library?section=documents#details");
+  expect(location.pathname + location.search + location.hash).toBe("/library?section=documents&mock=1#details");
+  navigate("/?session=saved");
+  expect(new URLSearchParams(location.search).get("mock")).toBe("1");
+  navigate("/?mock=0");
+  expect(location.search).toBe("?mock=0");
+});

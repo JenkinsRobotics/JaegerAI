@@ -1,5 +1,7 @@
 /// <reference types="vitest/config" />
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
@@ -19,6 +21,7 @@ export default defineConfig(({ mode }) => {
   const proxy = { "/v1": { target, changeOrigin: false }, "/api": { target, changeOrigin: false } };
   return {
     base: "/",
+    cacheDir: join(tmpdir(), "jaeger-ui-vite-cache"),
     plugins: [react()],
     resolve: {
       alias: [

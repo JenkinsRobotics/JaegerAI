@@ -135,6 +135,8 @@ it("leaves a session that disappears while the chat is already mounted", async (
  await mount(source);
  expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('deleted-after-mount');
  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Report missing session"]')!.click());
+ expect(document.body.textContent).toContain('Conversation unavailable');
+ await flush(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Open recent conversations')!.click());
  await vi.waitFor(() => expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('shared-fallback'));
  expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('shared-fallback');
  expect(document.body.textContent).not.toContain('Deleted elsewhere');
@@ -182,22 +184,18 @@ it("collapses each column independently without remounting the chat", async () =
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
  expect(document.querySelector('.jg-stable-demo__profile')?.textContent).toContain('Jaeger');
 });
-it("opens searchable draft settings and returns to the same chat", async () => {
+it("opens the existing settings route and returns to the same chat", async () => {
  localStorage.setItem(DEMO_SESSION_KEY, 'saved');
  const source = new MockSource();
  vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
  await mount(source);
  const chat = document.querySelector('[data-chat-session]');
- await flush(() => { const settings = [...document.querySelectorAll('button')].find(button => button.textContent === 'Settings')!; settings.focus(); settings.click(); });
- expect(document.querySelector('#jaeger-settings-title')?.textContent).toBe('General');
- const nav = document.querySelector('[aria-label="Settings categories"]')!;
- expect(nav.querySelectorAll('button')).toHaveLength(23);
- await flush(() => [...nav.querySelectorAll('button')].find(button => button.textContent === 'Worktrees')!.click());
- expect(document.querySelector('#jaeger-settings-title')?.textContent).toBe('Worktrees');
- await flush(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})));
- expect(document.querySelector('[aria-label="Settings navigation"]')).toBeNull();
+ await flush(() => document.querySelector<HTMLButtonElement>('.jg-stable-demo__rail-settings')!.click());
+ expect(location.pathname).toBe('/settings/appearance');
+ expect(document.querySelector('[data-workspace-embedded="true"]')).not.toBeNull();
+ expect(document.body.textContent).not.toContain('Settings for this section will be added here.');
+ await flush(() => document.querySelector<HTMLButtonElement>('nav button[aria-label="Chat"]')!.click());
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
- expect(document.activeElement?.textContent).toBe('Settings');
 });
 
 it("organizes sessions into pinned, projects, and recents and permanently deletes a selected session", async () => {
@@ -249,4 +247,129 @@ it("keeps the icon rail beside a context panel that changes with the selected ta
  await choose('Chat');
  expect(context.textContent).toContain('New conversation');
  expect(document.querySelector('[aria-label="Mobile navigation"]')).toBeNull();
+});
+
+it("mounts existing settings for direct links instead of showing chat", async () => {
+ history.replaceState(null, "", "/settings/appearance");
+ await mount();
+ expect(document.querySelector('[data-workspace-embedded="true"]')).not.toBeNull();
+ expect(document.querySelector<HTMLElement>('section[aria-label="Chat"]')?.hidden).toBe(true);
+});
+
+it("honors session deep links over a device's saved or most recent session", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'device-local');
+ history.replaceState(null, "", "/?session=linked");
+ const source = new MockSource();
+ Object.defineProperty(source, 'kind', {value: 'live'});
+ vi.spyOn(source, 'session').mockImplementation(async id => ({session_id:id} as never));
+ vi.spyOn(source, 'sessions').mockResolvedValue([{session_id:'newest',agent_id:'native:jaeger'}]);
+ const create = vi.spyOn(source, 'createSession');
+ await mount(source);
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','linked');
+ expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('linked');
+ expect(create).not.toHaveBeenCalled();
+ await flush(() => { history.pushState(null, '', '/?session=another'); dispatchEvent(new PopStateEvent('popstate')); });
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','another');
+});
+
+it("does not silently replace a missing explicit conversation with another chat", async () => {
+ history.replaceState(null, "", "/?session=missing");
+ const source = new MockSource();
+ Object.defineProperty(source, 'kind', {value: 'live'});
+ vi.spyOn(source, 'session').mockRejectedValue(new Error('Session not found'));
+ vi.spyOn(source, 'sessions').mockResolvedValue([{session_id:'newest',agent_id:'native:jaeger'}]);
+ await mount(source);
+ expect(document.querySelector('[data-chat-session]')).toBeNull();
+ expect(document.body.textContent).toContain('Session not found');
+ expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('missing');
+});
+
+it("copies a conversation-specific URL even from a workspace page", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'saved / chat');
+ const writeText = vi.fn().mockResolvedValue(undefined);
+ const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+ Object.defineProperty(navigator, 'clipboard', {configurable:true,value:{writeText}});
+ try {
+  await mount();
+  await flush(() => document.querySelector<HTMLButtonElement>('nav button[aria-label="Tasks"]')!.click());
+  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Conversation actions"]')!.click());
+  await flush(() => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b=>b.textContent==='Copy')!.click());
+  await flush(() => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b=>b.textContent==='Conversation link')!.click());
+  expect(writeText).toHaveBeenCalledWith(`${location.origin}/?session=saved%20%2F%20chat`);
+ } finally {
+  if (original) Object.defineProperty(navigator, 'clipboard', original);
+  else delete (navigator as unknown as {clipboard?:unknown}).clipboard;
+ }
+});
+
+it("dismisses compact navigation when a destination is selected", async () => {
+ const original = window.matchMedia;
+ window.matchMedia = vi.fn().mockImplementation(query => ({matches:true,media:query,addEventListener:vi.fn(),removeEventListener:vi.fn()}));
+ try {
+  await mount();
+  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Toggle navigation"]')!.click());
+  expect(document.querySelector('.jg-stable-demo')).toHaveAttribute('data-sidebar','true');
+  await flush(() => document.querySelector<HTMLButtonElement>('nav button[aria-label="Library"]')!.click());
+  expect(document.querySelector('.jg-stable-demo')).toHaveAttribute('data-sidebar','false');
+ } finally { window.matchMedia = original; }
+});
+
+it("resolves agent chat links to the requested agent's durable session", async () => {
+ history.replaceState(null, '', '/chat?agent=specialist');
+ localStorage.setItem(DEMO_SESSION_KEY, 'unrelated');
+ const source = new MockSource();
+ const home = vi.fn().mockResolvedValue({session_id:'specialist-home'});
+ Object.assign(source, {agentHome: home});
+ vi.spyOn(source, 'session').mockImplementation(async id => ({session_id:id,agent_id:'specialist'} as never));
+ const create = vi.spyOn(source, 'createSession');
+ await mount(source); await flush();
+ expect(home).toHaveBeenCalledWith('specialist');
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','specialist-home');
+ expect(new URLSearchParams(location.search).get('agent')).toBe('specialist');
+ expect(create).not.toHaveBeenCalled();
+});
+
+it("shows agent-link failures without sending to the previously selected chat", async () => {
+ history.replaceState(null, '', '/chat?agent=missing-agent');
+ localStorage.setItem(DEMO_SESSION_KEY, 'unrelated');
+ const source = new MockSource();
+ Object.assign(source, {agentHome: vi.fn().mockRejectedValue(new Error('Agent unavailable'))});
+ await mount(source); await flush();
+ expect(document.querySelector('[data-chat-session]')).toBeNull();
+ expect(document.body.textContent).toContain('Agent unavailable');
+});
+
+it("reports when an explicitly linked conversation disappears while open", async () => {
+ history.replaceState(null, '', '/?session=linked');
+ await mount();
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Report missing session"]')!.click());
+ expect(document.querySelector('[data-chat-session]')).toBeNull();
+ expect(document.body.textContent).toContain('This linked conversation is no longer available.');
+});
+
+it("records a restored conversation in history before switching to another", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'first');
+ const source = new MockSource();
+ vi.spyOn(source, 'session').mockImplementation(async id => ({session_id:id} as never));
+ vi.spyOn(source, 'sessions').mockResolvedValue([{session_id:'second',title:'Second chat',agent_id:'native:jaeger'}]);
+ await mount(source);
+ expect(new URLSearchParams(location.search).get('session')).toBe('first');
+ await flush(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Second chat')!.click());
+ expect(new URLSearchParams(location.search).get('session')).toBe('second');
+ await flush(() => history.back());
+ await vi.waitFor(() => expect(new URLSearchParams(location.search).get('session')).toBe('first'));
+ await flush();
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','first');
+});
+
+it("offers usable recovery for a missing conversation without promising reconnection", async () => {
+ history.replaceState(null, '', '/?session=missing');
+ const source = new MockSource();
+ vi.spyOn(source, 'session').mockRejectedValue(new Error('Session not found'));
+ vi.spyOn(source, 'sessions').mockResolvedValue([]);
+ await mount(source);
+ expect(document.body.textContent).not.toContain('Your saved conversation will return');
+ await flush(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Open recent conversations')!.click());
+ expect(new URLSearchParams(location.search).has('session')).toBe(false);
+ expect(document.body.textContent).toContain('Start conversation');
 });

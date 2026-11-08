@@ -156,19 +156,16 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
   // Chat and Settings share one App instance (its stores, streams, dialogs and settings panels).
   const appView = active === 'settings' ? 'settings' : 'chat'
   const chatOpen = windows.some((w) => w.id === 'chat')
+  const palette = <JumpTo open={paletteOpen} agents={store.agents.filter(visible)} summaries={store.summaries} seen={store.seen}
+        onClose={() => setPaletteOpen(false)} onAgent={(id) => go(`/chat?agent=${encodeURIComponent(id)}`)} actions={paletteActions} />
 
   if (embedded && active !== 'chat' && active !== 'settings') {
     return <ToastProvider><div className="app-window__embedded" data-page={active} aria-label={WINDOW_DEFINITIONS[active].title}>
       <Suspense fallback={<PageFallback />}>{render(active)}</Suspense>
-    </div></ToastProvider>
+    </div>{palette}</ToastProvider>
   }
 
-  return (
-    <ToastProvider>
-    <div className={`app-window${phone ? ' app-window--phone' : ''}`} data-page={active}>
-      <AppChrome active={active} sub={route.sub} pages={dockWindows} phone={phone} onSearch={() => setPaletteOpen(true)}
-        trail={<ApprovalTray source={source} onOpenChat={(agentId) => go(agentId ? `/chat?agent=${encodeURIComponent(agentId)}` : '/chat')} />}
-        onPick={(id) => go(id === 'settings' && settingsTab ? `/settings/${settingsTab}` : id === active ? pathOf(id) : pathOf(id, lastSub[id]))}>
+  const content = (
       <div className="app-window__content">
         {chatOpen && (
           <div className={`app-window__page app-window__page--chat${active === 'chat' || active === 'settings' ? ' app-window__page--active' : ''}`}
@@ -196,10 +193,19 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
           </div>
         ))}
       </div>
+  )
+  if (embedded) return <ToastProvider><div className="app-window__embedded" data-page={active}>{content}</div>{palette}</ToastProvider>
+
+  return (
+    <ToastProvider>
+    <div className={`app-window${phone ? ' app-window--phone' : ''}`} data-page={active}>
+      <AppChrome active={active} sub={route.sub} pages={dockWindows} phone={phone} onSearch={() => setPaletteOpen(true)}
+        trail={<ApprovalTray source={source} onOpenChat={(agentId) => go(agentId ? `/chat?agent=${encodeURIComponent(agentId)}` : '/chat')} />}
+        onPick={(id) => go(id === 'settings' && settingsTab ? `/settings/${settingsTab}` : id === active ? pathOf(id) : pathOf(id, lastSub[id]))}>
+      {content}
       </AppChrome>
 
-      <JumpTo open={paletteOpen} agents={store.agents.filter(visible)} summaries={store.summaries} seen={store.seen}
-        onClose={() => setPaletteOpen(false)} onAgent={(id) => go(`/chat?agent=${encodeURIComponent(id)}`)} actions={paletteActions} />
+      {palette}
     </div>
     </ToastProvider>
   )

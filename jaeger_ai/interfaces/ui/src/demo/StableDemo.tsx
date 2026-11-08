@@ -17,7 +17,6 @@ import { TaskArtifacts } from "../library/TaskArtifacts";
 import { WorkspaceBrowser } from "../unified/WorkspaceBrowser";
 import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, Bot, Workflow, Search, Image, Compass, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2 } from "../components/Icons";
 import "./stableDemo.css";
-import { SettingsWorkspace } from "./SettingsWorkspace";
 import { navigate, pathOf, useRoute, SUBTABS, type PageId } from "../shell/router";
 import { AppWindow } from "../windows/AppWindow";
 import { clampWidth, SIDEBAR } from "../shell/sidebarSizing";
@@ -49,8 +48,6 @@ function ConversationRow({ row, active, pinned, selecting, selected, onOpen, onS
 }
 /** Recovery surface: existing chat renderer and Gateway-owned task runner, no parallel backend. */
 export function StableDemo({ source }: { source: JaegerSource }) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof matchMedia === "function" ? !matchMedia(COMPACT_SHELL_QUERY).matches : true);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -96,19 +93,51 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [historyError, setHistoryError] = useState("");
   const [historyReady, setHistoryReady] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [session, setSession] = useState(storedSession);
+  const requestedAgent = route.page === "chat" ? route.params.get("agent") || "" : "";
+  const [activeAgentId, setActiveAgentId] = useState("native:jaeger");
+  const requestedSession = route.page === "chat" ? route.params.get("session") || "" : "";
+  const [session, setSession] = useState(() => requestedSession || storedSession());
+  useEffect(() => {
+    if (!requestedSession) return;
+    if (requestedSession !== session) setReady(false);
+    setSession(requestedSession);
+    try { localStorage.setItem(DEMO_SESSION_KEY, requestedSession); } catch { /* link still works for this visit */ }
+  }, [requestedSession]);
+  const routeKey = `${route.page}/${route.sub}/${route.rest}?${route.params.toString()}`;
+  useEffect(() => {
+    if (typeof matchMedia === "function" && matchMedia(COMPACT_SHELL_QUERY).matches) setSidebarOpen(false);
+    setHeaderPopup(null);
+  }, [routeKey]);
   const [ready, setReady] = useState(false);
   const [avatarState, setAvatarState] = useState<ClipState>("idle");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (!requestedAgent || requestedSession) return;
+    let live = true;
+    setReady(false); setError("");
+    if (!source.agentHome) {
+      setError("This Gateway cannot open an agent conversation.");
+      return;
+    }
+    source.agentHome(requestedAgent).then(home => {
+      if (live) navigate(`/?agent=${encodeURIComponent(requestedAgent)}&session=${encodeURIComponent(home.session_id)}`, { replace: true });
+    }, e => { if (live) setError(String((e as Error).message)); });
+    return () => { live = false; };
+  }, [source, requestedAgent, requestedSession]);
   const unavailableSessions = useRef(new Set<string>());
   const recoverMissingSession = useCallback((missingSession: string) => {
     unavailableSessions.current.add(missingSession);
+    if (requestedSession === missingSession) {
+      setError("This linked conversation is no longer available.");
+      setReady(false);
+      return;
+    }
     setRecent(rows => rows.filter(row => row.session_id !== missingSession));
     setError(""); setReady(true); setHeaderPopup(null);
     setSession(current => current === missingSession ? "" : current);
     try { if (localStorage.getItem(DEMO_SESSION_KEY) === missingSession) localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* the in-memory recovery still works */ }
-  }, []);
+  }, [requestedSession]);
   useEffect(() => {
     if (!sidebarOpen) return;
     const close = (event: KeyboardEvent) => {
@@ -125,15 +154,16 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   }, [source]);
   useEffect(() => {
     let live = true;
-    Promise.all([source.agents(), session ? source.session(session) : Promise.resolve(null)]).then(([rows]) => {
-      if (live) { setAgents(rows); setReady(true); setError(""); }
+    if (requestedAgent && !requestedSession) return;
+    Promise.all([source.agents(), session ? source.session(session) : Promise.resolve(null)]).then(([rows, snapshot]) => {
+      if (live) { setAgents(rows); setActiveAgentId(snapshot?.agent_id || requestedAgent || "native:jaeger"); setReady(true); setError(""); }
     }).catch((e: unknown) => {
       if (!live) return;
-      if (session && isSessionMissingError(e)) recoverMissingSession(session);
+      if (session && !requestedSession && isSessionMissingError(e)) recoverMissingSession(session);
       else { setError(String((e as Error).message)); setReady(false); }
     });
     return () => { live = false; };
-  }, [source, session, recoverMissingSession]);
+  }, [source, session, requestedAgent, requestedSession, recoverMissingSession]);
   useEffect(() => {
     if (!headerPopup) return;
     const close = (event: MouseEvent) => { if (headerPopup !== "summary" && !toolsRef.current?.contains(event.target as Node)) setHeaderPopup(null); };
@@ -151,7 +181,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   }, []);
   useEffect(() => {
     let live = true;
-    source.sessions({ agent_id: "native:jaeger" }).then(rows => {
+    source.sessions({ agent_id: activeAgentId }).then(rows => {
       if (!live) return;
       const available = rows.filter(row => !row.archived && !unavailableSessions.current.has(row.session_id)).sort((a, b) => sessionActivity(b) - sessionActivity(a));
       setRecent(available);
@@ -161,17 +191,25 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       // the id of a conversation deleted on another device. In either case, open Jaeger's
       // most recently active durable conversation instead of stranding the device on 404.
       const selectedStillExists = Boolean(session && available.some(row => row.session_id === session));
-      if (source.kind === "live" && !selectedStillExists && available[0]) {
+      if (source.kind === "live" && !requestedAgent && !requestedSession && !selectedStillExists && available[0]) {
         setSession(available[0].session_id);
         try { localStorage.setItem(DEMO_SESSION_KEY, available[0].session_id); } catch { /* still usable for this visit */ }
       }
     }, e => { if (live) setHistoryError(String((e as Error).message)); });
     return () => { live = false; };
-  }, [source, session]);
+  }, [source, session, requestedAgent, requestedSession, activeAgentId]);
+  // Put the restored selection in this history entry before another chat is
+  // pushed, so Back returns to the original conversation rather than a local preference.
+  useEffect(() => {
+    if (route.page === "chat" && ready && !error && session && !requestedSession && !requestedAgent) {
+      navigate(`/?session=${encodeURIComponent(session)}`, { replace: true });
+    }
+  }, [route.page, ready, error, session, requestedSession, requestedAgent]);
   const workspaceParams = useMemo(() => new URLSearchParams({ session }), [session]);
   const selectSession = (id: string) => {
     if (id !== session) { setReady(false); setSession(id); }
-    navigate("/");
+    navigate(`/?session=${encodeURIComponent(id)}`);
+    if (typeof matchMedia === "function" && matchMedia(COMPACT_SHELL_QUERY).matches) setSidebarOpen(false);
     try { localStorage.setItem(DEMO_SESSION_KEY, id); } catch { setHistoryError("This browser could not remember the selected conversation."); }
   };
   const start = async () => {
@@ -179,7 +217,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     setBusy(true); setError("");
     try {
       // Independent lead conversation: never reuse or replay the stuck Builder request.
-      const row = await source.createSession({ agent_id: "native:jaeger", title: "Jaeger stable chat" });
+      const row = await source.createSession({ agent_id: activeAgentId, title: "Jaeger stable chat" });
       selectSession(row.session_id);
     } catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(false); }
@@ -270,14 +308,15 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     try { await navigator.clipboard.writeText(text); setHeaderPopup(null); }
     catch { setHistoryError("Clipboard access was unavailable."); }
   };
+  const conversationUrl = new URL(session ? `/?session=${encodeURIComponent(session)}` : "/", location.origin).href;
   const shareConversation = async () => {
     try {
-      if (navigator.share) await navigator.share({ title: currentTitle, url: location.href });
-      else await navigator.clipboard.writeText(location.href);
+      if (navigator.share) await navigator.share({ title: currentTitle, url: conversationUrl });
+      else await navigator.clipboard.writeText(conversationUrl);
       setHeaderPopup(null);
     } catch (e) { if ((e as DOMException).name !== "AbortError") setHistoryError("This conversation could not be shared."); }
   };
-  const agent = agents.find(a => a.id === "native:jaeger");
+  const agent = agents.find(a => a.id === activeAgentId);
   const pinnedRows = recent.filter(row => pinnedSessions.has(row.session_id));
   const unpinnedRows = recent.filter(row => !pinnedSessions.has(row.session_id));
   const projectGroups = [...unpinnedRows.reduce((groups, row) => {
@@ -287,11 +326,21 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     return groups;
   }, new Map<string, SessionRow[]>())];
   const recentRows = unpinnedRows.filter(row => !row.workspace);
-  const workspacePage = route.page !== "chat" && route.page !== "settings";
+  const workspacePage = route.page !== "chat";
   const routeTitle: Record<PageId, string> = { library: "Library", automations: "Automations", feed: "Feed", home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Imagine", models: "Models", machine: "Machine", settings: "Settings" };
   const activeSection = route.page === "work" && route.sub === "tasks" ? "tasks" : route.page === "models" ? "studio" : route.page === "home" ? "chat" : route.page;
+  const missingLinkedSession = Boolean(requestedSession && (isSessionMissingError(error) || error === "This linked conversation is no longer available."));
+  const openRecentConversations = () => {
+    setSession(""); setError("");
+    try { localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* navigation still works */ }
+    navigate("/");
+  };
   const openTabCount = (session ? 1 : 0) + (inspector ? 1 : 0);
-  return <ToastProvider><div hidden={settingsOpen}><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector || headerPopup === "summary"} data-summary={headerPopup === "summary"} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+  const navigateFromSidebar = (to: string) => {
+    navigate(to);
+    if (typeof matchMedia === "function" && matchMedia(COMPACT_SHELL_QUERY).matches) setSidebarOpen(false);
+  };
+  return <ToastProvider><div><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector || headerPopup === "summary"} data-summary={headerPopup === "summary"} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__rail">
         <button type="button" aria-label="Close sidebar" title="Close sidebar" aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(false)}><PanelLeft size={20} /></button>
@@ -300,16 +349,16 @@ export function StableDemo({ source }: { source: JaegerSource }) {
             ["chat", "Chat", MessageSquare], ["studio", "Imagine", Image],
             ["library", "Library", FolderOpen], ["automations", "Automations", Clock],
             ["feed", "Feed", Compass], ["agents", "Agents", Bot],
-          ] as const).map(([id, title, Icon]) => <button key={id} type="button" title={title} aria-label={title} aria-current={route.page === id ? "page" : undefined} onClick={() => navigate(pathOf(id))}><Icon size={20} /><span>{title}</span></button>)}
+          ] as const).map(([id, title, Icon]) => <button key={id} type="button" title={title} aria-label={title} aria-current={route.page === id ? "page" : undefined} onClick={() => navigateFromSidebar(pathOf(id))}><Icon size={20} /><span>{title}</span></button>)}
           <details className="jg-stable-demo__more"><summary aria-label="More tools" title="More tools"><MoreHorizontal size={20} /></summary>
-            {([["work", "Work", Workflow], ["research", "Research", Search], ["machine", "Machine", Cpu]] as const).map(([id,title,Icon]) => <button key={id} type="button" title={title} aria-label={title} onClick={() => navigate(pathOf(id))}><Icon size={20}/><span>{title}</span></button>)}
-          <button type="button" aria-label="Tasks" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={20} /><span>Tasks</span></button>
+            {([["work", "Work", Workflow], ["research", "Research", Search], ["machine", "Machine", Cpu]] as const).map(([id,title,Icon]) => <button key={id} type="button" title={title} aria-label={title} onClick={() => navigateFromSidebar(pathOf(id))}><Icon size={20}/><span>{title}</span></button>)}
+          <button type="button" aria-label="Tasks" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => navigateFromSidebar(pathOf("work", "tasks"))}><CheckCircle size={20} /><span>Tasks</span></button>
           </details>
         </nav>
-        <button className="jg-stable-demo__rail-settings" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /><span>Settings</span></button>
+        <button className="jg-stable-demo__rail-settings" type="button" aria-label="Settings" title="Settings" onClick={() => navigateFromSidebar("/settings/appearance")}><Settings size={20} /><span>Settings</span></button>
       </div>
       <section className="jg-stable-demo__context" aria-label={`${routeTitle[route.page]} sidebar`}>
-        <div className="jg-stable-demo__brand"><CompanionMode team={route.page === "agents"} onChange={team => navigate(pathOf(team ? "agents" : "chat"))} />{activeSection === "chat" && <button type="button" className="jg-stable-demo__manage" aria-pressed={selectionMode} onClick={() => selectionMode ? leaveSelectionMode() : setSelectionMode(true)}>{selectionMode ? "Done" : "Manage"}</button>}</div>
+        <div className="jg-stable-demo__brand"><CompanionMode team={route.page === "agents"} onChange={team => navigateFromSidebar(pathOf(team ? "agents" : "chat"))} />{activeSection === "chat" && <button type="button" className="jg-stable-demo__manage" aria-pressed={selectionMode} onClick={() => selectionMode ? leaveSelectionMode() : setSelectionMode(true)}>{selectionMode ? "Done" : "Manage"}</button>}</div>
         {activeSection === "chat" && <>
           <button className="jg-stable-demo__new" type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "New conversation"}</button>
           {selectionMode && <div className="jg-stable-demo__selection-tools">
@@ -334,13 +383,13 @@ export function StableDemo({ source }: { source: JaegerSource }) {
             </section>
           </div>
         </>}
-        {activeSection === "agents" && <div className="jg-stable-demo__context-list"><h2>Agent team</h2>{agents.map(row => <button key={row.id} type="button" onClick={() => navigate(pathOf("agents"))}><Bot size={17} />{row.display_name || row.name || row.id}</button>)}</div>}
-        {(route.page === "work" || route.page === "research") && <div className="jg-stable-demo__context-list"><h2>{route.page === "work" ? "Your work" : "Explore"}</h2>{SUBTABS[route.page]?.map(tab => <button type="button" key={tab.id} aria-current={route.sub === tab.id ? "page" : undefined} onClick={() => navigate(pathOf(route.page,tab.id))}>{tab.title}</button>)}</div>}
-        {activeSection === "studio" && <div className="jg-stable-demo__context-list"><h2>Create with Jaeger</h2>{[["create","Generate images"],["library","Saved images"],["board","Idea board"]].map(([section,title]) => <button type="button" key={section} aria-current={(route.params.get("section") || "create") === section ? "page" : undefined} onClick={() => navigate(`/studio?section=${section}`)}>{title}</button>)}</div>}
-        {activeSection === "library" && <div className="jg-stable-demo__context-list"><h2>Your library</h2>{[["media","Media"],["documents","Documents"],["outputs","Task outputs"]].map(([section,title]) => <button type="button" key={section} aria-current={(route.params.get("section") || "media") === section ? "page" : undefined} onClick={() => navigate(`/library?section=${section}`)}>{title}</button>)}</div>}
-        {activeSection === "automations" && <div className="jg-stable-demo__context-list"><h2>Routines</h2><button type="button" aria-current="page" onClick={() => navigate("/automations")}>Schedules and run history</button><p>Manage schedules, pause a routine, or review its latest runs.</p></div>}
-        {activeSection === "feed" && <div className="jg-stable-demo__context-list"><h2>From Jaeger</h2><button type="button" aria-current="page" onClick={() => navigate("/feed")}>Agent updates</button><p>Recent activity and updates from your agent.</p></div>}
-        {activeSection === "machine" && <div className="jg-stable-demo__context-list"><h2>System</h2><button type="button" aria-current="page" onClick={() => navigate(pathOf("machine"))}><Cpu size={17} />Machine</button></div>}
+        {activeSection === "agents" && <div className="jg-stable-demo__context-list"><h2>Agent team</h2>{agents.map(row => <button key={row.id} type="button" onClick={() => navigateFromSidebar(pathOf("agents"))}><Bot size={17} />{row.display_name || row.name || row.id}</button>)}</div>}
+        {(route.page === "work" || route.page === "research") && <div className="jg-stable-demo__context-list"><h2>{route.page === "work" ? "Your work" : "Explore"}</h2>{SUBTABS[route.page]?.map(tab => <button type="button" key={tab.id} aria-current={route.sub === tab.id ? "page" : undefined} onClick={() => navigateFromSidebar(pathOf(route.page,tab.id))}>{tab.title}</button>)}</div>}
+        {activeSection === "studio" && <div className="jg-stable-demo__context-list"><h2>Create with Jaeger</h2>{[["create","Generate images"],["library","Saved images"],["board","Idea board"]].map(([section,title]) => <button type="button" key={section} aria-current={(route.params.get("section") || "create") === section ? "page" : undefined} onClick={() => navigateFromSidebar(`/studio?section=${section}`)}>{title}</button>)}</div>}
+        {activeSection === "library" && <div className="jg-stable-demo__context-list"><h2>Your library</h2>{[["media","Media"],["documents","Documents"],["outputs","Task outputs"]].map(([section,title]) => <button type="button" key={section} aria-current={(route.params.get("section") || "media") === section ? "page" : undefined} onClick={() => navigateFromSidebar(`/library?section=${section}`)}>{title}</button>)}</div>}
+        {activeSection === "automations" && <div className="jg-stable-demo__context-list"><h2>Routines</h2><button type="button" aria-current="page" onClick={() => navigateFromSidebar("/automations")}>Schedules and run history</button><p>Manage schedules, pause a routine, or review its latest runs.</p></div>}
+        {activeSection === "feed" && <div className="jg-stable-demo__context-list"><h2>From Jaeger</h2><button type="button" aria-current="page" onClick={() => navigateFromSidebar("/feed")}>Agent updates</button><p>Recent activity and updates from your agent.</p></div>}
+        {activeSection === "machine" && <div className="jg-stable-demo__context-list"><h2>System</h2><button type="button" aria-current="page" onClick={() => navigateFromSidebar(pathOf("machine"))}><Cpu size={17} />Machine</button></div>}
         <div className="jg-stable-demo__context-footer">
           <label className="jg-stable-demo__appearance">Appearance<select aria-label="Appearance" value={appearance} onChange={e => { const mode = e.target.value as Appearance; setAppearance(mode); applyAppearance(mode); }}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
           <div className="jg-stable-demo__connection" role="status"><span className="jg-stable-demo__dot" data-ready={ready && !error} />{error ? "Connection error" : ready ? source.kind === "mock" ? "Design preview · sample data" : "Gateway connected" : "Connecting…"}</div>
@@ -357,7 +406,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         </div>
         <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : currentTitle}>
           <span className="jg-stable-demo__profile-avatar"><JaegerAvatar portraitOverride={agent?.avatar_url} state={!ready || error ? "connecting" : avatarState} /></span>
-          <span className="jg-stable-demo__profile-copy"><strong>Jaeger<span className="jg-clip-status" role="status">{(ready && !error && avatarState === "idle" ? "Idle" : STATUS_TEXT[!ready || error ? "connecting" : avatarState])}</span></strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
+          <span className="jg-stable-demo__profile-copy"><strong>{agent?.display_name || agent?.name || "Jaeger"}<span className="jg-clip-status" role="status">{(ready && !error && avatarState === "idle" ? "Idle" : STATUS_TEXT[!ready || error ? "connecting" : avatarState])}</span></strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
         </div>
         <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
           <button className="jg-stable-demo__top-button" type="button" aria-label="Conversation actions" data-tooltip="Conversation actions" aria-expanded={headerPopup === "menu"} onClick={() => togglePopup("menu")}><MoreHorizontal size={19} /></button>
@@ -370,7 +419,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
               <button role="menuitem" type="button" disabled={!session} onClick={togglePinned}><Pin size={17} />{pinnedSessions.has(session) ? "Unpin" : "Pin"}</button>
               <button role="menuitem" type="button" disabled={!session} onClick={() => void archiveSession()}><FolderOpen size={17} />Archive</button>
               <div className="jg-stable-demo__menu-separator" />
-              <button role="menuitem" type="button" onClick={() => void shareConversation()}><Share size={17} />Share</button>
+              <button role="menuitem" type="button" disabled={!session} onClick={() => void shareConversation()}><Share size={17} />Share</button>
               <button role="menuitem" type="button" onClick={() => setMenuPage("copy")}><Copy size={17} />Copy<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
               <div className="jg-stable-demo__menu-separator" />
               <button role="menuitem" type="button" disabled={!ready || busy} onClick={() => { setHeaderPopup(null); void start(); }}><MessageSquare size={17} />New side chat</button>
@@ -378,10 +427,10 @@ export function StableDemo({ source }: { source: JaegerSource }) {
               <button role="menuitem" type="button" disabled><Clock size={17} />Add scheduled task…</button>
               <div className="jg-stable-demo__menu-separator" />
               <button role="menuitem" type="button" onClick={() => setMenuPage("open")}><ChevronRight size={17} />Open in<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
-              <button role="menuitem" type="button" onClick={() => window.open(location.href, "_blank", "noopener,noreferrer")}><PanelLeft size={17} />Open in new window</button>
+              <button role="menuitem" type="button" onClick={() => window.open(conversationUrl, "_blank", "noopener,noreferrer")}><PanelLeft size={17} />Open in new window</button>
             </>}
-            {menuPage === "copy" && <><button role="menuitem" type="button" onClick={() => void copyText(location.href)}><Copy size={17} />Conversation link</button><button role="menuitem" type="button" disabled={!session} onClick={() => void copyText(session)}><Copy size={17} />Conversation ID</button></>}
-            {menuPage === "open" && <><button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><MessageSquare size={17} />Chat</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("work", "tasks")); setHeaderPopup(null); }}><CheckCircle size={17} />Tasks</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("agents")); setHeaderPopup(null); }}><Bot size={17} />Agents</button><button role="menuitem" type="button" onClick={() => { setSettingsOpen(true); setHeaderPopup(null); }}><Settings size={17} />Settings</button></>}
+            {menuPage === "copy" && <><button role="menuitem" type="button" disabled={!session} onClick={() => void copyText(conversationUrl)}><Copy size={17} />Conversation link</button><button role="menuitem" type="button" disabled={!session} onClick={() => void copyText(session)}><Copy size={17} />Conversation ID</button></>}
+            {menuPage === "open" && <><button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><MessageSquare size={17} />Chat</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("work", "tasks")); setHeaderPopup(null); }}><CheckCircle size={17} />Tasks</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("agents")); setHeaderPopup(null); }}><Bot size={17} />Agents</button><button role="menuitem" type="button" onClick={() => { navigate("/settings/appearance"); setHeaderPopup(null); }}><Settings size={17} />Settings</button></>}
           </div>}
           {headerPopup === "tabs" && <div className="jg-stable-demo__popover jg-stable-demo__popover--tabs" role="menu" aria-label="Open tabs menu"><h2>Working and shared tabs</h2>
             {session && <button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><span className="jg-stable-demo__tab-mark">J</span>{currentTitle}</button>}
@@ -391,10 +440,10 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           </div>}
         </div>
       </header>
-      {error && <p className="jg-stable-demo__connection-alert" role="alert"><span>{error}</span><button type="button" onClick={() => location.reload()}>Reconnect</button></p>}
+      {error && <p className="jg-stable-demo__connection-alert" role="alert"><span>{error}</span>{missingLinkedSession ? <button type="button" onClick={openRecentConversations}>Open recent conversations</button> : <button type="button" onClick={() => location.reload()}>Reconnect</button>}</p>}
       <section className="jg-stable-demo__body" hidden={workspacePage} aria-label="Chat">
         {session && ready ? <ChatPane onAvatarState={setAvatarState} host={host} sessionId={session} agents={agent ? [agent] : agents} onSessionMissing={recoverMissingSession} /> : !ready || !historyReady || historyError || session ?
-          <div className="jg-stable-demo__empty" role="status"><h1>{error || historyError ? "Waiting to reconnect" : "Restoring your conversation"}</h1><p>{error || historyError ? "Jaeger is temporarily unavailable. Your saved conversation will return when the connection is restored." : "Loading your saved conversation from Jaeger."}</p></div> :
+          <div className="jg-stable-demo__empty" role="status"><h1>{missingLinkedSession ? "Conversation unavailable" : error || historyError ? "Waiting to reconnect" : "Restoring your conversation"}</h1><p>{missingLinkedSession ? "This conversation is no longer available. Open your recent conversations to continue." : error || historyError ? "Jaeger is temporarily unavailable. Your saved conversation will return when the connection is restored." : "Loading your saved conversation from Jaeger."}</p></div> :
           <div className="jg-stable-demo__empty"><span className="jg-stable-demo__eyebrow">YOUR AI COMPANION</span><h1>What would you like to work on?</h1><p>Talk with Jaeger, follow a task, or explore your files.<br />Your conversation stays here when you return.</p>
           <button type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "Start conversation"}</button></div>}
       </section>
@@ -432,5 +481,5 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         <div><button type="button" disabled={deleting} onClick={() => setDeleteConfirm(null)}>Cancel</button><button className="jg-stable-demo__delete-confirm" type="button" disabled={deleting} onClick={() => void deleteSessions()}>{deleting ? "Deleting…" : "Delete permanently"}</button></div>
       </div>
     </div>}
-  </div></div>{settingsOpen && <SettingsWorkspace onClose={closeSettings} />}</ToastProvider>;
+  </div></div></ToastProvider>;
 }
