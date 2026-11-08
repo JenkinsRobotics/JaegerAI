@@ -43,7 +43,7 @@ class OwnedGateway:
         instance = self.root / "instances" / "contract"
         instance.mkdir(parents=True, exist_ok=True)
         from jaeger_ai.core.instance.schemas import (
-            Config, ExternalModelConfig, ModelConfig, dump_yaml)
+            Config, ExternalModelConfig, ModelConfig, SkillsConfig, dump_yaml)
         # Same external_model surface the worker would write, so the
         # model-override contracts keep their scripted provider, plus the
         # pinned autonomy for the approval contracts.
@@ -53,6 +53,15 @@ class OwnedGateway:
                          enabled=True, provider="openai", model="contract-model",
                          base_url="http://127.0.0.1:9/v1",
                          api_key_env="JAEGER_CONTRACT_API_KEY"),
+                     # These synthetic HTTP contracts exercise the real loader,
+                     # safety scans, tools and cancellation, not cold skill-smoke
+                     # gating. Optional smoke subprocesses each allow 10s, while
+                     # the cancellation contract requires provider entry in 10s.
+                     # SkillsConfig's production default remains True. Disabling
+                     # this also excludes non-core missing-smoke gating from
+                     # this fixture's guarantees; separate loader tests retain
+                     # their configured smoke behavior.
+                     skills=SkillsConfig(run_smoke_tests=False),
                      automation={"autonomy": "ask"})
         dump_yaml(instance / "config.yaml", cfg)
         environment = {

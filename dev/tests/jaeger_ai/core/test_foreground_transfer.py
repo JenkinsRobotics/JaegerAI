@@ -341,6 +341,14 @@ async def test_admission_race_cannot_bind_or_signal_foreign_request(gateway,monk
     await gateway.task_owner._execute(tid)
     row=gateway.store.get_request(tid+':0')
     assert row['session_id']=='foreign' and row['native_run_id'] is None
+    held=gateway.task_owner.store.get_task(tid)
+    assert held.state==TaskState.PAUSED and not held.payload.get('delivered')
+    assert [r.run_id for r in held.run_history]==['foreground']
+    assert not gateway._cancellations.is_cancelled(tid+':0')
+    # Reconciliation observes the collision without retry spin or foreign work.
+    await gateway.task_owner._execute(tid)
+    assert gateway.store.get_request(tid+':0')==row
+    assert gateway.task_owner.store.get_task(tid).state==TaskState.PAUSED
     from dev.tests.jaeger_ai.core.test_foreground_transfer_recovery import owned_pending_child
     child=owned_pending_child(gateway)
     await gateway.task_owner.cancel(tid)

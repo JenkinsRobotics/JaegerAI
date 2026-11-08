@@ -267,3 +267,39 @@ async def test_approval_status_is_readable_only_within_the_callers_sessions(gw):
     body = await (await gw.get(f"/v1/approvals/{mine['approval_id']}", headers=H("mcp"))).json()
     assert body["status"] == "resolved" and body["decision"] == "deny"
     assert (await gw.get("/v1/approvals/nope", headers={})).status == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_foreign_request_identity_rejected_by_authenticated_http(gw, legacy):
+    import sqlite3
+    from jaeger_ai.core.gateway.session_store import input_fingerprint
+
+    gateway = gw.gateway
+    gateway._current_tier = lambda: "agent"
+    store = gateway.store
+    body = {"text": "Summarize this", "request_id": "identity-http"}
+    store.admit_request("private-chat", body["text"], request_id=body["request_id"],
+                        requested={"caller": "owner:cli", "interaction_tier": "agent"})
+    store.complete_request(body["request_id"], status="completed",
+                           result={"output": "PRIVATE ANSWER"}, assistant_text="PRIVATE ANSWER")
+    if legacy:
+        with sqlite3.connect(store.path) as conn:
+            conn.execute("UPDATE client_requests SET digest_version=1,digest=?,execution_json='{}' WHERE request_id=?",
+                         (input_fingerprint(body["text"]), body["request_id"]))
+    replay = await gw.post("/v1/sessions/private-chat/turns", json=body, headers=H("cli"))
+    assert replay.status == 200
+    assert (await replay.json())["output"] == "PRIVATE ANSWER"
+    before = store.active_session_state()
+    for caller, destination in [("cli", "other-chat"), ("mcp", "mcp:other")]:
+        for endpoint in ("turns", "queue"):
+            if endpoint == "queue":
+                store.ensure_session(destination, title="Existing queue destination")
+            destination_before = store.get_session(destination)
+            denied = await gw.post(f"/v1/sessions/{destination}/{endpoint}", json=body, headers=H(caller))
+            assert denied.status == 409
+            payload = await denied.json()
+            assert "PRIVATE ANSWER" not in str(payload) and "private-chat" not in str(payload)
+            assert store.get_session(destination) == destination_before
+            assert store.active_session_state() == before
+    assert not gateway.seen

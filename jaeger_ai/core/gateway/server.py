@@ -3916,7 +3916,11 @@ class JaegerGatewayApp:
     async def _turn_model_revision(self, session_id: str, requested: dict[str, Any], request_id: str | None) -> int | None:
         # An existing immutable receipt outlives model availability; never probe or
         # re-admit it. Fresh admissions revalidate only an explicitly chosen model.
-        if request_id and self.store.get_request(request_id) is not None:return None
+        prior = self.store.get_request(request_id) if request_id else None
+        if prior is not None:
+            if prior["session_id"] != session_id:
+                raise RequestConflict("Request identity belongs to another conversation")
+            return None
         session=self.store.get_session(session_id) or {}
         meta=session.get('metadata') or {}
         revision=self.store.model_choice_revision(meta)

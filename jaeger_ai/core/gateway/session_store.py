@@ -1272,18 +1272,15 @@ class GatewaySessionStore:
         now = time.time()
         pid = os.getpid()
         with self._immediate() as conn:
-            conn.execute(
-                """
-                INSERT INTO sessions (session_id, title, profile, workspace, created_at, updated_at, status, metadata_json)
-                VALUES (?, 'New Conversation', 'jaeger', '', ?, ?, 'idle', '{}')
-                ON CONFLICT(session_id) DO NOTHING
-                """,
-                (session_id, now, now),
-            )
             existing = conn.execute(
                 "SELECT * FROM client_requests WHERE request_id=?", (rid,)
             ).fetchone()
             if existing:
+                # A globally unique request id remains bound to its original
+                # conversation, including legacy text-only receipts. Reject
+                # before replay or any destination-session side effects.
+                if existing["session_id"] != session_id:
+                    raise RequestConflict("Request identity belongs to another conversation")
                 if existing["digest_version"] == 1:
                     same = existing["digest"] == input_fingerprint(text)
                 else:
@@ -1294,6 +1291,14 @@ class GatewaySessionStore:
                 payload["replayed"] = True
                 payload["accepted"] = False
                 return payload
+            conn.execute(
+                """
+                INSERT INTO sessions (session_id, title, profile, workspace, created_at, updated_at, status, metadata_json)
+                VALUES (?, 'New Conversation', 'jaeger', '', ?, ?, 'idle', '{}')
+                ON CONFLICT(session_id) DO NOTHING
+                """,
+                (session_id, now, now),
+            )
             count = conn.execute(
                 "SELECT COUNT(*) AS n FROM client_requests WHERE session_id=? AND status IN ('queued', 'paused')",
                 (session_id,),
@@ -1548,18 +1553,15 @@ class GatewaySessionStore:
         now = time.time()
         pid = os.getpid()
         with self._immediate() as conn:
-            conn.execute(
-                """
-                INSERT INTO sessions (session_id, title, profile, workspace, created_at, updated_at, status, metadata_json)
-                VALUES (?, 'New Conversation', 'jaeger', '', ?, ?, 'idle', '{}')
-                ON CONFLICT(session_id) DO NOTHING
-                """,
-                (session_id, now, now),
-            )
             existing = conn.execute(
                 "SELECT * FROM client_requests WHERE request_id=?", (rid,)
             ).fetchone()
             if existing:
+                # A globally unique request id remains bound to its original
+                # conversation, including legacy text-only receipts. Reject
+                # before replay or any destination-session side effects.
+                if existing["session_id"] != session_id:
+                    raise RequestConflict("Request identity belongs to another conversation")
                 if existing["digest_version"] == 1:
                     same = existing["digest"] == input_fingerprint(text)
                 else:
@@ -1572,6 +1574,14 @@ class GatewaySessionStore:
                 payload["replayed"] = True
                 payload["accepted"] = False
                 return payload
+            conn.execute(
+                """
+                INSERT INTO sessions (session_id, title, profile, workspace, created_at, updated_at, status, metadata_json)
+                VALUES (?, 'New Conversation', 'jaeger', '', ?, ?, 'idle', '{}')
+                ON CONFLICT(session_id) DO NOTHING
+                """,
+                (session_id, now, now),
+            )
             session = conn.execute(
                 "SELECT status, workspace, metadata_json FROM sessions WHERE session_id=?",
                 (session_id,),
