@@ -1,4 +1,4 @@
-import {act,fireEvent,render,renderHook,screen} from '@testing-library/react';
+import {act,fireEvent,render,renderHook,screen,waitFor} from '@testing-library/react';
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {ClipAvatar} from './ClipAvatar';
 import {activityState,getAvatar,JAEGER_BUNDLE} from './avatar';
@@ -32,6 +32,16 @@ describe('prerendered avatar',()=>{
   rerender(<ClipAvatar portraitOverride="/custom.png"/>);
   expect(container.querySelector('video')).toBeNull();
   expect(screen.getByRole('img').getAttribute('src')).toBe('/custom.png');
+ });
+ it('keeps a moving poster and retries after Safari refuses autoplay',async()=>{
+  vi.spyOn(HTMLMediaElement.prototype,'play').mockRejectedValue(new DOMException('blocked','NotAllowedError'));
+  const {container}=render(<ClipAvatar state="idle"/>);
+  const video=container.querySelector('video')!;
+  fireEvent.canPlay(video);
+  await waitFor(()=>expect(container.querySelector('.jg-clip-avatar')).toHaveAttribute('data-motion','poster'));
+  expect(container.querySelector('video')).toBe(video);
+  fireEvent(window,new Event('pageshow'));
+  await waitFor(()=>expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2));
  });
  it('uses structured activity, not message content',()=>{
   const turn=session('pending').turns[0];
