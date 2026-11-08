@@ -1316,3 +1316,36 @@ async def test_real_default_create_preserves_unpinned_first_turn_routing(env, mo
     assert env.store.get_request(row['request_id'])['execution'] == row['execution']
     assert not env.store.has_owner_request_journal(row['request_id'])
     assert len([e for e in env.app.event_bus.get_replay_events('route-control') if e.event == 'session.handoff']) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('inheritance', ['retry', 'canonical_source'])
+async def test_markerless_first_turn_inheritance_never_mints_current_lead_proof(env, monkeypatch, inheritance):
+    env.app._registry().list_agents()
+    monkeypatch.setattr(env.app, '_resolve_session_agent', JaegerGatewayApp._resolve_session_agent.__get__(env.app))
+    created = await env.app.handle_create_session(Request(session_id='implicit-retry', source='webui', title='New chat'))
+    assert created.status == 201
+    choices = {'model': 'scripted', 'provider': 'scripted', 'allowed_tools': [], 'caller': 'agent:test'}
+    env.row = env.store.admit_request('implicit-retry', 'hello', request_id='first', requested=choices)
+    original = env.row
+    assert '_owner_agent' not in original['execution']
+    await execute(env)
+    assert env.store.get_session('implicit-retry')['metadata']['route_checked'] is True
+    assert not env.store.has_owner_request_journal('first')
+    source = ({'retry_of': 'first'} if inheritance == 'retry' else {
+        'instance_defaults_source': {'request_id': 'first', 'session_id': 'implicit-retry',
+                                     'expected': original['execution']}})
+    env.row = env.store.admit_request('implicit-retry', 'hello', request_id='inherited', requested=choices, **source)
+    assert env.row['execution'] == original['execution']
+    assert env.store.get_request('first')['execution'] == original['execution']
+    env.runtime.answers = [('Repeated answer.', None)]
+    await execute(env)
+    assert env.store.get_request('inherited')['status'] == 'completed'
+    assert not env.store.has_owner_request_journal('inherited')
+    # A separate new request may use the now-committed route. This is not a retry.
+    env.row = env.store.admit_request('implicit-retry', 'hello again', request_id='independent', requested=choices)
+    assert owner_receipts.canonical_lead(env.row['execution']['_owner_agent'])
+    env.runtime.answers = [('New answer.', None)]
+    await execute(env)
+    assert env.store.owner_request_receipt('independent') is not None
+    assert env.runtime.calls == 3

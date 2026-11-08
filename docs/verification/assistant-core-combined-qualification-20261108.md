@@ -1,58 +1,142 @@
 # Combined assistant-core qualification, 2026-11-08
 
-## Seventeenth increment: PARTIAL
+## Candidate and boundaries
 
-Production source is 35100a1e477a5eaebc21cd4fc66f3f25b530f015. This increment
-adds test-only request/session/PID-scoped fault hooks and actual owned-child
-SIGKILL qualification, plus reports. No production implementation is changed.
+The isolated branch preserves nineteen commits over canonical master
+ff71bb769bc56e4c6d7be6d540a86be73e291e07. The last increments add actual
+owned-process loss qualification, verified default-artifact scope and immutable
+retry identity. The final source is identified by its frozen Python manifest. The bundle README and
+commits.txt identify its final commit/tree and cumulative patch hash.
 
-- Repository verification: 430 passed.
-- Production-path: 75 passed.
-- Security: 203 passed, 2 platform skips.
-- Durable/recovery: 491 passed.
-- Agent runtime/commitment: 120 passed.
-- Separate unshimmed specialist OWNER integration: 1 passed.
-- Owned HTTP/process: 49 passed, 1 failed, 3 infrastructure exclusions.
-- All four strengthened process-loss cases passed, including both-restart
-  status, file bytes/mtime, model/tool/effect, projection and queue assertions.
-- Root and agent archives rebuilt without installation; six unchanged
-  companions retained, all ten inspected. Nine root and five agent runtime
-  modules match source exactly, with the verified no-mock UI fingerprint.
-- Critical Python lint, source freeze and whitespace checks passed.
+No runtime machine edit, build, restart, installation or deployment took place.
+No merge occurred. GitHub writes remain blocked; there is no remote branch, PR
+or CI. The prepared draft is text only. All operator data and dirty runtime work
+remain preserved outside this isolated checkout.
 
-Counts overlap. UI source is unchanged from the 910-test/201-file build; all
-866 source files and the 857-input fingerprint matched independently. That
-prior UI result is reused, not a fresh rendered-browser run.
+## Combined final results
 
-## Blocking combined regression
+- Repository verification: 430 passed; production-path: 75 passed.
+- Security: 203 passed, with 2 platform skips.
+- Durable/recovery/artifact: 558 passed; agent runtime/commitment: 120 passed.
+- Owned HTTP/process: 50 passed, 3 established infrastructure exclusions,
+  638.80 seconds. This includes all four strengthened SIGKILL/two-restart cases.
+- Separate real unshimmed specialist OWNER integration: 1 passed.
+- Independent final artifact review: 97 passed; retry review: 9 new controls
+  and 66 existing controls passed. Counts overlap with other evidence.
+- Unchanged UI: prior 910 tests / 201 files, theme/TypeScript/production/no-mock
+  build reused after independently matching 866 source files and 857 manifest
+  inputs. Source fingerprint:
+  `36612489016ec2283f86dcc22d435be6aa80478591ab9dcb4551833c7be0fc1f`.
+- Root and jaeger-agent wheel/source archives rebuilt without installation;
+  six unchanged companions retained; all 10 archives inspected. Ten root and
+  five agent runtime modules match source byte-for-byte, with matching UI
+  provenance. Critical lint, source freeze and whitespace checks pass.
 
-The existing test_new_chat_default_snapshot_survives_real_retry fails because
-the original implicit unpinned first turn correctly has no lead marker, but its
-retry incorrectly mints _owner_agent from the now-current route. This changes
-immutable execution identity. The exact execution-equality assertion remains
-unchanged. Producer repair and renewed combined qualification are required.
-The failing result and source are retained, not relabeled a pass.
+All tests use external state, cache and temporary directories. The final Python
+source SHA-256 manifest was checked after testing. Critical Python lint and git
+diff --check pass. Test counts overlap; this is not the complete package matrix.
+Existing warnings and the two platform skips remain visible in raw logs.
 
-The four process-loss tests themselves pass on this combined source. They use
-real authenticated proxy admission, native tools, approval, ledger, verified
-TaskCard and SQLite proof; only provider replies and fault barrier are scripted.
-They qualify explicit pinned lead recovery, not every possible resident path.
+## Acceptance journey covered
 
-## Reproduction and limits
+- Real authenticated local WebUI/Gateway HTTP: conversation admission, incremental
+  stream, cancellation, persisted transcript, SSE replay and restart.
+- Real managed document CRUD, revision conflicts, search/reopen and persistence;
+  memory remember/recall/correction/forget across restart.
+- Real approval decisions and file writes, durable work ledger, readback and
+  verified completion; foreground transfer, queue defaults, scheduled execution,
+  cancellation propagation and request/session collision rejection.
+- Actual top-level agent selection and immutable retry behavior; stable home,
+  explicit pinned lead and route-checked fresh admission proof.
+- Real unshimmed specialist OWNER autorouting under canonical skill scope, with
+  preserved caller and a denied out-of-grant write, no file and no new approval.
+- Four real owned-child SIGKILL cases at the whole-request seal boundary. Safe
+  sealed proof projects once and runs queued work once; pre-seal loss and
+  authority/session drift remain unknown and keep queued work paused. Both
+  subsequent restarts check original status, bytes/mtime, provider/tool/effect
+  counts, all-session terminal projection and queue state. No blind replay.
 
-The cumulative evidence contains run-seventeenth-final.sh, per-gate logs and
-seventeenth-source-freeze.sha256. Always use a fresh external basetemp, since
-pytest clears that directory. The HTTP fixture deliberately disables optional
-skill smoke subprocesses; production defaults are unchanged.
+The model/provider boundary and nominated fault barrier are scripted. Controllers,
+SQLite journals, task verification, approval and file tools are not fabricated.
+The actual HTTP proxy is not a rendered browser or physical device. The existing
+HTTP fixture deliberately disables optional skill smoke subprocesses; production
+defaults remain unchanged. This does not qualify cold production skill startup or
+non-core missing-smoke gates.
 
-Overall and every tab remain PARTIAL. Actual browser/phone/native-host,
-configured providers/accounts, voice/media and native-bridge restart are not
-qualified. Historical markerless identity and unsupported/background/attachment
-paths remain conservative. Registry/SQLite validation is not one cross-store
-transaction. Same-tab drafts and bounded foreground continuation retain their
-previous limitations. The headless environment does not pass every package
-suite. Archive inspection is not proof of installed behavior.
+## What changed after the thirteen-commit bundle
 
-No Mac runtime mutation, merge or deployment occurred. Dirty runtime work and
-operator data remain preserved. GitHub write is blocked; no remote branch,
-PR or CI exists. See the per-tab and increment reports for detailed boundaries.
+1. [Selected agents](assistant-core-chat-agent-selection-20261108.md): creation
+   previously ignored the UI selector and silently assigned the lead. Canonical
+   validation/pinning and immutable retries now preserve the requested agent and
+   reject conflicting or unauthorized identity claims.
+2. [Default lead identity](assistant-core-default-lead-journal-20261108.md): fresh
+   stable/pinned/home lead requests bind immutable server-selected identity to
+   request proof. Unpinned first-turn routing remains intact and unqualified until
+   the route commits. Registry drift and invalid identity fail closed.
+3. [Specialist scope](assistant-core-specialist-scope-20261108.md): the branch
+   imported a nonexistent binder. It now uses the existing canonical context
+   manager through preparation/execution and thread context, restoring parent
+   scope without expanding tools, caller authority or allowed skills.
+4. [Actual process loss](assistant-core-owner-process-loss-20261108.md): test-only
+   request/session/PID-scoped fault hooks enable real kill/restart qualification
+   without signaling unrelated processes or weakening the verified TaskCard gate.
+
+5. [Default artifact scope](assistant-core-artifact-default-scope-20261108.md):
+   verified default-workspace reports can be cataloged and reopened using an
+   owner-captured checked root/path, unchanged originating session mode and
+   current instance scope. Untrusted metadata is discarded; file identity and
+   bytes are checked without granting access to old unproved receipts.
+6. [Retry identity](assistant-core-retry-identity-20261108.md): markerless retries
+   cannot acquire fresh lead proof from current routing. Qualified retries retain
+   identity-drift refusal, and separate fresh admissions still qualify normally.
+
+## Preserved combined failure and independent correction
+
+The seventeenth combined source passed 49 HTTP cases and failed the existing
+immutable retry equality assertion, with 3 exclusions. Its four strengthened
+process-loss cases passed. That failed log remains http-seventeenth-final.log;
+its source and other passing gate logs remain preserved. The nineteenth gates
+above rerun the full combined source after the producer correction.
+
+Independent review also rejected the initial default-artifact patch: it could
+hash a file under root A, then re-resolve a worker path and issue trusted metadata
+for root B. The corrected producer captures one root and returns exactly checked
+paths. The initial failed controls and corrected 97-case independent review are
+included, with no change to current scope or digest enforcement.
+
+## Remaining acceptance
+
+Overall and every tab remain **PARTIAL**. Browser/phone layout and interaction,
+actual configured provider/account quality, native-host permissions, voice/media,
+and actual native-bridge restart remain unqualified. Chromium and AF_UNIX are
+blocked here; missing optional packages prevent a full package-suite pass.
+
+Proof applies only to the documented admitted paths. Historical markerless
+identity can be ambiguous. Other named agents, unsupported background or yielded
+paths, attachments and unresolved defaults do not gain sealed recovery. Registry
+files and SQLite are not one atomic cross-store transaction. Missing proof may
+leave a blocked session safely. Existing continuation still requires a versioned
+new card, canonical workspace/model/provider and readable checkpoint. Unsaved
+document drafts are limited to the same tab/session.
+
+The [per-tab audit](assistant-core-ui-20261108.md) inventories the actual UI;
+source-backed capabilities and component tests are not proof that every tab works
+with a real account. Package/archive matching is not installation acceptance.
+Runtime phone/message work is not automatically reconciled into this branch.
+Separate data-preserving reconciliation and explicit deployment approval remain
+necessary. Evolution work is still deferred.
+
+## Evidence and reproduction
+
+The bundle includes run-nineteenth-final.sh and per-gate logs, source hashes,
+artifact inspection, machine-readable UI results, and independent review logs.
+Invoke each runner case from the isolated clone with its recorded external venv,
+and select a fresh external basetemp for every rerun. Do not reuse pytest basetemp
+paths containing retained evidence, since pytest clears them.
+
+Earlier failures remain included: concurrent commitment activation, initial
+bridge cancellation, selected-agent/default inference, rejected identity marker
+candidates, and process-fixture prompt/event-contract errors. The historical
+four-case process result used fewer assertions. Only the final combined run
+qualifies the strengthened two-restart checks. No prior failure is relabeled a
+pass and no test deadline or safety boundary was weakened to obtain these results.

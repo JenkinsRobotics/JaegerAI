@@ -1626,10 +1626,16 @@ class GatewaySessionStore:
                     raise InstanceDefaultsConflict('Retry source does not belong to originating session; no dispatch')
                 source_row = conn.execute('SELECT * FROM client_requests WHERE request_id=? AND session_id=?',
                     (origin.get('request_id'), origin.get('session_id'))).fetchone()
-                if retry_of and source_row is not None:
+                if source_row is not None:
                     prior_agent = _row_meta(source_row['execution_json']).get('_owner_agent')
-                    if prior_agent is not None and execution.get('_owner_agent') != prior_agent:
-                        raise RequestConflict('Retry agent identity changed; no dispatch')
+                    if retry_of and prior_agent is not None:
+                        if execution.get('_owner_agent') != prior_agent:
+                            raise RequestConflict('Retry agent identity changed; no dispatch')
+                    else:
+                        # Current routing cannot mint proof absent from a retry's
+                        # canonical source. Internal continuations retain source
+                        # validation, never fresh foreground qualification.
+                        execution.pop('_owner_agent', None)
                 marker = inherit_instance_defaults(
                     self._request_row(source_row) if source_row else None, execution,
                     session_id=origin.get('session_id'),

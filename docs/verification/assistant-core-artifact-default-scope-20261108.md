@@ -92,3 +92,8 @@ and six additional fail-closed controls. Integrated main source matches both
 reviewed production files byte-for-byte. Its artifact, owner and turn-card
 aggregate passed 89 tests in 18.96 seconds; counts overlap with other suites.
 Full combined gates are recorded separately in the combined qualification report.
+
+The subsequent [combined qualification](assistant-core-combined-qualification-20261108.md)
+passes the expanded 558-case durable/artifact gate and all 50 selected owned
+HTTP cases. A separate default-report full-process catalog/download journey is
+not inferred from these verifier/handler controls.
