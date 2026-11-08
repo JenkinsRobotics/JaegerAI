@@ -43,6 +43,16 @@ be random. Cursor pagination accepts nonnegative `after` and limit 1–100.
 There are no group deliveries or unread markers. Messages are inert data;
 storing a `task` message never admits tool execution.
 
+## Muse confinement
+
+Muse's authenticated Gateway access is limited to hub messages, roster and
+approval-count reads, goal-result reads, and bounded backlog operations. It
+cannot admit turns/goals, generate models, import backlog items, or use native
+bridge controls. MCP `send_message` and `handoff_task` are unavailable to Muse;
+`post_result` remains available. The separately configured filesystem Muse
+bridge retains its existing inert inbox-message workflow; storing a message
+is not permission to execute it.
+
 ## Durable webhook outbox
 
 Schema migration **14** adds `agent_webhook_outbox` in the session database.

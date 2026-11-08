@@ -221,8 +221,10 @@ def test_only_owner_approves_and_imports(gw, tmp_path):
 def test_auth_tables_and_activity_kind():
     for m, r in bl_routes.ROUTES:
         assert caller_auth.required_scope(m, r) == "search"
-        for name in ("grokbot", "ares", "muse"):
+        for name in ("grokbot", "ares"):
             assert caller_auth.prefixed_route_allowed(m, r, name)
+        # J-063: muse is confined to backlog read/add/update/assign; bulk import stays off.
+        assert caller_auth.prefixed_route_allowed(m, r, "muse") == ((m, r) != ("POST", "/v1/backlog/import"))
         assert not caller_auth.prefixed_route_allowed(m, r, "rackpc")
     for name in ("grokbot", "ares", "muse"):
         assert caller_auth.prefixed_route_allowed("GET", "/v1/backlog", name)

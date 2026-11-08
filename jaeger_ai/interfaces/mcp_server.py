@@ -409,6 +409,13 @@ def build_server(client: Any, instance: str, model: str | None,
 
     register_agent_bridge(mcp, agent_bridge_client)
 
+    def refuse_muse(ctx: Context | None, tool: str) -> None:
+        caller, token = _presented_caller(ctx)
+        if token is None and os.environ.get("JAEGER_MCP_TOKEN_FILE"):
+            caller, _ = _agent_bridge_caller(ctx)
+        if caller == "muse":
+            raise PermissionError(f"Caller 'muse' may not use {tool}")
+
     @mcp.tool()
     @_off_event_loop
     def chat(message: str, session_id: str = "", request_id: str = "",
@@ -428,6 +435,10 @@ def build_server(client: Any, instance: str, model: str | None,
         relay_caller, relay_token = _presented_caller(ctx)
         if relay_token is None and os.environ.get("JAEGER_MCP_TOKEN_FILE"):
             relay_caller, relay_token = _agent_bridge_caller(ctx)
+        if relay_caller == "muse":
+            from jaeger_ai.core.gateway.caller_auth import prefixed_route_allowed
+            if not prefixed_route_allowed("POST", "/v1/sessions/{id}/turns", relay_caller):
+                raise PermissionError("Caller 'muse' may not use chat")
         session = (session_id or "").strip() if relay_caller == "jaegerd" else _mcp_session(session_id, relay_caller or "mcp")
         if bridge is not None:
             return _bridge_chat(
@@ -466,6 +477,7 @@ def build_server(client: Any, instance: str, model: str | None,
         @_off_event_loop
         def cancel_turn(session_id: str = "", request_id: str = "", ctx: Context | None = None) -> dict:
             """Request native cancellation. Does not claim the native effect stopped."""
+            refuse_muse(ctx, "cancel_turn")
             try:
                 _caller, token = _presented_caller(ctx)
                 if token or os.environ.get("JAEGER_MCP_TOKEN_FILE"):
@@ -481,6 +493,7 @@ def build_server(client: Any, instance: str, model: str | None,
         @_off_event_loop
         def cancel_turn(session_id: str = "", request_id: str = "", ctx: Context | None = None) -> dict:
             """Request Gateway turn cancellation."""
+            refuse_muse(ctx, "cancel_turn")
             try:
                 _caller, token = _presented_caller(ctx)
                 if token or os.environ.get("JAEGER_MCP_TOKEN_FILE"):
@@ -494,8 +507,9 @@ def build_server(client: Any, instance: str, model: str | None,
 
     @mcp.tool()
     @_off_event_loop
-    def agent_info() -> dict:
+    def agent_info(ctx: Context | None = None) -> dict:
         """Return the JaegerAI agent's instance name and loaded model."""
+        refuse_muse(ctx, "agent_info")
         info: dict[str, Any] = {"instance": instance, "model": model or "unknown"}
         if bridge is not None:
             try:
@@ -513,25 +527,28 @@ def build_server(client: Any, instance: str, model: str | None,
 
     @mcp.tool()
     @_off_event_loop
-    def capability_inventory_tool() -> dict:
+    def capability_inventory_tool(ctx: Context | None = None) -> dict:
         """Return Jaeger's live tool inventory and shared protocol endpoints."""
+        refuse_muse(ctx, "capability_inventory_tool")
         return capability_inventory(bridge=bridge)
 
     if bridge is not None:
         @mcp.tool()
         @_off_event_loop
-        def bridge_health() -> dict:
+        def bridge_health(ctx: Context | None = None) -> dict:
             """Health of the live Jaeger instance bridge (no model boot)."""
+            refuse_muse(ctx, "bridge_health")
             return dict(bridge.health())
 
         @mcp.tool()
         @_off_event_loop
-        def bridge_query(what: str, args_json: str = "{}") -> Any:
+        def bridge_query(what: str, args_json: str = "{}", ctx: Context | None = None) -> Any:
             """Run a read-only bridge query (contract/identity/tools/skills/schedules/...).
 
             Only queries in ``MCP_READ_ONLY_BRIDGE_QUERIES`` are served; anything
             that starts work, loads a model, or exposes private context is refused.
             """
+            refuse_muse(ctx, "bridge_query")
             name = str(what or "").strip()
             if name not in MCP_READ_ONLY_BRIDGE_QUERIES:
                 raise PermissionError(
@@ -549,8 +566,9 @@ def build_server(client: Any, instance: str, model: str | None,
 
         @mcp.tool()
         @_off_event_loop
-        def list_delegates() -> dict:
+        def list_delegates(ctx: Context | None = None) -> dict:
             """Delegate catalog: builtin runtimes plus any delegate_* bridge tools."""
+            refuse_muse(ctx, "list_delegates")
             names: list[str] = []
             payload_error = None
             try:
