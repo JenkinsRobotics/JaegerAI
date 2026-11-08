@@ -4,10 +4,10 @@ import type { ControlResult, ScheduleAction, ScheduleControls, ScheduleJob } fro
 const KEY = "jaeger.ui.schedule-operation.v1";
 interface Pending { version: 1; operationId: string; action: ScheduleAction }
 /** Intent is device-local; definitions and outcomes belong exclusively to the existing Gateway owner. */
-export function AutomationsPanel({ controls }: { controls: ScheduleControls }) {
+export function AutomationsPanel({ controls, initialNew = false }: { controls: ScheduleControls; initialNew?: boolean }) {
   const [jobs, setJobs] = useState<ScheduleJob[]>(), [attempt, setAttempt] = useState(0);
   const [error, setError] = useState<string>(), [notice, setNotice] = useState<string>();
-  const [editing, setEditing] = useState<ScheduleJob | "new">();
+  const [editing, setEditing] = useState<ScheduleJob | "new" | undefined>(initialNew ? "new" : undefined);
   const [name, setName] = useState(""), [prompt, setPrompt] = useState(""), [cron, setCron] = useState("0 9 * * *");
   const [zone, setZone] = useState("");
   const [pending, setPending] = useState<Pending>(), [busy, setBusy] = useState(false), locked = useRef(false);

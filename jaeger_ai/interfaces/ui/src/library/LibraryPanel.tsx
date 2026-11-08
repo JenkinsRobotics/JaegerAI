@@ -8,7 +8,7 @@ const backupKeys = (id: string) => { try { return keysWithPrefix(draftKey(id) + 
 type Draft = Pick<LibraryDocument, "title" | "content" | "revision">;
 type Intent = { operationId: string; action: "create" | "save" | "archive" | "restore" | "version"; documentId: string };
 /** Native documents only; indexed corpus previews cannot gain edit/file access. */
-export function LibraryPanel({ controls, artifacts }: { controls: LibraryControls; artifacts?:ArtifactControls }) {
+export function LibraryPanel({ controls, artifacts, initialNew = false }: { controls: LibraryControls; artifacts?:ArtifactControls; initialNew?: boolean }) {
   const [catalog, setCatalog] = useState<Awaited<ReturnType<LibraryControls["list"]>>>(), [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState<string>(), [document, setDocument] = useState<LibraryDocument>();
   const [draft, setDraft] = useState<Draft>({ title: "", content: "" });
@@ -49,6 +49,7 @@ export function LibraryPanel({ controls, artifacts }: { controls: LibraryControl
       if (saved && saved.revision !== current.revision) setError("Document changed elsewhere. Your draft is preserved; review the saved document before merging.");
     } catch (e) { if (owner === generation.current) setError(String((e as Error).message ?? e)); }
   };
+  useEffect(() => { if (initialNew) void open("new"); }, [initialNew]);
   const finish = async (intent: Intent, receipt: Awaited<ReturnType<LibraryControls["mutate"]>>) => {
     if (receipt.operation_id !== intent.operationId) throw Error("Document operation identity mismatch");
     if (!receipt.ok) { localStorage.removeItem(OP); setPending(undefined); throw Error(receipt.error ?? "Document action rejected"); }

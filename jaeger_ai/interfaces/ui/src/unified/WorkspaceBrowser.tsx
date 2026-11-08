@@ -17,6 +17,7 @@ const errorText = (error: unknown) => String(error).includes("HTTP 404") ? "This
 
 export function WorkspaceBrowser({ source, params }: { source: JaegerSource; params: URLSearchParams }) {
   const requested = params.get("session") ?? "";
+  const view = params.get("view");
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sessionId, setSessionId] = useState(requested);
   const [folder, setFolder] = useState(".");
@@ -63,19 +64,19 @@ export function WorkspaceBrowser({ source, params }: { source: JaegerSource; par
   const chooseSession = useCallback((id: string) => { setSessionId(id); setFolder("."); setSelected(""); setDiffPath(""); }, []);
   const parent = folder === "." ? "." : folder.split("/").slice(0, -1).join("/") || ".";
   return <div className="jg-u-page jg-workspace-browser">
-    <PageHead title="Workspace" subtitle="Browse session files and Git changes. Read only." actions={<button type="button" className="jg-u-btn" onClick={() => setRevision(v => v + 1)}>Refresh</button>} />
+    <PageHead title={view === "changes" ? "Changes" : view === "files" ? "Files" : "Workspace"} subtitle="Browse session files and Git changes. Read only." actions={<button type="button" className="jg-u-btn" onClick={() => setRevision(v => v + 1)}>Refresh</button>} />
     <label className="jg-workspace-browser__session">Session <select aria-label="Workspace session" value={sessionId} onChange={e => chooseSession(e.target.value)}><option value="">Choose a session</option>{sessionId && !sessions.some(s => s.session_id === sessionId) && <option value={sessionId}>{sessionId}</option>}{sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title || s.session_id}</option>)}</select></label>
     {!sessionId && <Empty title="No session selected">{sessions.length ? "Choose a Gateway session to browse its workspace." : "No sessions have a workspace yet."}</Empty>}
     {error && <p role="alert" className="jg-u-error">{error}</p>}
     {loading && <SkeletonRows n={3} />}
     {sessionId && !error && !loading && <div className="jg-workspace-browser__grid" data-file-selected={!!selected}>
-      <section className="jg-u-card" aria-label="File browser"><h3>Files</h3><p className="jg-workspace-browser__path">{folder}</p>{folder !== "." && <button type="button" onClick={() => setFolder(parent)}>.. Parent folder</button>}
+      <section className="jg-u-card" aria-label="File browser" hidden={view === "changes"}><h3>Files</h3><p className="jg-workspace-browser__path">{folder}</p>{folder !== "." && <button type="button" onClick={() => setFolder(parent)}>.. Parent folder</button>}
         {entries.length === 0 && <p>This workspace folder is empty.</p>}
         <ul>{entries.map(entry => <li key={entry.path}><button type="button" disabled={entry.target_outside_workspace} onClick={() => isDir(entry) ? (setFolder(entry.path), setSelected("")) : setSelected(entry.path)}>{isDir(entry) ? <FolderOpen size={16} /> : <FileText size={16} />} {entry.name}</button></li>)}</ul>
       </section>
-      <section className="jg-u-card" aria-label="File viewer"><h3>{selected || "File viewer"}</h3>{selected ? <>{fileError && <p role="alert">{fileError}</p>}{!fileError && <pre>{content || "Loading file…"}</pre>}<a href={query("/api/file/raw", { session_id: sessionId, path: selected, download: "1" })}>Download original</a></> : <p>Select a file to read it.</p>}</section>
-      <section className="jg-u-card" aria-label="Git status"><h3>Git status</h3>{status?.is_git ? <><p>Branch: {status.branch}</p>{status.files?.length ? <ul>{status.files.map(file => <li key={file.path}><span>{file.status} {file.path}</span>{file.staged && <button type="button" onClick={() => setDiffPath(`staged:${file.path}`)}>Staged diff</button>}{(file.unstaged || file.untracked) && <button type="button" onClick={() => setDiffPath(`unstaged:${file.path}`)}>Diff</button>}</li>)}</ul> : <p>No changes.</p>}{status.truncated && <p>Showing a limited set of changes.</p>}</> : <p>This workspace is not a Git repository.</p>}</section>
-      <section className="jg-u-card" aria-label="Branches and diff"><h3>Branches</h3>{branches ? <><p>Current: {branches.current}</p><ul>{branches.local?.map(b => <li key={b.name}>{b.name}</li>)}</ul></> : <p>No branch list available.</p>}{diffPath && <><h3>Diff: {diffPath.slice(diffPath.indexOf(":") + 1)}</h3><pre>{diff || "Loading diff…"}</pre></>}</section>
+      <section className="jg-u-card" aria-label="File viewer" hidden={view === "changes"}><h3>{selected || "File viewer"}</h3>{selected ? <>{fileError && <p role="alert">{fileError}</p>}{!fileError && <pre>{content || "Loading file…"}</pre>}<a href={query("/api/file/raw", { session_id: sessionId, path: selected, download: "1" })}>Download original</a></> : <p>Select a file to read it.</p>}</section>
+      <section className="jg-u-card" aria-label="Git status" hidden={view === "files"}><h3>Git status</h3>{status?.is_git ? <><p>Branch: {status.branch}</p>{status.files?.length ? <ul>{status.files.map(file => <li key={file.path}><span>{file.status} {file.path}</span>{file.staged && <button type="button" onClick={() => setDiffPath(`staged:${file.path}`)}>Staged diff</button>}{(file.unstaged || file.untracked) && <button type="button" onClick={() => setDiffPath(`unstaged:${file.path}`)}>Diff</button>}</li>)}</ul> : <p>No changes.</p>}{status.truncated && <p>Showing a limited set of changes.</p>}</> : <p>This workspace is not a Git repository.</p>}</section>
+      <section className="jg-u-card" aria-label="Branches and diff" hidden={view === "files"}><h3>Branches</h3>{branches ? <><p>Current: {branches.current}</p><ul>{branches.local?.map(b => <li key={b.name}>{b.name}</li>)}</ul></> : <p>No branch list available.</p>}{diffPath && <><h3>Diff: {diffPath.slice(diffPath.indexOf(":") + 1)}</h3><pre>{diff || "Loading diff…"}</pre></>}</section>
     </div>}
   </div>;
 }

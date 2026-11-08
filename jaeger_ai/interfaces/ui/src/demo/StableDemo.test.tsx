@@ -100,7 +100,7 @@ it("offers one navigation for chat and every workspace page", async () => {
  expect(document.querySelector('.jg-stable-demo__profile-avatar')).not.toBeNull();
  expect(document.querySelector('[aria-label="Mobile navigation"]')).toBeNull();
  expect(document.querySelectorAll('.jg-stable-demo__top-button')).toHaveLength(5);
- expect([...document.querySelectorAll<HTMLButtonElement>('.jg-stable-demo__tools > .jg-stable-demo__top-button')].map(button => button.getAttribute('aria-label'))).toEqual(["Conversation actions", "Toggle pinned summary", "Open tabs"]);
+ expect([...document.querySelectorAll<HTMLButtonElement>('.jg-stable-demo__tools > .jg-stable-demo__top-button')].map(button => button.getAttribute('aria-label'))).toEqual(["Conversation actions", "Conversation summary", "Toggle tools workspace"]);
 });
 it("creates an isolated Jaeger session only after the user starts, then keeps chat mounted across task navigation", async () => {
  const source=new MockSource();const create=vi.spyOn(source,'createSession').mockResolvedValue({session_id:'demo-safe',agent_id:'native:jaeger'} as never);
@@ -180,31 +180,37 @@ it("keeps a disappeared conversation's exact address until the operator chooses 
  await flush(()=>[...document.querySelectorAll('button')].find(button=>button.textContent==='Shared fallback')!.click());
  expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','shared-fallback');
 });
-it("opens and closes the work panel without replacing the conversation", async () => {
- await mount();
- const summary = document.querySelector<HTMLButtonElement>('[aria-label="Toggle pinned summary"]')!;
- await flush(() => summary.click());
- await flush(() => [...document.querySelectorAll('button')].find(b => b.textContent === 'Files and changes')!.click());
- await flush(() => [...document.querySelectorAll('button')].find(b => b.textContent === 'Files & changes')!.click());
- expect(document.querySelector('#jaeger-work-panel')?.textContent).toContain('Start a conversation');
- await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Close work panel"]')!.click());
- expect(document.querySelector('#jaeger-work-panel')).toBeNull();
- expect(summary.getAttribute('aria-expanded')).toBe('false');
+it("opens tools independently from its compact summary and preserves the conversation", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'saved');
+ const source = new MockSource();vi.spyOn(source,'session').mockResolvedValue({session_id:'saved'});
+ await mount(source);
+ const chat=document.querySelector('[data-chat-session]');
+ const toggle=document.querySelector<HTMLButtonElement>('[aria-label="Toggle tools workspace"]')!;
+ await flush(()=>toggle.click());
+ expect(document.querySelector('[aria-label="Tools workspace"]')).not.toBeNull();
+ expect(document.querySelector('[role="tabpanel"]')?.textContent).toContain('Suggested');
+ await flush(()=>document.querySelector<HTMLButtonElement>('[aria-label="Conversation summary"]')!.click());
+ expect(document.querySelector('[aria-label="Conversation summary"][role="dialog"]')?.textContent).toContain('Subagents');
+ expect(document.querySelector('[aria-label="Conversation summary"][role="dialog"]')?.textContent).toContain('Sources');
+ expect(document.querySelector<HTMLElement>('#jaeger-work-panel')?.hidden).toBe(false);
+ await flush(()=>document.querySelector<HTMLButtonElement>('[aria-label="Close summary"]')!.click());
+ await flush(()=>toggle.click());
+ expect(document.querySelector<HTMLElement>('#jaeger-work-panel')?.hidden).toBe(true);
+ expect(document.querySelector('[data-chat-session]')).toBe(chat);
 });
-
-it("opens the three Codex-style header popovers with real Jaeger destinations", async () => {
+it("matches the conversation action groups and supports menu keyboard dismissal", async () => {
  await mount();
- const actions = document.querySelector<HTMLButtonElement>('[aria-label="Conversation actions"]')!;
- await flush(() => actions.click());
- expect(document.querySelector('[aria-label="Conversation actions menu"]')?.textContent).toContain('Rename');
- expect(document.querySelector('[aria-label="Conversation actions menu"]')?.textContent).toContain('Open in new window');
- await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Toggle pinned summary"]')!.click());
- expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Environment');
- expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Connection and activity');
- await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Open tabs"]')!.click());
- expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).toContain('Working and shared tabs');
- expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).toContain('No tabs are currently shared with Jaeger');
- expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).not.toContain('Settings');
+ const actions=document.querySelector<HTMLButtonElement>('[aria-label="Conversation actions"]')!;
+ await flush(()=>actions.click());
+ const items=[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+ expect(items.map(row=>row.textContent)).toEqual(['Rename','Pin','New side chat','Fork','Add scheduled task…','Share','Copy','Open in new window','Open in','Archive']);
+ const enabled=items.filter(row=>!row.disabled);
+ expect(document.activeElement).toBe(enabled[0]);
+ await flush(()=>enabled[0].dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));
+ expect(document.activeElement).toBe(enabled[1]);
+ await flush(()=>enabled[1].dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+ expect(document.querySelector('[role="menu"]')).toBeNull();
+ expect(document.activeElement).toBe(actions);
 });
 
 it("collapses each column independently without remounting the chat", async () => {
@@ -223,6 +229,55 @@ it("collapses each column independently without remounting the chat", async () =
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
  expect(document.querySelector('.jg-stable-demo__profile')?.textContent).toContain('Jaeger');
 });
+
+it("collapses sidebar groups independently while keeping the same conversation and right panel", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'saved');
+ const source = new MockSource();
+ vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
+ const create = vi.spyOn(source, 'createSession');
+ await mount(source);
+ const chat = document.querySelector('[data-chat-session]');
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Toggle tools workspace"]')!.click());
+ for (const title of ['Pinned', 'Projects', 'Recents']) {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('.jg-sidebar-section__toggle')].find(b => b.textContent === title)!;
+  expect(button).toHaveAttribute('aria-expanded', 'true');
+  await flush(() => button.click());
+  expect(button).toHaveAttribute('aria-expanded', 'false');
+  expect(document.getElementById(button.getAttribute('aria-controls')!)?.hidden).toBe(true);
+  expect(document.querySelector('[data-chat-session]')).toBe(chat);
+  expect(document.querySelector('[aria-label="Tools workspace"]')).not.toBeNull();
+ }
+ const recents = [...document.querySelectorAll<HTMLButtonElement>('.jg-sidebar-section__toggle')].find(b => b.textContent === 'Recents')!;
+ await flush(() => recents.click());
+ expect(recents).toHaveAttribute('aria-expanded', 'true');
+ expect(document.querySelector('.jg-sidebar-section__toggle')).toHaveAttribute('aria-expanded', 'false');
+ expect(create).not.toHaveBeenCalled();
+});
+
+it("restores each sidebar group's expansion preference after reopening the app", async () => {
+ await mount();
+ const pinned = document.querySelector<HTMLButtonElement>('.jg-sidebar-section__toggle')!;
+ await flush(() => pinned.click());
+ await flush(() => root.unmount());
+ await mount();
+ const groups = [...document.querySelectorAll<HTMLButtonElement>('.jg-sidebar-section__toggle')];
+ expect(groups.find(button => button.textContent === 'Pinned')).toHaveAttribute('aria-expanded', 'false');
+ expect(groups.find(button => button.textContent === 'Projects')).toHaveAttribute('aria-expanded', 'true');
+ expect(groups.find(button => button.textContent === 'Recents')).toHaveAttribute('aria-expanded', 'true');
+});
+
+it("keeps disclosures usable if browser storage refuses writes", async () => {
+ const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {throw new Error('Storage unavailable');});
+ try {
+  await mount();
+  const pinned = document.querySelector<HTMLButtonElement>('.jg-sidebar-section__toggle')!;
+  await flush(() => pinned.click());
+  expect(pinned).toHaveAttribute('aria-expanded', 'false');
+  await flush(() => pinned.click());
+  expect(pinned).toHaveAttribute('aria-expanded', 'true');
+ } finally {storage.mockRestore();}
+});
+
 it("opens the existing settings route and returns to the same chat", async () => {
  localStorage.setItem(DEMO_SESSION_KEY, 'saved');
  const source = new MockSource();
@@ -468,4 +523,36 @@ it("refreshes unread markers for the selected historic agent without changing it
  expect(rows).toHaveBeenLastCalledWith({agent_id:'specialist'});
  expect(document.querySelector('[aria-label="Unread"]')).not.toBeNull();
  expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','old / chat');
+});
+
+it('forks saved history through the existing Gateway route only on explicit selection', async()=>{
+ history.replaceState(null,'','/chat?session=original');
+ const source=new MockSource();Object.defineProperty(source,'kind',{value:'live'});
+ vi.spyOn(source,'session').mockImplementation(async id=>({session_id:id,title:'Original'}));
+ vi.spyOn(source,'sessions').mockResolvedValue([{session_id:'original',title:'Original'}]);
+ const fetch=vi.fn().mockResolvedValue({ok:true,text:async()=>JSON.stringify({session_id:'forked',title:'Original (fork)'})});vi.stubGlobal('fetch',fetch);
+ try {
+  await mount(source);
+  await flush(()=>document.querySelector<HTMLButtonElement>('[aria-label="Conversation actions"]')!.click());
+  await flush(()=>[...document.querySelectorAll('button')].find(button=>button.textContent==='Fork')!.click());
+  expect(fetch).not.toHaveBeenCalled();
+  await flush(()=>[...document.querySelectorAll('button')].find(button=>button.textContent==='Fork conversation')!.click());await flush();
+  expect(fetch.mock.calls[0][0]).toBe('/v1/sessions/original/branch');
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({title:'Original (fork)'});
+  expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','forked');
+ } finally {vi.unstubAllGlobals();}
+});
+it('preserves an opaque historic agent selection through the new tools and summary controls',async()=>{
+ const id='historic / α';history.replaceState(null,'','/chat?agent=specialist&session='+encodeURIComponent(id));
+ const source=new MockSource();vi.spyOn(source,'session').mockImplementation(async session_id=>({session_id,agent_id:'specialist',title:'Historic'}));
+ vi.spyOn(source,'sessions').mockResolvedValue([{session_id:id,agent_id:'specialist',title:'Historic'}]);
+ const home=vi.fn();Object.assign(source,{agentHome:home});const create=vi.spyOn(source,'createSession');
+ await mount(source);const chat=document.querySelector('[data-chat-session]');
+ await flush(()=>document.querySelector<HTMLButtonElement>('[aria-label="Toggle tools workspace"]')!.click());
+ await flush(()=>document.querySelector<HTMLButtonElement>('[aria-label="Conversation summary"]')!.click());
+ await flush(()=>document.querySelector<HTMLButtonElement>('[aria-label="Close summary"]')!.click());
+ await flush(()=>document.querySelector<HTMLButtonElement>('[aria-label="Close work panel"]')!.click());
+ expect(document.querySelector('[data-chat-session]')).toBe(chat);expect(chat).toHaveAttribute('data-chat-session',id);
+ expect(new URLSearchParams(location.search).get('session')).toBe(id);expect(new URLSearchParams(location.search).get('agent')).toBe('specialist');
+ expect(home).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
 });
