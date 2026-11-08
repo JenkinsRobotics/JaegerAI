@@ -1,9 +1,14 @@
-import { useRef, type PointerEvent as ReactPointerEvent } from "react";
-import jaegerArtwork from "../assets/characters/jaeger-sculpted.png";
+import { useEffect, useState } from "react";
+import artwork from "../assets/characters/jaeger-emotes.png";
 import { ClipAvatar } from "./ClipAvatar";
 import { useReducedMotion } from "./AvatarStage";
 import { STATUS_TEXT, type ClipState } from "./avatar";
 import "./jaegerAvatar.css";
+
+export const EXPRESSIONS = ["Idle", "Listening", "Thinking", "Determined", "Your move", "Eureka", "Resting", "Facepalm", "Laughing", "Playful curiosity", "Playful invitation", "Peekaboo"] as const;
+export const STATE_EXPRESSION: Record<ClipState, number> = {
+  idle: 0, working: 2, making_something: 3, waiting: 4, connecting: 6, milestone_level_up: 5,
+};
 
 type JaegerAvatarProps = {
   state?: ClipState;
@@ -14,61 +19,23 @@ type JaegerAvatarProps = {
   portraitOverride?: string;
 };
 
-/**
- * A 2D cutout rig made from the canonical sculpted Jaeger artwork. Every
- * layer uses the same source image, so the character is pixel-identical when
- * resting; only the clipped smile and arms move.
- */
-export function JaegerAvatar({
-  state = "idle",
-  size = 94,
-  name = "Jaeger",
-  still = false,
-  showStatus = false,
-  portraitOverride,
-}: JaegerAvatarProps) {
-  const rig = useRef<HTMLSpanElement>(null);
+export function JaegerAvatar({ state = "idle", size = 94, name = "Jaeger", still = false, showStatus = false, portraitOverride }: JaegerAvatarProps) {
   const reduced = useReducedMotion();
-  const calm = still || reduced;
-
-  if (portraitOverride) {
-    return <ClipAvatar state={state} size={size} name={name} still={calm} showStatus={showStatus} portraitOverride={portraitOverride} />;
-  }
-
-  const point = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    if (calm) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width) * 2 - 1));
-    const y = Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height) * 2 - 1));
-    rig.current?.style.setProperty("--jg-look-x", `${(x * 1.2).toFixed(2)}px`);
-    rig.current?.style.setProperty("--jg-look-y", `${(y * 0.7).toFixed(2)}px`);
-  };
-  const center = () => {
-    rig.current?.style.setProperty("--jg-look-x", "0px");
-    rig.current?.style.setProperty("--jg-look-y", "0px");
-  };
-
-  return <span
-    ref={rig}
-    className="jg-jaeger-avatar"
-    data-avatar-state={state}
-    data-motion={calm ? "still" : "rigged"}
-    style={{ width: size, height: size }}
-    onPointerMove={point}
-    onPointerLeave={center}
-  >
-    <span className="jg-jaeger-cutout" role="img" aria-label={`${name} avatar`}>
-      <img className="jg-jaeger-cutout__base" src={jaegerArtwork} alt="" draggable={false} />
-      <span className="jg-jaeger-cutout__part jg-jaeger-cutout__smile" aria-hidden="true">
-        <img src={jaegerArtwork} alt="" draggable={false} />
-      </span>
-      <span className="jg-jaeger-cutout__part jg-jaeger-cutout__arm--raised" aria-hidden="true">
-        <img src={jaegerArtwork} alt="" draggable={false} />
-      </span>
-      <span className="jg-jaeger-cutout__part jg-jaeger-cutout__arm--grounded" aria-hidden="true">
-        <img src={jaegerArtwork} alt="" draggable={false} />
-      </span>
-    </span>
+  const [choice, setChoice] = useState(-1);
+  useEffect(() => { setChoice(-1); }, [state]);
+  useEffect(() => {
+    if (choice < 0) return;
+    const timer = setTimeout(() => setChoice(-1), 8000);
+    return () => clearTimeout(timer);
+  }, [choice]);
+  if (portraitOverride) return <ClipAvatar state={state} size={size} name={name} still={still || reduced} showStatus={showStatus} portraitOverride={portraitOverride} />;
+  const expression = choice < 0 ? STATE_EXPRESSION[state] : choice;
+  return <span className="jg-jaeger-avatar" data-avatar-state={state} data-expression={EXPRESSIONS[expression]} data-motion={still || reduced ? "still" : "animated"} style={{ width: size, height: size }}>
+    <span key={expression} className="jg-jaeger-emote" role="img" aria-label={`${name}: ${EXPRESSIONS[expression]}`} style={{ backgroundImage: `url(${artwork})`, backgroundPosition: `${expression % 4 * 100 / 3}% ${Math.floor(expression / 4) * 50}%` }} />
+    <select className="jg-jaeger-expression-picker" aria-label="Avatar expression" title="Preview an expression for 8 seconds" value={choice} onChange={event => setChoice(Number(event.target.value))}>
+      <option value={-1}>Automatic</option>
+      {EXPRESSIONS.map((label, index) => <option key={label} value={index}>{label}</option>)}
+    </select>
     {showStatus && <span className="jg-clip-status" role="status">{STATUS_TEXT[state]}</span>}
   </span>;
 }
