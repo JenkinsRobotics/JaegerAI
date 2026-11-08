@@ -935,6 +935,7 @@ class EntityRuntime:
         callbacks: Any = None,
         continuation_state: dict[str, Any] | None = None,
         project_root: str | None = None,
+        admitted_default_route: str | None = None,
         on_agent: Callable[[Any], None] | None = None,
     ) -> dict[str, Any]:
         """Execute subordinate ReAct loop inside the EntityRuntime.
@@ -1013,6 +1014,8 @@ class EntityRuntime:
             # turn one. The wizard/`jaeger setup` remains the authoritative
             # writer; this only reads what does not exist yet.
             cfg = load_instance_config_or_default(layout)
+            from jaeger_ai.core.runtime.execution_defaults import validate_default_route
+            validate_default_route(cfg, admitted_default_route)
             client = ExternalModelClient(cfg.external_model, layout)
             if model:
                 from jaeger_ai.core.models.router import select_client

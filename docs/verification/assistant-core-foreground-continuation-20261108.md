@@ -174,3 +174,11 @@ No alternate write route was attempted afterward. The cumulative patch is a
 review artifact, not a published or deployed fix. Runtime-local work and user
 data remain untouched. Reconciliation, backups, full acceptance and separate
 cutover approval remain necessary.
+
+## Later ordinary Chat default admission
+
+The [eighth increment](assistant-core-default-admission-20261108.md) supplies
+canonical execution facts for supported ordinary new-chat defaults, preserving
+instance workspace mode rather than converting it into a project. The original
+new-card, checkpoint and authority restrictions remain. Historical receipts,
+unsupported routes and queue admission are not broadened by that repair.

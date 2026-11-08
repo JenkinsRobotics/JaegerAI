@@ -40,6 +40,21 @@ def current_task_context():
     return _context.get()
 
 
+def handoff_workspace(context: dict[str, Any]) -> str:
+    """Preserve instance-vs-project mode without sending internal authority.
+
+    Only the host can prove a canonical admission. The model never supplies
+    this context or the owner object; an unproved marker fails before send.
+    """
+    execution = context.get('execution') or {}
+    if not (execution.get('_instance_defaults') or {}).get('workspace'):
+        return str(execution.get('workspace') or '')
+    check = getattr(context.get('owner'), 'handoff_workspace', None)
+    if not callable(check):
+        raise ValueError('Cannot prove inherited instance workspace; no handoff')
+    return check(context)
+
+
 def install_remote(client: Any) -> None:
     """Register the host's HTTP task client (``tasks()``, ``submit(...)``)."""
     global _remote

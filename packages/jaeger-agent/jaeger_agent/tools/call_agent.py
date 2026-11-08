@@ -100,7 +100,6 @@ def _request_json(method: str, path: str, body: dict[str, Any] | None = None, ti
 def _handoff_body(work, turn, *, from_agent_id, require_approval, request_id,
                   parent_run_id, permitted_context, timeout_seconds, tools,
                   project_id=""):
-    execution = turn.get("execution") or {}
     body = {
         "task": work,
         "from_agent_id": from_agent_id or "native:jaeger",
@@ -114,8 +113,11 @@ def _handoff_body(work, turn, *, from_agent_id, require_approval, request_id,
     }
     if project_id:
         body["project_id"] = project_id
-    elif execution.get("workspace"):
-        body["workspace"] = str(execution["workspace"])
+    else:
+        from jaeger_agent.task_port import handoff_workspace
+        workspace = handoff_workspace(turn)
+        if workspace:
+            body["workspace"] = workspace
     return body
 
 

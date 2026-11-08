@@ -107,7 +107,6 @@ def _handoff_body(target: str, work: str, turn: dict[str, Any], *, from_agent_id
                   project_id: str) -> dict[str, Any]:
     """One handoff request. The parent's project workspace rides along, so a
     child without a project still works in the same root as its parent."""
-    execution = turn.get("execution") or {}
     body: dict[str, Any] = {
         "task": work,
         "from_agent_id": from_agent_id or "native:jaeger",
@@ -121,8 +120,11 @@ def _handoff_body(target: str, work: str, turn: dict[str, Any], *, from_agent_id
     }
     if project_id:
         body["project_id"] = project_id.strip()
-    elif execution.get("workspace"):
-        body["workspace"] = str(execution["workspace"])
+    else:
+        from jaeger_agent.task_port import handoff_workspace
+        workspace = handoff_workspace(turn)
+        if workspace:
+            body["workspace"] = workspace
     return body
 
 
