@@ -906,7 +906,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
                 : "activity" in seg ? <ActivityFold key={`activity:${i}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
-                : "diagnostic" in seg ? <div key={`diagnostic:${i}`} className="jg-turn-diagnostic" data-sender="assistant">{seg.diagnostic.map((p,j)=><BubblePart key={j} part={p} links={links} live={false} style={streamStyle}/>)}</div>
+                : "diagnostic" in seg ? <div key={`diagnostic:${i}`} className="jg-turn-diagnostic" data-stream-role="diagnostic">{seg.diagnostic.map((p,j)=><BubblePart key={j} part={p} links={links} live={false} style={streamStyle}/>)}</div>
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
               {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} />}
