@@ -64,10 +64,12 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       if (viewport.scale !== 1) {
         shell.style.removeProperty("--jg-viewport-height");
         shell.style.removeProperty("--jg-viewport-top");
+        delete shell.dataset.keyboard;
         return;
       }
       shell.style.setProperty("--jg-viewport-height", `${viewport.height}px`);
       shell.style.setProperty("--jg-viewport-top", `${viewport.offsetTop}px`);
+      shell.dataset.keyboard = String(window.innerHeight - viewport.height > 120);
     };
     update();
     viewport.addEventListener("resize", update);

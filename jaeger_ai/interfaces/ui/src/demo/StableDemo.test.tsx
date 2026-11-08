@@ -41,10 +41,13 @@ it("keeps the shell in the visible viewport when the mobile keyboard opens", asy
   await flush(() => {viewport.height=408;viewport.offsetTop=30;viewport.dispatchEvent(new Event('resize'));});
   expect(shell.style.getPropertyValue('--jg-viewport-height')).toBe('408px');
   expect(shell.style.getPropertyValue('--jg-viewport-top')).toBe('30px');
+  expect(shell.dataset.keyboard).toBe('true');
   await flush(() => {viewport.scale=2;viewport.dispatchEvent(new Event('resize'));});
   expect(shell.style.getPropertyValue('--jg-viewport-height')).toBe('');
+  expect(shell.dataset.keyboard).toBeUndefined();
   await flush(() => {viewport.scale=1;viewport.height=844;viewport.offsetTop=0;viewport.dispatchEvent(new Event('scroll'));});
   expect(shell.style.getPropertyValue('--jg-viewport-height')).toBe('844px');
+  expect(shell.dataset.keyboard).toBe('false');
   await flush(() => root.unmount());
   expect(remove.mock.calls.map(call=>call[0])).toEqual(['resize','scroll']);
  } finally {
