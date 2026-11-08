@@ -25,7 +25,7 @@ from jaeger_ai.core.gateway import handoff_outputs as _handoff_outputs
 from jaeger_ai.core.sqlite_connection import ClosingConnection
 
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
@@ -586,6 +586,10 @@ class GatewaySessionStore:
             from .owner_receipts import migrate
             migrate(conn)
             current = 17
+        if current < 18:
+            from jaeger_ai.core.tasks.background_receipts import migrate
+            migrate(conn)
+            current = 18
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -1872,16 +1876,26 @@ class GatewaySessionStore:
         with self._get_conn() as conn:
             return conn.execute('SELECT 1 FROM owner_request_journal WHERE request_id=?', (request_id,)).fetchone() is not None
 
+    def has_resident_request_journal(self, request_id: str) -> bool:
+        """Both producer domains prohibit fallback to a foreign native receipt."""
+        with self._get_conn() as conn:
+            return conn.execute('SELECT 1 FROM owner_request_journal WHERE request_id=? UNION ALL '
+                'SELECT 1 FROM background_request_journal WHERE request_id=? LIMIT 1',
+                (request_id, request_id)).fetchone() is not None
+
     def owner_request_receipt(self, request_id: str) -> dict[str, Any] | None:
         from .owner_receipts import read
         with self._get_conn() as conn:
             row = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id,)).fetchone()
             return read(conn, row) if row is not None else None
 
-    def sealed_owner_requests(self) -> list[str]:
+    def sealed_owner_requests(self, *, include_background: bool = True) -> list[str]:
         with self._get_conn() as conn:
+            journals = 'SELECT request_id, terminal_json FROM owner_request_journal'
+            if include_background:
+                journals += ' UNION ALL SELECT request_id, terminal_json FROM background_request_journal'
             return [row[0] for row in conn.execute(
-                "SELECT r.request_id FROM client_requests r JOIN owner_request_journal j "
+                "SELECT r.request_id FROM client_requests r JOIN (" + journals + ") j "
                 "ON j.request_id=r.request_id WHERE j.terminal_json IS NOT NULL "
                 "AND r.status NOT IN ('completed', 'failed', 'cancelled') ORDER BY r.created_at")]
 
@@ -1943,6 +1957,10 @@ class GatewaySessionStore:
                 return payload
             from .owner_receipts import read, encoded, OwnerReceiptConflict
             proof = read(conn, row)
+            if proof is not None:
+                from jaeger_ai.core.tasks.background_receipts import SOURCE as BACKGROUND_SOURCE
+                if proof.get('source') == BACKGROUND_SOURCE and owner_recovery_lease is None:
+                    raise OwnerReceiptConflict('Background projection requires the current Gateway lease')
             if proof is not None and encoded({
                 'status': status, 'result': result, 'assistant_text': assistant_text,
                 'session_status': session_status, 'follow_ups': follow_ups,
@@ -2093,6 +2111,8 @@ class GatewaySessionStore:
     def mark_request_status(self, request_id: str, status: str) -> dict[str, Any] | None:
         now = time.time()
         with self._immediate() as conn:
+            if status == 'cancelling':
+                conn.execute('UPDATE background_request_journal SET revoked=1 WHERE request_id=?', (request_id,))
             from .owner_receipts import read
             existing = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id,)).fetchone()
             if existing is not None:

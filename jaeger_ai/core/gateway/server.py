@@ -1084,7 +1084,7 @@ class JaegerGatewayApp:
         self._owns_store = True
         self._owner_receipt_lease = lease
         self.store.recover_interrupted_sessions()
-        self._recover_sealed_owner_results()
+        self._recover_sealed_owner_results(include_background=False)
         expired = self.store.expire_orphaned_tool_confirms()
         if expired:
             logger.info("Expired %d tool approvals orphaned by the previous process", expired)
@@ -1116,6 +1116,10 @@ class JaegerGatewayApp:
                 sqlite_store.bind(layout)
             except Exception as exc:
                 logger.warning("sqlite_store bind skipped: %s", exc)
+            # Background seals retain native operation fingerprints. Validate
+            # them only after binding this instance's ledger, before any producer
+            # or scheduler can run. Foreground projection keeps its early order.
+            self._recover_sealed_owner_results()
             rt = EntityRuntime.get_singleton(mode=EntityRuntimeMode.OWNER)
             runtime_for_producers = rt
             if not getattr(rt, "_gateway_cognition_handler_registered", False):
@@ -1552,7 +1556,7 @@ class JaegerGatewayApp:
                 )
             )
 
-    def _recover_sealed_owner_results(self) -> int:
+    def _recover_sealed_owner_results(self, *, include_background: bool = True) -> int:
         """Project producer-committed outcomes on the existing startup lease.
 
         Never dispatch work or reconstruct proof from checkpoints/effect absence.
@@ -1564,7 +1568,7 @@ class JaegerGatewayApp:
         if not lease or any(lease.get(key) != current.get(key) for key in ('owner_pid', 'started_at')):
             raise OwnerReceiptConflict('Startup recovery does not own the Gateway lease')
         recovered = 0
-        for request_id in self.store.sealed_owner_requests():
+        for request_id in self.store.sealed_owner_requests(include_background=include_background):
             try:
                 proof = self.store.owner_request_receipt(request_id)
                 if proof is None:
@@ -5615,6 +5619,7 @@ class JaegerGatewayApp:
         rid = request_id or turn_id
         admitted_request = self.store.get_request(rid)
         owner_receipt_token: str | None = None
+        background_receipt_token: str | None = None
         owner_receipt_authority = execution is not None and execution == (admitted_request or {}).get('execution')
         timing = self._turn_timings.get(rid)
         # One Goal/TaskCard per operational turn (see _open_turn_card). None for conversation.
@@ -5688,7 +5693,7 @@ class JaegerGatewayApp:
                 return await self._native_lead_turn(session_id, prompt, request_id=rid, is_subordinate=True)
 
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
-                nonlocal backend, model, owner_receipt_token
+                nonlocal backend, model, owner_receipt_token, background_receipt_token
                 session_atts = self._turn_attachments(session_id, execution)
                 has_image = any(str(a.get("mime_type") or "").startswith("image/") for a in session_atts)
                 if not has_image:
@@ -5783,6 +5788,15 @@ class JaegerGatewayApp:
                         and not str(original.get('model') or '').startswith('@')):
                     from .owner_receipts import begin
                     owner_receipt_token = begin(self.store, rid, session_id, lease)
+                elif (lease and resident_owner and owner_receipt_authority and not legacy_paths_enabled()
+                        and execution is not None and session_key == session_id and role_s == 'lead'):
+                    # Positive canonical task lookup, not caller background/options
+                    # markers. Foreground/historical/specialist paths stay unchanged.
+                    with self.store._get_conn() as conn:
+                        task = self.task_owner.background_dispatch_guard(conn, admitted_request or {})
+                    if task is not None:
+                        from jaeger_ai.core.tasks.background_receipts import begin
+                        background_receipt_token = begin(self.task_owner, rid)
                 return self._continued_owner_react(
                     prompt, session_key=session_key, request_id=rid,
                     on_model=selected_model,
@@ -6007,6 +6021,8 @@ class JaegerGatewayApp:
                 self._commit_owner_outcome(rid, owner_receipt_token, terminal_status, result,
                                            response_text, card_task_id=card_task_id,
                                            owner_result=turn_result)
+            if background_receipt_token:
+                self._commit_background_outcome(rid, background_receipt_token, result, response_text)
             self._persist_terminal(rid, session_id, terminal_status, result, assistant_text=response_text, record_entity_event=False)
         except asyncio.CancelledError:
             # Global Stop cancels this task. Persist how the request ended (cancelled, or
@@ -6046,11 +6062,13 @@ class JaegerGatewayApp:
                 # In particular, transferred runs must never downgrade unknown
                 # to failed merely because their latest effect list is empty.
                 after_native = True
-            owner_journal = self.store.has_owner_request_journal(rid)
+            owner_journal = self.store.has_resident_request_journal(rid)
             if owner_journal:
                 # An exception/cancelled await cannot attest quiescence of the
                 # worker thread or all of its continuation runs.
                 after_native = True
+            if background_receipt_token:
+                after_native = True  # A failed producer cannot prove a returned outcome.
             status = "execution_unknown" if after_native else "failed"
             receipt = (
                 self._native_receipt(bound.get("native_run_id"), bound.get("native_session"))
@@ -6257,6 +6275,12 @@ class JaegerGatewayApp:
             logger.exception("could not settle turn card %s", card_task_id)
             return {}
 
+    def _commit_background_outcome(self, request_id, token, result, assistant_text):
+        """Seal only a returned and independently verified background result."""
+        from jaeger_ai.core.tasks.background_receipts import finish
+        return finish(self.task_owner, request_id, token, result, assistant_text,
+                      _explicit_follow_ups(result))
+
     def _owner_settled_runs(self, request_id: str, token: str) -> list[str]:
         from .owner_receipts import accepted_runs, OwnerReceiptConflict
         from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
@@ -6362,7 +6386,7 @@ class JaegerGatewayApp:
             self._finish_cancelled(session_id, turn_id, request_id, agent_fields,
                                    "cancelled before native acceptance")
             return True
-        if not self.store.has_owner_request_journal(request_id) and not str(bound.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX):
+        if not self.store.has_resident_request_journal(request_id) and not str(bound.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX):
             return False
         from jaeger_ai.core.entity.runtime import EntityRuntime
         if self.store.has_owner_request_journal(request_id) or EntityRuntime.run_has_indeterminate_effects(run_id):
@@ -6395,7 +6419,7 @@ class JaegerGatewayApp:
         assistant_text: str | None = None,
         record_entity_event: bool = True,
     ) -> None:
-        journal_owned = self.store.has_owner_request_journal(request_id)
+        journal_owned = self.store.has_resident_request_journal(request_id)
         proof = self.store.owner_request_receipt(request_id)
         if proof is not None:
             status, result, assistant_text = proof['status'], proof['result'], proof['assistant_text']
@@ -6417,6 +6441,7 @@ class JaegerGatewayApp:
                 pass
         persisted = None
         try:
+            from jaeger_ai.core.tasks.background_receipts import SOURCE as BACKGROUND_SOURCE
             persisted = self.store.complete_request(
                 request_id,
                 status=status,
@@ -6424,6 +6449,8 @@ class JaegerGatewayApp:
                 assistant_text=assistant_text,
                 session_status=session_status,
                 follow_ups=_explicit_follow_ups(result) if status == "completed" else None,
+                owner_recovery_lease=(getattr(self, '_owner_receipt_lease', None)
+                    if proof is not None and proof.get('source') == BACKGROUND_SOURCE else None),
             )
             if persisted.get("search_count_event"):
                 self.event_bus.fanout(persisted["search_count_event"])
@@ -6655,7 +6682,7 @@ class JaegerGatewayApp:
         scope = self._cancellations.cancel(row["request_id"])
         updated = self.store.mark_request_status(row["request_id"], "cancelling") or row
         native_requested = False
-        owner_run = (self.store.has_owner_request_journal(row['request_id'])
+        owner_run = (self.store.has_resident_request_journal(row['request_id'])
                      or str(updated.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX))
         if updated.get("native_run_id") and not owner_run:
             # Legacy MCP-dispatched run: only the native side can stop it.
@@ -6784,7 +6811,7 @@ class JaegerGatewayApp:
         if row["status"] in {"completed", "failed", "cancelled"}:
             return web.json_response({**row, "reconciled": False, "already_terminal": True})
         owner_proof = None
-        owner_journal = self.store.has_owner_request_journal(request_id)
+        owner_journal = self.store.has_resident_request_journal(request_id)
         if owner_journal or str(row.get('native_session') or '').startswith(OWNER_RUN_SESSION_PREFIX):
             try:
                 owner_proof = self.store.owner_request_receipt(request_id)
@@ -6832,6 +6859,7 @@ class JaegerGatewayApp:
             "turn_id": row["turn_id"],
             "reconciliation": receipt,
         }
+        from jaeger_ai.core.tasks.background_receipts import SOURCE as BACKGROUND_SOURCE
         persisted = self.store.complete_request(
             request_id,
             status=status,
@@ -6840,6 +6868,8 @@ class JaegerGatewayApp:
             session_status=owner_proof['session_status'] if owner_proof else "idle" if status in {"completed", "cancelled"} else "failed",
             follow_ups=owner_proof['follow_ups'] if owner_proof else None,
             event_name="turn.reconciled",
+            owner_recovery_lease=(getattr(self, '_owner_receipt_lease', None)
+                if owner_proof is not None and owner_proof.get('source') == BACKGROUND_SOURCE else None),
         )
         if owner_proof:
             for key in ('search_count_event', 'follow_up_event'):

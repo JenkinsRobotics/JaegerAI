@@ -441,12 +441,13 @@ def test_additive_migration_preserves_legacy_without_backfill(tmp_path):
         conn.execute('DROP TABLE owner_request_journal')
         conn.execute("UPDATE schema_meta SET value='16' WHERE key='version'")
     upgraded = GatewaySessionStore(path)
-    assert upgraded.schema_version() == 17
+    from jaeger_ai.core.gateway.session_store import SCHEMA_VERSION
+    assert upgraded.schema_version() == SCHEMA_VERSION
     assert upgraded.get_request('old') == before
     assert upgraded.get_session('s')['messages'] == messages
     assert upgraded.owner_request_receipt('old') is None
     assert not upgraded.has_owner_request_journal('old')
-    assert GatewaySessionStore(path).schema_version() == 17
+    assert GatewaySessionStore(path).schema_version() == SCHEMA_VERSION
 
 
 @pytest.mark.asyncio

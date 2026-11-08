@@ -895,6 +895,8 @@ class GatewayTaskOwner:
         task = self.background_dispatch_guard(conn, row)
         if task is None:
             return
+        from .background_receipts import assert_open
+        assert_open(conn, row)
         if (native_session != 'owner:task:'+task.task_id or not native
                 or row.get('status') not in {'admitted', 'running', 'awaiting_approval'}):
             raise TaskAdmissionChanged('Background native binding is not an active owner run')
