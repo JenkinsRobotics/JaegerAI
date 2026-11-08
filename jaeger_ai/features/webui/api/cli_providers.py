@@ -260,11 +260,19 @@ def _state_path() -> Path:
     return root / "providers" / "cli.json"
 
 
-def _settings() -> dict:
+def _settings(*, for_update: bool = False) -> dict:
     try:
         d = json.loads(_state_path().read_text("utf-8"))
-        return d if isinstance(d, dict) else {}
+        if not isinstance(d, dict):
+            raise ValueError("expected a settings object")
+        return d
+    except FileNotFoundError:
+        return {}  # First save may create the document.
     except (OSError, ValueError):
+        if for_update:
+            # A display fallback is not a writable snapshot. Preserve the original
+            # bytes on failed reads, and never expose file contents/error details.
+            raise ValueError("Existing CLI provider settings could not be read; no changes saved") from None
         return {}
 
 
@@ -358,7 +366,7 @@ def _decorate(data: list[dict]) -> list[dict]:
 def update(pid: str, body: dict) -> dict:
     if not known(pid):
         raise KeyError(pid)
-    st = _settings()
+    st = _settings(for_update=True)
     cur = dict(st.get(pid, {}))
     if "enabled" in body:
         cur["enabled"] = bool(body["enabled"])
