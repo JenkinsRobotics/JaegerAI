@@ -233,3 +233,60 @@ test('minimap jumps to loaded turns without sending a message',async({page},test
  await expect(minimap.getByRole('button').first()).toHaveAttribute('aria-current','location');
  await expect(minimap.getByRole('button')).toHaveCount(count);
 });
+
+// Simulated iOS safe areas and visual viewport: desktop emulation alone cannot
+// expose the notch, Home indicator, or Safari's non-resizing layout viewport.
+for (const scenario of [
+ {name:'Safari',width:393,height:694,standalone:false,top:0,bottom:0},
+ {name:'Home Screen',width:393,height:852,standalone:true,top:59,bottom:34},
+ {name:'small iPhone',width:320,height:568,standalone:true,top:20,bottom:0},
+ {name:'landscape iPhone',width:852,height:393,standalone:true,top:0,bottom:21},
+]) {
+ test(`iPhone ${scenario.name} keeps chat, safe areas and keyboard inside the screen`,async({page})=>{
+  await page.setViewportSize({width:scenario.width,height:scenario.height});
+  await page.addInitScript(({standalone,height})=>{
+   Object.defineProperty(navigator,'standalone',{configurable:true,value:standalone});
+   const viewport=Object.assign(new EventTarget(),{height,offsetTop:0,scale:1});
+   Object.defineProperty(window,'visualViewport',{configurable:true,value:viewport});
+  },scenario);
+  await openChat(page);
+  const shell=page.locator('.jg-stable-demo');
+  await shell.evaluate((node,{top,bottom})=>{
+   (node as HTMLElement).style.setProperty('--jg-safe-top',`${top}px`);
+   (node as HTMLElement).style.setProperty('--jg-safe-bottom',`${bottom}px`);
+  },scenario);
+  await expect(page.locator('html')).toHaveAttribute('data-jaeger-display-mode',scenario.standalone?'standalone':'browser');
+  const header=await page.locator('.jg-stable-demo__header').boundingBox();
+  expect(header!.height,'phone chrome must not inherit the desktop hero').toBeLessThanOrEqual(72);
+  expect(header!.y).toBeGreaterThanOrEqual(scenario.top);
+  const input=page.getByRole('textbox',{name:'Message',exact:true});
+  const check=async(height:number,bottom:number)=>{
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(scenario.width);
+   const composer=await page.locator('.jg-composer').boundingBox();
+   expect(composer!.y+composer!.height).toBeLessThanOrEqual(height-bottom);
+   expect(height-bottom-composer!.y-composer!.height,'safe area is reserved once, not twice').toBeLessThanOrEqual(12);
+   expect(await input.evaluate(el=>parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+   const transcript=await page.locator('.jg-chat__scroll').boundingBox();
+   expect(transcript!.height).toBeGreaterThan(height < 300 ? 40 : 80);
+  };
+  await check(scenario.height,scenario.bottom);
+  await input.fill('An unsent draft');
+  // Two open/close cycles catch stale dimensions and a composer stuck offscreen.
+  for(let cycle=0;cycle<2;cycle++) {
+   await input.focus();
+   const visibleHeight=Math.min(360,scenario.height-140);
+   await page.evaluate(height=>{Object.assign(visualViewport!,{height,offsetTop:0});visualViewport!.dispatchEvent(new Event('resize'));},visibleHeight);
+   await expect(shell).toHaveAttribute('data-keyboard','true');
+   await check(visibleHeight,0);
+   await page.evaluate(height=>{Object.assign(visualViewport!,{height,offsetTop:0});visualViewport!.dispatchEvent(new Event('resize'));},scenario.height);
+   await expect(shell).toHaveAttribute('data-keyboard','false');
+   await check(scenario.height,scenario.bottom);
+  }
+  await expect(input).toHaveValue('An unsent draft');
+  await input.fill(''); await input.blur();
+  await page.getByRole('button',{name:'Toggle navigation'}).click();
+  await expect(page.getByRole('button',{name:'Close sidebar'})).toBeVisible();
+  await page.getByRole('button',{name:'Close sidebar'}).click();
+  await expect(input).toBeVisible();
+ });
+}

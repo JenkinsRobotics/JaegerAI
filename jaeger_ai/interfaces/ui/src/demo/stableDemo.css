@@ -248,7 +248,7 @@
 @media(max-width:820px), (max-height:520px) and (max-width:1000px) {
   .jg-stable-demo__sidebar { width: min(360px,calc(100vw - 36px)); top:0; bottom:0; left:0; max-height:100dvh; margin:0; }
   .jg-stable-demo__backdrop { display:block; position:fixed; inset:0; z-index:69; border:0; background:var(--jg-color-overlay, #0008); }
-  .jg-stable-demo__main { padding-bottom:env(safe-area-inset-bottom); }
+  .jg-stable-demo__main { padding-bottom:0; }
 }
 .jg-stable-demo__context-list p { padding: 0 10px; font-size: 13px; line-height: 1.6; color: var(--jg-color-text-secondary); }
 
@@ -311,9 +311,6 @@
  .jg-stable-demo__header-start { left:12px; }
  .jg-stable-demo__tools { right:12px; }
 }
-@media(max-width:520px) {
- .jg-stable-demo__profile { margin-top:76px; }
-}
 .jg-stable-demo__profile-avatar {
  transition: width .45s ease, height .45s ease, flex-basis .45s ease;
 }
@@ -321,10 +318,12 @@
  width:100% !important;
  height:100% !important;
 }
-.jg-stable-demo__main:has(> .jg-stable-demo__body:not([hidden]) .jg-chat-home) .jg-stable-demo__profile-avatar {
- width: min(34dvh,44vw,360px);
- height: min(34dvh,44vw,360px);
- flex-basis: min(34dvh,44vw,360px);
+@media (min-width:821px) and (min-height:521px) {
+ .jg-stable-demo__main:has(> .jg-stable-demo__body:not([hidden]) .jg-chat-home) .jg-stable-demo__profile-avatar {
+  width: min(34dvh,44vw,360px);
+  height: min(34dvh,44vw,360px);
+  flex-basis: min(34dvh,44vw,360px);
+ }
 }
 .jg-stable-demo__main .jg-chat-home { margin-top:24px; }
 @media (max-height:520px) {
@@ -344,4 +343,33 @@
  .jg-stable-demo__header-start .jg-stable-demo__top-button:nth-child(2) { position:relative; top:auto; right:auto; transform:none; }
  .jg-stable-demo__tools { padding-left:0; }
  .jg-stable-demo__tools > .jg-stable-demo__top-button[aria-label="Toggle pinned summary"] { display:flex; }
+}
+
+/* The compact shell owns safe areas exactly once, including Home Screen mode.
+ * Keep the desktop hero and absolute toolbar out of the phone's height budget. */
+@media (max-width:820px), (max-height:520px) and (max-width:1000px) {
+ .jg-stable-demo {
+  --jg-safe-top: env(safe-area-inset-top,0px);
+  --jg-safe-bottom: env(safe-area-inset-bottom,0px);
+  --jg-safe-left: env(safe-area-inset-left,0px);
+  --jg-safe-right: env(safe-area-inset-right,0px);
+  box-sizing:border-box;
+  padding: max(0px,calc(var(--jg-safe-top) - var(--jg-viewport-top,0px))) var(--jg-safe-right) var(--jg-safe-bottom) var(--jg-safe-left);
+ }
+ .jg-stable-demo[data-keyboard=true] { padding-bottom:0; }
+ .jg-stable-demo__header { display:flex; min-height:64px; margin:0; padding:6px 8px; gap:4px; }
+ .jg-stable-demo__header-start, .jg-stable-demo__tools { position:static; display:flex; flex:none; gap:0; padding:0; }
+ .jg-stable-demo__header-start .jg-stable-demo__top-button:nth-child(2) { position:static; transform:none; }
+ .jg-stable-demo__top-button { width:44px; height:44px; }
+ .jg-stable-demo__profile { flex:1; min-width:0; margin:0; flex-direction:row; justify-content:center; gap:6px; }
+ .jg-stable-demo__profile-avatar, .jg-stable-demo__profile-avatar:has(.jg-clip-avatar,.jg-jaeger-avatar) { width:44px; height:44px; flex-basis:44px; transition:none; }
+ .jg-stable-demo__profile-copy { min-width:0; align-items:flex-start; }
+ .jg-stable-demo__profile-copy strong { padding:0; font-size:12px; }
+ .jg-stable-demo__profile .jg-clip-status { font-size:10px; }
+ .jg-stable-demo__tools > .jg-stable-demo__top-button[aria-label="Open tabs"] { display:none; }
+ .jg-stable-demo .jg-chat .jg-composer { width:auto; align-self:stretch; margin:0 10px 8px; }
+ .jg-stable-demo .jg-composer__input { font-size:max(16px,var(--jg-font-body)); }
+ .jg-stable-demo .jg-chat__scroll { overscroll-behavior-y:contain; }
+ .jg-stable-demo__sidebar { top:var(--jg-viewport-top,0px); height:var(--jg-viewport-height,100dvh); max-height:none; padding-top:var(--jg-safe-top); padding-bottom:var(--jg-safe-bottom); }
+ .jg-stable-demo__popover { max-height:calc(var(--jg-viewport-height,100dvh) - var(--jg-safe-top) - var(--jg-safe-bottom) - 80px); overflow-y:auto; }
 }

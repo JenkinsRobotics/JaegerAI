@@ -5,6 +5,8 @@
  * traffic-light reserve come from the native chrome contract. */
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
+/* Avoid Safari orientation text inflation without disabling pinch zoom. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   background: var(--aether-color-bg-app);
   color: var(--aether-color-text);
