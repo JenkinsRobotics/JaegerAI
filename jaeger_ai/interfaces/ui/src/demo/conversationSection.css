@@ -1,0 +1,8 @@
+.jg-stable-demo__recents .jg-sidebar-section > h2 { margin:0; font-size:14px; font-weight:500; }
+.jg-stable-demo__context .jg-sidebar-section__toggle { min-height:44px; gap:6px; padding:10px; color:var(--jg-color-text-secondary); }
+.jg-sidebar-section__chevron { flex:none; transition:transform .15s ease; }
+.jg-sidebar-section[data-expanded=true] .jg-sidebar-section__chevron { transform:rotate(90deg); }
+.jg-sidebar-section > [hidden] { display:none; }
+.jg-stable-demo__recents .jg-sidebar-section + .jg-sidebar-section { margin-top:8px; }
+.jg-stable-demo__recents .jg-sidebar-section[data-expanded=true] + .jg-sidebar-section { margin-top:16px; }
+@media(prefers-reduced-motion:reduce) { .jg-sidebar-section__chevron { transition:none; } }
