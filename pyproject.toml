@@ -51,7 +51,8 @@ requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-asyncio>=0.24,<2"]
+mcp-events = ["PyJWT[crypto]>=2.10,<3", "keyring>=25,<26"]
+test = ["pytest>=8", "pytest-asyncio>=0.24,<2", "jaeger-ai[mcp-events]"]
 # Acoustic echo cancellation for duplex voice — passed through from
 # jaeger-os (core/audio/aec.py); re-declared here so `pip install
 # 'jaeger-ai[aec]'` works without the operator needing to know it's
