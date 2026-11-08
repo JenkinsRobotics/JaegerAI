@@ -145,7 +145,8 @@ def test_speech_during_playback_interrupts_a_speaker_that_can_stop():
 
 
 @pytest.mark.integration
-def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatch):
+@pytest.mark.parametrize("prior_runtime", ["unbooted", "configured"])
+def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatch, prior_runtime):
     """Client ↔ server contract over a socket; only the Entity is scripted."""
     from aiohttp import web
 
@@ -156,6 +157,15 @@ def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatc
     from types import SimpleNamespace
 
     from jaeger_ai.core.entity.runtime import PreparedTurn
+
+    # Reproduce prior tests leaving a resident runtime with unrelated defaults.
+    previous = None
+    if prior_runtime == "configured":
+        previous = SimpleNamespace(layout=SimpleNamespace(
+            workspace_dir=tmp_path / "unrelated-workspace",
+            config_path=tmp_path / "unrelated-config.yaml",
+        ))
+    monkeypatch.setattr(EntityRuntime, "_instance", previous)
 
     class _Entity:
         """The three calls a Gateway turn makes on the entity: build the request,
@@ -170,7 +180,11 @@ def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatc
         def finish_turn(self, prepared, response_text):
             pass
 
-    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: _Entity()))
+    # Admission reads the resident singleton directly; dispatch uses the accessor.
+    # Both must see this same scripted identity, never a previous test's defaults.
+    entity = _Entity()
+    monkeypatch.setattr(EntityRuntime, "_instance", entity)
+    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: entity))
     gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "voice.sqlite3"))
     gateway.app.on_startup.clear()
     monkeypatch.setattr(gateway, "_resolve_session_agent", lambda sid: None)
@@ -197,6 +211,11 @@ def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatc
     assert result.text == "heard: what is my token"
     # The verification pass is off the turn path (see docs/architecture/MAIN_LOOP.md).
     assert result.verification is None
+    assert EntityRuntime._instance is EntityRuntime.get_singleton() is entity
+    assert gateway._foreground_execution_defaults() == {}
+    admitted = gateway.store.get_request(result.request_id)
+    assert not admitted["execution"].get("workspace")
+    assert not admitted["execution"].get("_instance_defaults")
 
 
 def test_runtime_audio_truth_is_the_measured_voice_status(monkeypatch):
