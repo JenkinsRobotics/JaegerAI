@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useClarificationAnswers } from "./clarificationAnswers";
 /* Approval card in Grok's shape (REA catalog: "Approve terminal command" / "Approve tool call", "Allow once",
- * "Deny once (Esc)", "Approved" / "Denied"): a titled card with the EXACT command or target in a code block, then
+ * "Deny once (Esc)", "Approved" / "Denied"): a titled card with the requested command or target in a code block, then
  * Allow once / Deny once. Nothing is ever approved without an explicit click: there is no auto-approve and no
  * "Always allow" (Jaeger has no allow-list policy). Esc denies only while focus is inside the card. Once decided,
  * the card collapses to one status line (local; the gateway's tool part carries the real outcome). */
@@ -45,8 +45,9 @@ export function ApprovalCard({ title, message, toolName, input, decided, onDecid
         <span className="jg-approval__title">{heading}</span>
         {tool && <span className="jg-approval__tool">{tool}</span>}
       </div>
-      {subject && <pre className="jg-approval__cmd" aria-label="Exact command">{subject}</pre>}
-      {subject !== message && message && <div className="jg-approval__note">{message}</div>}
+      {subject && <pre className="jg-approval__cmd" aria-label="Requested action">{subject}</pre>}
+      {subject !== message && message && <pre className="jg-approval__cmd" aria-label="Approval details">{message}</pre>}
+      <div className="jg-approval__note">Review all supplied arguments. Secret values may be redacted; tool defaults are not shown. Unavailable values cannot be reviewed here. Older requests may contain only a summary.</div>
       <div className="jg-approval__actions">
         <button type="button" className="jg-action" onClick={() => onDecide("deny")}>Deny once <kbd>Esc</kbd></button>
         <button type="button" className="jg-action jg-action--primary" onClick={() => onDecide("approve")}>Allow once</button>

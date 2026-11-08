@@ -209,3 +209,14 @@ No unsupported control or tab is promoted to PASS by these scoped results.
   tests recognized credential removal from failed-turn replay/logs and Machine
   log tail while preserving operational receipt data. This is pattern-based,
   synthetic backend qualification, not a universal secrecy or real-account pass.
+
+
+- Research: the [cooperative HTTP journey](assistant-core-research-journey-20261108.md)
+  now covers native retrieval/ledger tools, consistency checking, exact artifact
+  download and authenticated Documents persistence. Synthetic providers, lack
+  of automatic evidence enforcement and untested interrupted Research status
+  keep acceptance PARTIAL.
+- Chat/approvals: [complete escaped requested-action display](assistant-core-approval-visibility-20261108.md)
+  preserves full supplied details alongside progress previews, marks unsupported
+  values unavailable and masks known credentials. Fresh production UI build and
+  913 tests in 201 files pass; DOM/CSS evidence is not visual phone/browser QA.

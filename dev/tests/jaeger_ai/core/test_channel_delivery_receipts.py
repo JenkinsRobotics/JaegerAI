@@ -203,7 +203,7 @@ def test_discord_ingress_author_and_saved_destination_are_distinct_ceilings(tmp_
     with replies.scope(gateway,home,'owned-discord-request'),use_policy(policy):
         assert not send_message('discord','909','No author',reply_to_message_id=missing['message_id'])['sent']
     target=_approval_target(PermissionRequest(PermissionTier.EXTERNAL_EFFECT,'messaging','send_message',arguments={'channel':'discord','recipient':'909','reply_to_message_id':message['id']}))
-    assert 'channel=discord' in target and 'recipient=909' in target
+    assert 'channel="discord"' in target and 'recipient="909"' in target
     assert 'reply_to_message_id='+str(message['id']) in target
 
 

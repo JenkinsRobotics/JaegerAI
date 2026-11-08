@@ -46,14 +46,24 @@ def test_research_report_source_chain_and_documents_reopen(tmp_path):
             for a in gateway.request('/v1/approvals')[1]['approvals']:
                 assert a['session_id'] == 'task:' + tid and a['request_id'] == tid + ':0'
                 assert a['metadata']['tool'] in {'files.write_file','shell.run_shell'}, a
+                # Independently decode all displayed supplied arguments and
+                # compare them to the exact scripted call before authorizing it.
+                # These fixtures contain no credentials requiring redaction.
+                issued = [json.loads(line) for line in (tmp_path/'research-provider-tools.jsonl').read_text().splitlines()]
+                call = issued[-1]
+                pairs = [line.split('=', 1) for line in a['metadata']['target'].splitlines()]
+                shown = {key: json.loads(value) for key, value in pairs}
+                assert len(shown) == len(pairs), a  # Do not silently drop duplicate keys.
+                assert shown == call['args'], (a, call)
                 if a['metadata']['tool'] == 'files.write_file':
-                    assert a['metadata']['target'] in {'path=workspace/' + x for x in ['retrieval.json','page.txt','research-report.md']}, a
+                    expected = {'research-3': 'retrieval.json', 'research-4': 'page.txt',
+                                'research-5': 'research-report.md'}
+                    assert call['name'] == 'write_file' and call['call_id'] in expected, call
+                    assert shown['path'] == 'workspace/' + expected[call['call_id']]
+                    assert set(shown) == {'path', 'content'} and isinstance(shown['content'], str)
                 else:
-                    # Approval display is truncated. Verify exact scope against the
-                    # preauthorized scripted provider's evidence, not that display.
-                    issued = [json.loads(line) for line in (tmp_path/'research-provider-tools.jsonl').read_text().splitlines()]
-                    assert issued[-1] == {'call_id':'research-6','name':'terminal','args':{'command':terminal_command()}}
-                    assert a['metadata']['target'].startswith('command=' + terminal_command()[:100]), a
+                    assert call == {'call_id':'research-6','name':'terminal','args':{'command':terminal_command(), 'timeout_s':60.0}}
+                assert a['approval_id'] not in {row['approval_id'] for row in approved}, a
                 gateway.request('/v1/approvals/' + a['approval_id'], {'approved':True,'decision':'once'})
                 approved.append(a)
             response = gateway.request('/v1/tasks/' + tid)[1]
