@@ -101,6 +101,17 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
         with (state / "provider-requests.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"request": request,
                 "request_id": (current_task_context() or {}).get("request_id")}) + "\n")
+        if any('CONTRACT-BACKGROUND-YIELD' in str(m.get('content', ''))
+               for m in messages if m.get('role') == 'user'):
+            # Real durable owner yields at its normal budget; only the provider is scripted.
+            done = [m for m in messages if m.get('tool_call_id') == 'yield-ledger']
+            if not done:
+                return {'choices':[{'message':{'role':'assistant','content':None,'tool_calls':[
+                    {'id':'yield-ledger','type':'function','function':{'name':'work_ledger',
+                        'arguments':json.dumps({'action':'create','task_name':'Yield observation','total_items':1})}}
+                ]},'finish_reason':'tool_calls'}]}
+            answer = 'Observed checkpoint ' + str(len(messages)) + '; one item remains.'
+            return {'choices':[{'message':{'role':'assistant','content':answer,'tool_calls':[]},'finish_reason':'stop'}]}
         if "CONTRACT-RESEARCH" in request:
             assert os.environ.get("JAEGER_CONTRACT_RESEARCH") == "1"
             from dev.tests.fixtures.research_contract import model_response as research_response
@@ -134,6 +145,8 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
             from jaeger_agent.task_port import current_task_context
             context = current_task_context() or {}
             background = bool((context.get('execution', {}).get('options') or {}).get('background'))
+            if os.environ.get('JAEGER_REVIEW_BACKGROUND_SLICES') == '1':
+                background = not str(context.get('request_id', '')).endswith(':0')
             with (state / 'foreground-resume-calls.jsonl').open('a', encoding='utf-8') as stream:
                 stream.write(json.dumps({'request_id': context.get('request_id'),
                                          'background': background}) + '\n')

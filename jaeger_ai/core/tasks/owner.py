@@ -907,6 +907,8 @@ class GatewayTaskOwner:
                 json_each(t.task_json, '$.payload.background_admissions') admissions,
                 json_each(admissions.value, '$.native_run_ids') runs WHERE runs.value=?))''',
             (row['request_id'], native, native)).fetchall()
+        if not sources and run.state not in {'active', 'running', 'verifying'}:
+            raise TaskAdmissionChanged('Background native lifecycle does not authorize fresh binding')
         from jaeger_ai.core.gateway.session_store import pid_is_alive
         if ((not sources and run.owner_pid != os.getpid())
                 or (sources and run.owner_pid not in {None, os.getpid()} and pid_is_alive(run.owner_pid))):
@@ -914,7 +916,18 @@ class GatewayTaskOwner:
         for source in sources:
             source = self.gateway.store._request_row(source)
             admission = task.payload['background_admissions'].get(source['request_id'])
-            if (not admission or admission['attempt'] >= contract['attempt']
+            operation = self.gateway._running_tasks.get(source['request_id'])
+            # Durable yielded natives intentionally remain active. Only this
+            # lease's returned producer may transfer that active trajectory;
+            # absence of an operation after restart is not returned proof.
+            live_returned = (run.owner_pid == os.getpid()
+                and admission is not None
+                and admission.get('lease') == self.gateway._owner_receipt_lease
+                and (operation is None or operation.done()))
+            lifecycle_known = run.state in {'completed', 'failed', 'cancelled'} or (
+                run.state in {'active', 'running', 'verifying'} and live_returned)
+            if (not lifecycle_known or (operation is not None and not operation.done())
+                    or not admission or admission['attempt'] >= contract['attempt']
                     or source['status'] not in {'completed', 'failed'}
                     or self._continuation_receipt_error(task, source)
                     or any(EntityRuntime.run_has_indeterminate_effects(run_id)
@@ -951,7 +964,7 @@ class GatewayTaskOwner:
         current = self.store.get_task_in_transaction(conn, task.task_id)
         rid = f'{task.task_id}:{task.payload.get("attempt", 0)}'
         proof = {'task_id': task.task_id, 'attempt': task.payload.get('attempt', 0),
-            'request_id': rid, 'session_id': 'task:'+task.task_id,
+            'request_id': rid, 'session_id': 'task:'+task.task_id, 'lease': clone(lease),
             'execution': clone(resolved), 'input_text': prompt,
             'authority': authority(task), 'objective_version': task.payload['background_objective_version'],
             'research_contract': clone(task.payload.get('research_contract')),
@@ -1199,9 +1212,13 @@ class GatewayTaskOwner:
                 return
             if task.payload.get('native_run_id'):
                 from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
-                self.gateway.store.bind_native(rid, native_run_id=task.payload['native_run_id'], native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}',
-                    native_reuse_guard=self.native_reuse_guard(task_id, task.payload['native_run_id'], f'{OWNER_RUN_SESSION_PREFIX}{sid}'),
-                    native_binding_guard=self.background_binding_guard)
+                try:
+                    self.gateway.store.bind_native(rid, native_run_id=task.payload['native_run_id'], native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}',
+                        native_reuse_guard=self.native_reuse_guard(task_id, task.payload['native_run_id'], f'{OWNER_RUN_SESSION_PREFIX}{sid}'),
+                        native_binding_guard=self.background_binding_guard)
+                except TaskAdmissionChanged as exc:
+                    self._retain_foreign_receipt(task_id, str(exc))
+                    return
             self.gateway._start_admitted_turn(admitted, sid, prompt)
         elif row.get('status') in {'admitted', 'running'} and rid not in self.gateway._running_tasks:
             if task.payload.get('foreground_resume_version') == 1:
