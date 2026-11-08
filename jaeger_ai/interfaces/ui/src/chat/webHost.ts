@@ -42,11 +42,11 @@ function persistedToPart(p: PersistedPart, agentName: (id: string) => string): C
     case "model_identity": return {kind:"modelIdentity",actualModel:p.scope==="provider_reported"&&typeof p.actual_model==="string"?p.actual_model:null,scope:p.scope==="provider_reported"?"provider_reported":"unknown"};
     case "model_context": return {kind: "modelContext", outline: modelContext(p.outline)};
     case "knowledge": return { kind: "knowledgeContext", documents: p.documents };
-    case "text": return p.text ? { kind: "markdownContent", text: p.text } : null;
+    case "text": return p.text ? { kind: "markdownContent", text: p.text, role:p.role, itemId:p.item_id } : null;
     case "reasoning": return { kind: "thinking", text: p.text ?? "", durationMs: p.duration_ms };
     case "tool": return {
       kind: "toolInvocation", callId: String(p.call_id ?? ""), toolName: String(p.tool ?? "tool"), input: p.input ?? null,
-      state: toolState(p.state ?? p.status), output: p.output,
+      state: toolState(p.state ?? p.status), output: p.output, summary:p.summary,
     };
     // Keep the compact Approved / Denied receipt in the feed after reload.
     case "approval": {

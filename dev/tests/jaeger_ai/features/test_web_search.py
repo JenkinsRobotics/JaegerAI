@@ -135,11 +135,12 @@ def test_fetch_size_type_and_truncation(tmp_path):
 def test_search_grant_for_callers_not_owner_powers():
     assert caller_auth.required_scope("POST", "/v1/search") == "search"
     assert caller_auth.required_scope("POST", "/v1/fetch") == "search"
-    for name in [*caller_auth.APP_CALLERS, "ares", "grokbot"]:
+    for name in [*(name for name in caller_auth.APP_CALLERS if name != "muse"), "ares", "grokbot"]:
         spec = caller_auth.CALLERS[name]
         assert "search" in spec.scopes
         assert caller_auth.prefixed_route_allowed("POST", "/v1/search", name)
         assert not spec.scopes & {"approve", "delegate", "admin"}
+    assert not caller_auth.prefixed_route_allowed("POST", "/v1/search", "muse")
     assert "search" not in caller_auth.CALLERS["a2a"].scopes
 
 

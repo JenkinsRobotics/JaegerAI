@@ -7,7 +7,7 @@ export function requestOutcome(row: RequestSnapshot, onPart: (part: ChatPart) =>
   const state = states[row.status];
   if (!state) return;
   const output = row.result?.output;
-  if (typeof output === "string" && output.startsWith(streamed) && output.length > streamed.length) onPart({ kind: "markdownContent", text: output.slice(streamed.length) });
+  if (typeof output === "string" && output !== streamed) onPart({ kind: "markdownContent", text: output, role:"final", itemId:"final" });
   if (state === "unknown") onPart({ kind: "warning", message: "Execution outcome is unknown. This request has been preserved; it will not be resent." });
   if (state === "failed") onPart({ kind: "error", message: String(row.result?.error ?? row.result?.summary ?? "Request failed") });
   return state;

@@ -86,9 +86,9 @@ export type PersistedPart =
   | {type:"model_identity";actual_model:string|null;scope:string}
   | { type: "model_context"; outline: unknown }
   | { type: "knowledge"; documents: { id: string; revision: number; digest: string; title: string }[] }
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; role?: "provisional"|"commentary"|"final"; item_id?: string }
   | { type: "reasoning"; text: string; duration_ms?: number }
-  | { type: "tool"; call_id?: string | null; tool?: string; status?: string; state?: string; input?: unknown; output?: unknown }
+  | { type: "tool"; call_id?: string | null; tool?: string; status?: string; state?: string; input?: unknown; output?: unknown; summary?: string }
   /** 417d8a0c: an approval the turn asked for. call_id is usually null, so it matches its tool on tool+target. */
   | { type: "approval"; approval_id: string; call_id?: string | null; tool?: string; target?: string; status?: string; state?: string; decision?: string | null }
   | { type: "plan"; [key: string]: unknown }

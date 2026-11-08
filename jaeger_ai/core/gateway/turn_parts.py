@@ -14,7 +14,7 @@ PART_EVENTS = ("turn.delta", "turn.reasoning", "turn.reasoning.done", "tool.star
                *_TOOL_END, "turn.plan", "turn.progress", "turn.checkpoint", "sources", "search.count", "follow_ups", *_HANDOFF)
 
 
-def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+def project_parts(events: Iterable[dict[str, Any]], final_text: str | None = None) -> list[dict[str, Any]]:
     parts: list[dict[str, Any]] = []
     tools: dict[str, dict[str, Any]] = {}
     for evt in events:
@@ -22,10 +22,12 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         last = parts[-1] if parts else None
         if name == "turn.delta":
             text = str(data.get("delta") or "")
-            if last and last["type"] == "text":
+            role = str(data.get("content_type") or data.get("channel") or "provisional")
+            item_id = str(data.get("item_id") or "") or None
+            if last and last["type"] == "text" and last.get("role") == role and last.get("item_id") == item_id:
                 last["text"] += text
             elif text:
-                parts.append({"type": "text", "text": text})
+                parts.append({"type": "text", "text": text, "role": role, **({"item_id": item_id} if item_id else {})})
         elif name == "turn.reasoning":
             text = str(data.get("text") or "")
             if last and last["type"] == "reasoning" and "duration_ms" not in last:
@@ -38,6 +40,9 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
                 open_["started_at"] = data.get("started_at", open_.get("started_at"))
                 open_["duration_ms"] = data.get("duration_ms")
         elif name == "tool.started":
+            for prior in parts:
+                if prior.get("type") == "text" and prior.get("role") == "provisional":
+                    prior["role"] = "commentary"
             part = {"type": "tool", "call_id": data.get("call_id"), "tool": data.get("tool"),
                     "status": "running", **({"input": data["input"]} if data.get("input") else {})}
             tools[str(data.get("call_id"))] = part
@@ -51,6 +56,8 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             part["elapsed_s"] = data.get("elapsed_s")
             if data.get("output"):
                 part["output"] = data["output"]
+            if data.get("summary") or data.get("text"):
+                part["summary"] = data.get("summary") or data.get("text")
         elif name == "turn.model":
             parts.append({"type":"model_identity", "actual_model":data.get("actual_model"), "scope":data.get("scope") or "unknown"})
         elif name == "turn.context":
@@ -74,6 +81,15 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
                 parts.append(part)
             elif parts[prior].get("status") != "delivered" or part.get("status") == "delivered":
                 parts[prior] = part
+    if final_text is not None:
+        indexes = [i for i, part in enumerate(parts) if part.get("type") == "text" and part.get("role") == "provisional"]
+        final = {"type": "text", "text": final_text, "role": "final", "item_id": "final"}
+        if indexes:
+            first, rest = indexes[0], set(indexes[1:])
+            parts[first] = final
+            parts = [part for i, part in enumerate(parts) if i not in rest]
+        elif final_text:
+            parts.append(final)
     return parts
 
 

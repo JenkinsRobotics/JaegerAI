@@ -198,6 +198,7 @@ def test_update_verb_rebuild_uses_external_path(tmp_path, monkeypatch):
     """_rebuild_mac_shell calls build-shell.sh; the bundle it checks for staleness
     must be the external path, not the in-repo .build."""
     from jaeger_ai.cli.verbs import update_verb as U
+    monkeypatch.setattr(U.sys, "platform", "darwin")
 
     external = tmp_path / "ext-build"
     monkeypatch.setenv("JAEGER_MAC_BUILD", str(external))

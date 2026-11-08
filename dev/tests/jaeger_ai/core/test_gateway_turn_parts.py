@@ -43,14 +43,52 @@ def test_project_parts_folds_events_in_order():
         {"event": "turn.reasoning.done", "data": {"started_at": 1.0, "duration_ms": 900}},
         {"event": "tool.started", "data": {"call_id": "c1", "tool": "read_file", "input": "x.py"}},
         {"event": "tool.completed", "data": {"call_id": "c1", "tool": "read_file", "elapsed_s": 0.2}},
-        {"event": "turn.delta", "data": {"delta": "Hel"}},
-        {"event": "turn.delta", "data": {"delta": "lo"}},
-    ])
+        {"event": "turn.delta", "data": {"delta": "Hel", "content_type": "provisional", "item_id": "answer-1"}},
+        {"event": "turn.delta", "data": {"delta": "lo", "content_type": "provisional", "item_id": "answer-1"}},
+    ], "Hello")
     assert parts == [
         {"type": "reasoning", "text": "ab", "started_at": 1.0, "duration_ms": 900},
         {"type": "tool", "call_id": "c1", "tool": "read_file", "status": "done", "input": "x.py", "elapsed_s": 0.2},
-        {"type": "text", "text": "Hello"},
+        {"type": "text", "text": "Hello", "role": "final", "item_id": "final"},
     ]
+
+
+def test_project_parts_keeps_commentary_actions_and_one_final_in_order():
+    from jaeger_ai.core.gateway.turn_parts import project_parts
+
+    parts = project_parts([
+        {"event": "turn.delta", "data": {"delta": "I’ll inspect the build.", "content_type": "provisional", "item_id": "text-1"}},
+        {"event": "turn.progress", "data": {"message": "Reading pyproject.toml", "content_type": "commentary"}},
+        {"event": "tool.started", "data": {"call_id": "c1", "tool": "read_file", "input": "pyproject.toml"}},
+        {"event": "tool.completed", "data": {"call_id": "c1", "tool": "read_file", "summary": "Read pyproject.toml"}},
+        {"event": "turn.delta", "data": {"delta": "The project uses Python 3.12.", "content_type": "provisional", "item_id": "text-2"}},
+    ], "The project uses Python 3.12.")
+
+    assert [(part["type"], part.get("role"), part.get("summary")) for part in parts] == [
+        ("text", "commentary", None),
+        ("progress", None, None),
+        ("tool", None, "Read pyproject.toml"),
+        ("text", "final", None),
+    ]
+    assert parts[-1]["text"] == "The project uses Python 3.12."
+
+
+def test_tool_start_has_useful_public_progress_and_stable_activity_id(tmp_path):
+    gateway = _gateway(tmp_path)
+    callbacks, finish = gateway._turn_stream_callbacks("s1", "r1")
+    callbacks.stream_delta("I’ll check it.")
+    callbacks.tool_progress("read_file", "start", {"path": "pyproject.toml"})
+    callbacks.tool_done("read_file", {"path": "pyproject.toml"}, {}, True, None, 0.2)
+    finish()
+    events = _events(gateway)
+    progress = next(event for event in events if event["event"] == "turn.progress")["data"]
+    started = next(event for event in events if event["event"] == "tool.started")["data"]
+    completed = next(event for event in events if event["event"] == "tool.completed")["data"]
+    delta = next(event for event in events if event["event"] == "turn.delta")["data"]
+    assert progress["message"] == "Reading pyproject.toml"
+    assert progress["activity_id"] == started["activity_id"] == completed["activity_id"]
+    assert completed["summary"] == "Read pyproject.toml"
+    assert delta["content_type"] == "provisional" and delta["item_id"].startswith("text_")
 
 
 def test_completed_turn_persists_parts_on_the_assistant_message(tmp_path):
@@ -66,7 +104,8 @@ def test_completed_turn_persists_parts_on_the_assistant_message(tmp_path):
     message = store.get_session("s1")["messages"][-1]
     assert message["role"] == "assistant"
     assert [p["type"] for p in message["parts"]] == ["reasoning", "text"]
-    assert message["parts"][0]["duration_ms"] >= 0 and message["parts"][1]["text"] == "Hi there"
+    assert message["parts"][0]["duration_ms"] >= 0
+    assert message["parts"][1] == {"type": "text", "text": "Hi there", "role": "final", "item_id": "final"}
 
 
 def test_handoffs_stream_on_the_origin_turn_and_persist_as_parts(tmp_path):

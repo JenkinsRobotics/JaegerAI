@@ -4,7 +4,7 @@
 import type { ChatPart, ChatTurn } from "./host";
 
 export type ToolPart = Extract<ChatPart, { kind: "toolInvocation" }>;
-export type ToolCategory = "search" | "web" | "shell" | "read" | "edit" | "agent" | "other";
+export type ToolCategory = "search" | "web" | "shell" | "read" | "image" | "edit" | "agent" | "other";
 
 /** Tool name → category. Command lines (a name with spaces, e.g. "npm run build") count as shell. */
 export function toolCategory(name: string): ToolCategory {
@@ -14,6 +14,7 @@ export function toolCategory(name: string): ToolCategory {
   if (/(fetch|browse|browser|web_?read|read_url|open_url|http_get|scrape|crawl)/.test(n)) return "web";
   if (/(shell|bash|zsh|terminal|exec|run_command|command|execute_code|run_)/.test(n)) return "shell";
   if (/(write|edit|patch|apply|replace|create_file|delete_file|move_file)/.test(n)) return "edit";
+  if (/(view_image|image_view|inspect_image|screenshot)/.test(n)) return "image";
   if (/(read|view|cat|list_dir|ls|grep|glob|search_files|find)/.test(n) || /^list_|_dir$/.test(n)) return "read";
   if (/(call_agent|handoff|delegate|ask_agent)/.test(n)) return "agent";
   return "other";
@@ -24,6 +25,7 @@ const RUNNING: Record<ToolCategory, string> = {
   web: "Reading a page…",
   shell: "Running commands…",
   read: "Reading files…",
+  image: "Viewing an image…",
   edit: "Writing to a file…",
   agent: "Checking with another agent…",
   other: "Waiting on results…",
@@ -63,8 +65,8 @@ export function toolTarget(part: Pick<ToolPart, "toolName" | "input">): string |
   return command;
 }
 
-const PAST: Record<ToolCategory, string> = { search: "Searched", web: "Read", shell: "Ran", read: "Read", edit: "Edited", agent: "Asked", other: "Used" };
-const NOW: Record<ToolCategory, string> = { search: "Searching", web: "Reading", shell: "Running", read: "Reading", edit: "Editing", agent: "Asking", other: "Using" };
+const PAST: Record<ToolCategory, string> = { search: "Searched", web: "Read", shell: "Ran", read: "Read", image: "Viewed", edit: "Edited", agent: "Asked", other: "Used" };
+const NOW: Record<ToolCategory, string> = { search: "Searching", web: "Reading", shell: "Running", read: "Reading", image: "Viewing", edit: "Editing", agent: "Asking", other: "Using" };
 
 /** One step in the fold: a verb plus what it worked on ("Ran" + "npm run build"); the tool name stands in for a missing target. */
 export function stepLine(part: ToolPart): { verb: string; target: string; mono: boolean } {
@@ -115,6 +117,7 @@ const DONE: Record<ToolCategory, (n: number) => string> = {
   web: (n) => `Read ${n} ${n === 1 ? "page" : "pages"}`,
   shell: (n) => `Ran ${n} ${n === 1 ? "command" : "commands"}`,
   read: (n) => `Read ${n} ${n === 1 ? "file" : "files"}`,
+  image: (n) => n === 1 ? "Viewed an image" : `Viewed ${n} images`,
   edit: (n) => `Edited ${n} ${n === 1 ? "file" : "files"}`,
   agent: (n) => `Asked ${n} ${n === 1 ? "agent" : "agents"}`,
   other: (n) => `Used ${n} ${n === 1 ? "tool" : "tools"}`,

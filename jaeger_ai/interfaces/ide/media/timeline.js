@@ -40,7 +40,7 @@
   // Shared presentation contract used by the IDE panel and browser/Mac chat.
   // Only structured work boundaries reclassify earlier text; never inspect prose.
   function partitionTurn(items) {
-    const workKinds = new Set(['reasoning', 'tool', 'progress', 'checkpoint', 'plan']);
+    const workKinds = new Set(['reasoning', 'tool', 'progress', 'checkpoint', 'plan', 'commentary']);
     let boundary = -1;
     items.forEach((item, index) => {
       if (['tool', 'progress', 'checkpoint'].includes(item.kind)) boundary = index;

@@ -5,7 +5,7 @@ import { GatewayError } from "../api/gateway";
 import type { JaegerSource, TurnReceipt } from "../api/source";
 import type { GatewayEvent } from "../api/types";
 import { followTurn, REQUEST_STATUS_POLL_MS } from "./followTurn";
-import type { ChatPart } from "./host";
+import {applyPart, type ChatPart} from "./host";
 import { WebHost } from "./webHost";
 
 type Stream = JaegerSource["stream"];
@@ -132,7 +132,9 @@ describe("durable terminal answer", () => {
     const result = await followTurn({ source: { stream: replayAll(events) }, sessionId: "fixture", requestId: "r", cursor: 9,
       signal: new AbortController().signal, onPart: (p) => parts.push(p), sleep: noSleep });
     expect(result.state).toBe("complete");
-    expect(parts.filter((p) => p.kind === "markdownContent").map((p) => p.text).join("")).toBe("MAC-CONTINUITY-OK");
+    const reconciled=parts.reduce(applyPart,[] as ChatPart[]);
+    expect(reconciled.filter((p) => p.kind === "markdownContent").map((p) => p.text).join("")).toBe("MAC-CONTINUITY-OK");
+    expect(reconciled.find((p)=>p.kind==="markdownContent")).toMatchObject({role:"final",itemId:"final"});
   });
 });
 
@@ -223,7 +225,7 @@ describe("request stream liveness", () => {
       expect(parts).toEqual([{ kind: "markdownContent", text: "hel" }]);
       await vi.advanceTimersByTimeAsync(REQUEST_STATUS_POLL_MS);
       expect((await done).state).toBe("complete");
-      expect(parts).toEqual([{ kind: "markdownContent", text: "hel" }, { kind: "markdownContent", text: "lo" }]);
+      expect(parts.reduce(applyPart,[] as ChatPart[])).toEqual([{ kind: "markdownContent", text: "hello", role:"final", itemId:"final" }]);
       expect(vi.getTimerCount()).toBe(0);
     } finally { vi.useRealTimers(); }
   });

@@ -22,7 +22,7 @@ describe("request outcome truth", () => {
     expect(outcome.state).toBe("complete");
     expect(requestStatus).toHaveBeenCalledWith("owned-s", "owned-r");
     expect(send).toHaveBeenCalledTimes(1);
-    expect(parts).toContainEqual({ kind: "markdownContent", text: "REAL-RECEIPT" });
+    expect(parts).toContainEqual({ kind: "markdownContent", text: "REAL-RECEIPT", role:"final", itemId:"final" });
   });
   it("lookup transport failure remains unknown, never a safe retry", async () => {
     const source = { kind: "live", send: async () => { throw new TypeError("offline"); }, requestStatus: async () => { throw new TypeError("offline"); } } as unknown as JaegerSource;

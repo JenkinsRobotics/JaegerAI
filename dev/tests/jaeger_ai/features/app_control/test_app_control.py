@@ -372,7 +372,8 @@ def test_route_scopes():
     assert caller_auth.required_scope("POST", "/v1/apps/{app}/proposals") == "turn"
     assert caller_auth.required_scope("POST", "/v1/apps/proposals/{pid}/decision") == "approve"
     assert caller_auth.required_scope("POST", "/v1/apps/proposals/{pid}/rollback") == "approve"
-    assert caller_auth.prefixed_route_allowed("GET", "/v1/apps/{app}/config", "muse")
+    # Muse is deliberately confined to its exact message/backlog allow-list.
+    assert not caller_auth.prefixed_route_allowed("GET", "/v1/apps/{app}/config", "muse")
     assert caller_auth.prefixed_route_allowed("POST", "/v1/apps/{app}/proposals", "grokbot")
     assert not caller_auth.prefixed_route_allowed("POST", "/v1/apps/proposals/{pid}/decision", "grokbot")
     assert not caller_auth.prefixed_route_allowed("POST", "/v1/apps/{app}/proposals", "rackpc")

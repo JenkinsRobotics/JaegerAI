@@ -112,16 +112,6 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
           if (part.kind === "markdownContent") answer += part.text;
           opts.onPart(part);
         });
-        // Text-only execution may emit no text deltas; its durable terminal
-        // receipt is the answer. Append only a missing suffix, never duplicate
-        // a streamed answer on finish/reconnect.
-        if (event.event === "turn.finish" || event.event === "turn.reconciled") {
-          const output = event.payload?.output;
-          if (typeof output === "string" && output.startsWith(answer) && output.length > answer.length) {
-            opts.onPart({ kind: "markdownContent", text: output.slice(answer.length) });
-            answer = output;
-          }
-        }
         if (mapped?.state) { terminal = mapped.state; local.abort(); }
       }, local.signal), statusDone]);
     } catch (error) {

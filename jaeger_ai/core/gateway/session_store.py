@@ -1854,9 +1854,9 @@ class GatewaySessionStore:
                         (row["session_id"], *PART_EVENTS, request_id),
                     )
                 ]
-                turn_parts = project_parts(turn_events)
+                turn_parts = project_parts(turn_events, assistant_text)
                 if assistant_text and not any(p["type"] == "text" for p in turn_parts):
-                    turn_parts.append({"type": "text", "text": assistant_text})
+                    turn_parts.append({"type": "text", "text": assistant_text, "role": "final", "item_id": "final"})
                 for appr in conn.execute(
                     "SELECT approval_id, kind, status, decision, metadata_json FROM approvals "
                     "WHERE request_id=? ORDER BY created_at", (request_id,)):

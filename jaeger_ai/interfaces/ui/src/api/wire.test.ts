@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { followTurn } from "../chat/followTurn";
-import type { ChatPart } from "../chat/host";
+import {applyPart, type ChatPart} from "../chat/host";
 import { normalizeFrame } from "./gateway";
 import { parseSSEChunk } from "./sse";
 import type { GatewayEvent } from "./types";
@@ -28,6 +28,8 @@ describe("gateway wire envelope", () => {
       onPart: (p) => parts.push(p), sleep: async () => {},
     });
     expect(result.state).toBe("complete");
-    expect(parts.map((p) => p.kind)).toEqual(["thinking", "thinking", "markdownContent"]);
+    const reconciled=parts.reduce(applyPart,[] as ChatPart[]);
+    expect(reconciled.map((p) => p.kind)).toEqual(["thinking", "markdownContent"]);
+    expect(reconciled.at(-1)).toEqual({kind:"markdownContent",text:"pong",role:"final",itemId:"final"});
   });
 });
