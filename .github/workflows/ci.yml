@@ -88,12 +88,24 @@ jobs:
                 --repo explosion/spacy-models \
                 --pattern 'en_core_web_sm-3.8.0-py3-none-any.whl' \
                 --dir "$model_dir" --clobber
-              python -m pip install "$model_dir/en_core_web_sm-3.8.0-py3-none-any.whl"
+              agent_source="$RUNNER_TEMP/jaeger-agent-ci"
+              cp -a packages/jaeger-agent "$agent_source"
+          python - "$agent_source/pyproject.toml" "$model_dir/en_core_web_sm-3.8.0-py3-none-any.whl" <<'PY'
+          import sys
+          from pathlib import Path
+
+          manifest = Path(sys.argv[1])
+          remote = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+          text = manifest.read_text(encoding="utf-8")
+          if text.count(remote) != 3:
+              raise SystemExit("unexpected spaCy model dependency declarations")
+          manifest.write_text(text.replace(remote, Path(sys.argv[2]).resolve().as_uri()), encoding="utf-8")
+          PY
               # Honor the app's binding version while installing its packages,
               # instead of compiling a newer binding and then replacing it.
               sed -n '/^llama-cpp-python==/p' requirements.txt > "$RUNNER_TEMP/jaeger-ci-constraints.txt"
               export PIP_CONSTRAINT="$RUNNER_TEMP/jaeger-ci-constraints.txt"
-              python scripts/install-packages.py packages/jaeger-os 'packages/jaeger-agent[multimodal-duplex]' packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]'
+              python scripts/install-packages.py packages/jaeger-os "$agent_source[multimodal-duplex]" packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]'
               python -m pip install pytest-timeout
               python -m playwright install --with-deps chromium
               ;;
