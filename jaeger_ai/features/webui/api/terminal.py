@@ -533,16 +533,34 @@ def _ensure_terminal_reaper() -> None:
         _terminal_reaper_started = True
 
 
+def _terminal_session_id(value: str) -> str:
+    """Validate an opaque registry key without coercing or normalizing identity."""
+    if (not isinstance(value, str) or not value or len(value) > 256
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)):
+        raise ValueError("Invalid terminal session_id")
+    return value
+
+
+def _registered_terminal(sid: str) -> TerminalSession | None:
+    """Caller holds _LOCK. A corrupt registry entry cannot alias another owner."""
+    term = _TERMINALS.get(sid)
+    if term is not None and term.session_id != sid:
+        raise ValueError("Terminal session identity mismatch")
+    return term
+
+
 def start_terminal(session_id: str, workspace: Path, rows: int = 24, cols: int = 80, restart: bool = False) -> TerminalSession:
     """Start or return the embedded terminal for a WebUI session."""
     if not _TERMINAL_SUPPORTED:
         raise NotImplementedError("Embedded terminal is not supported on Windows")
-    sid = str(session_id or "").strip()
-    if not sid:
-        raise ValueError("session_id is required")
+    sid = _terminal_session_id(session_id)
     cwd = str(Path(workspace).expanduser().resolve())
     if not Path(cwd).is_dir():
         raise ValueError("workspace is not a directory")
+
+    # Reject an inconsistent owner before cap enforcement can evict any shell.
+    with _LOCK:
+        _registered_terminal(sid)
 
     # Enforce the cap before spawning. Done outside the main lock below (the
     # eviction's process teardown must not run while _LOCK is held for the whole
@@ -551,7 +569,7 @@ def start_terminal(session_id: str, workspace: Path, rows: int = 24, cols: int =
     _enforce_terminal_cap(exclude_sid=sid)
 
     with _LOCK:
-        current = _TERMINALS.get(sid)
+        current = _registered_terminal(sid)
         if current and current.is_alive() and not restart and current.workspace == cwd:
             _set_size(current, rows, cols)
             return current
@@ -635,8 +653,9 @@ def start_terminal(session_id: str, workspace: Path, rows: int = 24, cols: int =
 def get_terminal(session_id: str) -> TerminalSession | None:
     if not _TERMINAL_SUPPORTED:
         return None
+    sid = _terminal_session_id(session_id)
     with _LOCK:
-        term = _TERMINALS.get(str(session_id or ""))
+        term = _registered_terminal(sid)
         if term and term.is_alive():
             return term
         return term
@@ -670,9 +689,9 @@ def attach_terminal(
     """
     if not _TERMINAL_SUPPORTED:
         return None
-    sid = str(session_id or "")
+    sid = _terminal_session_id(session_id)
     with _LOCK:
-        term = _TERMINALS.get(sid)
+        term = _registered_terminal(sid)
         if term is None:
             return None
         return term, term.subscribe(after_seq=after_seq)
@@ -714,9 +733,10 @@ def close_terminal(session_id: str, *, expected: TerminalSession | None = None) 
     """
     if not _TERMINAL_SUPPORTED:
         return False
-    sid = str(session_id or "")
+    sid = _terminal_session_id(session_id)
     with _LOCK:
-        if expected is not None and _TERMINALS.get(sid) is not expected:
+        current = _registered_terminal(sid)
+        if expected is not None and current is not expected:
             return False
         term = _TERMINALS.pop(sid, None)
     if not term:

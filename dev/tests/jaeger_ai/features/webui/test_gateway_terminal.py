@@ -16,9 +16,11 @@ def terminal_route():
     # replacing only unrelated heavyweight config and transport dependencies.
     package = 'jaeger_ai.features.webui.api'
     imports = {}
-    for name in ('config', 'helpers', 'sse_chunked', 'streaming', 'workspace'):
+    for name in ('config', 'helpers', 'sse_chunked', 'streaming', 'workspace', 'profiles'):
         imports[package + '.' + name] = types.ModuleType(package + '.' + name)
     imports[package + '.config'].get_config = lambda: {}
+    imports[package + '.profiles'].get_active_profile_name = lambda: None
+    imports[package + '.profiles']._profiles_match = lambda actual, active: actual == active
     for name in ('bad', 'j', 'require', '_sanitize_error'):
         setattr(imports[package + '.helpers'], name, Mock())
     imports[package + '.sse_chunked'].end_sse_headers = Mock()
@@ -142,3 +144,18 @@ def test_terminal_output_revocation_withholds_buffer_and_unsubscribes(monkeypatc
     terminal_route._sse.assert_called_once_with(handler, 'terminal_error', {'error': 'Terminal session is no longer available.'})
     handler.wfile.write.assert_not_called()
     term.unsubscribe.assert_called_once_with(output)
+
+
+def test_legacy_foreign_profile_does_not_fall_back_to_gateway(monkeypatch, terminal_route):
+    monkeypatch.setattr(terminal_route, '_get_session', lambda sid: SimpleNamespace(session_id=sid, workspace='/foreign', profile='other'))
+    fallback = Mock()
+    monkeypatch.setattr(gateway_read_workspace, 'gateway_read_workspace', fallback)
+    with pytest.raises(KeyError, match='Session not found'):
+        terminal_route._terminal_session_lookup({'session_id': 'legacy'})
+    fallback.assert_not_called()
+
+
+def test_legacy_mismatched_identity_is_rejected(monkeypatch, terminal_route):
+    monkeypatch.setattr(terminal_route, '_get_session', lambda sid: SimpleNamespace(session_id='other', workspace='/legacy'))
+    with pytest.raises(KeyError, match='Session not found'):
+        terminal_route._terminal_session_lookup({'session_id': 'legacy'})
