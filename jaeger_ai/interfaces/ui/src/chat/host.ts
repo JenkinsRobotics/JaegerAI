@@ -50,6 +50,7 @@ export interface StartTurnRequest {
   model?: string;
   mode?: string;
   message: string;
+  fastLane?: boolean;
   attachments?: ChatAttachment[];
   onAccepted?: () => void;
   draftFileIds?: string[];

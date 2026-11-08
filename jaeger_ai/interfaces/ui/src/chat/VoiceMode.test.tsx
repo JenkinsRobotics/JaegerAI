@@ -34,3 +34,19 @@ it('does not start capture after a capability probe resolves on a closed panel',
 it('splits long replies within the existing speech endpoint limit without dropping text',()=>{
  const body='A sentence with words. '.repeat(80).trim();const chunks=speechChunks(body);expect(chunks.length).toBeGreaterThan(1);expect(chunks.every(chunk=>chunk.length<=500)).toBe(true);expect(chunks.join(' ')).toBe(body);
 });
+it('reports microphone startup until the recorder actually signals readiness',async()=>{
+ const io=fakeIO();let ready!:()=>void;
+ io.capture.mockImplementation((_signal,_input,_level,onReady)=>{ready=()=>onReady(()=>{});return new Promise(()=>{});});
+ render(<VoiceMode io={io} busy={false} onTranscript={async()=>true}/>);
+ await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Start voice mode'})));
+ expect(screen.getByRole('status').textContent).toContain('Starting microphone');
+ await act(async()=>ready());expect(screen.getByRole('status').textContent).toContain('Listening');
+});
+it('tests the speaker without submitting a chat or retaining the microphone',async()=>{
+ const io=fakeIO(),submit=vi.fn(async()=>true);render(<VoiceMode io={io} busy={false} onTranscript={submit}/>);
+ await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Start voice mode'})));
+ const signal=io.capture.mock.calls[0][0];
+ await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Test speaker'})));
+ expect(signal.aborted).toBe(true);expect(io.speak).toHaveBeenCalledWith('Jaeger voice is connected.',expect.any(AbortSignal),'',expect.any(Function));expect(submit).not.toHaveBeenCalled();expect(io.capture).toHaveBeenCalledTimes(1);
+ expect(screen.getByRole('status').textContent).toContain('Ready to listen');
+});

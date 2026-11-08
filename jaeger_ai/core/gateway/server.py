@@ -5595,7 +5595,7 @@ class JaegerGatewayApp:
                 # The worker must know how the owner will check its result.
                 from jaeger_ai.core.tasks.owner import TURN_CARD_GUIDANCE
                 prompt = f"{TURN_CARD_GUIDANCE}\n\n" + prompt
-            if tier == "chat":
+            if tier == "chat" or self._voice_direct_lane(runtime, prepared, fast_lane=fast_lane):
                 model_only = True
             else:
                 model_only = (text_only and not actionable) or (
@@ -5761,6 +5761,24 @@ class JaegerGatewayApp:
             self._running_tasks.pop(rid, None)
             self._cancellations.release(rid)
             self._turn_timings.pop(rid, None)
+
+    @staticmethod
+    def _voice_direct_lane(runtime: Any, prepared: Any, *, fast_lane: bool) -> bool:
+        """Honor the executive's conversational voice decision at execution.
+
+        Reuse the existing model-only lane; work requests retain the full owner
+        loop and tool authority. An unavailable decision never changes lanes.
+        """
+        if not fast_lane or prepared is None:
+            return False
+        from jaeger_ai.core.entity.executive import CognitiveStrategy
+
+        try:
+            decision = runtime.executive_selector.select_strategy(prepared.event, runtime.current_state)
+            return decision.strategy == CognitiveStrategy.DIRECT_RESPONSE
+        except Exception:
+            logger.warning("voice strategy unavailable; retaining owner execution", exc_info=True)
+            return False
 
     @staticmethod
     def _lane_model(request_text: str, requested: str | None) -> str:

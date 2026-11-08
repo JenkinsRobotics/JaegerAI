@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { JaegerSource } from "../api/source";
 import type { ChatPart } from "./host";
 import { WebHost } from "./webHost";
+import { readIntent } from "./sendJournal";
 
 /** A source that records attachment registrations and the turn body, returns a durable completed receipt (no live stream needed). */
 function recording(failPath?: string) {
@@ -71,4 +72,13 @@ describe("WebHost attachments (H8 → gateway)", () => {
     await turn(host, [{ name: "c.txt", mimeType: "text/plain", path: "/outside/c.txt" } as never]);
     expect(seen).toEqual([{ turnId: "t1", rejected: [{ name: "c.txt", path: "/outside/c.txt", reason: "attachment path escapes workspace" }] }]);
   });
+});
+
+it('preserves a spoken turn in the send journal and forwards its voice routing flag through the normal host',async()=>{
+ const {source}=recording();const original=source.send;let options:unknown,journal:unknown;
+ source.send=async(...args)=>{options=args[4];journal=readIntent(args[0]);return original(...args);};
+ source.stream=async(_session,_cursor,on)=>{on({event:'turn.finish',request_id:'voice-request',event_id:1,payload:{output:'Hello'}});};
+ const host=new WebHost(source);
+ await host.startTurn({sessionId:'voice-routing',turnId:'voice-request',message:'Hello Jaeger',fastLane:true},()=>{}).done;
+ expect(options).toEqual({fast_lane:true});expect(journal).toMatchObject({sessionId:'voice-routing',requestId:'voice-request',fastLane:true});
 });

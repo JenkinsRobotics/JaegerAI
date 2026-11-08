@@ -787,7 +787,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
     setSession({ ...session, turns: [...session.turns, { turnId, requestId: turnId, message, parts: [], state: "pending", createdAt: Date.now() }] });
     let finished: ChatTurn | undefined;
     const attachments = attached.length ? toAttachments(attached) : undefined;
-    const handle = host.startTurn({ sessionId: session.id, turnId, message, draftFileIds: attached.map(f => f.id), draftBody: text, quoteKey, onAccepted: () => {
+    const handle = host.startTurn({ sessionId: session.id, turnId, message, ...(speakReply ? {fastLane:true} : {}), draftFileIds: attached.map(f => f.id), draftBody: text, quoteKey, onAccepted: () => {
       setDraft(current => current === text ? "" : current);
       setQuote(current => current && JSON.stringify(current) === quoteKey ? undefined : current);
       setFiles(current => current.filter(f => f.error || !attached.some(sent => sent.id === f.id)));
@@ -804,7 +804,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         setFiles(current => current.filter(f => f.error || !attached.some(sent => sent.id === f.id)));
       }
       setActive(null);
-      if (speakReply && state === "complete" && finished) voiceHost?.speak(replyText(finished));
+      if (speakReply && !voiceModeOpen && state === "complete" && finished) voiceHost?.speak(replyText(finished));
     }, error => {
       sending.current = false;
       sentFiles.current.delete(turnId);
@@ -1074,7 +1074,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
           <RunModeControl host={host} disabled={Boolean(active)} />
           <span className="jg-composer__spacer" />
           <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
-          {host instanceof WebHost && <>{!voiceModeOpen && <VoiceDictation />}<VoiceMode primary={!active && !hasText} onOpenChange={setVoiceModeOpen} disabled={Boolean(listening) || !session || !draftReady || preparingFiles || files.length>0 || Boolean(quote) || recoveryBlocked || recoveryStatus === 'unknown'} busy={Boolean(active)} outcome={session?.turns.at(-1) ? {id:session.turns.at(-1)!.requestId || session.turns.at(-1)!.turnId,state:session.turns.at(-1)!.state} : undefined} reply={spokenTurn ? {id:spokenTurn.requestId || spokenTurn.turnId,text:replyText(spokenTurn)} : undefined} onTranscript={async text=>{const accepted=active?await submitWhileBusy('steer',text):send(text);if(!accepted)setDraft(draft=>draft?draft+'\n'+text:text);return Boolean(accepted);}} /></>}
+          {host instanceof WebHost && <>{!voiceModeOpen && <VoiceDictation />}<VoiceMode primary={!active && !hasText} onOpenChange={setVoiceModeOpen} disabled={Boolean(listening) || !session || !draftReady || preparingFiles || files.length>0 || Boolean(quote) || recoveryBlocked || recoveryStatus === 'unknown'} busy={Boolean(active)} outcome={session?.turns.at(-1) ? {id:session.turns.at(-1)!.requestId || session.turns.at(-1)!.turnId,state:session.turns.at(-1)!.state} : undefined} reply={spokenTurn ? {id:spokenTurn.requestId || spokenTurn.turnId,text:replyText(spokenTurn)} : undefined} onTranscript={async text=>{const accepted=active?await submitWhileBusy('steer',text):send(text,true);if(!accepted)setDraft(draft=>draft?draft+'\n'+text:text);return Boolean(accepted);}} /></>}
         {dictation && !voiceModeOpen && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
