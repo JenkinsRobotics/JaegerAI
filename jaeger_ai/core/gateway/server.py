@@ -6700,9 +6700,9 @@ class JaegerGatewayApp:
 
     async def handle_set_autonomy(self, request: web.Request) -> web.Response:
         """POST /v1/runtime/autonomy ``{"autonomy": "auto|scoped|ask"}``: saved to the
-        instance config, which the approval provider reads on every tool call."""
+        instance config and applied immediately to the running approval provider."""
         from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
-        from jaeger_ai.core.runtime.autonomy import AUTONOMY
+        from jaeger_ai.core.runtime.autonomy import AUTONOMY, set_autonomy
 
         try:
             body = await request.json()
@@ -6717,6 +6717,9 @@ class JaegerGatewayApp:
         config = load_yaml(Path(path), Config)
         config.automation.autonomy = mode
         dump_yaml(Path(path), config)
+        receipt = set_autonomy(mode)
+        if not receipt.get("ok"):
+            return web.json_response({"error": "Autonomy was saved but the running agent did not accept it"}, status=500)
         return web.json_response({"autonomy": mode, "options": list(AUTONOMY)})
 
     def _current_tier(self) -> str:

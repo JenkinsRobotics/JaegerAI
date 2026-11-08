@@ -1,12 +1,25 @@
-import { act } from "react";import { createRoot } from "react-dom/client";import { expect,it,vi } from "vitest";import {RuntimeSettings} from './RuntimeSettings';
+import { act } from "react";import { createRoot } from "react-dom/client";import { expect,it,vi } from "vitest";import {RuntimeSettings,runtimeChoices} from './RuntimeSettings';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+it('separates live Ollama server models into cloud and local provider groups',()=>{
+ const choices=runtimeChoices({providers:[{id:'ollama',display_name:'Ollama',reachable:true,configured:true,models:[
+  {id:'glm-5.3-flash:cloud',available:true,remote_host:'https://ollama.com',capabilities:['completion','tools']},
+  {id:'deepseek-v4-pro:0813-cloud',available:true,remote_host:'https://ollama.com',capabilities:['completion','tools']},
+  {id:'qwen3:4b',available:true,remote_host:null,capabilities:['completion','tools']},
+  {id:'qwen3-embedding:0.6b',available:true,capabilities:['embedding']},
+ ]}]});
+ expect(choices.map(model=>[model.id,model.group,model.groupLabel])).toEqual([
+  ['@ollama:glm-5.3-flash:cloud','ollama-cloud','Ollama Cloud'],
+  ['@ollama:deepseek-v4-pro:0813-cloud','ollama-cloud','Ollama Cloud'],
+  ['@ollama:qwen3:4b','ollama-local','Ollama Local'],
+ ]);
+});
 it('shows real reachable choices, leaves rejected save unconfirmed and never changes credentials',async()=>{
  const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
  const save=vi.fn(async()=>{throw Error('Unknown or unreachable model');});
  const settings={inventory:async()=>({providers:[{id:'owned',display_name:'Owned provider',reachable:true,configured:true,models:[{id:'model'}]},{id:'offline',display_name:'Offline',reachable:false,configured:true,models:[{id:'not-selectable'}]}]}),read:async()=>({session_id:'owned-home',model:null}),save};
  await act(async()=>root.render(<RuntimeSettings settings={settings} sessionId="owned-home"/>));await act(async()=>(el.querySelector('button')!).click());
- expect([...document.querySelectorAll('[role="option"] strong')].map(o=>o.textContent)).toEqual(['Gateway default','Owned provider · model']);
- await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(b=>b.textContent?.includes('Owned provider · model'))!.click();});
+ expect([...document.querySelectorAll('[role="option"] strong')].map(o=>o.textContent)).toEqual(['Gateway default','model']);
+ await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(b=>b.querySelector('strong')?.textContent==='model')!.click();});
  await act(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='Save conversation model')!.click();});
  expect(save).toHaveBeenCalledExactlyOnceWith('owned-home','@owned:model');expect(document.body.textContent).toContain('Unknown or unreachable model');expect(document.body.textContent).not.toContain('Conversation model saved.');
  await act(async()=>root.unmount());el.remove();
@@ -30,7 +43,7 @@ it('restores a lost versioned save journal and checks its original receipt witho
  const click=(label:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===label)!.click();
  try{
   await act(async()=>root.render(<RuntimeSettings settings={settings} sessionId="owned-modern"/>));await act(async()=>el.querySelector('button')!.click());
-  await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(b=>b.textContent?.includes('Owned · model'))!.click();});
+  await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(b=>b.querySelector('strong')?.textContent==='model')!.click();});
   await act(async()=>click('Save conversation model'));
   expect(saveVersioned).toHaveBeenCalledTimes(1);expect(command?.expected_model_revision).toBe(0);
   expect(document.body.textContent).toContain('lost ACK');
@@ -50,11 +63,11 @@ it('retains a rejected model proposal and requires fresh read before a new expli
  const settings={inventory:async()=>({providers:[{id:'owned',display_name:'Owned',reachable:true,configured:true,models:[{id:'model'}]}]}),read:async()=>({session_id:'owned-conflict',model:null,model_choice_revision:revision,atomic_model_operations:true}),save:vi.fn(),saveVersioned};
  const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
  try{await act(async()=>root.render(<RuntimeSettings settings={settings} sessionId="owned-conflict"/>));await act(async()=>el.querySelector('button')!.click());
- await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(b=>b.textContent?.includes('Owned · model'))!.click();});await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Save conversation model')!.click());
+ await act(async()=>{[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(b=>b.querySelector('strong')?.textContent==='model')!.click();});await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Save conversation model')!.click());
  expect(document.body.textContent).toContain('Changed elsewhere');expect(document.body.textContent).not.toContain('save confirmed');
  expect(localStorage.getItem('jaeger.ui.model-choice.v1.owned-conflict.draft')).toBe('@owned:model');expect(saveVersioned).toHaveBeenCalledTimes(1);
  await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Refresh models and settings')!.click());
- expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toContain('Owned · model');expect(document.body.textContent).toContain('revision 2');expect(saveVersioned).toHaveBeenCalledTimes(1);
+ expect(document.querySelector('[role="option"][aria-selected="true"]')?.querySelector('strong')?.textContent).toBe('model');expect(document.body.textContent).toContain('revision 2');expect(saveVersioned).toHaveBeenCalledTimes(1);
  }finally{await act(async()=>root.unmount());el.remove();localStorage.clear();}
 });
 it('never settles a foreign model receipt or replays the saved command',async()=>{

@@ -17,7 +17,6 @@ import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
-import { Shield } from "../components/Icons";
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { RuntimeSettings } from "../settings/RuntimeSettings";
@@ -42,6 +41,7 @@ import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
 import { useRevealedText } from "./reveal";
 import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
 import type { VoiceHost } from "./nativeHost";
+import { AutonomyControl } from "./AutonomyControl";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
 type Decide = (callId: string, decision: "approve" | "deny") => void;
@@ -239,7 +239,6 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
     }
     return true;
   }, [onSessionMissing, sessionId]);
-  const [autonomy, setAutonomy] = useState<"ask" | "scoped" | "auto">();
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState<"dictation" | "voice" | null>(null);
   const sending = useRef(false);
@@ -308,12 +307,6 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
     const timer = setInterval(load, 3000);
     return () => { live = false; clearInterval(timer); };
   }, [host, sessionId, reportMissingSession]);
-  useEffect(() => {
-    let live = true;
-    if (!host.runtimeAutonomy) { setAutonomy(undefined); return; }
-    void host.runtimeAutonomy().then(result => { if (live) setAutonomy(result.autonomy); }, () => { if (live) setAutonomy(undefined); });
-    return () => { live = false; };
-  }, [host]);
   useEffect(() => {
     if (!session?.turns.length || !busyMessages.length) return;
     const recorded = new Set(session.turns.map(turn => turn.message?.trim()).filter(Boolean));
@@ -907,7 +900,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
-          <span className="jg-composer__policy" title="Current Gateway tool approval policy"><Shield size={15} />{autonomy === "auto" ? "Approve for me" : autonomy === "scoped" ? "Scoped approval" : "Ask for approval"}</span>
+          <AutonomyControl host={host} />
           {active && host.sessionQueue ? (
             <button type="button" className="jg-busy-mode" aria-label="Queue next message" title="Send this after the current turn"
               disabled={!hasText || followUpBusy} onClick={() => void submitWhileBusy("queue")}>

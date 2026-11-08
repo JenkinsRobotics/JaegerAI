@@ -2,6 +2,12 @@ import type { HomeOptions, HomeSessions } from "../chat/homeSession";
 import type { ChatSession } from "../chat/host";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
+export type RuntimeAutonomy = "ask" | "scoped" | "auto";
+export interface RuntimeAutonomySnapshot {
+  autonomy: RuntimeAutonomy;
+  options: RuntimeAutonomy[];
+}
+
 /** Everything the screen needs from Jaeger. The live adapter calls the
  * gateway through same-origin paths; the mock adapter replays sample data. */
 /** 201 from the bytes upload route. */
@@ -49,7 +55,7 @@ export interface ConnectedApp {
 export interface ConnectAppsListing { apps: ConnectedApp[]; categories: { id: string; label: string }[]; connected_count: number }
 export interface ModelInventory {
   active?: { provider: string; model: string };
-  providers: { id: string; display_name: string; reachable: boolean; configured: boolean; availability?:'not_probed'|'not_configured'|'unknown';configuration_observed?:boolean;reason?: string; models: { id: string; available?: boolean; usable_for_react?: boolean }[] }[];
+  providers: { id: string; display_name: string; reachable: boolean; configured: boolean; availability?:'not_probed'|'not_configured'|'unknown';configuration_observed?:boolean;reason?: string; models: { id: string; available?: boolean; usable_for_react?: boolean; remote_host?: string | null; capabilities?: string[] }[] }[];
 }
 export interface ModelChoiceSnapshot {session_id:string;model?:string|null;provider?:string|null;model_choice_revision?:number;atomic_model_operations?:boolean}
 export interface ModelChoiceReceipt extends ControlResult {domain:string;session_id:string}
@@ -248,7 +254,8 @@ export interface JaegerSource {
   tools?(query?: string): Promise<ToolInventory>;
   specialistControls?: SpecialistControls;
   sessionQueue?: SessionQueue;
-  runtimeAutonomy?(): Promise<{ autonomy: "ask" | "scoped" | "auto"; options: string[] }>;
+  runtimeAutonomy?(): Promise<RuntimeAutonomySnapshot>;
+  setRuntimeAutonomy?(autonomy: RuntimeAutonomy): Promise<RuntimeAutonomySnapshot>;
   messageReactions?: {
     load(sessionId: string): Promise<ReactionSnapshot>;
     save(sessionId: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }): Promise<ReactionSnapshot>;
