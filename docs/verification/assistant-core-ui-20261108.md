@@ -77,6 +77,11 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 
 - Workspace pages mount only while selected. The later [document-draft repair](document-draft-recovery-20261108.md) adds same-tab recovery with regression evidence; it does not claim permanent unsaved drafts or browser acceptance. Chat draft persistence has a dedicated browser contract.
 - The later [historic-session repair](historic-session-navigation-20261108.md) fixes roster rows opening agent home instead of the selected historic session, with production-shell component evidence.
+- Later [authority/streaming](assistant-core-authority-streaming-20261108.md),
+  [durable outcome/recovery](assistant-core-outcome-recovery-20261108.md), and
+  [foreground truth](assistant-core-foreground-truth-20261108.md) repairs strengthen
+  Chat/Work state and execution evidence. Foreground automatic resume remains
+  unimplemented; background yielded continuation is tested. Overall stays PARTIAL.
 - Source-backed capability presence does not prove native-host availability, real provider credentials, external connector authorization, output quality, or a completed autonomous workflow.
 
 ### Parallel workspace error-state repair

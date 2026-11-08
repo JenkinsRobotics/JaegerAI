@@ -394,6 +394,10 @@ class GatewayTaskOwner:
                 error = str(result.get('error') or halt)
             elif result.get('error'):
                 state, error = TaskState.FAILED, str(result['error'])
+            elif halt:
+                # A fresh artifact can be a partial checkpoint, not completion.
+                # Only a clean worker outcome authorizes verification.
+                state, error = TaskState.FAILED, halt
             else:
                 verified, evidence = self.verify(task, result)
                 if verified:
