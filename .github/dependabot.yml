@@ -6,6 +6,12 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # Unpinned Python requirements are compatibility lower bounds and already
+    # resolve the latest compatible release on a fresh install. Only propose
+    # version PRs for the two product-owned exact pins.
+    allow:
+      - dependency-name: "llama-cpp-python"
+      - dependency-name: "a2a-sdk"
     ignore:
       - dependency-name: "*"
         update-types:
