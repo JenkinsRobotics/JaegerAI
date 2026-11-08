@@ -67,6 +67,7 @@ export interface AgentSummary {
 }
 
 export interface SessionRow {
+  unread?: { request_id: string; role: "user" | "assistant" } | null;
   session_id: string;
   title?: string;
   agent_id?: string | null;

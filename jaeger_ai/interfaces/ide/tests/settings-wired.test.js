@@ -73,8 +73,10 @@ test('webuiUrl overrides derived chat URL for normal and session chat', async ()
   await f.controller.openChatSession('abc');
   assert.deepEqual(f.events, [
     ['external', 'http://127.0.0.1:9999/base/?ui=apple'],
-    ['external', 'http://127.0.0.1:9999/base/?ui=apple&session=abc'],
+    ['external', 'http://127.0.0.1:9999/base/chat?session=abc'],
   ]);
+  await f.controller.openChatSession('agent-native:jaeger');
+  assert.equal(f.events.at(-1)[1], 'http://127.0.0.1:9999/base/chat?session=agent-native%3Ajaeger');
 });
 
 test('copilotBridge.enabled starts and stops bridge on configuration change', () => {

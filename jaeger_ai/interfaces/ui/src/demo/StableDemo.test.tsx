@@ -29,6 +29,44 @@ it("does not present a new-chat welcome when history cannot be restored", async 
  expect(document.body.textContent).not.toContain('What would you like to work on?');
 });
 async function mount(source = new MockSource()) {const el=document.createElement("div");document.body.append(el);root=createRoot(el);await flush(()=>root.render(<StableDemo source={source}/>));return source;}
+it('opens an explicit conversation link before any device-local or most-recent choice',async()=>{
+ history.replaceState(null,'','/chat?session=from-ide');localStorage.setItem(DEMO_SESSION_KEY,'phone-old');
+ const source=new MockSource();Object.defineProperty(source,'kind',{value:'live'});
+ vi.spyOn(source,'sessions').mockResolvedValue([{session_id:'latest-other',title:'Other',agent_id:'native:jaeger'}]);
+ const load=vi.spyOn(source,'session').mockImplementation(async id=>({session_id:id,title:'Shared from IDE',agent_id:'native:jaeger'}));
+ const create=vi.spyOn(source,'createSession');await mount(source);
+ expect(load).toHaveBeenCalledWith('from-ide');expect(load).not.toHaveBeenCalledWith('phone-old');
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','from-ide');
+ expect(create).not.toHaveBeenCalled();
+});
+it('preserves an unavailable explicit link without attaching another chat',async()=>{
+ history.replaceState(null,'','/chat?session=missing');
+ const source=new MockSource();Object.defineProperty(source,'kind',{value:'live'});
+ vi.spyOn(source,'sessions').mockResolvedValue([{session_id:'other',title:'Other',agent_id:'native:jaeger'}]);
+ const load=vi.spyOn(source,'session').mockRejectedValue(new Error('Session not found'));
+ await mount(source);
+ expect(document.querySelector('[data-chat-session]')).toBeNull();
+ expect(load.mock.calls.every(call=>call[0]==='missing')).toBe(true);
+ expect(location.search).toBe('?session=missing');
+ expect(document.body.textContent).toContain('no other conversation was opened');
+});
+it('uses the Gateway-selected conversation on a fresh device without overriding other windows',async()=>{
+ const source=new MockSource();Object.defineProperty(source,'kind',{value:'live'});
+ vi.spyOn(source,'sessions').mockResolvedValue([{session_id:'latest',last_activity_at:20},{session_id:'chosen',last_activity_at:10}]);
+ vi.spyOn(source,'session').mockImplementation(async id=>({session_id:id}));
+ Object.assign(source,{operatorSession:vi.fn().mockResolvedValue({active_session_id:'chosen',revision:4})});
+ await mount(source);await flush();
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','chosen');
+ expect(location.search).toBe('?session=chosen');
+});
+it('resolves browser back and forward conversation identities without starting new work',async()=>{
+ history.replaceState(null,'','/chat?session=first');
+ const source=new MockSource();vi.spyOn(source,'session').mockImplementation(async id=>({session_id:id}));
+ const create=vi.spyOn(source,'createSession');await mount(source);
+ await flush(()=>{history.pushState(null,'','/chat?session=second');dispatchEvent(new PopStateEvent('popstate'));});await flush();
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','second');
+ expect(create).not.toHaveBeenCalled();
+});
 it("keeps the shell in the visible viewport when the mobile keyboard opens", async () => {
  const viewport = Object.assign(new EventTarget(), {height:844,offsetTop:0,scale:1});
  const original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
@@ -123,7 +161,7 @@ it("recovers a phone whose saved conversation was deleted on another device", as
  expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('shared-latest');
  expect(document.querySelector('[role=alert]')).toBeNull();
 });
-it("leaves a session that disappears while the chat is already mounted", async () => {
+it("keeps a disappeared conversation's exact address until the operator chooses another", async () => {
  localStorage.setItem(DEMO_SESSION_KEY, 'deleted-after-mount');
  const source = new MockSource();
  Object.defineProperty(source, 'kind', {value: 'live'});
@@ -135,11 +173,12 @@ it("leaves a session that disappears while the chat is already mounted", async (
  await mount(source);
  expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('deleted-after-mount');
  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Report missing session"]')!.click());
- expect(document.body.textContent).toContain('Conversation unavailable');
- await flush(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Open recent conversations')!.click());
- await vi.waitFor(() => expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('shared-fallback'));
- expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('shared-fallback');
+ expect(document.querySelector('[data-chat-session]')).toBeNull();
+ expect(location.search).toBe('?session=deleted-after-mount');
+ expect(document.body.textContent).toContain('no other conversation was opened');
  expect(document.body.textContent).not.toContain('Deleted elsewhere');
+ await flush(()=>[...document.querySelectorAll('button')].find(button=>button.textContent==='Shared fallback')!.click());
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','shared-fallback');
 });
 it("opens and closes the work panel without replacing the conversation", async () => {
  await mount();
@@ -295,7 +334,7 @@ it("copies a conversation-specific URL even from a workspace page", async () => 
   await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Conversation actions"]')!.click());
   await flush(() => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b=>b.textContent==='Copy')!.click());
   await flush(() => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b=>b.textContent==='Conversation link')!.click());
-  expect(writeText).toHaveBeenCalledWith(`${location.origin}/?session=saved%20%2F%20chat`);
+  expect(writeText).toHaveBeenCalledWith(`${location.origin}/chat?session=saved+%2F+chat`);
  } finally {
   if (original) Object.defineProperty(navigator, 'clipboard', original);
   else delete (navigator as unknown as {clipboard?:unknown}).clipboard;
@@ -372,4 +411,61 @@ it("offers usable recovery for a missing conversation without promising reconnec
  await flush(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Open recent conversations')!.click());
  expect(new URLSearchParams(location.search).has('session')).toBe(false);
  expect(document.body.textContent).toContain('Start conversation');
+});
+
+it("accepts slow unread-history responses without overlapping polling forever", async () => {
+ const source = new MockSource();
+ Object.assign(source, {messageReadState: {load: vi.fn(), save: vi.fn(), clear: vi.fn()}});
+ let resolve!: (rows: Awaited<ReturnType<MockSource['sessions']>>) => void;
+ const pending = new Promise<Awaited<ReturnType<MockSource['sessions']>>>(done => { resolve = done; });
+ const sessions = vi.spyOn(source, 'sessions').mockReturnValue(pending);
+ const visibility = Object.getOwnPropertyDescriptor(document, "hidden");
+ Object.defineProperty(document, "hidden", {configurable:true,value:false});
+ vi.useFakeTimers();
+ try {
+  const el=document.createElement("div"); document.body.append(el); root=createRoot(el);
+  await act(async () => { root.render(<StableDemo source={source}/>); });
+  await act(async () => { vi.advanceTimersByTime(15000); });
+  expect(sessions).toHaveBeenCalledTimes(2); // initial history + one in-flight refresh
+  await act(async () => { resolve([{session_id:'slow',title:'Slow durable conversation',unread:{request_id:'request',role:'assistant'}}] as never); });
+  expect(document.body.textContent).toContain('Slow durable conversation');
+  expect(document.querySelector('[aria-label="Unread"]')).not.toBeNull();
+ } finally { vi.useRealTimers(); if(visibility)Object.defineProperty(document,"hidden",visibility); else delete (document as unknown as {hidden?:boolean}).hidden; }
+});
+
+
+it("keeps an empty explicit link invalid even when an agent home is available", async () => {
+ history.replaceState(null, '', '/chat?agent=specialist&session=');
+ const source = new MockSource();
+ const home = vi.fn().mockResolvedValue({session_id:'home'});
+ Object.assign(source, {agentHome:home});
+ const load = vi.spyOn(source, 'session');
+ await mount(source);
+ expect(home).not.toHaveBeenCalled(); expect(load).not.toHaveBeenCalled();
+ expect(document.querySelector('[data-chat-session]')).toBeNull();
+ expect(document.body.textContent).toContain('invalid session ID');
+});
+
+it("refuses a mismatched snapshot for an exact historic agent link", async () => {
+ history.replaceState(null, '', '/chat?agent=specialist&session=historic');
+ const source = new MockSource();
+ vi.spyOn(source, 'session').mockResolvedValue({session_id:'wrong',agent_id:'specialist'});
+ await mount(source);
+ expect(document.querySelector('[data-chat-session]')).toBeNull();
+ expect(location.search).toBe('?agent=specialist&session=historic');
+ expect(document.body.textContent).toContain('different conversation');
+});
+
+it("refreshes unread markers for the selected historic agent without changing its identity", async () => {
+ history.replaceState(null, '', '/chat?agent=specialist&session=old%20%2F%20chat');
+ const source = new MockSource();
+ vi.spyOn(source, 'session').mockImplementation(async id => ({session_id:id,agent_id:'specialist',title:'Historic'}));
+ const rows = vi.spyOn(source, 'sessions').mockImplementation(async options => options?.agent_id === 'specialist' ? [{session_id:'old / chat',title:'Historic',agent_id:'specialist'}] : []);
+ Object.assign(source, {messageReadState:{load:vi.fn(),save:vi.fn(),clear:vi.fn()}});
+ await mount(source); await flush();
+ rows.mockResolvedValue([{session_id:'old / chat',title:'Historic',agent_id:'specialist',unread:{request_id:'r',role:'assistant'}}]);
+ await flush(() => window.dispatchEvent(new Event('jg:read-state-changed')));
+ expect(rows).toHaveBeenLastCalledWith({agent_id:'specialist'});
+ expect(document.querySelector('[aria-label="Unread"]')).not.toBeNull();
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','old / chat');
 });
