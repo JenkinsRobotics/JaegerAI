@@ -1481,7 +1481,7 @@ def test_scheduled_work_fires_once_and_survives_restart(gateway):
 
 @pytest.mark.parametrize('global_defaults', [False, True], ids=['session-defaults', 'new-chat-defaults'])
 @pytest.mark.parametrize('explicit_tools', [False, True], ids=['minimal-chat', 'restricted-tools'])
-def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explicit_tools, global_defaults):
+def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explicit_tools, global_defaults, queue_next=False):
     """Ordinary HTTP admission, real native checkpoints/ledger, one owner transfer."""
     workspace = gateway.root / 'instances/contract'
     sid, rid = 'foreground-parent', 'foreground-resume-source'
@@ -1497,7 +1497,9 @@ def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explic
     tools = ['work_ledger','write_file','read_file','complete_task']
     if explicit_tools:
         body['allowed_tools'] = tools
-    gateway.request('/v1/sessions/' + sid + '/turns', body)
+    frozen = _enqueue_behind_running_turn(gateway, sid, body) if queue_next else None
+    if not queue_next:
+        gateway.request('/v1/sessions/' + sid + '/turns', body)
     tid = 'turn:' + rid
     deadline = time.monotonic() + 50
     task = None
@@ -1513,6 +1515,8 @@ def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explic
     assert task and task['state']=='completed_verified', (task,(gateway.root/'gateway.log').read_text()[-18000:])
     _, original = gateway.request('/v1/requests/' + rid)
     _, continuation = gateway.request('/v1/requests/' + tid + ':0')
+    if queue_next:
+        assert original['execution'] == frozen
     assert original['status']=='completed' and original['result']['halt_reason']=='yielded'
     assert original['execution']['model']=='contract-model'
     assert original['execution']['provider']=='openai'
@@ -1542,6 +1546,7 @@ def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explic
         events=[(event,json.loads(data)) for event,data in conn.execute('SELECT event,data_json FROM events')]
         saved_tasks=[json.loads(row[0]) for row in conn.execute('SELECT task_json FROM durable_tasks')]
     assert len(saved_tasks)==1
+    assert len([item for item in saved_tasks if item['task_id']==tid])==1
     # The completed ledger is the one created by the original foreground
     # tool, under the task's stable key, not a new background/chat ledger.
     ledgers=list((workspace/'run').glob('ledger_*.json'))
@@ -1561,6 +1566,15 @@ def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explic
     messages=session.get('session',session)['messages']
     assert len([m for m in messages if m['role']=='assistant' and m['content']=='Foreground task resumed and verified'])==1
     assert (gateway.root/'foreground-resume-calls.jsonl').read_text()==before
+    if queue_next:
+        # Full durable terminal history after restart, including the actual
+        # blocker and resumed child, not an SSE stream cut at its first finish.
+        with sqlite3.connect(f'file:{gateway.root / "gateway_sessions.sqlite3"}?mode=ro',uri=True) as conn:
+            after_events = [(name,json.loads(data)) for name,data in conn.execute('SELECT event,data_json FROM events')]
+        for request_id in ('queue-blocker', rid, tid+':0'):
+            terminals = [name for name,data in after_events
+                         if data.get('request_id')==request_id and name in _TERMINAL_EVENTS]
+            assert terminals==['turn.finish'], (request_id,terminals)
 
 
 def test_new_chat_default_snapshot_survives_real_retry(gateway):
@@ -1602,3 +1616,72 @@ def test_new_chat_default_snapshot_survives_real_internal_task_submission(gatewa
         assert child['execution'][key] == original['execution'][key]
     assert child['result']['task_completion']['ok']
     assert (gateway.root/'instances/contract/workspace/durable-report.txt').read_text() == 'DURABLE-VERIFIED-CONTENT'
+
+
+def _enqueue_behind_running_turn(gateway, sid, body):
+    """Use only the shared Chat queue wire payload while another turn runs."""
+    gateway.request('/v1/sessions/'+sid+'/turns', {
+        'text':'Say CONTRACT-WAIT', 'request_id':'queue-blocker', 'attachment_ids':[]})
+    deadline = time.monotonic()+10
+    while not (gateway.root/'provider-waiting').exists():
+        assert time.monotonic()<deadline, (gateway.root/'gateway.log').read_text()
+        time.sleep(.05)
+    payload = {'text':body['text'], 'request_id':body['request_id']}
+    status, accepted = gateway.request('/v1/sessions/'+sid+'/queue', payload)
+    assert status==202 and accepted['queued'] and accepted['status']=='queued'
+    frozen = gateway.request('/v1/requests/'+body['request_id'])[1]['execution']
+    assert frozen['model']=='contract-model' and frozen['provider']=='openai'
+    assert frozen['workspace']==str(gateway.root/'instances/contract/workspace')
+    assert frozen['_instance_defaults']['workspace']==frozen['workspace']
+    assert frozen['_instance_defaults']['route_fingerprint']
+    assert frozen['allowed_tools'] is None and frozen['caller']=='owner:cli'
+    assert frozen['attachments']==[]
+    _, replay = gateway.request('/v1/sessions/'+sid+'/queue', payload)
+    assert replay['replayed'] is True
+    assert gateway.request('/v1/requests/'+body['request_id'])[1]['execution']==frozen
+    (gateway.root/'provider-release').touch()
+    assert gateway.wait_for_terminal(sid,'queue-blocker')['status']=='completed'
+    return frozen
+
+
+def test_queue_next_default_snapshot_resumes_same_foreground_card(gateway):
+    test_foreground_chat_yield_resumes_same_card_with_real_tools(
+        gateway, explicit_tools=False, global_defaults=True, queue_next=True)
+
+
+def test_queue_next_default_snapshot_preserves_bare_file_semantics(gateway):
+    _, session = gateway.request('/v1/sessions', {})
+    sid, rid = session['session_id'], 'queue-bare-defaults'
+    body = {'text':'Create and verify CONTRACT-QUEUE-BARE', 'request_id':rid}
+    frozen = _enqueue_behind_running_turn(gateway, sid, body)
+    deadline = time.monotonic()+40
+    while time.monotonic()<deadline:
+        for approval in gateway.request('/v1/approvals')[1]['approvals']:
+            gateway.request('/v1/approvals/'+approval['approval_id'], {'approved':True,'decision':'once'})
+        row = gateway.request('/v1/requests/'+rid)[1]
+        if row['status'] in {'completed','failed','cancelled','execution_unknown'}:
+            break
+        time.sleep(.05)
+    assert row['status']=='completed', (row,(gateway.root/'gateway.log').read_text()[-18000:])
+    assert row['execution']==frozen and row['native_run_id']
+    assert row['result']['output']=='Durable report verified'
+    completion = row['result']['task_completion']
+    assert completion['ok'] is True
+    digest = hashlib.sha256(b'DURABLE-VERIFIED-CONTENT').hexdigest()
+    assert any(r.get('kind')=='file_sha256' and r.get('sha256')==digest for r in completion['verification_receipts'])
+    instance = gateway.root/'instances/contract'
+    assert (instance/'skills/queue-bare-report.txt').read_text()=='DURABLE-VERIFIED-CONTENT'
+    assert not (instance/'workspace/queue-bare-report.txt').exists()
+    calls = (gateway.root/'provider-calls.jsonl').read_text()
+    _, replay = gateway.request('/v1/sessions/'+sid+'/queue',body)
+    assert replay['replayed'] is True
+    assert gateway.request('/v1/requests/'+rid)[1]['execution']==frozen
+    assert (gateway.root/'provider-calls.jsonl').read_text()==calls
+    # Read the entire durable history after completed replay. The SSE helper
+    # intentionally stops at the first terminal event, so cannot prove uniqueness.
+    import sqlite3
+    with sqlite3.connect(f'file:{gateway.root / "gateway_sessions.sqlite3"}?mode=ro',uri=True) as conn:
+        events = [(name,json.loads(data)) for name,data in conn.execute('SELECT event,data_json FROM events')]
+    terminal = [name for name,data in events
+                if data.get('request_id')==rid and name in _TERMINAL_EVENTS]
+    assert terminal==['turn.finish']

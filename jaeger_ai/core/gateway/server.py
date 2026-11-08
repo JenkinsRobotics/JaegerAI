@@ -4075,6 +4075,7 @@ class JaegerGatewayApp:
         try:
             item = self.store.enqueue_request(
                 session_id, text, request_id=request_id, requested=requested,
+                execution_defaults=self._foreground_execution_defaults,
             )
         except RequestConflict as exc:
             return web.json_response({"error": str(exc), "session_id": session_id}, status=409)

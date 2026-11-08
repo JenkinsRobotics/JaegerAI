@@ -131,18 +131,19 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
                 ]},'finish_reason':'tool_calls'}]}
             answer = 'Foreground task resumed and verified' if background else 'FOREGROUND-PARTIAL checkpoint retained; work remains.'
             return {'choices':[{'message':{'role':'assistant','content':answer,'tool_calls':[]},'finish_reason':'stop'}]}
-        if 'CONTRACT-DURABLE' in request:
+        if 'CONTRACT-DURABLE' in request or 'CONTRACT-QUEUE-BARE' in request:
             # Script only the provider boundary; ledger, file tool, Gateway,
             # approvals, checkpoints and result delivery are production code.
+            path = 'queue-bare-report.txt' if 'CONTRACT-QUEUE-BARE' in request else 'workspace/durable-report.txt'
             tool_messages = [m for m in messages if m.get('role') == 'tool']
             steps = [
                 ('work_ledger', {'action':'create', 'task_name':'Durable report', 'total_items':1,
-                                 'verify':{'kind':'paths_exist', 'paths':['workspace/durable-report.txt']}}),
-                ('write_file', {'path':'workspace/durable-report.txt', 'content':'DURABLE-VERIFIED-CONTENT'}),
-                ('read_file', {'path':'workspace/durable-report.txt'}),
+                                 'verify':{'kind':'paths_exist', 'paths':[path]}}),
+                ('write_file', {'path':path, 'content':'DURABLE-VERIFIED-CONTENT'}),
+                ('read_file', {'path':path}),
                 ('work_ledger', {'action':'update', 'completed_ids':['report'], 'remaining_count':0}),
                 ('complete_task', {'summary':'Durable report verified',
-                    'evidence':'Wrote and read back workspace/durable-report.txt: DURABLE-VERIFIED-CONTENT'}),
+                    'evidence':f'Wrote and read back {path}: DURABLE-VERIFIED-CONTENT'}),
             ]
             step = len(tool_messages)
             if step < len(steps):

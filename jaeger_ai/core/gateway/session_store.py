@@ -1253,6 +1253,7 @@ class GatewaySessionStore:
         *,
         request_id: str | None = None,
         requested: dict[str, Any] | None = None,
+        execution_defaults: Callable[[], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Atomically add a durable follow-up request without starting it.
 
@@ -1312,6 +1313,7 @@ class GatewaySessionStore:
             meta = _row_meta(session["metadata_json"] if session else "{}")
             execution = self._resolve_execution(conn, session_id, choices, meta,
                                                 session["workspace"] if session else "")
+            self._apply_execution_defaults(execution, execution_defaults)
             position = conn.execute(
                 "SELECT COALESCE(MAX(queue_position), 0) + 1 AS p FROM client_requests "
                 "WHERE session_id=? AND status IN ('queued', 'paused')",
@@ -1608,21 +1610,7 @@ class GatewaySessionStore:
             # Server-owned defaults are evaluated only for a fresh admission,
             # after replay/conflict checks. They never enter client identity or
             # mutate session choices, and cannot add tool/caller authority.
-            if execution_defaults is not None and (
-                    not execution['workspace'] or
-                    (not execution['model'] and not execution['provider'])):
-                defaults = execution_defaults()
-                marker = {}
-                if not execution['model'] and not execution['provider']:
-                    if defaults.get('model') and defaults.get('provider'):
-                        execution.update(model=defaults['model'], provider=defaults['provider'])
-                        if defaults.get('route_fingerprint'):
-                            marker['route_fingerprint'] = defaults['route_fingerprint']
-                if not execution['workspace'] and defaults.get('workspace'):
-                    execution['workspace'] = defaults['workspace']
-                    marker['workspace'] = defaults['workspace']
-                if marker:
-                    execution['_instance_defaults'] = marker
+            self._apply_execution_defaults(execution, execution_defaults)
             # Retry and internal child tasks inherit from a canonical request,
             # never a client marker or later configuration. Session identity is
             # part of the proof even though request IDs are globally indexed.
@@ -1728,6 +1716,32 @@ class GatewaySessionStore:
                 "replayed": False,
                 "accepted": True,
             }
+
+    @staticmethod
+    def _apply_execution_defaults(
+        execution: dict[str, Any],
+        execution_defaults: Callable[[], dict[str, Any]] | None,
+    ) -> None:
+        """Freeze instance facts only for a fresh admission, never authority.
+
+        Both immediate and queued producers call this after identity/replay
+        checks, inside their transaction. Promotion must never re-resolve it.
+        """
+        if execution_defaults is not None and (
+                not execution['workspace'] or
+                (not execution['model'] and not execution['provider'])):
+            defaults = execution_defaults()
+            marker = {}
+            if not execution['model'] and not execution['provider']:
+                if defaults.get('model') and defaults.get('provider'):
+                    execution.update(model=defaults['model'], provider=defaults['provider'])
+                    if defaults.get('route_fingerprint'):
+                        marker['route_fingerprint'] = defaults['route_fingerprint']
+            if not execution['workspace'] and defaults.get('workspace'):
+                execution['workspace'] = defaults['workspace']
+                marker['workspace'] = defaults['workspace']
+            if marker:
+                execution['_instance_defaults'] = marker
 
     @staticmethod
     def _resolve_execution(
