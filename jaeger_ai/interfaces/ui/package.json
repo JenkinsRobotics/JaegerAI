@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.5.5",
-    "@rive-app/canvas": "^2.49.0",
+    "@rive-app/canvas": "^2.49.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-grid-layout": "^2.3.0",
