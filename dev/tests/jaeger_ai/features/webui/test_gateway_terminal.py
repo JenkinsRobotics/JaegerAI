@@ -69,3 +69,76 @@ def test_legacy_session_preserves_its_existing_workspace(monkeypatch, terminal_r
     monkeypatch.setattr(gateway_read_workspace, 'gateway_read_workspace', resolve)
     assert terminal_route._terminal_session_lookup({'session_id': 'legacy'}) == ('legacy', row)
     resolve.assert_not_called()
+
+@pytest.mark.parametrize('action', ['input', 'resize', 'close'])
+def test_gateway_terminal_rechecks_current_session_scope(monkeypatch, terminal_route, action):
+    # A terminal opened under profile A must not be writable after profile switch
+    # to B, even when its opaque session id is known. No real PTY is started.
+    monkeypatch.setattr(terminal_route, '_embedded_terminal_gate_allows', lambda handler: True)
+    monkeypatch.setattr(terminal_route, '_terminal_session_lookup', Mock(side_effect=KeyError('Session not found')))
+    backend = types.ModuleType('jaeger_ai.features.webui.api.terminal')
+    methods = {'input':'write_terminal','resize':'resize_terminal','close':'close_terminal'}
+    operation = Mock()
+    setattr(backend, methods[action], operation)
+    with patch.dict(sys.modules, {'jaeger_ai.features.webui.api.terminal':backend, 'api.terminal':backend}):
+        getattr(terminal_route, 'handle_terminal_' + action)(object(), {'session_id':'profile-A-gateway-session','data':'echo scope','rows':24,'cols':80})
+    operation.assert_not_called()
+
+
+def test_gateway_terminal_preserves_exact_opaque_id(monkeypatch, tmp_path, terminal_route):
+    monkeypatch.setattr(terminal_route, '_get_session', Mock(side_effect=KeyError('missing')))
+    resolve = Mock(return_value=tmp_path)
+    monkeypatch.setattr(gateway_read_workspace, 'gateway_read_workspace', resolve)
+    opaque_id = ' historic / α '
+    sid, _ = terminal_route._terminal_session_lookup({'session_id':opaque_id})
+    assert sid == opaque_id
+    resolve.assert_called_once_with(opaque_id)
+
+@pytest.mark.parametrize('action', ['input', 'resize', 'close'])
+def test_terminal_existing_scope_preserves_exact_id(monkeypatch, terminal_route, action):
+    sid = ' historic / α '
+    monkeypatch.setattr(terminal_route, '_embedded_terminal_gate_allows', lambda handler: True)
+    monkeypatch.setattr(terminal_route, '_terminal_session_lookup', Mock(return_value=(sid, SimpleNamespace(workspace='/legacy'))))
+    backend = types.ModuleType('jaeger_ai.features.webui.api.terminal')
+    operation = Mock()
+    setattr(backend, {'input': 'write_terminal', 'resize': 'resize_terminal', 'close': 'close_terminal'}[action], operation)
+    with patch.dict(sys.modules, {'jaeger_ai.features.webui.api.terminal': backend, 'api.terminal': backend}):
+        getattr(terminal_route, 'handle_terminal_' + action)(object(), {'session_id': sid, 'data': 'echo scope'})
+    assert operation.call_args.args[0] == sid
+
+
+def test_terminal_output_rejects_scope_before_attachment(monkeypatch, terminal_route):
+    monkeypatch.setattr(terminal_route, '_embedded_terminal_gate_allows', lambda handler: True)
+    monkeypatch.setattr(terminal_route, '_terminal_session_lookup', Mock(side_effect=KeyError('Session not found')))
+    backend = types.ModuleType('jaeger_ai.features.webui.api.terminal')
+    backend.attach_terminal = Mock()
+    with patch.dict(sys.modules, {'jaeger_ai.features.webui.api.terminal': backend, 'api.terminal': backend}):
+        terminal_route.handle_terminal_output(Mock(), SimpleNamespace(query='session_id=foreign'))
+    backend.attach_terminal.assert_not_called()
+    assert terminal_route.bad.call_args.args[2] == 404
+
+
+@pytest.mark.parametrize('buffered', [True, False])
+def test_terminal_output_revocation_withholds_buffer_and_unsubscribes(monkeypatch, terminal_route, buffered):
+    import queue
+    from urllib.parse import urlencode
+    sid = ' historic / α '
+    monkeypatch.setattr(terminal_route, '_embedded_terminal_gate_allows', lambda handler: True)
+    lookup = Mock(side_effect=[(sid, SimpleNamespace(workspace='/work')), KeyError('Session not found')])
+    monkeypatch.setattr(terminal_route, '_terminal_session_lookup', lookup)
+    output = Mock()
+    if buffered:
+        output.get.return_value = (7, 'output', {'text': 'private buffered output'})
+    else:
+        output.get.side_effect = queue.Empty
+    term = Mock()
+    backend = types.ModuleType('jaeger_ai.features.webui.api.terminal')
+    backend.attach_terminal = Mock(return_value=(term, output))
+    handler = Mock(headers={})
+    with patch.dict(sys.modules, {'jaeger_ai.features.webui.api.terminal': backend, 'api.terminal': backend}):
+        assert terminal_route.handle_terminal_output(handler, SimpleNamespace(query=urlencode({'session_id': sid})))
+    backend.attach_terminal.assert_called_once_with(sid, after_seq=None)
+    assert all(call.args == ({'session_id': sid},) for call in lookup.call_args_list)
+    terminal_route._sse.assert_called_once_with(handler, 'terminal_error', {'error': 'Terminal session is no longer available.'})
+    handler.wfile.write.assert_not_called()
+    term.unsubscribe.assert_called_once_with(output)

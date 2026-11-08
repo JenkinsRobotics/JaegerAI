@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from .config import get_config
-from .helpers import bad, j, require, _sanitize_error
+from .helpers import bad, j, _sanitize_error
 from .sse_chunked import end_sse_headers
 from .streaming import _sse, _sse_set_write_deadline
 from .workspace import _is_remote_terminal_backend, resolve_trusted_workspace
@@ -41,8 +41,8 @@ def _get_session(session_id: str):
 
 
 def _terminal_session_lookup(body_or_query: dict) -> tuple[str, Any]:
-    sid = str(body_or_query.get("session_id", "")).strip()
-    if not sid:
+    sid = body_or_query.get("session_id", "")
+    if not isinstance(sid, str) or not sid:
         raise ValueError("session_id required")
     try:
         s = _get_session(sid)
@@ -124,7 +124,7 @@ def handle_terminal_input(handler: Any, body: dict) -> bool:
     try:
         if not _embedded_terminal_gate_allows(handler):
             return bad(handler, _EMBEDDED_TERMINAL_GATE_DENIED_MESSAGE, 403)
-        require(body, "session_id")
+        sid, _ = _terminal_session_lookup(body)
         data = str(body.get("data", ""))
         if len(data) > 8192:
             return bad(handler, "input too large", 413)
@@ -133,7 +133,7 @@ def handle_terminal_input(handler: Any, body: dict) -> bool:
         except Exception:
             from .terminal import write_terminal
 
-        write_terminal(body["session_id"], data)
+        write_terminal(sid, data)
         return j(handler, {"ok": True})
     except KeyError as e:
         return bad(handler, str(e), 404)
@@ -147,14 +147,14 @@ def handle_terminal_resize(handler: Any, body: dict) -> bool:
     try:
         if not _embedded_terminal_gate_allows(handler):
             return bad(handler, _EMBEDDED_TERMINAL_GATE_DENIED_MESSAGE, 403)
-        require(body, "session_id")
+        sid, _ = _terminal_session_lookup(body)
         try:
             from api.terminal import resize_terminal
         except Exception:
             from .terminal import resize_terminal
 
         resize_terminal(
-            body["session_id"],
+            sid,
             rows=int(body.get("rows") or 24),
             cols=int(body.get("cols") or 80),
         )
@@ -171,25 +171,34 @@ def handle_terminal_close(handler: Any, body: dict) -> bool:
     try:
         if not _embedded_terminal_gate_allows(handler):
             return bad(handler, _EMBEDDED_TERMINAL_GATE_DENIED_MESSAGE, 403)
-        require(body, "session_id")
+        sid, _ = _terminal_session_lookup(body)
         try:
             from api.terminal import close_terminal
         except Exception:
             from .terminal import close_terminal
 
-        closed = close_terminal(body["session_id"])
+        closed = close_terminal(sid)
         return j(handler, {"ok": True, "closed": closed})
+    except KeyError as e:
+        return bad(handler, str(e), 404)
     except ValueError as e:
         return bad(handler, str(e), 400)
+    except Exception as e:
+        return bad(handler, _sanitize_error(e), 500)
 
 
 def handle_terminal_output(handler: Any, parsed: Any) -> bool:
     if not _embedded_terminal_gate_allows(handler):
         return bad(handler, _EMBEDDED_TERMINAL_GATE_DENIED_MESSAGE, 403)
     qs = parse_qs(parsed.query)
-    sid = qs.get("session_id", [""])[0]
-    if not sid:
-        return bad(handler, "session_id required")
+    try:
+        sid, _ = _terminal_session_lookup({"session_id": qs.get("session_id", [""])[0]})
+    except KeyError as e:
+        return bad(handler, str(e), 404)
+    except ValueError as e:
+        return bad(handler, str(e), 400)
+    except Exception as e:
+        return bad(handler, _sanitize_error(e), 500)
     try:
         from api.terminal import attach_terminal
     except Exception:
@@ -220,12 +229,16 @@ def handle_terminal_output(handler: Any, parsed: Any) -> bool:
             try:
                 event_seq, event, data = output.get(timeout=_SSE_HEARTBEAT_INTERVAL_SECONDS)
             except queue.Empty:
+                if not _terminal_stream_scope_allows(handler, sid):
+                    break
                 handler.wfile.write(b": terminal heartbeat\n\n")
                 handler.wfile.flush()
                 if term.closed.is_set() and output.empty():
                     _sse(handler, "terminal_closed", {"exit_code": term.proc.poll()})
                     break
                 continue
+            if not _terminal_stream_scope_allows(handler, sid):
+                break
             _sse_with_id(handler, event, data, event_id=event_seq)
             if event in ("terminal_closed", "terminal_error"):
                 break
@@ -235,3 +248,12 @@ def handle_terminal_output(handler: Any, parsed: Any) -> bool:
         term.unsubscribe(output)
     return True
 
+
+def _terminal_stream_scope_allows(handler: Any, sid: str) -> bool:
+    """Revoke an existing subscription before delivering buffered output."""
+    try:
+        _terminal_session_lookup({"session_id": sid})
+        return True
+    except Exception:
+        _sse(handler, "terminal_error", {"error": "Terminal session is no longer available."})
+        return False
