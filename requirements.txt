@@ -72,7 +72,7 @@ pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
 
 # --- vision: look_at + generate_image ---
 torch>=2.2
-transformers>=4.40
+transformers>=5.22.1
 diffusers>=0.27
 pillow>=10.0
 
