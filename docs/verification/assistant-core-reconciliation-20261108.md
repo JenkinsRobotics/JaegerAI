@@ -128,3 +128,10 @@ creation outcomes remain bounded as previously documented.
 No runtime-local work or user data is overwritten. The review candidate is not a
 remote PR or deployment. Reconciliation of existing runtime changes, backups,
 complete acceptance and separate cutover permission remain necessary.
+
+## Later conservative receipt routing
+
+The next [resident receipt-routing increment](assistant-core-resident-receipt-routing-20261108.md)
+rejects wrong-engine proof. Its focused checks pass, but the subsequent aggregate
+HTTP run exposed a separate commitment-activation race and remains PARTIAL.
+The successful HTTP result recorded here applies to this tenth increment only.
