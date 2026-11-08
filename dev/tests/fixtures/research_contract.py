@@ -97,6 +97,16 @@ def model_response(messages):
                            'evidence':'Ran grounded-citations evidence verification and read back '+report_path}),
     ]
     step = len(results)
+    # Test-only cooperative provider boundary. Native tool execution and its
+    # durable receipts have already returned; only the owned process is killed.
+    cut = Path(os.environ['JAEGER_STATE_DIR']) / 'research-cut.json'
+    if cut.exists() and json.loads(cut.read_text())['after_tools'] == step:
+        import threading
+        (cut.parent / 'research-cut-ready.json').write_text(json.dumps({
+            'pid': os.getpid(), 'after_tools': step, 'directory': directory,
+            'tool_call_ids': [m['tool_call_id'] for m in results],
+        }))
+        threading.Event().wait()
     if step > 6:
         assert result(6)['exit_code'] == 0, result(6)
         assert 'citations OK' in result(6)['stdout'], result(6)
