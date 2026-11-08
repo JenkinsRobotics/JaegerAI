@@ -71,3 +71,8 @@ a green combined qualification; it does not negate the four passed kill cases.
 Log: http-seventeenth-final.log. Fixture root:
 /workspace/shared/jaeger-20261108-test-temp/http-seventeenth-final.
 See [combined evidence](assistant-core-combined-qualification-20261108.md).
+
+The later [retry correction](assistant-core-retry-identity-20261108.md) fixes that
+separate regression. The nineteenth combined HTTP run passed all 50 selected
+cases, including these four strengthened kill cases, with the same three
+infrastructure exclusions. The failed seventeenth log is preserved.
