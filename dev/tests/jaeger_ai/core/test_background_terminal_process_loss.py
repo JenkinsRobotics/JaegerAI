@@ -16,6 +16,18 @@ def sql(root, statement, args=()):
         return [dict(row) for row in conn.execute(statement, args)]
 
 
+
+def checkpoint_snapshot(path, runs):
+    with sqlite3.connect(path) as conn:
+        slots = ','.join('?' for _ in runs)
+        stable_runs = conn.execute('SELECT id,commitment_id,attempt,provider,payload_json,parent_run_id,root_run_id,relation,created_at '
+            + 'FROM runs WHERE id IN ('+slots+') ORDER BY id', runs).fetchall()
+        checkpoints = conn.execute('SELECT * FROM checkpoints WHERE run_id IN ('+slots+') ORDER BY run_id,seq', runs).fetchall()
+        assert len(stable_runs) == len(runs)
+        assert all(any(row[0] == native for row in checkpoints) for native in runs)
+        return stable_runs, checkpoints
+
+
 def wait(predicate, gateway, timeout=50):
     end = time.monotonic()+timeout
     while time.monotonic() < end:
@@ -26,13 +38,15 @@ def wait(predicate, gateway, timeout=50):
     raise AssertionError((gateway.root/'gateway.log').read_text()[-18000:])
 
 
-@pytest.mark.parametrize('phase,drift,research', [
-    ('after_seal', None, False), ('before_seal', None, False),
-    ('after_seal', 'cancel', False), ('after_seal', 'artifact', False),
-    ('after_seal', 'goal', False), ('after_seal', None, True),
+@pytest.mark.parametrize('phase,drift,research,rotate', [
+    ('after_seal', None, False, False), ('before_seal', None, False, False),
+    ('after_seal', 'cancel', False, False), ('after_seal', 'artifact', False, False),
+    ('after_seal', 'goal', False, False), ('after_seal', None, True, False),
+    ('native_settled', None, False, False),
+    ('after_seal', None, False, True), ('native_settled', None, False, True),
 ])
-def test_background_terminal_seal_survives_only_exact_proved_completion(tmp_path, phase, drift, research):
-    gateway = OwnedGateway(tmp_path, research=research, receipt_fault={'background': True, 'phase': phase})
+def test_background_terminal_seal_survives_only_exact_proved_completion(tmp_path, phase, drift, research, rotate):
+    gateway = OwnedGateway(tmp_path, research=research, receipt_fault={'background': True, 'phase': phase, 'rotate': rotate})
     try:
         gateway.start()
         gateway.request('/v1/sessions', {'session_id': 'seal-parent', 'profile': 'jaeger'})
@@ -74,8 +88,22 @@ def test_background_terminal_seal_survives_only_exact_proved_completion(tmp_path
         before_calls = (tmp_path/'provider-requests.jsonl').read_bytes()
         before_events = sql(tmp_path, "SELECT * FROM events WHERE event LIKE 'tool.%'")
         assert len([e for e in before_events if e['event'] == 'tool.completed']) == (10 if research else 5)
-        runs = [request['native_run_id']]
+        enrollment = sql(tmp_path, 'SELECT native_runs_json FROM background_native_enrollments WHERE request_id=?', (rid,))[0]
+        runs = json.loads(enrollment['native_runs_json'])
+        assert len(runs) == len(set(runs)) == (2 if rotate else 1)
+        assert request['native_run_id'] == runs[-1]
+        if rotate:
+            assert json.loads((tmp_path/'rotation-returned.json').read_text())['native_run_id'] == runs[0]
+        native_db = tmp_path/'instances/contract/memory/state.db'
+        with sqlite3.connect(native_db) as conn:
+            states = dict(conn.execute('SELECT id,state FROM runs'))
+        if phase in {'after_seal', 'native_settled'}:
+            assert all(states[native] == 'completed' for native in runs)
+        else:
+            assert states[runs[-1]] == 'active'
+
         before_native = native_evidence(gateway, runs)
+        before_checkpoints = checkpoint_snapshot(native_db, runs)
         files = {str(path.relative_to(tmp_path)): (path.read_bytes(), path.stat().st_mtime_ns)
                  for path in (tmp_path/'instances/contract/workspace').rglob('*') if path.is_file()}
         assert files
@@ -120,6 +148,11 @@ def test_background_terminal_seal_survives_only_exact_proved_completion(tmp_path
             assert (tmp_path/'provider-requests.jsonl').read_bytes() == before_calls
             assert sql(tmp_path, "SELECT * FROM events WHERE event LIKE 'tool.%'") == before_events
             assert native_evidence(gateway, runs) == before_native
+            assert checkpoint_snapshot(native_db, runs) == before_checkpoints
+            if phase in {'after_seal', 'native_settled'}:
+                with sqlite3.connect(native_db) as conn:
+                    terminal_roots = {row[0]: (row[1], row[2]) for row in conn.execute('SELECT id,state,owner_pid FROM runs')}
+                assert all(terminal_roots[native] == ('completed', None) for native in runs)
             assert all((tmp_path/name).read_bytes() == content and (tmp_path/name).stat().st_mtime_ns == stamp
                        for name, (content, stamp) in files.items())
             terminal = sql(tmp_path, "SELECT * FROM events WHERE session_id=? AND event IN ('turn.finish','turn.reconciled')", (sid,))

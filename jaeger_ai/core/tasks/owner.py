@@ -1321,10 +1321,10 @@ class GatewayTaskOwner:
                 current.payload['native_run_id'] = row['native_run_id']
             current.payload['verification'] = evidence
             native_unknown = False
-            if can_verify and current.payload.get('background_admission_version') == 1:
+            if (can_verify or current.cancellation) and current.payload.get('background_admission_version') == 1:
                 from .background_receipts import assert_settlement_safe
                 try:
-                    assert_settlement_safe(settlement_conn, self, current)
+                    assert_settlement_safe(settlement_conn, self, current, for_cancellation=bool(current.cancellation))
                 except Exception:
                     # An unsealed unsupported tree or late retained-state
                     # change cannot become verified merely from file bytes.
@@ -1340,7 +1340,7 @@ class GatewayTaskOwner:
             elif current.cancellation and unconfirmed:
                 current.payload['cancellation_children'] = children
                 authoritative_transition(current, TaskState.PAUSED,
-                    error='Cancellation requested; owned child execution remains unconfirmed')
+                    error='Cancellation requested; execution or owned child outcome remains unconfirmed')
             elif current.cancellation and status != 'execution_unknown':
                 current.payload['cancellation_children'] = children
                 authoritative_transition(current, TaskState.CANCELLED)
@@ -1684,13 +1684,21 @@ class GatewayTaskOwner:
             if current.is_terminal or current.payload.get('attempt', 0) != task.payload.get('attempt', 0):
                 return
             current.payload['cancellation_children'] = children
-            if unconfirmed_ids(children):
+            graph_unknown = False
+            if current.payload.get('background_admission_version') == 1:
+                from .background_receipts import assert_settlement_safe
+                try:
+                    assert_settlement_safe(cancellation_conn, self, current, for_cancellation=True)
+                except Exception:
+                    graph_unknown = True
+            if graph_unknown or unconfirmed_ids(children):
                 authoritative_transition(current, TaskState.PAUSED,
-                    error='Cancellation requested; owned child execution remains unconfirmed')
+                    error='Cancellation requested; execution or owned child outcome remains unconfirmed')
             elif not in_flight:
                 authoritative_transition(current, TaskState.CANCELLED)
             self._checkpoint(current, receipt or {})
-        task = self.store.update_task(task_id, record_cancellation)
+        with self.gateway.store._immediate() as cancellation_conn:
+            task = self.store.update_task_in_transaction(cancellation_conn, task_id, record_cancellation)
         for approval in self.gateway.store.list_pending_approvals():
             if (approval.get('metadata') or {}).get('task_id') == task_id:
                 self.gateway.store.resolve_approval(approval['approval_id'], approved=False, decision='deny')

@@ -1,4 +1,4 @@
-"""Owned Gateway process for contract tests; only the model call is scripted."""
+"""Owned Gateway with synthetic provider and nominated lifecycle/crash controls."""
 
 import asyncio
 import json
@@ -64,7 +64,37 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
                 **fault, 'request_id': request_id, 'pid': os.getpid()}))
             threading.Event().wait()
 
-        if fault['phase'] == 'before_seal' and hasattr(JaegerGatewayApp, '_commit_background_outcome'):
+        if fault.get('rotate'):
+            # A synthetic executor closes its first normally returned slice.
+            # The next real TurnExecutive call must create/bind a distinct root;
+            # no task completion or final receipt is fabricated here.
+            original_react = EntityRuntime.run_subordinate_react
+            def rotated_react(self, prompt, **kwargs):
+                captured = []
+                callback = kwargs.get('on_run')
+                def accept(ident):
+                    captured.append(ident)
+                    if callback:
+                        callback(ident)
+                kwargs['on_run'] = accept
+                result = original_react(self, prompt, **kwargs)
+                marker = state / 'rotation-returned.json'
+                if captured and not marker.exists() and str(kwargs.get('session_key', '')).startswith('task:'):
+                    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+                    assert not result.get('halt_reason') and not result.get('error')
+                    SqliteRunStore().transition(captured[-1], 'completed', reason='synthetic_returned_slice')
+                    marker.write_text(json.dumps({'native_run_id': captured[-1]}))
+                return result
+            EntityRuntime.run_subordinate_react = rotated_react
+        if fault['phase'] == 'native_settled':
+            from jaeger_ai.core.tasks import background_receipts
+            original_settle = background_receipts.complete_native_runs
+            def fault_settle(owner, task, runs):
+                result = original_settle(owner, task, runs)
+                barrier(f'{task.task_id}:{task.payload.get("attempt", 0)}')
+                return result
+            background_receipts.complete_native_runs = fault_settle
+        elif fault['phase'] == 'before_seal' and hasattr(JaegerGatewayApp, '_commit_background_outcome'):
             original_background = JaegerGatewayApp._commit_background_outcome
             def fault_background(self, request_id, *args, **kwargs):
                 barrier(request_id)
@@ -203,6 +233,8 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
             answer = 'Foreground task resumed and verified' if background else 'FOREGROUND-PARTIAL checkpoint retained; work remains.'
             return {'choices':[{'message':{'role':'assistant','content':answer,'tool_calls':[]},'finish_reason':'stop'}]}
         if 'CONTRACT-DURABLE' in request or 'CONTRACT-QUEUE-BARE' in request:
+            if fault and fault.get('rotate') and not (state / 'rotation-returned.json').exists():
+                return {'choices':[{'message':{'role':'assistant','content':'Initial synthesis returned; report remains to be written.', 'tool_calls':[]}, 'finish_reason':'stop'}]}
             # Script only the provider boundary; ledger, file tool, Gateway,
             # approvals, checkpoints and result delivery are production code.
             path = 'queue-bare-report.txt' if 'CONTRACT-QUEUE-BARE' in request else 'workspace/durable-report.txt'

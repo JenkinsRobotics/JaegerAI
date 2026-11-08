@@ -14,19 +14,24 @@ projection left the request `execution_unknown`, even with complete report
 bytes. The new process fixture reproduces that failure on the unchanged base
 with only the test fixture and test copied into a separate clone.
 
-The additive schema-18 background journal is separate from foreground journals.
+The schema-18 background journal is separate from foreground journals.
+Schema 19 adds guarded owner-native enrollment, without historical backfill.
 Before dispatch, the resident producer captures a single-use producer identity,
 exact request identity, immutable task admission, admitted agent and Gateway
 PID/generation. Only its normally awaited return may seal a clean, nonempty
 completed result. The owner independently verifies artifacts or both Research
 report/source-ledger obligations. Every accepted native run, checkpoint and
-effect is checked and fingerprinted. No worker-supplied completed status alone
-is sufficient. Binding another native after sealing is rejected.
+effect is checked and fingerprinted. After positive final verification, every
+accepted root is legally completed and the files/operations/authority are
+rechecked before the version-4 seal is written. No worker-supplied completed
+status alone is sufficient. Binding another native after sealing is rejected.
 
-Durable native runs legitimately remain active until TaskOwner settlement,
-including after a clean final slice. Recovery does not invent a terminal native
-state. Returned producer identity plus positive independent verification is the
-completion proof; an active checkpoint or absence of pending effects is not.
+Durable native runs legitimately remain active after yielded slices. Final
+verified no-child results now legally complete the accepted roots before the
+seal, so ordinary boot orphan recovery does not relabel already-proved work.
+No recoverable/owner_lost label grants completion, and no illegal transition or
+fake intermediate active state is used. Native completion alone still grants no
+request recovery: loss after native completion but before seal stays unknown.
 
 Normal projection and recovery both use the exact sealed output. Research
 verification intentionally replaces provisional worker prose with the checked
@@ -43,7 +48,8 @@ terminal event use the existing atomic/idempotent request projection.
 
 ## Negative boundary
 
-- Pre-seal process loss remains unknown. No interrupted replay is implemented.
+- Pre-seal process loss remains unknown, including the native-completion-to-seal
+  gap. No interrupted replay is implemented.
 - Historical tasks, explicit-provider/specialist routes and foreground journals
   do not acquire this recovery contract.
 - Yielded, blocked, owner-needed, failed, empty and unverifiable returned results
@@ -219,3 +225,75 @@ variants and pre-bind drift tests require final-frozen qualification; those
 prior counts must not be presented as the final result. Final immutable runner
 receipts and independent requalification determine whether this child can leave
 HOLD. Neither preceding held checkout nor its evidence was modified.
+
+
+## Producer completion and truthful Stop correction
+
+Frozen `c7cbffab032d6de0655df3c038cb8bfc3b63d8e6` (tree
+`8065a46d649bc7c63ce1c9332a579f505c1da113`) remains unchanged and held.
+Its exact qualification passed unit 338, full verify and smoke 170, each exit 0;
+HTTP was 2 failed / 10 passed, exit 1, and runner exit 1. The two positive
+plain/Research recovery failures were real: request projection succeeded, then
+RecoveryManager changed the orphan active native to recoverable/owner_lost and
+the lifecycle veto paused TaskOwner. This was not an approval-state bypass or
+a reason to trust a recovery label.
+
+Independent c7 review had 60 unique passing completion/recovery/enrollment/
+migration controls, then found four Stop failures plus one clean control. Stop
+could report cancelled with an earlier accepted or indirect child native effect
+pending, including truncated task history. Journal-independent ccda0c attribution
+also had 2 failed / 1 passed, exit 1, proving this Stop defect was pre-existing.
+Evidence is preserved at `/workspace/shared/bg-graph-review-state-20261109` and
+`/workspace/shared/bg-attribution-state-20261109`.
+
+The next isolated checkout is `/workspace/shared/jaeger-background-producer-settle-20261109`;
+evidence root is `/workspace/shared/bg-producer-settle-state-20261109`.
+Only after the exact awaited final result, artifact/Research verification,
+current authority/lease and settled qualified graph are established does the
+producer call legal native completion for every accepted root. It rechecks
+files, operations and authority, then writes a version-4 seal with actual terminal
+native evidence. Reads require that terminal evidence to remain exact. Earlier
+seals are not silently upgraded. Yielded slices remain active. Roots that cannot
+legally complete are refused rather than forced through an active state.
+
+The completion graph also supplies a negative cancellation-settlement veto,
+including in later cancellation reconciliation. Known pending effects, incomplete
+enrollment/history, running producers or unresolved owned children keep a task
+paused with cancellation retained; they do not produce a confirmed cancelled
+outcome. Clean Stop and cancellation before admission remain supported. This
+check does not mint a seal, invoke a producer, repeat effects or signal foreign
+children. Retained enrollment is included even when mutable task history or a
+request row disappears.
+
+The process fixture now includes two distinct actually accepted native roots.
+A synthetic executor legally closes its first returned partial slice; the real
+TurnExecutive creates the next root through the normal binder. The final owner
+still has to verify the full report. Tests require exact enrollment, terminal
+states at the nominated barrier, every accepted checkpoint, stable native data,
+provider/tool/effect/file counts, and once-only delivery across two real restarts.
+The new native-settled barrier is before the journal commit: SIGKILL there must
+leave completed native rows but an unknown request, with no replay.
+
+Existing after-projection lifecycle fault tests use the legitimate ordinary
+unsealed completed-child path, where an active root can still legally move to
+waiting/failed/blocked. Equivalent faults before the producer seal are also
+covered. For a sealed final result, native completion is already terminal and
+such a later transition is rejected by the native state machine; the tests do
+not force an illegal transition merely to preserve an old active-root premise.
+
+Pre-freeze diagnostics are retained with explicit exits:
+- `initial-tests`: 120 passed, exit 0 before the additional boundary cases.
+- `boundary-tests`: 136 passed, exit 0, including truthful Stop and drift during
+  native-completion-to-seal verification.
+- `boundary-http`: 3 passed / 2 failed, exit 1. Plain/Research sealed recovery and
+  native-completed-without-seal preservation passed. The rotation fixture used
+  the wrong session namespace, so its two rotation cases never reached the
+  nominated barrier; these are fixture failures, not passing qualification.
+- `rotated-http`: the corrected two rotation cases passed, exit 0. Assertions
+  were strengthened to require two distinct enrolled roots, all their native
+  checkpoints and exact expected states, not relaxed to a one-root path.
+
+Final-frozen tests and independent review remain separate evidence. The final
+HTTP suite contains ten background terminal cases plus five affected existing
+cases. No check here claims general interruption replay, provider outage
+recovery, Mac/runtime/browser qualification, or an atomic cross-store commit.
