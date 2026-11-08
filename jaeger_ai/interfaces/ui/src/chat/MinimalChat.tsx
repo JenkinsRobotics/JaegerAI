@@ -1,3 +1,4 @@
+import {ConversationMinimap} from "./ConversationMinimap";
 import {AgentActivity} from "./AgentActivity";
 import {ChevronIcon, GlyphCode} from "../icons";
 import {partitionChatParts} from "./workGrouping";
@@ -846,6 +847,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
             onSelect={(id) => { setMenuOpen(false); if (id === "history") (host as WebHost).openHistory?.(agent.id); else host.openDetails?.(agent.id); }} />
         </div>
       </div>
+      <ConversationMinimap onNavigate={markInput} scroller={scroller} revision={`${sessionId}:${session?.turns.length}`} />
       <div className="jg-chat__scroll" ref={scroller} onContextMenu={onMessageMenu} onScroll={onScroll} onWheel={markInput} onTouchMove={markInput} onPointerDown={markInput} onKeyDown={markInput}>
         <div className="jg-chat__column">
           {filesOpen && host.sessionFiles && sessionId && <><SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)} onSelectMedia={bytesUploadEnabled()&&draftReady&&!active&&!recoveryBlocked?file=>{try{if(!sessionId||active||recoveryBlocked)return;stageSavedMedia([],sessionId,file);setFiles(current=>{const result=stageSavedMedia(current,sessionId,file);setFileNote(result.note);return result.files;});}catch(e){setFileNote(String(e));}}:undefined}/>{host.taskArtifacts&&<TaskArtifacts key={"artifacts:"+sessionId} controls={host.taskArtifacts} sessionId={sessionId}/>}</>}
@@ -859,7 +861,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
             </div>
           )}
           {session?.turns.map((turn, index) => entries[turn.turnId] ? (
-            <section key={turn.turnId} className={`jg-turn jg-turn--entry${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
+            <section key={turn.turnId} data-turn-id={turn.turnId} className={`jg-turn jg-turn--entry${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
               {needsSeparator(session.turns[index - 1]?.createdAt, turn.createdAt) && (
                 <div className="jg-separator" role="separator">{separatorLabel(turn.createdAt!)}</div>
               )}

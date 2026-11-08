@@ -55,3 +55,18 @@ it("keeps the confirmed mode and exposes an error when the change fails", async 
   expect(element.querySelector('[role="alert"]')?.textContent).toContain("Gateway refused the change");
   expect(element.querySelector('[role="menu"]')).not.toBeNull();
 });
+
+it('refreshes a mode changed on another device before selecting',async()=>{
+ const read=vi.fn().mockResolvedValueOnce({autonomy:'ask'}).mockResolvedValue({autonomy:'scoped'});
+ const element=await renderControl({runtimeAutonomy:read,setRuntimeAutonomy:vi.fn()});
+ await act(async()=>element.querySelector<HTMLButtonElement>('.jg-composer__policy')!.click());
+ expect(element.querySelector('.jg-composer__policy')?.textContent).toContain('Approve for me');
+});
+it('does not present a failed read as confirmed Ask mode',async()=>{
+ const save=vi.fn();const element=await renderControl({runtimeAutonomy:vi.fn().mockRejectedValue(Error('offline')),setRuntimeAutonomy:save});
+ expect(element.querySelector('.jg-composer__policy')?.textContent).toContain('unavailable');
+ await act(async()=>element.querySelector<HTMLButtonElement>('.jg-composer__policy')!.click());
+ expect(element.querySelector('[role="alert"]')?.textContent).toContain('Cannot verify');
+ expect([...element.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].every(button=>button.disabled)).toBe(true);
+ expect(save).not.toHaveBeenCalled();
+});

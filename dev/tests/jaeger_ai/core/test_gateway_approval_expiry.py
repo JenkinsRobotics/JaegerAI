@@ -198,6 +198,8 @@ def test_session_grant_expires_on_gateway_restart_without_losing_metadata(tmp_pa
 def test_other_approval_scopes_keep_their_behavior(
     running_app, monkeypatch, tmp_path, decision, second_allowed,
 ):
+    from jaeger_ai.core.runtime import autonomy
+    autonomy.set_autonomy("scoped")  # Standing grants are a scoped-mode feature.
     from jaeger_ai.core.entity.runtime import EntityRuntime
     from jaeger_os.core.safety.permissions import PermissionTier
 
