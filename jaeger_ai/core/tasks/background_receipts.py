@@ -94,7 +94,7 @@ def assert_open(conn, row):
             raise OwnerReceiptConflict('Sealed background producer cannot bind another run')
 
 
-def _settled(owner, task, row):
+def _settled(owner, task, row, task_runs=None):
     from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
     from jaeger_ai.core.entity.runtime import EntityRuntime
     rid = row['request_id']
@@ -102,7 +102,7 @@ def _settled(owner, task, row):
     runs = contract.get('native_run_ids') or []
     if not runs or len(set(runs)) != len(runs) or runs[-1] != row['native_run_id']:
         raise OwnerReceiptConflict('Background result has no exact accepted native runs')
-    for native in runs:
+    for native in task_runs or runs:
         run = SqliteRunStore().get(native)
         # Durable natives intentionally stay active until task settlement. A
         # returned producer in this lease, not lifecycle inference, is the proof.
@@ -151,13 +151,90 @@ def _native_evidence(conn, task, runs):
     return evidence
 
 
-def _has_children(conn, row, runs):
+def _task_scope(conn, task):
+    """Retain every earlier attempt's ownership, not only its final native."""
+    runs, references = [], []
+    for rid, admission in task.payload['background_admissions'].items():
+        row = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (rid,)).fetchone()
+        if (row is None or admission['attempt'] > task.payload.get('attempt', 0)
+                or receipt_error(task, {**dict(row), 'execution': json.loads(row['execution_json'])})):
+            raise OwnerReceiptConflict('Background retained attempt ownership is unavailable')
+        references.extend((rid, row['turn_id']))
+        runs.extend(admission.get('native_run_ids') or [])
+    runs = list(dict.fromkeys(runs))
+    return runs, list(dict.fromkeys([*references, *runs]))
+
+
+def _has_children(conn, references, runs):
     # No delegated tree is eligible in this bounded slice, including historical
     # relationships that cannot be recursively qualified from owner receipts.
-    references = [row['request_id'], row['turn_id'], *runs]
-    return conn.execute('SELECT 1 FROM handoffs WHERE parent_run_id IN ('
-        + ','.join('?' for _ in references) + ") OR json_extract(metadata_json, '$.parent_binding.request_id')=? LIMIT 1",
-        (*references, row['request_id'])).fetchone() is not None
+    slots = ','.join('?' for _ in references)
+    if conn.execute('SELECT 1 FROM handoffs WHERE parent_run_id IN (' + slots
+        + ") OR json_extract(metadata_json, '$.parent_binding.request_id') IN (" + slots + ') LIMIT 1',
+        (*references, *references)).fetchone():
+        return True
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    native = {run.id: run for run in SqliteRunStore().list()}
+    accepted = set(runs)
+    for run_id in accepted:
+        run = native.get(run_id)
+        # Actual owner continuation reuses or rotates accepted root runs.
+        # An accepted callback does not convert a delegate or foreign lineage
+        # into that contract. Parent links wholly inside the accepted root
+        # trajectory are not an unaccepted delegated child.
+        if (run is None or run.relation != 'root'
+                or (run.root_run_id and run.root_run_id not in accepted)):
+            return True
+        seen = set()
+        while run is not None:
+            if run.id in seen or run.id not in accepted:
+                return True
+            seen.add(run.id)
+            if not run.parent_run_id:
+                break
+            run = native.get(run.parent_run_id)
+            if run is None:
+                return True
+    # root_run_id catches a deeper descendant even when its immediate parent
+    # is outside the accepted IDs or its historical parent row is missing.
+    return any(run.id not in accepted and
+        (run.parent_run_id in accepted or run.root_run_id in accepted)
+        for run in native.values())
+
+
+
+def assert_settlement_safe(conn, owner, task):
+    """An unsupported seal must not hide unresolved work in normal settlement.
+
+    This is a veto for enrolled background producers, not recursive completion
+    authority for children. Settled trees still cannot acquire a journal seal.
+    """
+    rid = f'{task.task_id}:{task.payload.get("attempt", 0)}'
+    if not conn.execute('SELECT 1 FROM background_request_journal WHERE request_id=?', (rid,)).fetchone():
+        return None
+    runs, references = _task_scope(conn, task)
+    evidence = _native_evidence(conn, task, runs)
+    from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger, SqliteRunStore
+    native = SqliteRunStore().list()
+    owned = set(runs)
+    # Include deeper descendants even if root metadata is incomplete. An
+    # unresolved child is a veto regardless of a parent's terminal label.
+    while True:
+        added = {run.id for run in native if run.parent_run_id in owned or run.root_run_id in owned} - owned
+        if not added:
+            break
+        owned.update(added)
+    if (any(run.id in owned - set(runs) and run.state not in {'completed', 'failed', 'cancelled'} for run in native)
+            or any(effect.run_id in owned and effect.status == 'pending' for effect in SqliteEffectLedger().list())):
+        raise OwnerReceiptConflict('Background task tree has unresolved native work; inspect without replay')
+    from jaeger_ai.core.gateway.handoff_cancellation import status, unconfirmed_ids
+    slots = ','.join('?' for _ in references)
+    handoffs = conn.execute('SELECT * FROM handoffs WHERE parent_run_id IN (' + slots
+        + ") OR json_extract(metadata_json, '$.parent_binding.request_id') IN (" + slots + ')',
+        (*references, *references)).fetchall()
+    if unconfirmed_ids([status(owner.gateway, owner.gateway.store._handoff_row(row)) for row in handoffs]):
+        raise OwnerReceiptConflict('Background task tree has unresolved handoffs; inspect without replay')
+    return evidence
 
 
 def finish(owner, request_id, token, result, assistant_text, follow_ups):
@@ -181,11 +258,13 @@ def finish(owner, request_id, token, result, assistant_text, follow_ups):
                 or result.get('turn_id') != row['turn_id']):
             raise OwnerReceiptConflict('Background outcome differs from its live producer')
         runs = _settled(owner, task, row)
+        task_runs, references = _task_scope(conn, task)
+        _settled(owner, task, row, task_runs)
+        native_evidence = assert_settlement_safe(conn, owner, task)
         # Delegated child recovery is deliberately outside this first slice.
         # A terminal child label alone is not a recursively qualified receipt.
-        if _has_children(conn, row, runs):
+        if _has_children(conn, references, task_runs):
             return False
-        native_evidence = _native_evidence(conn, task, runs)
         checked_result = json.loads(encoded(result))
         verified, evidence = owner.verify(task, checked_result)
         if not verified or not evidence:
@@ -196,19 +275,21 @@ def finish(owner, request_id, token, result, assistant_text, follow_ups):
             # letting the verifier mutate the caller's pending response.
             assistant_text = checked_result['text']
             result = {**checked_result, 'output': assistant_text}
-        proof = {'source': SOURCE, 'version': 1, 'status': 'completed',
+        proof = {'source': SOURCE, 'version': 2, 'status': 'completed',
             'execution_unknown': False, 'effects_settled': True,
             'request_id': request_id, 'session_id': row['session_id'], 'turn_id': row['turn_id'],
             'native_run_id': row['native_run_id'], 'native_session': row['native_session'],
             'native_run_ids': runs, 'admission': task.payload['background_admissions'][request_id],
+            'task_native_run_ids': task_runs, 'task_admissions': task.payload['background_admissions'],
             'result': result, 'assistant_text': assistant_text, 'session_status': 'idle',
             'follow_ups': follow_ups, 'verification': evidence, 'native_evidence': native_evidence}
         serialized = encoded(proof)
         # Recheck after independent file/Research verification; cancellation or
         # a changed native binding must never turn into completion authority.
         owner.background_dispatch_guard(conn, store._request_row(row))
-        _settled(owner, task, row)
-        if _native_evidence(conn, task, runs) != native_evidence:
+        _settled(owner, task, row, task_runs)
+        if (_has_children(conn, references, task_runs)
+                or _native_evidence(conn, task, task_runs) != native_evidence):
             raise OwnerReceiptConflict('Background operation evidence changed during verification')
         conn.execute('UPDATE background_request_journal SET terminal_json=?, terminal_sha256=? WHERE request_id=?',
             (serialized, hashlib.sha256(serialized.encode()).hexdigest(), request_id))
@@ -220,15 +301,18 @@ def read(conn, row):
     if journal is None or journal['terminal_json'] is None:
         return None
     task = _bound(conn, row, journal)
-    if _has_children(conn, row, task.payload['background_admissions'][row['request_id']].get('native_run_ids') or []):
+    task_runs, references = _task_scope(conn, task)
+    if _has_children(conn, references, task_runs):
         raise OwnerReceiptConflict('Background delegated outcomes need separate reconciliation')
     if hashlib.sha256(journal['terminal_json'].encode()).hexdigest() != journal['terminal_sha256']:
         raise OwnerReceiptConflict('Background terminal snapshot is damaged')
     proof = json.loads(journal['terminal_json'])
     contract = task.payload['background_admissions'][row['request_id']]
-    if (proof.get('source') != SOURCE or proof.get('version') != 1 or proof.get('status') != 'completed'
+    if (proof.get('source') != SOURCE or proof.get('version') != 2 or proof.get('status') != 'completed'
             or proof.get('effects_settled') is not True or proof.get('execution_unknown') is not False
             or proof.get('admission') != contract or proof.get('native_run_ids') != contract.get('native_run_ids')
+            or proof.get('task_native_run_ids') != task_runs
+            or proof.get('task_admissions') != task.payload['background_admissions']
             or any(proof.get(key) != row[key] for key in
                    ('request_id', 'session_id', 'turn_id', 'native_run_id', 'native_session'))
             or proof.get('result', {}).get('status') != 'completed'
@@ -244,6 +328,7 @@ def read(conn, row):
     verified, evidence = GatewayTaskOwner.verify(task, checked_result)
     if (not verified or evidence != proof['verification']
             or ('research_contract' in task.payload and checked_result.get('text') != proof['assistant_text'])
-            or _native_evidence(conn, task, proof['native_run_ids']) != proof['native_evidence']):
+            or _has_children(conn, references, task_runs)
+            or _native_evidence(conn, task, task_runs) != proof['native_evidence']):
         raise OwnerReceiptConflict('Background verified artifacts changed; inspect without replay')
     return proof
