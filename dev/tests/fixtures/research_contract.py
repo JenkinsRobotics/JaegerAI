@@ -5,6 +5,7 @@ invented prose are deliberately not represented as real-world evidence.
 """
 import json
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -45,17 +46,34 @@ def install_retrieval():
     requests.get = get
 
 
-def terminal_command():
-    prefix = shlex.join([sys.executable, str(SCRIPT), '--ledger', 'workspace/sources.json'])
+def terminal_command(directory=''):
+    base = Path('workspace') / directory
+    prefix = shlex.join([sys.executable, str(SCRIPT), '--ledger', str(base/'sources.json')])
     return ' && '.join([
-        prefix + ' ingest workspace/retrieval.json',
-        prefix + ' quote 1 --text ' + shlex.quote(QUOTE) + ' --from workspace/page.txt',
-        prefix + ' render --style evidence --replace-in workspace/research-report.md',
-        prefix + ' verify workspace/research-report.md --evidence --strict --min-coverage 1',
+        prefix + ' ingest ' + shlex.quote(str(base/'retrieval.json')),
+        prefix + ' quote 1 --text ' + shlex.quote(QUOTE) + ' --from ' + shlex.quote(str(base/'page.txt')),
+        prefix + ' render --style evidence --replace-in ' + shlex.quote(str(base/'research-report.md')),
+        prefix + ' verify ' + shlex.quote(str(base/'research-report.md')) + ' --evidence --strict --min-coverage 1',
     ])
 
 
 def model_response(messages):
+    # Explicit contracts receive server-designated task-local paths. Historical
+    # prefix-only fixtures retain their existing workspace-root artifact layout.
+    directory = ''
+    for message in messages:
+        content = message.get('content')
+        if not isinstance(content, str):
+            continue
+        match = re.search(r'^Research artifact paths: (\{[^\n]+\})$', content, re.MULTILINE)
+        if match:
+            paths = json.loads(match[1])
+            directory = str(Path(paths['report_path']).parent)
+            assert paths == {'report_path': directory+'/research-report.md',
+                             'ledger_path': directory+'/sources.json'}
+            break
+    base = Path('workspace') / directory
+    report_path = str(base/'research-report.md')
     results = [m for m in messages if m.get('role') == 'tool' and str(m.get('tool_call_id', '')).startswith('research-')]
     def result(index):
         raw = next(m['content'] for m in results if m['tool_call_id'] == f'research-{index}')
@@ -66,17 +84,17 @@ def model_response(messages):
     # the ledger or copied directly from this fixture's retrieval definitions.
     steps = [
         ('work_ledger', {'action':'create', 'task_name':'Synthetic research', 'total_items':1,
-                        'verify':{'kind':'paths_exist','paths':['workspace/research-report.md']}}),
+                        'verify':{'kind':'paths_exist','paths':[report_path]}}),
         ('web_search', {'query':'fixture observations'}),
         ('web_extract', {'url':result(1)['results'][0]['url'] if len(results) > 1 else URL}),
-        ('write_file', {'path':'workspace/retrieval.json', 'content':json.dumps(result(1)) if len(results) > 1 else ''}),
-        ('write_file', {'path':'workspace/page.txt', 'content':result(2)['text'] if len(results) > 2 else ''}),
-        ('write_file', {'path':'workspace/research-report.md', 'content':'# Synthetic research fixture\n\n' + QUOTE + '[1]\n'}),
-        ('terminal', {'command':terminal_command(), 'timeout_s':60.0}),
-        ('read_file', {'path':'workspace/research-report.md'}),
+        ('write_file', {'path':str(base/'retrieval.json'), 'content':json.dumps(result(1)) if len(results) > 1 else ''}),
+        ('write_file', {'path':str(base/'page.txt'), 'content':result(2)['text'] if len(results) > 2 else ''}),
+        ('write_file', {'path':report_path, 'content':'# Synthetic research fixture\n\n' + QUOTE + '[1]\n'}),
+        ('terminal', {'command':terminal_command(directory), 'timeout_s':60.0}),
+        ('read_file', {'path':report_path}),
         ('work_ledger', {'action':'update','completed_ids':['report'],'remaining_count':0}),
         ('complete_task', {'summary':'Synthetic citation ledger checked; not independent factual verification.',
-                           'evidence':'Ran grounded-citations evidence verification and read back workspace/research-report.md'}),
+                           'evidence':'Ran grounded-citations evidence verification and read back '+report_path}),
     ]
     step = len(results)
     if step > 6:

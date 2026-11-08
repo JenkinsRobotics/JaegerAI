@@ -1,4 +1,4 @@
-"""Qualification of cooperative grounding, not automatic source enforcement.
+"""Qualification of historical cooperative grounding and opt-in citation consistency.
 
 No browser or live source/model is exercised. Documents is reopened through
 its authenticated production HTTP API, preserving the task result text while
@@ -24,17 +24,35 @@ from dev.tests.fixtures.research_contract import QUOTE, SCRIPT, TITLE, URL, term
 pytestmark = [pytest.mark.integration, pytest.mark.subprocess]
 
 
-def test_research_report_source_chain_and_documents_reopen(tmp_path):
+@pytest.mark.parametrize('explicit_contract', [False, True])
+def test_research_report_source_chain_and_documents_reopen(tmp_path, explicit_contract):
     gateway = OwnedGateway(tmp_path, webui=True, research=True)
     sid = 'research-parent'
     body = {'session_id':sid, 'goal':'Deep research: CONTRACT-RESEARCH synthetic observations',
             'request_id':'research-proposal-once', 'proposal':True}
+    if explicit_contract:
+        from jaeger_ai.core.tasks.research import RESEARCH_CONTRACT
+        body['research_contract'] = dict(RESEARCH_CONTRACT)
     approved = []
     try:
         gateway.start()
         gateway.request('/v1/sessions', {'session_id':sid,'profile':'jaeger'})
         admitted = gateway.request('/v1/tasks', body, caller='webui')[1]
         tid = admitted['task_id']
+        directory = 'research/'+tid if explicit_contract else ''
+        artifact_prefix = 'workspace/'+directory+'/' if directory else 'workspace/'
+        if explicit_contract:
+            from urllib.error import HTTPError
+            for invalid in [None, {}, {**RESEARCH_CONTRACT, 'version':2},
+                            {**RESEARCH_CONTRACT, 'report_path':'unrelated.txt'}]:
+                with pytest.raises(HTTPError) as rejected:
+                    gateway.request('/v1/tasks', {**body, 'research_contract':invalid}, caller='webui')
+                assert rejected.value.code == 400
+            without_contract = {k:v for k,v in body.items() if k != 'research_contract'}
+            with pytest.raises(HTTPError) as conflict:
+                gateway.request('/v1/tasks', without_contract, caller='webui')
+            assert conflict.value.code == 409
+
         assert admitted['status'] == 'paused'
         proposed = gateway.request('/v1/tasks/'+tid)[1]
         assert proposed['provenance']['authorized'] is False
@@ -59,10 +77,10 @@ def test_research_report_source_chain_and_documents_reopen(tmp_path):
                     expected = {'research-3': 'retrieval.json', 'research-4': 'page.txt',
                                 'research-5': 'research-report.md'}
                     assert call['name'] == 'write_file' and call['call_id'] in expected, call
-                    assert shown['path'] == 'workspace/' + expected[call['call_id']]
+                    assert shown['path'] == artifact_prefix + expected[call['call_id']]
                     assert set(shown) == {'path', 'content'} and isinstance(shown['content'], str)
                 else:
-                    assert call == {'call_id':'research-6','name':'terminal','args':{'command':terminal_command(), 'timeout_s':60.0}}
+                    assert call == {'call_id':'research-6','name':'terminal','args':{'command':terminal_command(directory), 'timeout_s':60.0}}
                 assert a['approval_id'] not in {row['approval_id'] for row in approved}, a
                 gateway.request('/v1/approvals/' + a['approval_id'], {'approved':True,'decision':'once'})
                 approved.append(a)
@@ -73,7 +91,7 @@ def test_research_report_source_chain_and_documents_reopen(tmp_path):
             time.sleep(.05)
         assert task['state'] == 'completed_verified', (task, (tmp_path/'gateway.log').read_text()[-10000:])
         assert len(approved) == 4
-        root = tmp_path/'instances/contract/workspace'
+        root = tmp_path/'instances/contract/workspace'/directory
         sources = json.loads((root/'sources.json').read_text())['sources']
         assert len(sources) == 1
         assert {k:sources[0][k] for k in ['id','url','title']} == {'id':1,'url':URL,'title':TITLE}
@@ -101,7 +119,15 @@ def test_research_report_source_chain_and_documents_reopen(tmp_path):
         # that exact save/reopen HTTP workflow (no rendered browser claimed).
         result = task['result']
         result_text = result if isinstance(result,str) else result['text']
-        assert result_text == report.decode().strip()
+        assert result_text == (report.decode() if explicit_contract else report.decode().strip())
+        if explicit_contract:
+            assert task['payload']['research_contract'] == RESEARCH_CONTRACT
+            session = gateway.request('/v1/sessions/'+sid)[1]
+            parent_messages = session.get('session',session)['messages']
+            assert parent_messages[-1]['content'].encode() == report
+            assert all(row['citation_consistency']['version'] == 1 for row in task['payload']['verification'])
+        else:
+            assert all('citation_consistency' not in row for row in task['payload']['verification'])
         browser = build_opener(HTTPCookieProcessor(CookieJar()))
         def request(path, payload=None):
             headers = {'Content-Type':'application/json'}
@@ -137,6 +163,8 @@ def test_grounded_citations_negative_controls_and_semantic_limit(tmp_path):
         p = subprocess.run([sys.executable,str(SCRIPT),'--ledger',str(ledger),*map(str,args)],capture_output=True,text=True)
         print(args, p.returncode, p.stdout, p.stderr)
         return p
+    draft.write_text('No sourced results. Partial notes only.\n')
+    assert cli('verify',draft,'--evidence').returncode == 1
     assert cli('add',URL).returncode == 0
     draft.write_text(QUOTE+'[1]\n\n## Sources\n[1] '+URL+'\n')
     assert cli('verify',draft,'--evidence').returncode == 1

@@ -6,20 +6,29 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JaegerSource } from "../api/source";
-import type { Agent, Task } from "../api/types";
+import type { Agent, Task, ResearchContract } from "../api/types";
 import { label, visible } from "../agents/agentsLogic";
 import { TaskArtifacts } from "../library/TaskArtifacts";
 import { Markdown } from "../chat/Markdown";
 import { Badge, Empty, Segmented, SkeletonRows, useToast, PageHead } from "./ui";
 import { sendJson } from "./webui";
 
+export const RESEARCH_CONTRACT: ResearchContract = Object.freeze({ version: 1, kind: "citation_consistency", report_path: "research-report.md", ledger_path: "sources.json" });
+export const RESEARCH_CHECK_LIMITATION = "Checks references and saved bytes, not factual accuracy or authentic retrieval.";
+export const hasResearchContract = (t: Task) => {
+  const c = t.payload?.research_contract;
+  return c?.version === 1 && c.kind === "citation_consistency" && c.report_path === RESEARCH_CONTRACT.report_path && c.ledger_path === RESEARCH_CONTRACT.ledger_path;
+};
+export const researchStatus = (t: Task) => t.state === "completed_verified"
+  ? hasResearchContract(t) ? "Citation consistency checked" : "Completed (citation consistency not checked)"
+  : String(t.state).replace(/_/g, " ");
 export const RESEARCH_PREFIX = "Deep research: ";
 export function researchGoal(question: string, depth: "quick" | "standard" | "deep") {
   const steps = depth === "quick" ? 3 : depth === "deep" ? 8 : 5;
   return `${RESEARCH_PREFIX}${question.trim()}\n\nWork in steps: (1) break the question into up to ${steps} sub-questions; (2) investigate each with the tools you are allowed to use, noting every source; (3) reconcile conflicts; (4) write the final answer as a Markdown report with a summary, findings per sub-question, open questions, and a numbered list of sources. Say clearly when something could not be verified.`;
 }
-export const isResearch = (t: Task) => (t.goal ?? "").startsWith(RESEARCH_PREFIX);
-const question = (t: Task) => (t.goal ?? "").slice(RESEARCH_PREFIX.length).split("\n")[0];
+export const isResearch = (t: Task) => hasResearchContract(t) || (t.goal ?? "").startsWith(RESEARCH_PREFIX);
+const question = (t: Task) => (t.goal ?? "").replace(/^Deep research: /, "").split("\n")[0];
 const resultText = (r: unknown) => (typeof r === "string" ? r : r && typeof r === "object" && typeof (r as { text?: unknown }).text === "string" ? (r as { text: string }).text : r == null ? "" : "```json\n" + JSON.stringify(r, null, 2) + "\n```");
 const isProposal = (t: Task) => t.state === "paused" && t.provenance?.authorized === false && !t.run_history?.length;
 
@@ -44,7 +53,7 @@ export function ResearchPage({ source, agents, onNavigate }: { source: JaegerSou
     setBusy(true);
     try {
       const home = await source.agentHome(agentId);
-      const r = await source.taskActions.create({ session_id: home.session_id, goal: researchGoal(q, depth), request_id: crypto.randomUUID(), proposal: true });
+      const r = await source.taskActions.create({ session_id: home.session_id, goal: researchGoal(q, depth), request_id: crypto.randomUUID(), proposal: true, research_contract: RESEARCH_CONTRACT });
       toast("Research proposed — approve it to start");
       setQ(""); await load(); setSel(r.task_id);
     } catch (e) { toast(`Couldn't start research: ${(e as Error).message}`, "error"); } finally { setBusy(false); }
@@ -56,7 +65,7 @@ export function ResearchPage({ source, agents, onNavigate }: { source: JaegerSou
   };
   return (
     <div className="jg-u-page">
-      <PageHead title="Deep Research" subtitle="Multi-step research runs as a task you approve; the agent returns a sourced report." />
+      <PageHead title="Deep Research" subtitle="Multi-step research runs as a task you approve; sourced reports require citation consistency checks." />
       <form className="jg-u-card jg-compare__form" onSubmit={(e) => { e.preventDefault(); void start(); }}>
         <label className="jg-ui-field">Research question<textarea rows={3} maxLength={4000} value={q} onChange={(e) => setQ(e.target.value)} placeholder="What are the trade-offs of MLX vs GGUF for running 30B models on an M1 Max?" /></label>
         <div className="jg-ui-toolbar jg-spread">
@@ -75,17 +84,18 @@ export function ResearchPage({ source, agents, onNavigate }: { source: JaegerSou
           {!tasks && !err ? <SkeletonRows /> : !runs.length ? <Empty title="No research yet">Ask a question above to start one.</Empty> : (
             <ul className="jg-u-list">{runs.map((t) => (
               <li key={t.task_id}><button type="button" className="jg-u-row" aria-current={t.task_id === task?.task_id || undefined} onClick={() => setSel(t.task_id)}>
-                <span className="jg-u-row__text"><strong>{question(t)}</strong><span>{String(t.state)} · {t.updated_at ? new Date(t.updated_at * 1000).toLocaleString() : ""}</span></span>
+                <span className="jg-u-row__text"><strong>{question(t)}</strong><span>{researchStatus(t)} · {t.updated_at ? new Date(t.updated_at * 1000).toLocaleString() : ""}</span></span>
               </button></li>))}</ul>)}
         </section>
         <aside className="jg-ui-inspector" aria-label="Report">
           {!task ? <Empty title="No run selected" /> : (<>
             <h3>Report</h3>
             <strong>{question(task)}</strong>
-            <span className="jg-row"><Badge tone={task.state === "done" ? "ok" : task.state === "failed" ? "bad" : "warn"}>{String(task.state).replace(/_/g, " ")}</Badge></span>
+            <span className="jg-row"><Badge tone={task.state === "completed_verified" && hasResearchContract(task) ? "ok" : task.state === "failed" ? "bad" : "warn"}>{researchStatus(task)}</Badge></span>
+            <p className="jg-u-note">{hasResearchContract(task) ? RESEARCH_CHECK_LIMITATION : "Legacy research: citation consistency was not required for this task."}</p>
             <div className="jg-ui-toolbar">
               {isProposal(task) && source.taskActions && typeof task.updated_at === "number" && <button type="button" className="jg-u-btn jg-u-btn--primary" disabled={busy} onClick={() => void act(() => source.taskActions!.approve(task.task_id, task.updated_at!), "Approved — research started")}>Approve &amp; start</button>}
-              {!["done", "failed", "cancelled"].includes(String(task.state)) && source.taskActions && <button type="button" className="jg-u-btn jg-u-btn--danger" disabled={busy} onClick={() => void act(() => source.taskActions!.cancel(task.task_id), "Cancellation requested")}>Cancel</button>}
+              {!["done", "completed", "completed_verified", "blocked", "needs_owner", "failed", "cancelled"].includes(String(task.state)) && source.taskActions && <button type="button" className="jg-u-btn jg-u-btn--danger" disabled={busy} onClick={() => void act(() => source.taskActions!.cancel(task.task_id), "Cancellation requested")}>Cancel</button>}
               {task.result != null && <button type="button" className="jg-u-btn" onClick={() => void saveDoc(task)}>Save to Documents</button>}
               <button type="button" className="jg-u-btn" onClick={() => onNavigate(`/work/tasks?task=${encodeURIComponent(task.task_id)}`)}>Open task</button>
             </div>

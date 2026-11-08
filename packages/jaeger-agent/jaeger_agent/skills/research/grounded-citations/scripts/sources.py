@@ -471,6 +471,8 @@ def verify_draft(
         )
 
     if require_evidence:
+        if not cited_set or not sources:
+            errors.append('evidence verification requires nonempty inline citations and a source ledger')
         unevidenced = sorted(
             i for i in cited_set if i in by_id and not by_id[i].get("quotes")
         )
