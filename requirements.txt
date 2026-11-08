@@ -85,7 +85,7 @@ playwright>=1.40
 sentence-transformers>=3.0
 
 # --- external-model pipeline (LM Studio / OpenAI / Anthropic) ---
-openai>=1.0
+openai>=3.46.0
 anthropic>=0.40
 
 # --- messaging bridges (Discord / Telegram / Slack Socket Mode) ---
