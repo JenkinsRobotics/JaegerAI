@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 import { sendJson } from "./webui";
-import { CLI_STATE, loadCliProviders, type CliProvider, fit, gb, inventory, isCloud, isDefault, isEmbedding, loadCatalog, loadHardware, loadModels, loadProviderKeys, setDefaultModel,
+import { CLI_STATE, loadCloudModels, contextText, type CloudModel, loadCliProviders, type CliProvider, fit, gb, inventory, isCloud, isDefault, isEmbedding, loadCatalog, loadHardware, loadModels, loadProviderKeys, setDefaultModel,
   type Catalog, type Hardware, type LocalModel, type ProviderKey, type Pull, type Row } from "./models";
 
 const FIT_TEXT = { good: ["ok", "Fits well"], tight: ["warn", "Tight fit"], "too-big": ["bad", "Too big"], cloud: [undefined, "Cloud"], unknown: [undefined, "–"] } as const;
@@ -15,7 +15,7 @@ type Kind = "all" | "local" | "cloud" | "loaded" | "embedding";
 type Ask = { op: "pull" | "remove"; name: string } | { op: "default"; name: string; provider: string };
 
 export function matches(r: Row, q: string, kind: Kind): boolean {
-  const text = [r.name, r.local?.family, r.local?.quantization, r.local?.parameters, ...(r.catalog?.capabilities ?? [])].filter(Boolean).join(" ").toLowerCase();
+  const text = [r.name, r.local?.family, r.local?.quantization, r.local?.parameters, ...(r.cloud?.capabilities ?? r.catalog?.capabilities ?? [])].filter(Boolean).join(" ").toLowerCase();
   if (q && !q.toLowerCase().split(/\s+/).every((w) => text.includes(w))) return false;
   const cloud = r.providerId !== "ollama-local" || (r.local ? isCloud(r.local) : false);
   return kind === "all" || (kind === "local" ? !cloud : kind === "cloud" ? cloud : kind === "loaded" ? !!r.local?.loaded : isEmbedding({ name: r.name, family: r.local?.family }));
@@ -23,6 +23,8 @@ export function matches(r: Row, q: string, kind: Kind): boolean {
 
 export function ModelsPage() {
   const toast = useToast();
+  const [cloud, setCloud] = useState<CloudModel[]>([]);
+  const [cloudError, setCloudError] = useState<string>();
   const [models, setModels] = useState<LocalModel[] | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [keys, setKeys] = useState<ProviderKey[]>([]);
@@ -37,14 +39,15 @@ export function ModelsPage() {
   const [busy, setBusy] = useState(false);
   const loadLocal = useCallback(() => loadModels().then((r) => { setModels(r.models); setPulls(r.pulls); setErr((e) => ({ ...e, ollama: undefined })); }, (e: Error) => { setModels([]); setErr((x) => ({ ...x, ollama: e.message })); }), []);
   const loadCat = useCallback(() => loadCatalog().then((c) => { setCatalog(c); setErr((e) => ({ ...e, catalog: undefined })); }, (e: Error) => setErr((x) => ({ ...x, catalog: e.message }))), []);
-  const load = useCallback(() => Promise.all([loadLocal(), loadCat()]), [loadLocal, loadCat]);
+  const loadCloud = useCallback((refresh = false) => loadCloudModels(refresh).then((r) => { setCloud(r.models); setCloudError(r.error); }, (e: Error) => setCloudError(e.message)), []);
+  const load = useCallback((refresh = false) => Promise.all([loadLocal(), loadCat(), loadCloud(refresh)]), [loadLocal, loadCat, loadCloud]);
   useEffect(() => { void load(); loadHardware().then(setHw, () => {}); loadProviderKeys().then((r) => setKeys(r.providers ?? []), () => {}); loadCliProviders().then((r) => setClis(r.providers ?? []), () => {}); }, [load]);
   const running = pulls.some((p) => p.state === "running");
   useEffect(() => { if (!running) return; const t = setInterval(() => void loadLocal(), 1500); return () => clearInterval(t); }, [running, loadLocal]);
   // Refresh the catalog once a pull finishes so the new model is listed.
   useEffect(() => { if (!running && pulls.some((p) => p.state === "done")) void loadCat(); }, [running, pulls, loadCat]);
 
-  const groups = useMemo(() => inventory(catalog, models), [catalog, models]);
+  const groups = useMemo(() => inventory(catalog, models, cloud), [catalog, models, cloud]);
   const shown = useMemo(() => groups.map((g) => ({ ...g, rows: g.rows.filter((r) => matches(r, q, kind)).sort((a, b) => (b.local?.size ?? 0) - (a.local?.size ?? 0) || a.name.localeCompare(b.name)) })), [groups, q, kind]);
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
   const visibleCount = shown.reduce((n, g) => n + g.rows.length, 0);
@@ -69,10 +72,11 @@ export function ModelsPage() {
       <PageHead title="Models" subtitle={<>{loading ? "Loading models…" : `${total} models across ${groups.length} provider${groups.length === 1 ? "" : "s"} · ${gb(totalLocal)} on this Mac`}</>} actions={<>
           <input className="jg-u-search" type="search" placeholder="Search models" aria-label="Search models" value={q} onChange={(e) => setQ(e.target.value)} />
           <Segmented label="Show" value={kind} onChange={setKind} options={[{ value: "all", label: "All" }, { value: "local", label: "Local" }, { value: "cloud", label: "Cloud" }, { value: "loaded", label: "Loaded" }, { value: "embedding", label: "Embedding" }]} />
-          <button type="button" className="jg-u-btn" onClick={() => void load()}>Refresh</button>
+          <button type="button" className="jg-u-btn" onClick={() => void load(true)}>Refresh</button>
         </>} />
       {catalog?.default_model && <p className="jg-models__default">Default model <strong>{catalog.default_model}</strong> <span>via {groups.find((g) => g.id === catalog.active_provider)?.title ?? catalog.active_provider}</span></p>}
       {err.ollama && <p className="jg-u-error" role="alert">Ollama: {err.ollama}. Local models can't be listed, pulled or removed until it's running.</p>}
+      {cloudError && <p className="jg-u-error" role="alert">{cloudError}</p>}
       {err.catalog && <p className="jg-u-error" role="alert">Provider catalog unavailable: {err.catalog}</p>}
       <div className="jg-ui-split">
         <div className="jg-models__groups">
@@ -87,7 +91,7 @@ export function ModelsPage() {
                   <span className="jg-models__gmeta">{g.rows.length} model{g.rows.length === 1 ? "" : "s"}{g.group?.endpoint ? ` · ${g.group.endpoint.replace(/^https?:\/\//, "")}` : ""}{g.group?.status ? ` · ${g.group.status}` : ""}</span>
                 </header>
                 <table className="jg-table">
-                  <thead><tr><th>Model</th><th>Size</th><th>Context</th><th>Quant</th><th>Status</th><th><span className="jg-sr">Actions</span></th></tr></thead>
+                  <thead><tr><th>Model</th><th>Size</th><th>Context limit</th><th>Quant</th><th>Status</th><th><span className="jg-sr">Actions</span></th></tr></thead>
                   <tbody>{g.rows.map((r) => {
                     const m = r.local; const def = isDefault(catalog, r.providerId, r.name);
                     const f = m ? fit(m.size, hw?.memory ?? null) : "cloud"; const [tone, text] = FIT_TEXT[f];
@@ -97,10 +101,11 @@ export function ModelsPage() {
                         <td><strong>{r.name}</strong>{def && <> <Badge tone="ok">Default</Badge></>}
                           <br /><small>{[m?.family, m?.parameters, ...(r.catalog?.capabilities ?? []).filter((c) => c !== "completion")].filter(Boolean).join(" · ") || "–"}</small></td>
                         <td>{m ? gb(m.size) : r.catalog?.size_gb ? `${r.catalog.size_gb} GB` : "–"}</td>
-                        <td>{m?.context ? `${Math.round(m.context / 1024)}K` : "–"}</td>
+                        <td title="Maximum context reported by the model provider; runtime settings may use less.">{contextText(r.cloud?.context_length ?? r.catalog?.context_length ?? m?.context)}</td>
                         <td>{m?.quantization ?? "–"}</td>
-                        <td>{m?.loaded ? <Badge tone="ok">Loaded{m.vram ? ` · ${gb(m.vram)}` : ""}</Badge> : <Badge tone={tone}>{text}</Badge>}</td>
+                        <td>{m?.loaded ? <Badge tone="ok">Loaded{m.vram ? ` · ${gb(m.vram)}` : ""}</Badge> : <Badge tone={tone}>{r.needsAdd ? "Available" : text}</Badge>}</td>
                         <td className="jg-models__actions">
+                          {r.needsAdd && <button type="button" className="jg-u-icon-btn" onClick={() => setAsk({ op: "pull", name: r.name })}>Add to Ollama</button>}
                           {!def && r.catalog && <button type="button" className="jg-u-icon-btn" onClick={() => setAsk({ op: "default", name: r.name, provider: r.providerId })} aria-label={`Make ${r.name} the default`}>Make default</button>}
                           {canRemove && <button type="button" className="jg-u-icon-btn jg-models__danger" onClick={() => setAsk({ op: "remove", name: r.name })} aria-label={`Remove ${r.name}`}>Remove</button>}
                         </td>
@@ -156,7 +161,7 @@ export function ModelsPage() {
       </div>
       {ask && (
         <Sheet title={ask.op === "pull" ? `Pull ${ask.name}?` : ask.op === "remove" ? `Remove ${ask.name}?` : `Make ${ask.name} the default?`} onClose={() => !busy && setAsk(undefined)}>
-          <p>{ask.op === "pull" ? "Ollama will download this model from its registry. Large models can take many gigabytes of disk."
+          <p>{ask.op === "pull" ? (/(?:-|:)cloud$/.test(ask.name) ? "Adds this cloud model to your local Ollama catalog. Inference runs on Ollama Cloud and requires your Ollama account." : "Ollama will download this model from its registry. Large models can take many gigabytes of disk.")
             : ask.op === "remove" ? "This deletes the model's files from this Mac. Agents set to this model will stop working until you pull it again."
             : `Jaeger's main model setting changes to ${ask.name} (${ask.op === "default" ? ask.provider : ""}). Agents that use the default pick it up on their next turn.`}</p>
           <div className="jg-ui-actions"><button type="button" className="jg-u-btn" disabled={busy} onClick={() => setAsk(undefined)}>Cancel</button>

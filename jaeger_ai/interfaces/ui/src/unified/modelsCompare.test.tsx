@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, cleanup } from "@testing-library/react";
-import { inventory, isDefault, parseNdjson, type Catalog, type LocalModel } from "./models";
+import { contextText, inventory, isDefault, parseNdjson, type Catalog, type LocalModel } from "./models";
 import { matches, ModelsPage } from "./ModelsPage";
 import { ComparePage, pickDefaults, toResult } from "./ComparePage";
 import { ToastProvider } from "./ui";
@@ -112,4 +112,39 @@ describe("Models page", () => {
     expect(calls.find((c) => c.url === "/api/default-model")).toMatchObject({ method: "POST", body: { model: "gemma4:12b", provider: "ollama-local" } });
     expect(screen.queryByRole("button", { name: "Remove glm-5.3:cloud" })).toBeNull();
   });
+});
+
+describe("Ollama Cloud discovery", () => {
+  it("includes unpulled cloud models and enriches installed rows without duplicates", () => {
+    const groups = inventory(catalog, local, [
+      { name: "glm-5.3", local_name: "glm-5.3:cloud", context_length: 1048576, capabilities: ["completion"] },
+      { name: "new-model:123", local_name: "new-model:123-cloud", context_length: 262144, capabilities: ["completion"] },
+    ]);
+    const rows = groups.find((g) => g.id === "ollama-cloud")!.rows;
+    expect(rows).toHaveLength(2);
+    expect(rows[0].cloud?.context_length).toBe(1048576);
+    expect(rows[0].local?.name).toBe("glm-5.3:cloud");
+    expect(rows[1].needsAdd).toBe(true);
+    expect(rows[1].name).toBe("new-model:123-cloud");
+  });
+  it("shows exact token limits and labels missing metadata", () => {
+    expect(contextText(1048576)).toBe("1,048,576 tokens");
+    expect(contextText(null)).toBe("Unknown");
+  });
+});
+
+it("renders a newly discovered cloud model's limit and add action without making it default", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url === "/v1/models/local") return Response.json({ models: [], pulls: [] });
+    if (url === "/api/models") return Response.json({ groups: [] });
+    if (url === "/v1/models/cloud") return Response.json({ stale: false, models: [{ name: "brand-new", local_name: "brand-new:cloud", context_length: 1048576, capabilities: ["completion"] }] });
+    if (url === "/api/providers" || url === "/v1/providers/cli") return Response.json({ providers: [] });
+    if (url === "/v1/models/hardware") return Response.json({});
+    return new Response("{}", { status: 404 });
+  }));
+  render(<ToastProvider><ModelsPage /></ToastProvider>);
+  expect(await screen.findByText("brand-new:cloud")).toBeTruthy();
+  expect(screen.getByText("1,048,576 tokens")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Add to Ollama" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Make .* the default/ })).toBeNull();
 });
