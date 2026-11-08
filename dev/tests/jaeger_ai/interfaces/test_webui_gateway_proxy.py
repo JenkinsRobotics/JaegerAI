@@ -85,6 +85,20 @@ def test_routes_map_to_audited_gateway_paths(overlay, path, method, expected):
     assert overlay._calls[-1] == expected
 
 
+def test_composer_autonomy_uses_gateway_for_reads_and_exact_changes(overlay, monkeypatch):
+    calls = []
+    body = b'{"autonomy":"scoped"}'
+    monkeypatch.setattr(overlay, '_body_bytes', lambda handler: body)
+    monkeypatch.setattr(overlay, '_proxy', lambda h, m, p, b=None: calls.append((m, p, b)) or True)
+    assert _route(overlay, '/v1/runtime/autonomy')
+    assert _route(overlay, '/v1/runtime/autonomy', 'POST')
+    assert calls == [('GET', '/v1/runtime/autonomy', None), ('POST', '/v1/runtime/autonomy', body)]
+    for method in ('PATCH', 'DELETE', 'PUT'):
+        assert not _route(overlay, '/v1/runtime/autonomy', method)
+    assert not _route(overlay, '/v1/runtime/autonomy/reset', 'POST')
+    assert len(calls) == 2
+
+
 def test_health_uses_the_real_route_not_v1_health(overlay):
     """The gateway serves /health; /v1/health 404s."""
     assert _route(overlay, "/api/jaeger/gateway/health") is True
