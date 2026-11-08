@@ -43,10 +43,18 @@ describe("router", () => {
     expect(Object.keys(LEGACY_PATHS).sort()).toEqual(["calendar", "characters", "compare", "documents", "integrations", "knowledge", "sharepoint", "tasks", "workspace"]);
   });
   it("rewrites the old ?ui= links to the matching page", () => {
-    expect(legacyRedirect("/", "?ui=apple")).toBe("/agents/characters");
+    expect(legacyRedirect("/", "?ui=apple")).toBe("/chat");
     expect(legacyRedirect("/", "?ui=windows")).toBe("/work");
     expect(legacyRedirect("/", "?ui=default&home=fallback")).toBe("/chat?home=fallback");
     expect(legacyRedirect("/", "")).toBeNull();
+  });
+  it("opens bookmarked Apple chat links in Chat and preserves explicit destinations", () => {
+    const redirect = legacyRedirect("/", "?ui=apple&session=owned&agent=native%3Ajaeger")!;
+    const url = new URL(redirect, "https://jaeger.test");
+    expect(parseRoute(url.pathname, url.search)).toMatchObject({page:"chat"});
+    expect(url.searchParams.get("session")).toBe("owned");
+    expect(url.searchParams.get("agent")).toBe("native:jaeger");
+    expect(legacyRedirect("/agents/characters", "?ui=apple")).toBe("/agents/characters");
   });
 });
 

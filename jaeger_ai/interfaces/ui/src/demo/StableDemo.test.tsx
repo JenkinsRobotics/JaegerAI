@@ -29,6 +29,29 @@ it("does not present a new-chat welcome when history cannot be restored", async 
  expect(document.body.textContent).not.toContain('What would you like to work on?');
 });
 async function mount(source = new MockSource()) {const el=document.createElement("div");document.body.append(el);root=createRoot(el);await flush(()=>root.render(<StableDemo source={source}/>));return source;}
+it("keeps the shell in the visible viewport when the mobile keyboard opens", async () => {
+ const viewport = Object.assign(new EventTarget(), {height:844,offsetTop:0,scale:1});
+ const original = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+ Object.defineProperty(window, 'visualViewport', {configurable:true,value:viewport});
+ const remove = vi.spyOn(viewport, 'removeEventListener');
+ try {
+  await mount();
+  const shell = document.querySelector<HTMLElement>('.jg-stable-demo')!;
+  expect(shell.style.getPropertyValue('--jg-viewport-height')).toBe('844px');
+  await flush(() => {viewport.height=408;viewport.offsetTop=30;viewport.dispatchEvent(new Event('resize'));});
+  expect(shell.style.getPropertyValue('--jg-viewport-height')).toBe('408px');
+  expect(shell.style.getPropertyValue('--jg-viewport-top')).toBe('30px');
+  await flush(() => {viewport.scale=2;viewport.dispatchEvent(new Event('resize'));});
+  expect(shell.style.getPropertyValue('--jg-viewport-height')).toBe('');
+  await flush(() => {viewport.scale=1;viewport.height=844;viewport.offsetTop=0;viewport.dispatchEvent(new Event('scroll'));});
+  expect(shell.style.getPropertyValue('--jg-viewport-height')).toBe('844px');
+  await flush(() => root.unmount());
+  expect(remove.mock.calls.map(call=>call[0])).toEqual(['resize','scroll']);
+ } finally {
+  if(original)Object.defineProperty(window,'visualViewport',original);
+  else delete (window as unknown as {visualViewport?: unknown}).visualViewport;
+ }
+});
 it("offers one navigation for chat and every workspace page", async () => {
  await mount();expect([...document.querySelectorAll('#jaeger-navigation nav button')].map(e=>e.textContent)).toEqual(["Chat","Imagine","Library","Automations","Feed","Agents","Work","Research","Machine","Tasks"]);
  expect(document.body.textContent).not.toContain('Full workspace (preview)');

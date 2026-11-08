@@ -7,6 +7,7 @@ import type { JaegerSource } from "../api/source";
 import type { ChatHost, StartTurnRequest } from "./host";
 import { MinimalChat } from "./MinimalChat";
 import { GatewayError } from "../api/gateway";
+import * as draftStore from "./drafts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -50,12 +51,30 @@ describe("composer (DOM)", () => {
     copy: vi.fn(), openExternal: vi.fn(),
   } as unknown as ChatHost;
   beforeEach(async () => {
+    vi.spyOn(draftStore, 'readDraft').mockResolvedValue({text:'',files:[]});
+    vi.spyOn(draftStore, 'writeDraft').mockResolvedValue();
     el = document.createElement("div");
     document.body.append(el);
     root = createRoot(el);
     await act(async () => { root.render(<MinimalChat host={host} sessionId="s1" />); });
   });
-  afterEach(() => { act(() => root.unmount()); el.remove(); started.length = 0; });
+  afterEach(() => { act(() => root.unmount()); el.remove(); started.length = 0; vi.restoreAllMocks(); });
+
+  it("keeps a draft expanded after focus leaves and returns to compact when cleared", async () => {
+    const form = el.querySelector('form.jg-composer')!;
+    const field = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    expect(form).toHaveAttribute('data-expanded', 'false');
+    await act(async () => { setter.call(field, 'Follow up without losing my draft'); field.dispatchEvent(new Event('input', {bubbles:true})); });
+    expect(form).toHaveAttribute('data-expanded', 'true');
+    expect(el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.disabled).toBe(false);
+    await act(async () => { field.blur(); });
+    expect(field.value).toBe('Follow up without losing my draft');
+    expect(form).toHaveAttribute('data-expanded', 'true');
+    await act(async () => { setter.call(field, ''); field.dispatchEvent(new Event('input', {bubbles:true})); });
+    expect(form).toHaveAttribute('data-expanded', 'false');
+    expect(started).toHaveLength(0);
+  });
 
   it("shows picked files as chips, sends them with the turn and clears them", async () => {
     const input = el.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -64,6 +83,7 @@ describe("composer (DOM)", () => {
     Object.defineProperty(input, "files", { configurable: true, value: [file] });
     await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(el.querySelector(".jg-chip__name")?.textContent).toBe("notes.md");
+    expect(el.querySelector('form.jg-composer')).toHaveAttribute('data-expanded', 'true');
     const send = el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!;
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
     expect(send.disabled).toBe(false); // file bytes must be ready before Send enables

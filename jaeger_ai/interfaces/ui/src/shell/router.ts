@@ -97,7 +97,7 @@ export function legacyRedirect(pathname: string, search: string): string | null 
   const ui = params.get("ui");
   if (ui === null) return null;
   params.delete("ui");
-  const target = ui === "apple" ? "/agents/characters" : ui === "windows" ? "/work" : "/chat";
+  const target = ui === "windows" ? "/work" : "/chat";
   const keep = params.toString();
   const base = pathname === "/" || pathname === "" ? target : pathname;
   return keep ? `${base}?${keep}` : base;
