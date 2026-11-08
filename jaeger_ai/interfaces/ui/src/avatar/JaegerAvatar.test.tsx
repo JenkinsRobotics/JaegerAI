@@ -1,32 +1,34 @@
-import { fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { JaegerAvatar } from "./JaegerAvatar";
 
-const handle = { setState: vi.fn(), setPointer: vi.fn(), setPaused: vi.fn(), dispose: vi.fn() };
-vi.mock("./jaegerStage", () => ({ mountJaegerStage: vi.fn(() => handle) }));
-
-afterEach(() => { vi.unstubAllGlobals(); Object.values(handle).forEach(mock => mock.mockClear()); });
-
-describe("live Jaeger avatar", () => {
-  it("keeps the encoded avatar fallback when WebGL is unavailable", () => {
+describe("Jaeger cutout avatar", () => {
+  it("uses the canonical artwork for the body, smile, and both arm layers", () => {
     const { container } = render(<JaegerAvatar state="idle" />);
+    const rig = container.querySelector(".jg-jaeger-avatar")!;
+    const images = Array.from(container.querySelectorAll<HTMLImageElement>(".jg-jaeger-cutout img"));
+    expect(rig).toHaveAttribute("data-motion", "rigged");
+    expect(images).toHaveLength(4);
+    expect(new Set(images.map(image => image.src)).size).toBe(1);
     expect(container.querySelector("canvas")).toBeNull();
-    expect(container.querySelector("video")).toBeTruthy();
   });
-  it("mounts the rig, sends state and pointer updates, and disposes it", async () => {
-    vi.stubGlobal("WebGLRenderingContext", class {});
-    const { container, rerender, unmount } = render(<JaegerAvatar state="idle" />);
-    await waitFor(() => expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-live-status", "ready"));
-    expect(container.querySelector("video")).toBeNull();
-    rerender(<JaegerAvatar state="working" />);
-    expect(handle.setState).toHaveBeenLastCalledWith("working");
-    const canvas = container.querySelector("canvas")!;
-    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100, toJSON: () => ({}) });
+
+  it("tracks the pointer with the smile without replacing the artwork", () => {
+    const { container } = render(<JaegerAvatar state="working" />);
+    const rig = container.querySelector<HTMLElement>(".jg-jaeger-avatar")!;
+    Object.defineProperty(rig, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 100, height: 100 }) });
     const move = new Event("pointermove", { bubbles: true });
     Object.defineProperties(move, { clientX: { value: 75 }, clientY: { value: 25 } });
-    fireEvent(canvas, move);
-    expect(handle.setPointer).toHaveBeenLastCalledWith(0.5, -0.5);
-    unmount();
-    expect(handle.dispose).toHaveBeenCalledOnce();
+    fireEvent(rig, move);
+    expect(rig.style.getPropertyValue("--jg-look-x")).toBe("0.60px");
+    expect(rig.style.getPropertyValue("--jg-look-y")).toBe("-0.35px");
+    fireEvent.pointerLeave(rig);
+    expect(rig.style.getPropertyValue("--jg-look-x")).toBe("0px");
+  });
+
+  it("keeps custom portraits on the existing fallback path", () => {
+    const { container } = render(<JaegerAvatar portraitOverride="/custom.png" />);
+    expect(container.querySelector(".jg-jaeger-cutout")).toBeNull();
+    expect(container.querySelector("img")).toHaveAttribute("src", "/custom.png");
   });
 });
