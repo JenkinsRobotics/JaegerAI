@@ -38,6 +38,7 @@ from jaeger_ai.contract.sessions import normalise_surface
 
 from . import caller_auth
 from .event_bus import GatewayEventBus, ReplayGap
+from .owner_receipts import OWNER_RUN_SESSION_PREFIX
 from jaeger_ai.core.runtime.cancellation import CancellationRegistry
 from jaeger_ai.core.runtime.salience import SalienceLevel
 
@@ -103,10 +104,6 @@ def _model_has_vision(model: str) -> bool:
 # Agent turns require native MCP. Reduced text mode must be explicitly selected.
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
-
-# ``native_session`` marker for a request bound to the Entity's own run
-# (owner-react), as opposed to a run on the native MCP server.
-OWNER_RUN_SESSION_PREFIX = "owner:"
 
 # How long a tool call waits for the operator before it is refused.
 APPROVAL_WAIT_S = 300.0
@@ -1002,7 +999,9 @@ class JaegerGatewayApp:
         if not lease.get("ok"):
             raise RuntimeError(f"Gateway store is owned by live pid {lease.get('owner_pid')}")
         self._owns_store = True
+        self._owner_receipt_lease = lease
         self.store.recover_interrupted_sessions()
+        self._recover_sealed_owner_results()
         expired = self.store.expire_orphaned_tool_confirms()
         if expired:
             logger.info("Expired %d tool approvals orphaned by the previous process", expired)
@@ -1469,6 +1468,36 @@ class JaegerGatewayApp:
                     execution=_admitted_execution(admitted),
                 )
             )
+
+    def _recover_sealed_owner_results(self) -> int:
+        """Project producer-committed outcomes on the existing startup lease.
+
+        Never dispatch work or reconstruct proof from checkpoints/effect absence.
+        The ordinary startup queue drain runs later, after recovery completes.
+        """
+        from .owner_receipts import OwnerReceiptConflict
+        lease = getattr(self, '_owner_receipt_lease', None)
+        current = self.store.process_lease() or {}
+        if not lease or any(lease.get(key) != current.get(key) for key in ('owner_pid', 'started_at')):
+            raise OwnerReceiptConflict('Startup recovery does not own the Gateway lease')
+        recovered = 0
+        for request_id in self.store.sealed_owner_requests():
+            try:
+                proof = self.store.owner_request_receipt(request_id)
+                if proof is None:
+                    continue
+                persisted = self.store.complete_request(
+                    request_id, **{key: proof[key] for key in (
+                        'status', 'result', 'assistant_text', 'session_status', 'follow_ups')},
+                    event_name='turn.reconciled', owner_recovery_lease=lease,
+                )
+                for key in ('search_count_event', 'follow_up_event', 'event'):
+                    if persisted.get(key):
+                        self.event_bus.fanout(persisted[key])
+                recovered += not persisted.get('replayed', False)
+            except Exception:
+                logger.warning('Sealed owner result %s remains pending projection; no replay', request_id, exc_info=True)
+        return recovered
 
     def _preserve_unknown_requests(self) -> None:
         """Startup observes uncertain outcomes; it never redispatches their input.
@@ -5179,14 +5208,27 @@ class JaegerGatewayApp:
                     on_model=on_model,
                     on_agent=lambda agent: self._active_agents.__setitem__(request_id, agent),
                     cancellation=self._cancellations.get(request_id),
-                    on_run=lambda run_id: self.store.bind_native(
-                        request_id,
-                        native_run_id=run_id,
-                        native_session=f"{OWNER_RUN_SESSION_PREFIX}{session_key}",
+                    on_run=lambda run_id: self._bind_owner_run(
+                        request_id, session_key, run_id,
+                        (continuation_state or {}).get('_owner_receipt_token'),
+                        task_id=options.get('task_id') if options.get('background') else None,
                     ),
                 )
         finally:
             flush()
+
+    def _bind_owner_run(self, request_id: str, session_id: str, run_id: str, token: str | None, *, task_id: str | None = None) -> None:
+        if token:
+            from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+            from .owner_receipts import OwnerReceiptConflict
+            run = SqliteRunStore().get(run_id)
+            if run is None or run.owner_pid != os.getpid() or run.state not in {'active', 'running', 'verifying'}:
+                raise OwnerReceiptConflict('Resident native run is not owned by this producer')
+        self.store.bind_native(request_id, native_run_id=run_id,
+                               native_session=f'{OWNER_RUN_SESSION_PREFIX}{session_id}',
+                               owner_receipt_token=token,
+                               native_reuse_guard=self.task_owner.native_reuse_guard(
+                                   task_id, run_id, f'{OWNER_RUN_SESSION_PREFIX}{session_id}') if task_id else None)
 
     def _continued_owner_react(
         self, prompt: str, *, session_key: str, request_id: str,
@@ -5194,11 +5236,12 @@ class JaegerGatewayApp:
         execution: dict[str, Any] | None = None,
         objective: str = "",
         context_references: tuple[Any, ...] = (),
+        owner_receipt_token: str | None = None,
     ) -> dict[str, Any]:
         """One admitted request: inner ReAct plus owner-side continuation."""
         from jaeger_ai.core.runtime.autonomous_runner import run_continued_turn
 
-        continuation_state: dict[str, Any] = {}
+        continuation_state: dict[str, Any] = {'_owner_receipt_token': owner_receipt_token}
         timing = self._turn_timings.get(request_id)
 
         def step(inner_prompt: str) -> dict[str, Any]:
@@ -5363,6 +5406,8 @@ class JaegerGatewayApp:
             })
         rid = request_id or turn_id
         admitted_request = self.store.get_request(rid)
+        owner_receipt_token: str | None = None
+        owner_receipt_authority = execution is not None and execution == (admitted_request or {}).get('execution')
         timing = self._turn_timings.get(rid)
         # One Goal/TaskCard per operational turn (see _open_turn_card). None for conversation.
         card_task_id: str | None = None
@@ -5428,7 +5473,7 @@ class JaegerGatewayApp:
                 return await self._native_lead_turn(session_id, prompt, request_id=rid, is_subordinate=True)
 
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
-                nonlocal backend, model
+                nonlocal backend, model, owner_receipt_token
                 session_atts = self._turn_attachments(session_id, execution)
                 has_image = any(str(a.get("mime_type") or "").startswith("image/") for a in session_atts)
                 if not has_image:
@@ -5480,12 +5525,14 @@ class JaegerGatewayApp:
                     return {"text": txt, "status": "completed"}
 
                 owner_first = os.environ.get("JAEGER_OWNER_REACT", "").strip() in {"1", "true", "yes"}
+                resident_owner = False
                 try:
                     from jaeger_ai.core.entity.ownership import EntityRuntimeMode
                     from jaeger_ai.core.entity.runtime import EntityRuntime
                     rt = EntityRuntime.get_singleton()
                     if rt.mode == EntityRuntimeMode.OWNER and getattr(rt, "is_resident", False):
                         owner_first = True
+                        resident_owner = True
                 except Exception:
                     pass
                 # The native-MCP-first lead turn is an isolated second path: the
@@ -5506,12 +5553,26 @@ class JaegerGatewayApp:
                     model = name
 
                 backend = "owner-react"
+                original = (admitted_request or {}).get('execution') or {}
+                lease = getattr(self, '_owner_receipt_lease', None)
+                # Narrow, canonical foreground owner path only. Unsupported
+                # execution modes keep their existing behavior, never gain proof.
+                if (lease and resident_owner and owner_receipt_authority and not legacy_paths_enabled()
+                        and execution is not None and session_key == session_id
+                        and (admitted_request or {}).get('digest_version') == 2
+                        and not original.get('attachments') and not original.get('options')
+                        and not original.get('is_subordinate') and not role_s
+                        and original.get('provider') != 'cli'
+                        and not str(original.get('model') or '').startswith('@')):
+                    from .owner_receipts import begin
+                    owner_receipt_token = begin(self.store, rid, session_id, lease)
                 return self._continued_owner_react(
                     prompt, session_key=session_key, request_id=rid,
                     on_model=selected_model,
                     execution=execution if session_key == session_id else None,
                     objective=request_text,
                     context_references=context_references,
+                    **({'owner_receipt_token': owner_receipt_token} if owner_receipt_token else {}),
                 )
 
             session_meta = (session.get("metadata") or {}) if isinstance(session, dict) and isinstance(session.get("metadata"), dict) else {}
@@ -5626,6 +5687,10 @@ class JaegerGatewayApp:
             # Owner decisions and durable slice yields retain their existing
             # task-level semantics; every other halt is a failed request.
             terminal_status = "failed" if halt and halt not in {"blocked", "needs_owner", "yielded"} else "completed"
+            if owner_receipt_token:
+                # Detect uncertainty BEFORE memory/card/result settlement. An
+                # earlier continuation run's pending effect outranks its answer.
+                self._owner_settled_runs(rid, owner_receipt_token)
             if prepared is not None and not turn_result.get("error") and terminal_status == "completed":
                 try:
                     await asyncio.to_thread(runtime.finish_turn, prepared, str(turn_result.get("text") or ""))
@@ -5633,7 +5698,24 @@ class JaegerGatewayApp:
                     logger.warning("could not record the answer for %s", rid, exc_info=True)
 
             if self._cancellations.is_cancelled(rid):
-                self._close_turn_card(card_task_id, {"error": "cancelled"}, "cancelled", session_id=session_id)
+                if owner_receipt_token:
+                    # Only this branch follows the normally returned, awaited
+                    # whole continuation. Interrupt delivery or a cancelled
+                    # asyncio await alone cannot establish worker quiescence.
+                    cancelled_result = {"status": "cancelled", "turn_id": turn_id,
+                                        "output": None, "error": "cancelled during execution",
+                                        **agent_fields}
+                    self._commit_owner_outcome(
+                        rid, owner_receipt_token, "cancelled", cancelled_result, None,
+                        card_task_id=card_task_id, owner_result={"error": "cancelled"},
+                        returned_cancelled=True,
+                    )
+                    self._persist_terminal(rid, session_id, "cancelled", cancelled_result)
+                    return
+                self._close_turn_card(card_task_id, {"error": "cancelled"},
+                                      "execution_unknown" if self.store.has_owner_request_journal(rid)
+                                      and (self.store.get_request(rid) or {}).get('native_run_id') else "cancelled",
+                                      session_id=session_id, expected_request_id=rid if owner_receipt_token else None)
                 if self._settle_cancelled(session_id, turn_id, rid, agent_fields):
                     return
                 raise RuntimeError(
@@ -5645,7 +5727,9 @@ class JaegerGatewayApp:
                 raise RuntimeError(str(turn_result["error"]))
 
             response_text = str(turn_result.get("text") or "")
-            card_fields = self._close_turn_card(
+            # A journal-owned card settles in the SAME transaction as its
+            # immutable request snapshot, never as an earlier successful write.
+            card_fields = {} if owner_receipt_token else self._close_turn_card(
                 card_task_id, turn_result, "completed", session_id=session_id,
                 models=(model, backend),
             )
@@ -5702,12 +5786,19 @@ class JaegerGatewayApp:
             if timing is not None:
                 timing.turn_finish_ms = timing.now()
                 result["timing"] = timing.snapshot()
+            if owner_receipt_token:
+                self._commit_owner_outcome(rid, owner_receipt_token, terminal_status, result,
+                                           response_text, card_task_id=card_task_id,
+                                           owner_result=turn_result)
             self._persist_terminal(rid, session_id, terminal_status, result, assistant_text=response_text, record_entity_event=False)
         except asyncio.CancelledError:
             # Global Stop cancels this task. Persist how the request ended (cancelled, or
             # execution_unknown when an effect is pending) so it is never left 'running'.
             try:
-                self._close_turn_card(card_task_id, {"error": "cancelled"}, "cancelled", session_id=session_id)
+                self._close_turn_card(card_task_id, {"error": "cancelled"},
+                                      "execution_unknown" if self.store.has_owner_request_journal(rid)
+                                      and (self.store.get_request(rid) or {}).get('native_run_id') else "cancelled",
+                                      session_id=session_id, expected_request_id=rid if owner_receipt_token else None)
                 if not self._settle_cancelled(session_id, turn_id, rid, agent_fields):
                     self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled by Global Stop")
             except Exception:
@@ -5727,10 +5818,20 @@ class JaegerGatewayApp:
                 # receipt store, says whether anything was left half-done.
                 from jaeger_ai.core.entity.runtime import EntityRuntime
                 after_native = EntityRuntime.run_has_indeterminate_effects(str(bound["native_run_id"]))
+            if bound.get('status') == 'execution_unknown':
+                # Refusing a late callback is not proof of the earlier outcome.
+                # In particular, transferred runs must never downgrade unknown
+                # to failed merely because their latest effect list is empty.
+                after_native = True
+            owner_journal = self.store.has_owner_request_journal(rid)
+            if owner_journal:
+                # An exception/cancelled await cannot attest quiescence of the
+                # worker thread or all of its continuation runs.
+                after_native = True
             status = "execution_unknown" if after_native else "failed"
             receipt = (
                 self._native_receipt(bound.get("native_run_id"), bound.get("native_session"))
-                if after_native and not owner_run else None
+                if after_native and not owner_run and not owner_journal else None
             )
             reply = (receipt or {}).get("reply") if isinstance(receipt, dict) else None
             reply = reply if isinstance(reply, dict) else {}
@@ -5756,7 +5857,8 @@ class JaegerGatewayApp:
                 }
             if receipt:
                 result["native_receipt"] = receipt
-            result.update(self._close_turn_card(card_task_id, result, status, session_id=session_id))
+            result.update(self._close_turn_card(card_task_id, result, status, session_id=session_id,
+                                                expected_request_id=rid if owner_receipt_token else None))
             if not card_task_id:
                 self._present(session_id, "stopped" if status == "cancelled" else "failed", status=status)
             if timing is not None:
@@ -5773,11 +5875,16 @@ class JaegerGatewayApp:
             # Global Stop cancels this asyncio task (CancelledError skips the except
             # above). A card still open here is settled, never left running.
             retained = self.task_owner.store.get_task(card_task_id) if card_task_id else None
-            if not (retained and retained.payload.get('foreground_resume_version') == 1
-                    and retained.state.value == 'paused'):
+            journal_unknown = (self.store.has_owner_request_journal(rid)
+                               and (self.store.get_request(rid) or {}).get('status') == 'execution_unknown')
+            if journal_unknown:
+                self._close_turn_card(card_task_id, {'error': 'Execution outcome unknown'},
+                                      'execution_unknown', session_id=session_id, expected_request_id=rid)
+            elif not (retained and retained.payload.get('foreground_resume_version') == 1
+                      and retained.state.value == 'paused'):
                 self._close_turn_card(
                     card_task_id, {"error": "the turn ended before the task was settled"},
-                    "cancelled", session_id=session_id,
+                    "cancelled", session_id=session_id, expected_request_id=rid if owner_receipt_token else None,
                 )
             self._owner_declined.discard(rid)
             self._owner_unanswered.discard(rid)
@@ -5889,13 +5996,20 @@ class JaegerGatewayApp:
 
     def _close_turn_card(
         self, card_task_id: str | None, turn_result: dict[str, Any], status: str, *,
-        session_id: str, models: tuple[str, ...] = (),
+        session_id: str, models: tuple[str, ...] = (), expected_request_id: str | None = None,
     ) -> dict[str, Any]:
         """Verify and settle a turn's card through the task owner, then report it. Idempotent."""
         if not card_task_id:
             return {}
         try:
             existing = self.task_owner.store.get_task(card_task_id)
+            if expected_request_id and (existing is None
+                    or existing.provenance.get('request_id') != expected_request_id
+                    or existing.provenance.get('session_id') != session_id
+                    or existing.provenance.get('source') != 'gateway_turn'
+                    or not existing.provenance.get('turn_owned')):
+                logger.warning('Refusing to settle a foreign foreground card')
+                return {}
             if existing is not None and existing.is_terminal:
                 return {}  # already settled and reported once
             from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -5920,6 +6034,88 @@ class JaegerGatewayApp:
             logger.exception("could not settle turn card %s", card_task_id)
             return {}
 
+    def _owner_settled_runs(self, request_id: str, token: str) -> list[str]:
+        from .owner_receipts import accepted_runs, OwnerReceiptConflict
+        from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        runs = accepted_runs(self.store, request_id, token)
+        native_runs = [SqliteRunStore().get(run_id) for run_id in runs]
+        # Terminal inner states release owner_pid. Acceptance already proved
+        # the live producer; existence and no foreign live owner still matter.
+        if (not runs or any(run is None or run.owner_pid not in {None, os.getpid()} for run in native_runs)
+                or any(EntityRuntime.run_has_indeterminate_effects(run_id) for run_id in runs)):
+            raise OwnerReceiptConflict('Resident request has unknown effects or unowned accepted runs')
+        return runs
+
+    def _commit_owner_outcome(
+        self, request_id: str, token: str, status: str, result: dict[str, Any],
+        assistant_text: str | None, *, card_task_id: str | None, owner_result: dict[str, Any] | None = None,
+        returned_cancelled: bool = False,
+    ) -> None:
+        """Called only after the entire awaited owner continuation returned.
+
+        No exception/cancel handler calls this. A proof says this request
+        settled, not that any background task or user's objective finished.
+        """
+        from .owner_receipts import finish, producer_in_transaction, OwnerReceiptConflict
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_ai.contract.presence import ACTIVITY_FOR_TASK_STATE
+
+        runs = self._owner_settled_runs(request_id, token)
+        if ((status == 'cancelled') != returned_cancelled
+                or self._cancellations.is_cancelled(request_id) != returned_cancelled):
+            raise OwnerReceiptConflict('Resident cancellation does not match returned outcome')
+        settled_card = None
+        card_fields = {}
+        with self.store._immediate() as conn:
+            row, _journal = producer_in_transaction(conn, request_id, token, runs, returned_cancelled=returned_cancelled)
+            if card_task_id:
+                card = self.task_owner.store.get_task_in_transaction(conn, card_task_id)
+                if (card is None or card.provenance.get('request_id') != request_id
+                        or card.provenance.get('session_id') != row['session_id']
+                        or not card.provenance.get('turn_owned')
+                        or card.provenance.get('source') != 'gateway_turn'
+                        or card.notification_policy.recipient_session_id != row['session_id']
+                        or (card.cancellation and not returned_cancelled)
+                        or card.is_terminal):
+                    raise OwnerReceiptConflict('Foreground card no longer belongs to this producer')
+                if returned_cancelled:
+                    from .handoff_cancellation import unconfirmed_ids
+                    if unconfirmed_ids(card.payload.get('cancellation_children') or []):
+                        raise OwnerReceiptConflict('Owned child cancellation remains unconfirmed')
+                settled_card, receipt = self.task_owner.close_turn(
+                    card_task_id, owner_result or result, status=status,
+                    identity=EntityRuntime.get_singleton().identity,
+                    models=(str(result.get('model') or ''), str(result.get('backend') or '')),
+                    conn=conn, returned_cancelled=returned_cancelled,
+                )
+                if returned_cancelled and settled_card.state.value != 'cancelled':
+                    raise OwnerReceiptConflict('Returned cancellation did not settle its foreground card')
+                card_fields = {'task_id': card_task_id, 'task_state': settled_card.state.value,
+                               'receipt': receipt.to_dict()}
+            qualified = result.get('halt_reason') not in {'yielded', 'needs_owner', 'blocked'}
+            qualified = qualified and (settled_card is None or settled_card.state.value in {'completed_verified', 'failed', 'cancelled'})
+            if qualified:
+                finish(self.store, request_id, token, runs, status=status, result={**result, **card_fields},
+                       assistant_text=assistant_text,
+                       session_status='idle' if status in {'completed', 'cancelled'} else status,
+                       follow_ups=_explicit_follow_ups(result) if status == 'completed' else None, conn=conn,
+                       returned_cancelled=returned_cancelled)
+            # Even unsupported outcomes cannot commit a card after a producer
+            # conflict. No snapshot means no recovery claim for these paths.
+            producer_in_transaction(conn, request_id, token, runs, returned_cancelled=returned_cancelled)
+            if self._cancellations.is_cancelled(request_id) != returned_cancelled:
+                raise OwnerReceiptConflict('Cancellation raced foreground settlement')
+        result.update(card_fields)
+        if settled_card is not None:
+            self._present(row['session_id'], ACTIVITY_FOR_TASK_STATE.get(settled_card.state.value, 'failed'),
+                          task_id=card_task_id, intent='work', status=settled_card.state.value,
+                          receipt_id=card_fields['receipt']['receipt_id'])
+            if settled_card.state.value == 'completed_verified':
+                runtime = EntityRuntime.get_singleton()
+                self._world_claim(runtime, card_task_id, 'completed_verified', settled_card.goal, 'verified')
+
+
     def _settle_cancelled(
         self,
         session_id: str,
@@ -5937,14 +6133,16 @@ class JaegerGatewayApp:
         """
         bound = self.store.get_request(request_id) or {}
         run_id = str(bound.get("native_run_id") or "")
+        if bound.get('status') == 'execution_unknown':
+            return True  # A later cancel cannot certify an already unknown outcome.
         if not run_id:
             self._finish_cancelled(session_id, turn_id, request_id, agent_fields,
                                    "cancelled before native acceptance")
             return True
-        if not str(bound.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX):
+        if not self.store.has_owner_request_journal(request_id) and not str(bound.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX):
             return False
         from jaeger_ai.core.entity.runtime import EntityRuntime
-        if EntityRuntime.run_has_indeterminate_effects(run_id):
+        if self.store.has_owner_request_journal(request_id) or EntityRuntime.run_has_indeterminate_effects(run_id):
             self._persist_terminal(request_id, session_id, "execution_unknown", {
                 "status": "execution_unknown", "turn_id": turn_id, "output": None,
                 "error": "cancelled with an external effect whose outcome is unknown; reconcile",
@@ -5954,6 +6152,15 @@ class JaegerGatewayApp:
         self._finish_cancelled(session_id, turn_id, request_id, agent_fields,
                                "cancelled during execution")
         return True
+
+    def _owner_projection_pending(self, request_id: str) -> None:
+        try:
+            self.store.mark_owner_projection_pending(request_id, getattr(self, '_owner_receipt_lease', None) or {})
+        except Exception:
+            # A storage outage may prevent even the pending marker. The sealed
+            # snapshot remains authoritative and startup/reconcile retries only
+            # projection, never the model or its effects.
+            logger.warning('Could not mark owner result pending projection', exc_info=True)
 
     def _persist_terminal(
         self,
@@ -5965,6 +6172,10 @@ class JaegerGatewayApp:
         assistant_text: str | None = None,
         record_entity_event: bool = True,
     ) -> None:
+        journal_owned = self.store.has_owner_request_journal(request_id)
+        proof = self.store.owner_request_receipt(request_id)
+        if proof is not None:
+            status, result, assistant_text = proof['status'], proof['result'], proof['assistant_text']
         session_status = "idle" if status in {"completed", "cancelled"} else status
         if assistant_text is None and status != "completed":
             notification = _proactive_notification_payload(session_id, request_id, status, result)
@@ -6027,7 +6238,11 @@ class JaegerGatewayApp:
                     )
                 except Exception:
                     pass
-        except KeyError:
+        except KeyError as exc:
+            if journal_owned or proof is not None:
+                self._owner_projection_pending(request_id)
+                from .owner_receipts import OwnerReceiptConflict
+                raise OwnerReceiptConflict('Resident projection lost its request; no legacy fallback') from exc
             if assistant_text is not None:
                 self.store.append_message(session_id, "assistant", assistant_text)
             self.store.update_status(session_id, session_status)
@@ -6040,6 +6255,10 @@ class JaegerGatewayApp:
                 "completed": "turn.finish", "failed": "turn.failed",
                 "cancelled": "turn.cancelled", "execution_unknown": "turn.unknown",
             }[status], {**result, "request_id": request_id})
+        except Exception:
+            if journal_owned or proof is not None:
+                self._owner_projection_pending(request_id)
+            raise
 
     def _publish_proactive_notification(
         self,
@@ -6213,7 +6432,8 @@ class JaegerGatewayApp:
         scope = self._cancellations.cancel(row["request_id"])
         updated = self.store.mark_request_status(row["request_id"], "cancelling") or row
         native_requested = False
-        owner_run = str(updated.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX)
+        owner_run = (self.store.has_owner_request_journal(row['request_id'])
+                     or str(updated.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX))
         if updated.get("native_run_id") and not owner_run:
             # Legacy MCP-dispatched run: only the native side can stop it.
             native_requested = await self._request_native_cancel(
@@ -6340,7 +6560,16 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Request not found"}, status=404)
         if row["status"] in {"completed", "failed", "cancelled"}:
             return web.json_response({**row, "reconciled": False, "already_terminal": True})
-        receipt = self._native_receipt(row.get("native_run_id"), row.get("native_session"))
+        owner_proof = None
+        owner_journal = self.store.has_owner_request_journal(request_id)
+        if owner_journal or str(row.get('native_session') or '').startswith(OWNER_RUN_SESSION_PREFIX):
+            try:
+                owner_proof = self.store.owner_request_receipt(request_id)
+            except Exception:
+                logger.warning('Resident request proof is unavailable or invalid', exc_info=True)
+        receipt = owner_proof or ({'execution_unknown': True, 'status': 'unknown',
+                                  'source': 'resident_owner', 'error': 'owner_request_receipt_unavailable'}
+                                 if owner_journal else self._native_receipt(row.get("native_run_id"), row.get("native_session")))
         unresolved = receipt is None or receipt.get("execution_unknown") is not False \
             or receipt.get("status") not in {"completed", "failed", "cancelled"}
         if unresolved and body.get("acknowledge_unknown") is True and row["status"] == "execution_unknown":
@@ -6383,11 +6612,16 @@ class JaegerGatewayApp:
         persisted = self.store.complete_request(
             request_id,
             status=status,
-            result=result,
-            assistant_text=output or None,
-            session_status="idle" if status in {"completed", "cancelled"} else "failed",
+            result=owner_proof['result'] if owner_proof else result,
+            assistant_text=owner_proof['assistant_text'] if owner_proof else output or None,
+            session_status=owner_proof['session_status'] if owner_proof else "idle" if status in {"completed", "cancelled"} else "failed",
+            follow_ups=owner_proof['follow_ups'] if owner_proof else None,
             event_name="turn.reconciled",
         )
+        if owner_proof:
+            for key in ('search_count_event', 'follow_up_event'):
+                if persisted.get(key):
+                    self.event_bus.fanout(persisted[key])
         if persisted.get("event"):
             self.event_bus.fanout(persisted["event"])
         if not persisted.get("replayed"):

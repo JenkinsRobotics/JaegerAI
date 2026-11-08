@@ -84,10 +84,11 @@ class SqliteDurableTaskStore:
 
     def get_task(self, task_id: str) -> DurableTask | None:
         with closing(self._get_conn()) as conn, conn:
-            row = conn.execute("SELECT task_json FROM durable_tasks WHERE task_id = ?", (task_id,)).fetchone()
-            if not row:
-                return None
-            return DurableTask.from_dict(json.loads(row["task_json"]))
+            return self.get_task_in_transaction(conn, task_id)
+
+    def get_task_in_transaction(self, conn, task_id: str) -> DurableTask | None:
+        row = conn.execute("SELECT task_json FROM durable_tasks WHERE task_id = ?", (task_id,)).fetchone()
+        return DurableTask.from_dict(json.loads(row["task_json"])) if row else None
 
     def list_tasks(
         self,
@@ -152,12 +153,17 @@ class SqliteDurableTaskStore:
         """Serialize state transitions so cancellation cannot be overwritten by a stale worker."""
         with closing(self._get_conn()) as conn, conn:
             conn.execute('BEGIN IMMEDIATE')
-            row = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task_id,)).fetchone()
-            if row is None:
-                raise KeyError(task_id)
-            task = DurableTask.from_dict(json.loads(row[0]))
-            change(task)
-            task.updated_at = time.time()
-            conn.execute('UPDATE durable_tasks SET state=?, task_json=?, updated_at=? WHERE task_id=?',
-                         (task.state.value, json.dumps(task.to_dict()), task.updated_at, task_id))
+            return self.update_task_in_transaction(conn, task_id, change)
+
+    def update_task_in_transaction(self, conn, task_id: str, change: Callable[[DurableTask], None]) -> DurableTask:
+        """Compose the existing authoritative transition with an owner receipt."""
+        if not conn.in_transaction:
+            raise ValueError('Task update requires an active owner transaction')
+        task = self.get_task_in_transaction(conn, task_id)
+        if task is None:
+            raise KeyError(task_id)
+        change(task)
+        task.updated_at = time.time()
+        conn.execute('UPDATE durable_tasks SET state=?, task_json=?, updated_at=? WHERE task_id=?',
+                     (task.state.value, json.dumps(task.to_dict()), task.updated_at, task_id))
         return task

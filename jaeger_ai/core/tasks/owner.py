@@ -346,26 +346,38 @@ class GatewayTaskOwner:
         return task
 
     def settle_turn_card(self, task_id: str, state: TaskState, *, evidence: Any = None,
-                         error: str | None = None, result: Any = None) -> DurableTask:
+                         error: str | None = None, result: Any = None, conn=None,
+                         returned_cancelled: bool = False) -> DurableTask:
         """The one place a turn-owned task changes state.
 
         Callers hand over evidence; they never assign ``task.state``. A claim of
         ``completed_verified`` without real evidence becomes ``failed`` here, so
         no caller can report verified work it cannot show.
         """
+        if returned_cancelled and (conn is None or not conn.in_transaction or state != TaskState.CANCELLED):
+            raise ValueError('Confirmed cancellation requires atomic owner finalization')
         def change(task: DurableTask) -> None:
-            if task.is_terminal or task.cancellation:
+            if task.is_terminal or (task.cancellation and not returned_cancelled):
                 return
+            if returned_cancelled:
+                from jaeger_ai.core.gateway.handoff_cancellation import unconfirmed_ids
+                if unconfirmed_ids(task.payload.get('cancellation_children') or []):
+                    raise ValueError('Owned children remain unconfirmed')
             try:
                 authoritative_transition(task, state, evidence=evidence, error=error)
             except CompletionError as exc:
                 authoritative_transition(task, TaskState.FAILED, evidence=evidence, error=str(exc))
             if result is not None:
                 task.result = result
-        task = self.store.update_task(task_id, change)
+        task = (self.store.update_task_in_transaction(conn, task_id, change) if conn is not None
+                else self.store.update_task(task_id, change))
         parent = task.notification_policy.recipient_session_id or str(task.provenance.get('session_id') or '')
         if parent:
-            self.gateway.event_bus.publish(parent, 'task.updated', {'task': task.to_dict()})
+            if conn is None:
+                self.gateway.event_bus.publish(parent, 'task.updated', {'task': task.to_dict()})
+            else:
+                event = self.gateway.store._insert_event(conn, parent, 'task.updated', {'task': task.to_dict()})
+                self.gateway.store._queue_event(event)
         return task
 
     def open_turn(self, *, session_id: str, request_id: str, text: str, strategy: str,
@@ -387,14 +399,16 @@ class GatewayTaskOwner:
             execution=execution if resume else {'workspace': workspace}, resume=resume, agent_id=agent_id)
 
     def close_turn(self, task_id: str, result: dict, *, status: str, identity=None,
-                   models: tuple[str, ...] = ()) -> tuple[DurableTask, Receipt]:
+                   models: tuple[str, ...] = (), conn=None,
+                   returned_cancelled: bool = False) -> tuple[DurableTask, Receipt]:
         """Verify what the worker returned and settle the card. Workers never choose the state.
 
         ``status`` is the request's terminal status. Only evidence the owner can
         check (a declared artifact, or a work-ledger receipt for a file that exists
         and matches) reaches ``completed_verified``.
         """
-        task = self.store.get_task(task_id)
+        task = (self.store.get_task_in_transaction(conn, task_id) if conn is not None
+                else self.store.get_task(task_id))
         if task is None:
             raise ValueError(f'Unknown turn card: {task_id}')
         if not task.is_terminal:
@@ -435,7 +449,8 @@ class GatewayTaskOwner:
                 else:
                     state, error = TaskState.FAILED, str(evidence)
             task = self.settle_turn_card(task_id, state, evidence=evidence, error=error,
-                                         result=result.get('output') or result.get('text') or result)
+                                         result=result.get('output') or result.get('text') or result, conn=conn,
+                                         returned_cancelled=returned_cancelled)
         card = task.payload.get('turn_card') or {}
         receipt = Receipt(
             receipt_id=f'rcpt_{str(card.get("request_id") or task_id)[:12]}',
@@ -820,6 +835,34 @@ class GatewayTaskOwner:
             prompt += '\nPrevious checkpoint (continue from verified work):\n' + str(task.result)
         return prompt
 
+    def native_reuse_guard(self, task_id: str, run_id: str, native_session: str):
+        """Reuse only through the existing canonical foreground transfer proof.
+
+        The callable runs inside the native-binding transaction. Client options
+        or a raw task ID alone are never a native ownership grant.
+        """
+        def validate(conn, raw_row):
+            from jaeger_ai.core.gateway.owner_receipts import _lease, OwnerReceiptConflict
+            lease = getattr(self.gateway, '_owner_receipt_lease', None)
+            if not lease:
+                raise OwnerReceiptConflict('Native transfer has no current Gateway lease')
+            _lease(conn, lease['owner_pid'], lease['started_at'])
+            task = self.store.get_task_in_transaction(conn, task_id)
+            if task is None or task.payload.get('foreground_resume_version') != 1:
+                return set()
+            row = self.gateway.store._request_row(raw_row)
+            self._admission_guard(conn, task)
+            from jaeger_ai.core.gateway.owner_receipts import OWNER_RUN_SESSION_PREFIX
+            if (row['status'] not in {'admitted', 'running', 'awaiting_approval'}
+                    or self.gateway._cancellations.is_cancelled(row['request_id'])
+                    or task.provenance.get('turn_owned') or row['request_id'] != f'{task_id}:{task.payload.get("attempt", 0)}'
+                    or run_id != task.payload.get('native_run_id')
+                    or native_session != OWNER_RUN_SESSION_PREFIX + f'task:{task_id}'
+                    or self._continuation_receipt_error(task, row)):
+                raise OwnerReceiptConflict('Native reuse differs from canonical foreground transfer')
+            return {task.payload['original_request_id']}
+        return validate
+
     def _continuation_receipt_error(self, task, row):
         """An ID collision is not this task's receipt, even when it is terminal."""
         if not row:
@@ -992,7 +1035,8 @@ class GatewayTaskOwner:
                 return
             if task.payload.get('native_run_id'):
                 from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
-                self.gateway.store.bind_native(rid, native_run_id=task.payload['native_run_id'], native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}')
+                self.gateway.store.bind_native(rid, native_run_id=task.payload['native_run_id'], native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}',
+                    native_reuse_guard=self.native_reuse_guard(task_id, task.payload['native_run_id'], f'{OWNER_RUN_SESSION_PREFIX}{sid}'))
             self.gateway._start_admitted_turn(admitted, sid, prompt)
         elif row.get('status') in {'admitted', 'running'} and rid not in self.gateway._running_tasks:
             if task.payload.get('foreground_resume_version') == 1:
@@ -1009,7 +1053,8 @@ class GatewayTaskOwner:
                     from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
                     row = self.gateway.store.bind_native(rid,
                         native_run_id=task.payload['native_run_id'],
-                        native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}')
+                        native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}',
+                        native_reuse_guard=self.native_reuse_guard(task_id, task.payload['native_run_id'], f'{OWNER_RUN_SESSION_PREFIX}{sid}'))
             # A persisted admission without dispatch is safe. Unknown effects are
             # recovered separately by the Gateway; never create a fresh run here.
             self.gateway._start_admitted_turn({**row, 'accepted': True}, sid, prompt)
