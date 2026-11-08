@@ -1,4 +1,7 @@
-# Combined assistant-core qualification, 2026-11-08
+# Historical candidate 27 qualification, 2026-11-08
+
+This report preserves the earlier candidate evidence. Current reconciled source
+and gates are in [reconciled qualification](assistant-core-reconciled-qualification-20261108.md).
 
 ## Candidate and boundaries
 
