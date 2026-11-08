@@ -109,6 +109,24 @@ def begin(store: Any, request_id: str, session_id: str, lease: dict[str, Any]) -
     return token
 
 
+def protected_background_sources(conn: Any, run_id: str) -> set[tuple[str, str]]:
+    """Retained new-task native ownership applies even to legacy receivers.
+
+    This source index is not terminal proof and does not upgrade old tasks.
+    Look through every accepted native ID, including rotated earlier runs and
+    receipts no longer present in client_requests. It is read under bind's
+    write transaction before any receiving guard can update task proof.
+    """
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='durable_tasks'").fetchone() is None:
+        return set()
+    return {(row[0], row[1]) for row in conn.execute(
+        "SELECT DISTINCT t.task_id, admissions.key FROM durable_tasks t, "
+        "json_each(t.task_json, '$.payload.background_admissions') admissions, "
+        "json_each(admissions.value, '$.native_run_ids') runs "
+        "WHERE json_extract(t.task_json, '$.payload.background_admission_version')=1 "
+        "AND runs.value=?", (run_id,))}
+
+
 def accept(conn: Any, row: Any, run_id: str, native_session: str, token: str | None, reuse_guard=None) -> None:
     journal = conn.execute('SELECT * FROM owner_request_journal WHERE request_id=?', (row['request_id'],)).fetchone()
     if native_session.startswith(OWNER_RUN_SESSION_PREFIX):

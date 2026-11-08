@@ -940,6 +940,8 @@ class GatewayTaskOwner:
         contract.update(native_run_id=native, native_session=native_session)
         conn.execute('UPDATE durable_tasks SET task_json=? WHERE task_id=?',
                      (json.dumps(task.to_dict()), task.task_id))
+        return {(task.task_id, row['request_id']),
+                *((task.task_id, source['request_id']) for source in sources)}
 
     def _background_children_unsettled(self, source):
         from jaeger_ai.core.gateway.handoff_ownership import owned_children

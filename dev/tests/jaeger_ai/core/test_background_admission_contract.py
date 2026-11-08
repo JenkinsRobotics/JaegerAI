@@ -201,7 +201,10 @@ def test_native_reuse_requires_same_task_settled_attempt(owner, monkeypatch, mod
     owner.store.update_task(tid, next_attempt)
     if mode == 'foreign-task':
         foreign = store.admit_request('unrelated', 'foreign', request_id='foreign')
-        store.bind_native('foreign', native_run_id='original', native_session='owner:unrelated')
+        # Simulate a pre-existing corrupt historical collision. The public
+        # binder now rejects creating this alias (covered separately below).
+        with store._immediate() as conn:
+            conn.execute("UPDATE client_requests SET native_run_id='original', native_session='owner:unrelated' WHERE request_id='foreign'")
     if mode in {'settled', 'active'}:
         asyncio.run(owner._execute(tid))
         task = owner.store.get_task(tid)
@@ -275,3 +278,58 @@ def test_actual_dispatch_objects_cannot_differ_from_validated_database(owner, mo
     asyncio.run(JaegerGatewayApp._execute_turn_inner(gateway, row['session_id'], row['turn_id'], row['input_text'],
         request_id=row['request_id'], execution=row['execution']))
     assert errors and errors[0] is not None
+
+
+@pytest.mark.parametrize('guarded', [False, True])
+@pytest.mark.parametrize('receiver', ['unmarked', 'foreign-task', 'foreign-session', 'forged-options'])
+@pytest.mark.parametrize('rotated', [False, True])
+def test_protected_native_cannot_be_borrowed_by_unqualified_receiver(owner, monkeypatch, guarded, receiver, rotated):
+    import os
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    lifecycle = {'original': 'active', 'rotated': 'active'}
+    monkeypatch.setattr(SqliteRunStore, 'get', lambda self, rid: SimpleNamespace(owner_pid=os.getpid(), state=lifecycle[rid]))
+    monkeypatch.setattr(EntityRuntime, 'run_has_indeterminate_effects', lambda rid: False)
+    tid = submit(owner)
+    asyncio.run(owner._execute(tid))
+    store = owner.gateway.store
+    store.bind_native(tid+':0', native_run_id='original', native_session='owner:task:'+tid,
+        native_binding_guard=owner.background_binding_guard)
+    if rotated:
+        lifecycle['original'] = 'completed'
+        store.bind_native(tid+':0', native_run_id='rotated', native_session='owner:task:'+tid,
+            native_binding_guard=owner.background_binding_guard)
+    sid = 'task:foreign' if receiver == 'foreign-task' else 'foreign'
+    request = {'options': {'background': True, 'task_id': tid, 'source': 'durable_task'}} if receiver == 'forged-options' else {}
+    store.admit_request(sid, 'foreign objective', request_id='foreign-receiver', requested=request)
+    native_session = 'owner:task:'+tid if receiver == 'foreign-session' else 'owner:'+sid
+    before = owner.store.get_task(tid).to_dict()
+    with pytest.raises(ValueError):
+        store.bind_native('foreign-receiver', native_run_id='original', native_session=native_session,
+            **({'native_binding_guard': owner.background_binding_guard} if guarded else {}))
+    assert store.get_request('foreign-receiver')['native_run_id'] is None
+    assert owner.store.get_task(tid).to_dict() == before
+
+
+def test_protected_same_request_rebind_requires_owner_guard(owner, monkeypatch):
+    import os
+    from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+    monkeypatch.setattr(SqliteRunStore, 'get', lambda self, rid: SimpleNamespace(owner_pid=os.getpid(), state='active'))
+    tid = submit(owner)
+    asyncio.run(owner._execute(tid))
+    store = owner.gateway.store
+    store.bind_native(tid+':0', native_run_id='protected', native_session='owner:task:'+tid,
+        native_binding_guard=owner.background_binding_guard)
+    with pytest.raises(ValueError):
+        store.bind_native(tid+':0', native_run_id='protected', native_session='owner:task:'+tid)
+    store.bind_native(tid+':0', native_run_id='protected', native_session='owner:task:'+tid,
+        native_binding_guard=owner.background_binding_guard)
+
+
+def test_legacy_sources_do_not_acquire_new_exclusivity(owner):
+    store = owner.gateway.store
+    store.admit_request('legacy', 'old work', request_id='old')
+    store.bind_native('old', native_run_id='unprotected', native_session='owner:legacy')
+    store.admit_request('legacy-other', 'other old work', request_id='old-other')
+    store.bind_native('old-other', native_run_id='unprotected', native_session='owner:legacy-other')
+    assert store.get_request('old-other')['native_run_id'] == 'unprotected'
