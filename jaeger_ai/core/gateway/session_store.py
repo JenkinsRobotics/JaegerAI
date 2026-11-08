@@ -1534,6 +1534,7 @@ class GatewaySessionStore:
         requested: dict[str, Any] | None = None,
         expected_model_revision: int | None = None,
         admission_guard: Callable[[sqlite3.Connection], None] | None = None,
+        admission_snapshot_guard: Callable[[sqlite3.Connection, dict[str, Any]], None] | None = None,
         execution_defaults: Callable[[], dict[str, Any]] | None = None,
         instance_defaults_source: dict[str, Any] | None = None,
         retry_of: str | None = None,
@@ -1670,6 +1671,8 @@ class GatewaySessionStore:
                 meta["model_choice_revision"] = self.model_choice_revision(meta) + 1
             if admission_guard is not None:
                 admission_guard(conn)
+            if admission_snapshot_guard is not None:
+                admission_snapshot_guard(conn, execution)
             turn_id = uuid.uuid4().hex
             conn.execute(
                 """
@@ -1834,6 +1837,7 @@ class GatewaySessionStore:
         status: str = "running",
         owner_receipt_token: str | None = None,
         native_reuse_guard: Callable | None = None,
+        native_binding_guard: Callable | None = None,
     ) -> dict[str, Any] | None:
         now = time.time()
         with self._immediate() as conn:
@@ -1842,6 +1846,8 @@ class GatewaySessionStore:
             ).fetchone()
             if row is None:
                 return None
+            if native_binding_guard is not None:
+                native_binding_guard(conn, self._request_row(row), native_run_id, native_session)
             from .owner_receipts import accept
             accept(conn, row, native_run_id, native_session, owner_receipt_token, native_reuse_guard)
             # execution_unknown is an outcome awaiting reconciliation, not a state to resume
