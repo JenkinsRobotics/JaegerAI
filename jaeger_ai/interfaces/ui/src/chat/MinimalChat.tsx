@@ -914,6 +914,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         if (snapshot.status === "pending") return;
         const decision: "approve" | "deny" = ["deny", "cancelled", "expired"].includes(snapshot.decision ?? snapshot.status) ? "deny" : "approve";
         setDecisions(current => ({ ...current, [id]: decision }));
+        setSession(current => current ? {...current, turns:current.turns.map(turn=>({...turn,parts:turn.parts.map(part=>part.kind==='confirmation'&&part.callId===id?{...part,decision}:part)}))} : current);
       }).catch(() => { /* an unknown card stays visible rather than guessing its decision */ });
     }
   }, [host, session, sessionId]);
@@ -926,6 +927,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       updateTurn(turnId, (t) => ({
       ...t,
       parts: t.parts.map((p) =>
+        p.kind === "confirmation" && p.callId === callId ? {...p,decision} :
         p.kind === "toolInvocation" && p.callId === callId ? { ...p, state: decision === "approve" ? "executing" : "denied" } : p),
       }));
     }, async error => {

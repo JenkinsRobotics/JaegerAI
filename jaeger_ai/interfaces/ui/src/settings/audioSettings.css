@@ -1,0 +1,7 @@
+.jg-audio-settings { container-type:inline-size; }
+.jg-audio-settings .jg-sheet__row { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:18px 0; border-bottom:1px solid var(--jg-color-border); }
+.jg-audio-settings .jg-sheet__row-label { display:flex; flex-direction:column; gap:6px; }
+.jg-audio-settings .jg-sheet__hint { display:block; color:var(--jg-color-text-secondary); font-size:13px; line-height:1.5; }
+.jg-audio-settings select { min-height:44px; width:min(260px,50%); padding:8px 12px; border:1px solid var(--jg-color-border); border-radius:10px; color:var(--jg-color-text); background:var(--jg-color-elevated); font:inherit; }
+.jg-settings-workspace main .jg-audio-settings button { width:auto; margin-top:16px; border:1px solid var(--jg-color-border); background:var(--jg-color-elevated); }
+@container (max-width:480px) { .jg-audio-settings .jg-sheet__row { align-items:stretch; flex-direction:column; gap:12px; } .jg-audio-settings select { width:100%; } }

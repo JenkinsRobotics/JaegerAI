@@ -194,7 +194,8 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
     const index = parts.findIndex((p) => p.kind === part.kind && p.callId === part.callId);
     if (index >= 0) return parts.map((p, i) => {
       if (i !== index) return p;
-      // A clarify.resolved update carries only its status; keep the question and its options.
+      // Resolution events carry only status; preserve the original card content.
+      if (part.kind === "confirmation" && p.kind === "confirmation" && !part.title) return { ...p, decision: part.decision ?? p.decision };
       if (part.kind === "question" && p.kind === "question" && !part.title) return { ...p, status: part.status ?? p.status };
       return { ...p, ...part } as ChatPart;
     });
