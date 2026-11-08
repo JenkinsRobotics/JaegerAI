@@ -20,7 +20,7 @@ pytest-playwright>=0.4
 
 # Code quality
 ruff>=0.1
-mypy>=1.7
+mypy>=2.4.1
 
 # Test utilities
 faker>=22.0
