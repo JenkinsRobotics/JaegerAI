@@ -6390,6 +6390,10 @@ class JaegerGatewayApp:
         )
         if persisted.get("event"):
             self.event_bus.fanout(persisted["event"])
+        if not persisted.get("replayed"):
+            # Confirmed terminal receipts release queued follow-ups just like
+            # normal settlement. Unknown/acknowledged outcomes return above.
+            self._drain_session_queue(session_id)
         return web.json_response({**persisted, "reconciled": True, "receipt": receipt})
 
     def _native_receipt(self, native_run_id: str | None, native_session: str | None) -> dict[str, Any] | None:

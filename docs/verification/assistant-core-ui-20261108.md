@@ -4,6 +4,11 @@ Scope: cloud-only branch `fix/assistant-core-acceptance-20261108`, starting at
 `ff71bb769bc56e4c6d7be6d540a86be73e291e07`. No Mac runtime, deployment,
 real accounts, external messages, purchases, or provider-backed generation.
 
+Latest scoped qualification: [reconciliation ownership and outcomes](assistant-core-reconciliation-20261108.md)
+records 910 component tests in 201 files and a newly fingerprinted no-mock build.
+The earlier measurements below retain their historical scope; every tab remains
+PARTIAL and browser/phone/native acceptance is not inferred from them.
+
 ## Evidence levels
 
 Source inventory is not end-to-end acceptance. Component tests substitute API
@@ -95,6 +100,10 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 - The [queued Chat repair](assistant-core-queue-defaults-20261108.md) extends
   immutable defaults to Queue next, preserving replay, promotion and instance
   paths. Confirmed-reconciliation queue continuity remains a separate follow-up.
+- The [reconciliation repair](assistant-core-reconciliation-20261108.md) preserves
+  failed/cancelled terminal state and streamed partial text instead of suppressing
+  failure. It also protects newer session ownership and eligible queue progression.
+  Real native-bridge recovery and resident full-request receipts remain unqualified.
 - Source-backed capability presence does not prove native-host availability, real provider credentials, external connector authorization, output quality, or a completed autonomous workflow.
 
 ### Parallel workspace error-state repair

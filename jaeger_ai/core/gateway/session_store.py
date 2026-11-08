@@ -1854,10 +1854,27 @@ class GatewaySessionStore:
                 (status, json.dumps(result), now, request_id),
             )
             sess_status = session_status or ("idle" if status == "completed" else status)
-            conn.execute(
-                "UPDATE sessions SET status=?, updated_at=? WHERE session_id=?",
-                (sess_status, now, row["session_id"]),
-            )
+            # Both immediate admission and queued promotion record turn.start
+            # atomically. Its durable order, not request creation time, identifies
+            # the session owner even after replay events expire. A late historical
+            # receipt must not overwrite a newer busy OR terminal projection.
+            # Without matching admission proof preserve session state, while still
+            # recording this request's outcome. Acknowledged unknown history is
+            # not a live owner; other unacknowledged/live work remains protected.
+            latest_start = conn.execute(
+                "SELECT data_json FROM activity_history WHERE session_id=? "
+                "AND event='turn.start' ORDER BY event_id DESC LIMIT 1",
+                (row["session_id"],),
+            ).fetchone()
+            owner = _row_meta(latest_start["data_json"]) if latest_start else {}
+            if owner.get("request_id") == request_id and owner.get("turn_id") == row["turn_id"]:
+                conn.execute(
+                    "UPDATE sessions SET status=?, updated_at=? WHERE session_id=? "
+                    "AND NOT EXISTS (SELECT 1 FROM client_requests WHERE session_id=? "
+                    "AND request_id<>? AND (status IN ('admitted', 'running', 'awaiting_approval', 'cancelling') "
+                    "OR (status='execution_unknown' AND json_extract(result_json,'$.acknowledged') IS NULL)))",
+                    (sess_status, now, row["session_id"], row["session_id"], request_id),
+                )
             updated = conn.execute(
                 "SELECT * FROM client_requests WHERE request_id=?", (request_id,)
             ).fetchone()

@@ -107,3 +107,10 @@ continuation limits remain conservative. There is no new scheduler, authority
 model or evolution framework. Runtime-local work and all user data are preserved.
 The patch is a review candidate, not a remote PR or deployed fix. Reconciliation,
 backups, full acceptance and separate cutover approval are still required.
+
+## Later confirmed-reconciliation repair
+
+The [tenth increment](assistant-core-reconciliation-20261108.md) repairs safe
+confirmed-receipt queue progression and admission-order session ownership. It
+also corrects client terminal status and empty-receipt partial-output loss.
+It does not infer whole resident request completion from an inner native run.
