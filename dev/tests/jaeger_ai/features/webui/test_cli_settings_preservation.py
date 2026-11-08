@@ -86,3 +86,71 @@ def test_settings_put_reports_failure_and_preserves_document(cli, monkeypatch):
     assert responses[0][1]['status'] == 400
     assert 'synthetic-private-document' not in json.dumps(responses)
     assert path.read_bytes() == original
+
+
+def put(cli, monkeypatch, body):
+    api = load('unified_api')
+    monkeypatch.setattr(api, '_cli', lambda: cli)
+    responses = []
+    assert api.route(None, urlparse('/v1/providers/cli/codex'), 'PUT',
+                     lambda handler: body,
+                     lambda handler, data, **kwargs: responses.append((data, kwargs)))
+    assert len(responses) == 1
+    return responses[0]
+
+
+@pytest.mark.parametrize('enabled', ['false', '', 0, 1, None, [], {}, 'synthetic-private-input'])
+def test_nonboolean_enabled_is_rejected_before_write(cli, monkeypatch, enabled):
+    path = cli._state_path()
+    path.parent.mkdir(parents=True)
+    original = b'{ "codex": {"enabled":false}, "other":{"note":"retain"} }'
+    path.write_bytes(original)
+    result = put(cli, monkeypatch, {'enabled': enabled})
+    assert result == ({'error': 'enabled must be a boolean'}, {'status': 400})
+    assert path.read_bytes() == original
+    assert not path.with_suffix('.tmp').exists()
+
+
+@pytest.mark.parametrize('row', [[], [['enabled', False]], None, 42, False, 'synthetic-private-row'])
+def test_nonobject_target_row_is_rejected_without_coercion(cli, monkeypatch, row):
+    path = cli._state_path()
+    path.parent.mkdir(parents=True)
+    original = json.dumps({'codex': row, 'other': {'note': 'retain'}}).encode()
+    path.write_bytes(original)
+    result = put(cli, monkeypatch, {'enabled': False})
+    assert result == ({'error': 'Existing CLI provider settings entry must be an object; no changes saved'},
+                      {'status': 400})
+    assert path.read_bytes() == original
+    assert not path.with_suffix('.tmp').exists()
+
+
+def test_invalid_first_save_creates_nothing(cli, monkeypatch):
+    result = put(cli, monkeypatch, {'enabled': 'false'})
+    assert result == ({'error': 'enabled must be a boolean'}, {'status': 400})
+    assert not cli._state_path().parent.exists()
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_explicit_boolean_merge_preserves_unrelated_values(cli, enabled):
+    path = cli._state_path()
+    path.parent.mkdir(parents=True)
+    saved = {'codex': {'enabled': not enabled, 'models': ['auto'], 'future': {'keep': [1]}},
+             'future_provider': ['opaque', 'retain']}
+    path.write_text(json.dumps(saved))
+    cli.update('codex', {'enabled': enabled})
+    saved['codex']['enabled'] = enabled
+    assert json.loads(path.read_text()) == saved
+    cli.update('codex', {'models': ['model-a', 'model-a']})
+    saved['codex']['models'] = ['model-a']
+    assert json.loads(path.read_text()) == saved
+
+
+@pytest.mark.parametrize('models', [None, 'auto', [42], ['bad model'], ['auto'] * 41])
+def test_model_validation_still_preserves_original_bytes(cli, monkeypatch, models):
+    path = cli._state_path()
+    path.parent.mkdir(parents=True)
+    original = b'{ "codex": {"enabled":false,"models":["auto"]} }'
+    path.write_bytes(original)
+    assert put(cli, monkeypatch, {'enabled': True, 'models': models}) == (
+        {'error': 'models must be a list of model ids'}, {'status': 400})
+    assert path.read_bytes() == original

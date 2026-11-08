@@ -52,3 +52,7 @@ writer safety or live UI acceptance is claimed here.
 The existing atomic file helper is being evaluated for that follow-up without
 changing its policy or silently retrying uncertain outcomes. Overall and every
 tab remain PARTIAL. No runtime changes, merge, deployment or remote write occurred.
+
+The later [provider validation increment](assistant-core-provider-settings-validation-20261108.md)
+rejects nonboolean enabled values and malformed target-provider rows. It remains
+separate from concurrent-writer safety and preserves this earlier failure record.

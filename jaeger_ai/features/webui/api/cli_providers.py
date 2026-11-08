@@ -367,9 +367,14 @@ def update(pid: str, body: dict) -> dict:
     if not known(pid):
         raise KeyError(pid)
     st = _settings(for_update=True)
-    cur = dict(st.get(pid, {}))
+    saved = st.get(pid, {})
+    if not isinstance(saved, dict):
+        raise ValueError("Existing CLI provider settings entry must be an object; no changes saved")
+    cur = dict(saved)
     if "enabled" in body:
-        cur["enabled"] = bool(body["enabled"])
+        if not isinstance(body["enabled"], bool):
+            raise ValueError("enabled must be a boolean")
+        cur["enabled"] = body["enabled"]
     if "models" in body:
         ms = body["models"]
         if not isinstance(ms, list) or not all(isinstance(m, str) and MODEL_RE.match(m) for m in ms) or len(ms) > 40:
