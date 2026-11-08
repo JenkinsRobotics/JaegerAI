@@ -565,6 +565,16 @@ export const Shield = createIcon(
   'Shield'
 )
 
+export const ToolShield = createIcon(
+  <><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6z" /><path d="m8 9 3 3-3 3m5 0h3" /></>,
+  'ToolShield'
+)
+
+export const Gauge = createIcon(
+  <><path d="M4.2 19a9 9 0 1 1 15.6 0M5 12h1m12 0h1M8 6l.5 1M16 6l-.5 1M12 3v2m0 8 4-4" /><circle cx="12" cy="14" r="2" /></>,
+  'Gauge'
+)
+
 export const Target = createIcon(
   <>
     <circle cx="12" cy="12" r="10" />

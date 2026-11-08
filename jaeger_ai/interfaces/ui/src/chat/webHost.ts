@@ -174,6 +174,8 @@ export class WebHost implements ChatHost {
   get modelSettings() { return this.source.modelSettings; }
   get runtimeAutonomy() { return this.source.runtimeAutonomy?.bind(this.source); }
   get setRuntimeAutonomy() { return this.source.setRuntimeAutonomy?.bind(this.source); }
+  get runtimeTier() { return this.source.runtimeTier?.bind(this.source); }
+  get setRuntimeTier() { return this.source.setRuntimeTier?.bind(this.source); }
   get messageReactions() { return this.source.messageReactions; }
   get sessionQueue() { return this.source.sessionQueue; }
   async listModels() {

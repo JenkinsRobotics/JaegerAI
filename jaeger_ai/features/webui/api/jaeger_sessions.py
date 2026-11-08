@@ -461,7 +461,7 @@ def route(handler, parsed, method: str) -> bool:
     # The composer reads and changes autonomy through the same authenticated
     # Gateway as native clients. Keep the route exact; Gateway owns validation
     # and the admin scope required for changes.
-    if path == '/v1/runtime/autonomy' and method in {'GET', 'POST'}:
+    if path in {'/v1/runtime/autonomy', '/v1/runtime/tier'} and method in {'GET', 'POST'}:
         return _proxy(handler, method, path, _body_bytes(handler) if method == 'POST' else None)
 
     if path=='/v1/runtime/mcp/configuration' and method=='GET':return _proxy(handler,method,path)

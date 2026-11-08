@@ -50,6 +50,8 @@ export class GatewayClient implements JaegerSource {
   constructor(private readonly base = "") {}
   runtimeAutonomy = () => this.json<RuntimeAutonomySnapshot>("/v1/runtime/autonomy");
   setRuntimeAutonomy = (autonomy: RuntimeAutonomy) => this.json<RuntimeAutonomySnapshot>("/v1/runtime/autonomy", { autonomy });
+  runtimeTier = () => this.json<import('./source').RuntimeTierSnapshot>("/v1/runtime/tier");
+  setRuntimeTier = (tier: import('./source').RuntimeTier) => this.json<import('./source').RuntimeTierSnapshot>("/v1/runtime/tier", {tier});
   sessionQueue: SessionQueue = {
     list: id => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`),
     enqueue: (id, text, request_id) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`, { text, request_id }),

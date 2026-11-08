@@ -45,6 +45,7 @@ import { useRevealedText } from "./reveal";
 import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
 import type { VoiceHost } from "./nativeHost";
 import { AutonomyControl } from "./AutonomyControl";
+import { RunModeControl } from "./RunModeControl";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
 type Decide = (callId: string, decision: "approve" | "deny") => void;
@@ -929,6 +930,10 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         {draftError && <div role="alert">{draftError}</div>}
         {deliveryNotice && <div className="jg-composer__notice" role="alert">{deliveryNotice}</div>}
         <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : active ? "Follow up" : agent.id === "native:jaeger" ? "Do anything" : `Ask ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
+        {active && hasText && <div className="jg-followup-actions" role="group" aria-label="Follow-up delivery">
+          {host.sessionQueue && <button type="button" className="jg-busy-mode" aria-label="Queue next message" disabled={followUpBusy} onClick={() => void submitWhileBusy("queue")}>Queue next</button>}
+          <button type="submit" className="jg-busy-mode" aria-label="Send message" disabled={followUpBusy || !host.sessionQueue?.steer}>Send now</button>
+        </div>}
         <div className="jg-composer__bar">
         <button ref={plus} type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach file" title="Attach file" aria-haspopup="menu"
           aria-expanded={composerMenu} onClick={() => setComposerMenu(true)}><PlusIcon /></button>
@@ -936,24 +941,17 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
           <AutonomyControl host={host} />
-          {active && host.sessionQueue ? (
-            <button type="button" className="jg-busy-mode" aria-label="Queue next message" title="Send this after the current turn"
-              disabled={!hasText || followUpBusy} onClick={() => void submitWhileBusy("queue")}>
-              Queue next
-            </button>
-          ) : null}
+          <RunModeControl host={host} disabled={Boolean(active)} />
           <span className="jg-composer__spacer" />
           <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
-          {!active && host instanceof WebHost && <VoiceDictation />}
-        {!active && dictation && primary !== "dictate" && (
+          {host instanceof WebHost && <VoiceDictation />}
+        {dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
             disabled={listening === "voice"} onClick={() => void toggleListening("dictation")}><MicIcon /></button>
         )}
         {active
-          ? <><button type="submit" className="jg-send jg-send--steer" aria-label="Send message" title="Send to the active turn"
-                disabled={!hasText || followUpBusy || !host.sessionQueue?.steer}><SendIcon /></button>
-              <button type="button" className="jg-send jg-send--stop" aria-label="Stop current turn (⌘Esc)" onClick={stop}><StopIcon /></button></>
+          ? <button type="button" className="jg-send jg-send--stop" aria-label="Stop current turn (⌘Esc)" onClick={stop}><StopIcon /></button>
           : primary === "send"
             ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText || recoveryBlocked || preparingFiles || !draftReady || !session || recoveryStatus === "unknown"}><SendIcon /></button>
             : primary === "dictate"

@@ -1,4 +1,5 @@
 import type {ChatTurn} from './host';
+import {Bot} from '../components/Icons';
 
 /** Only recorded handoffs, never inferred agent execution or completion. */
 export function agentActivity(turns:ChatTurn[]) {
@@ -17,7 +18,7 @@ export function AgentActivity({turns,onOpen}:{turns:ChatTurn[];onOpen?:(id:strin
  const agents=agentActivity(turns);
  if(!agents.length)return null;
  return <details className="jg-agent-activity">
-  <summary>{agents.length} {agents.length===1?'agent':'agents'}</summary>
+  <summary><Bot size={18}/><span>{agents.length} {agents.length===1?'agent':'agents'}</span></summary>
   <ul aria-label="Agent activity">{agents.map(agent=><li key={agent.id}>
    {onOpen?<button type="button" onClick={()=>onOpen(agent.handoffId)}>{agent.name}</button>:<span>{agent.name}</span>}
    <small>{agent.status}</small>

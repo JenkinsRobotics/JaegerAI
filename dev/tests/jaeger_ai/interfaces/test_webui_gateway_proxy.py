@@ -85,17 +85,20 @@ def test_routes_map_to_audited_gateway_paths(overlay, path, method, expected):
     assert overlay._calls[-1] == expected
 
 
-def test_composer_autonomy_uses_gateway_for_reads_and_exact_changes(overlay, monkeypatch):
+@pytest.mark.parametrize('setting,value', [('autonomy','scoped'), ('tier','agent')])
+def test_composer_controls_use_gateway_for_reads_and_exact_changes(overlay, monkeypatch, setting, value):
     calls = []
-    body = b'{"autonomy":"scoped"}'
+    import json
+    body = json.dumps({setting:value}).encode()
+    path = f'/v1/runtime/{setting}'
     monkeypatch.setattr(overlay, '_body_bytes', lambda handler: body)
     monkeypatch.setattr(overlay, '_proxy', lambda h, m, p, b=None: calls.append((m, p, b)) or True)
-    assert _route(overlay, '/v1/runtime/autonomy')
-    assert _route(overlay, '/v1/runtime/autonomy', 'POST')
-    assert calls == [('GET', '/v1/runtime/autonomy', None), ('POST', '/v1/runtime/autonomy', body)]
+    assert _route(overlay, path)
+    assert _route(overlay, path, 'POST')
+    assert calls == [('GET', path, None), ('POST', path, body)]
     for method in ('PATCH', 'DELETE', 'PUT'):
-        assert not _route(overlay, '/v1/runtime/autonomy', method)
-    assert not _route(overlay, '/v1/runtime/autonomy/reset', 'POST')
+        assert not _route(overlay, path, method)
+    assert not _route(overlay, path+'/reset', 'POST')
     assert len(calls) == 2
 
 
