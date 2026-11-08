@@ -968,6 +968,13 @@ def test_bridge_always_answer_is_one_grant_shared_with_every_client(gateway, bri
     bridge.send({"op": "send", "text": "CONTRACT-WRITE: first", "session": "grant",
                  "turn_id": "grant-1"})
     request = bridge.until(lambda f: f.get("type") == "request")
+    # Compatibility for saved legacy/specialized cards that explicitly offer
+    # persistent permission. Current cards deliberately do not offer always.
+    import sqlite3
+    approval = gateway.request("/v1/approvals")[1]["approvals"][0]
+    with sqlite3.connect(gateway.root / "gateway_sessions.sqlite3") as conn:
+        conn.execute("UPDATE approvals SET options_json=? WHERE approval_id=?",
+                     (json.dumps(["once", "session", "always", "deny"]), approval["approval_id"]))
     bridge.send({"op": "respond", "id": request["id"], "answer": "always"})
     bridge.until(lambda f: f.get("type") == "reply")
     assert target.read_text(encoding="utf-8") == "CONTRACT-CONTENT"
