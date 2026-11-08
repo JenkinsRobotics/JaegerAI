@@ -6,7 +6,7 @@ import type { AgentActions, Section } from "./agentActions";
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
  * server side. The browser never sees or sends a token. */
 import { decodeSSE, type SSEFrame } from "./sse";
-import type { JaegerSource, RequestSnapshot, PendingApproval, ClarificationSnapshot, TurnReceipt , UploadedAttachment, ConnectAppsListing, ConnectedApp, ModelInventory, ScheduleControls, LibraryControls, ReactionSnapshot, SessionQueue } from "./source";
+import type { JaegerSource, RequestSnapshot, PendingApproval, ClarificationSnapshot, TurnReceipt , UploadedAttachment, ConnectAppsListing, ConnectedApp, ModelInventory, ScheduleControls, LibraryControls, ReactionSnapshot, SessionQueue, RuntimeAutonomy, RuntimeAutonomySnapshot } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 /** The WebUI's session CSRF token (meta tag the server injects for a
@@ -48,7 +48,8 @@ export function normalizeFrame(frame: SSEFrame): GatewayEvent {
 export class GatewayClient implements JaegerSource {
   readonly kind = "live" as const;
   constructor(private readonly base = "") {}
-  runtimeAutonomy = () => this.json<{ autonomy: "ask" | "scoped" | "auto"; options: string[] }>("/v1/runtime/autonomy");
+  runtimeAutonomy = () => this.json<RuntimeAutonomySnapshot>("/v1/runtime/autonomy");
+  setRuntimeAutonomy = (autonomy: RuntimeAutonomy) => this.json<RuntimeAutonomySnapshot>("/v1/runtime/autonomy", { autonomy });
   sessionQueue: SessionQueue = {
     list: id => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`),
     enqueue: (id, text, request_id) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`, { text, request_id }),

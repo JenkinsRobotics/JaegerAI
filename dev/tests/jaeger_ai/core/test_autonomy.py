@@ -9,6 +9,31 @@ from types import SimpleNamespace
 from jaeger_ai.core.runtime import autonomy
 
 
+def test_gateway_change_persists_and_updates_the_running_mode(tmp_path) -> None:
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock
+
+    from aiohttp.test_utils import make_mocked_request
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
+
+    config_path = tmp_path / "config.yaml"
+    dump_yaml(config_path, Config(instance_name="autonomy-test", model=ModelConfig(model_path="/dev/null")))
+    gateway = SimpleNamespace(_config_path=lambda: config_path)
+    request = make_mocked_request("POST", "/v1/runtime/autonomy")
+    request.json = AsyncMock(return_value={"autonomy": "auto"})
+    try:
+        autonomy.set_autonomy("ask")
+        response = asyncio.run(JaegerGatewayApp.handle_set_autonomy(gateway, request))
+        assert response.status == 200
+        assert json.loads(response.body)["autonomy"] == "auto"
+        assert autonomy.current_autonomy() == "auto"
+        assert autonomy.configured_autonomy(config_path) == "auto"
+    finally:
+        autonomy.set_autonomy(autonomy.DEFAULT)
+
+
 def test_module_default_set_and_unknown() -> None:
     try:
         assert autonomy.current_autonomy() == autonomy.DEFAULT == "scoped"

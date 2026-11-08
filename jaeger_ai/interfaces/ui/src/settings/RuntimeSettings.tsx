@@ -3,10 +3,32 @@ import type { ModelInventory, ModelSettings, ModelChoiceSnapshot, ModelChoiceInt
 import { useExclusivePopup } from "../popups/coordinator";
 import { Bot, ChevronDown, Search, X } from "../components/Icons";
 
+type RuntimeChoice = { id: string; model: string; provider: string; providerLabel: string; group: string; groupLabel: string; certified?: boolean };
+
+const isCloudModel = (id: string, remoteHost?: string | null) => Boolean(remoteHost) || id.endsWith(":cloud") || id.endsWith("-cloud");
+export function runtimeChoices(inventory?: ModelInventory): RuntimeChoice[] {
+  return inventory?.providers.filter(provider => provider.reachable).flatMap(provider => provider.models
+    .filter(model => model.available !== false && (!model.capabilities?.length || model.capabilities.includes("completion")))
+    .map(model => {
+      const ollama = provider.id === "ollama" || provider.id.startsWith("ollama-");
+      const cloud = ollama && isCloudModel(model.id, model.remote_host);
+      return {
+        id: `@${provider.id}:${model.id}`,
+        model: model.id,
+        provider: provider.id,
+        providerLabel: provider.display_name,
+        group: ollama ? cloud ? "ollama-cloud" : "ollama-local" : provider.id,
+        groupLabel: ollama ? cloud ? "Ollama Cloud" : "Ollama Local" : provider.display_name,
+        certified: model.usable_for_react,
+      };
+    })) ?? [];
+}
+
 /** Session choice only. Credentials, global routing and permissions stay Gateway-owned. */
 export function RuntimeSettings({ settings, sessionId, disabled = false }: { settings?: ModelSettings; sessionId?: string; disabled?: boolean }) {
   const [open, setOpen] = useState(false), [attempt, setAttempt] = useState(0);
   const [query, setQuery] = useState("");
+  const [providerGroup, setProviderGroup] = useState("all");
   const trigger = useRef<HTMLButtonElement>(null);
   const [inventory, setInventory] = useState<ModelInventory>();
   const [selected, setSelected] = useState(""), [loaded, setLoaded] = useState(false);
@@ -36,13 +58,18 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
       setInventory(models);setBase(current);
       let proposal:string|null=null;
       if(current.atomic_model_operations)try{proposal=localStorage.getItem(draftKey);}catch{setError('Model proposal storage unavailable; current settings retained');}
-      setSelected(proposalRef.current?.owner===sessionId?proposalRef.current.value:proposal??choice(current));setLoaded(true);
+      const nextSelected=proposalRef.current?.owner===sessionId?proposalRef.current.value:proposal??choice(current);
+      setSelected(nextSelected);
+      const matching=runtimeChoices(models).find(model=>model.id===nextSelected);
+      setProviderGroup(matching?.group??(runtimeChoices(models).some(model=>model.group==="ollama-cloud")?"ollama-cloud":"all"));
+      setLoaded(true);
     }).catch(e => { if (live) setError(String((e as Error).message ?? e)); });
     return () => { live = false; generation.current++; };
   }, [open, settings, sessionId, attempt]);
   if (!settings || !sessionId) return null;
-  const choices = inventory?.providers.filter(p => p.reachable).flatMap(p => p.models.filter(m => m.available !== false).map(m => ({ id: `@${p.id}:${m.id}`, label: `${p.display_name} · ${m.id}`, certified: m.usable_for_react }))) ?? [];
-  const filteredChoices = choices.filter(model => !query.trim() || model.label.toLowerCase().includes(query.trim().toLowerCase()));
+  const choices = runtimeChoices(inventory);
+  const providerGroups = Array.from(new Map(choices.map(model => [model.group, model.groupLabel])).entries());
+  const filteredChoices = choices.filter(model => (providerGroup === "all" || model.group === providerGroup) && (!query.trim() || `${model.model} ${model.providerLabel} ${model.groupLabel}`.toLowerCase().includes(query.trim().toLowerCase())));
   const currentChoice = base ? choice(base) : "";
   const currentLabel = currentChoice ? currentChoice.replace(/^@/, "").replace(":", " · ") : inventory?.active?.model || "Gateway default";
   const finish=async(receipt:ModelChoiceReceipt,intent:ModelChoiceIntent,owner:number)=>{
@@ -91,6 +118,10 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
   return <div className="jg-runtime-picker"><button ref={trigger} type="button" className="jg-runtime-trigger" aria-label="Choose conversation model" title="Choose model" aria-expanded={open} disabled={disabled} onClick={() => { setQuery(""); setOpen(value => !value); }}><Bot size={14} /><span>{currentLabel}</span><ChevronDown size={14} /></button>
     {open && <section className="jg-runtime-menu" role="dialog" aria-label="Gateway models and settings" data-jg-popup>
       <header><strong>Model for this conversation</strong><button type="button" aria-label="Close model picker" onClick={() => setOpen(false)}><X size={16} /></button></header>
+      {loaded && <div className="jg-runtime-tabs" role="tablist" aria-label="Model providers">
+        <button type="button" role="tab" aria-selected={providerGroup === "all"} onClick={() => setProviderGroup("all")}><Bot size={15} />All</button>
+        {providerGroups.map(([id,label]) => <button key={id} type="button" role="tab" aria-selected={providerGroup === id} onClick={() => setProviderGroup(id)}>{label}</button>)}
+      </div>}
       <label className="jg-runtime-search"><Search size={15} /><input type="search" autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search models…" aria-label="Search models" /></label>
       {error && <p className="jg-runtime-message is-error" role="alert">{error}</p>}{notice && <p className="jg-runtime-message" role="status">{notice}</p>}
       {!loaded && !error && !pending && !needsRefresh && <p className="jg-runtime-message" role="status">Loading Gateway models…</p>}
@@ -98,7 +129,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
       {loaded && <div className="jg-runtime-models" role="listbox" aria-label="Conversation model">
         <button type="button" role="option" aria-selected={selected === ""} onClick={() => select("")}><span><strong>Gateway default</strong>{inventory?.active?.model && <small>{inventory.active.provider} · {inventory.active.model}</small>}</span>{selected === "" && <span className="jg-runtime-check">✓</span>}</button>
         {selected && !choices.some(m => m.id === selected) && <button type="button" disabled><span><strong>{selected}</strong><small>Currently unavailable</small></span></button>}
-        {filteredChoices.map(model => <button key={model.id} type="button" role="option" aria-selected={selected === model.id} onClick={() => select(model.id)}><span><strong>{model.label}</strong>{!model.certified && <small>Tool certification not verified</small>}</span>{selected === model.id && <span className="jg-runtime-check">✓</span>}</button>)}
+        {filteredChoices.map(model => <button key={model.id} type="button" role="option" aria-selected={selected === model.id} onClick={() => select(model.id)}><span><strong>{model.model}</strong><small>{model.groupLabel}{model.certified ? " · Tool use verified" : " · Tool certification not verified"}</small></span>{selected === model.id && <span className="jg-runtime-check">✓</span>}</button>)}
         {!filteredChoices.length && <p className="jg-runtime-message">No available models match “{query}”.</p>}
       </div>}
       {pending&&<p className="jg-runtime-message" role="status">A model save needs its original receipt. It will not be resubmitted.</p>}
