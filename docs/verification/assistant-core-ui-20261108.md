@@ -195,3 +195,11 @@ combined qualification report.
 
 The latest combined report distinguishes refreshed gates from reused UI evidence.
 No unsupported control or tab is promoted to PASS by these scoped results.
+
+
+- Agents/Work procedure reuse: the [fresh-process qualification](assistant-core-procedure-retrieval-20261108.md)
+  proves persisted code retrieval and prompt selection of metadata/references,
+  not runtime execution of learned code. Automatic review now reports pending
+  verification instead of promoting a merely non-placeholder procedure. Its
+  missing objective verifier, caller-verdict and disk-reload trust boundaries
+  remain explicit. No tab is promoted to PASS by this correction.

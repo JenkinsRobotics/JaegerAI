@@ -2,10 +2,10 @@
 
 ## Candidate and boundaries
 
-The isolated branch preserves twenty-three commits over review base
-ff71bb769bc56e4c6d7be6d540a86be73e291e07. The last four increments add
-real default-report delivery qualification and provider settings preservation,
-type validation and concurrent-save protection. The separately inspected latest
+The isolated branch preserves twenty-four commits over review base
+ff71bb769bc56e4c6d7be6d540a86be73e291e07. The latest increment stops false automatic skill verification and qualifies
+fresh-process procedure retrieval. It follows default-report delivery and
+provider settings preservation, type validation and concurrent-save protection. The separately inspected latest
 master adds only two CI/documentation commits; see the
 [upstream check](assistant-core-upstream-check-20261108.md). No combined upstream
 revision was executed. The final source is identified by its frozen Python manifest. The bundle README and
@@ -22,9 +22,14 @@ remain preserved outside this isolated checkout.
 - Security: 203 passed, with 2 platform skips.
 - Durable/recovery/artifact: 558 passed; agent runtime/commitment: 120 passed.
 - Owned HTTP/process: 51 passed, 3 established infrastructure exclusions,
-  654.54 seconds. This includes all four strengthened SIGKILL/two-restart cases
+  581.50 seconds. This includes all four strengthened SIGKILL/two-restart cases
   and the real default-report delivery journey.
 - Separate real unshimmed specialist OWNER integration: 1 passed.
+- Procedure retrieval/review and adjacent controls: 31 passed, 1 HTTP case
+  excluded from this unit group. The separate HTTP gate covers its own tests.
+  Independent exact
+  candidate: 57 focused/adjacent and 430 aggregate passed, with no xfails.
+  These counts overlap other verification evidence.
 - Provider settings: 80 passed. Independent final transaction review: 89 passed,
   5 VS Code tests excluded, plus 9 hygiene checks. The main 80-case gate includes
   the safe synthetic bridge controls. No real provider credentials were used.
@@ -34,8 +39,8 @@ remain preserved outside this isolated checkout.
   build reused after independently matching 866 source files and 857 manifest
   inputs. Source fingerprint:
   `36612489016ec2283f86dcc22d435be6aa80478591ab9dcb4551833c7be0fc1f`.
-- Root and jaeger-agent wheel/source archives rebuilt without installation;
-  six unchanged companions retained; all 10 archives inspected. Twelve root and
+- Root wheel/source archives rebuilt without installation; eight unchanged
+  agent/companion archives retained; all 10 archives inspected. Fourteen root and
   five agent runtime modules match source byte-for-byte, with matching UI
   provenance. Critical lint, source freeze and whitespace checks pass.
 
@@ -137,7 +142,7 @@ necessary. Evolution work is still deferred.
 
 ## Evidence and reproduction
 
-The bundle includes run-twentythird-final.sh and per-gate logs, source hashes,
+The bundle includes run-twentyfourth-final.sh and per-gate logs, source hashes,
 artifact inspection, machine-readable UI results, and independent review logs.
 Invoke each runner case from the isolated clone with its recorded external venv,
 and select a fresh external basetemp for every rerun. Do not reuse pytest basetemp
@@ -167,3 +172,33 @@ They preserve unrelated values and modes, expose conflicts without retry, and
 distinguish an uncertain postcommit result from a confirmed save. Cooperating
 writers require the same canonical lock/state root. A noncooperating writer can
 still race after the final check, and no new frontend stale-form contract was added.
+
+
+## Fresh-session procedures and truthful automatic review
+
+The [procedure qualification](assistant-core-procedure-retrieval-20261108.md)
+uses two separate interpreters: the producer independently checks a controlled
+file effect and explicitly promotes the fixture, then exits. The consumer reloads
+the saved package code and selects its name, description and provenance in a new
+session. Failed/placeholder candidates remain absent, and historical reflection
+instructions stay escaped read-only prompt data. This proves retrieval and prompt
+construction, not model resistance to injection or execution of retrieved code.
+
+An independently failing procedure was previously promoted automatically because
+its code was not a placeholder. The corrected review retains such candidates as
+pending verification, rejects placeholders, and records the honest outcome without
+executing code, inventing a verifier or duplicating candidate extraction. The
+independent before/after probe includes spoofed passed-verdict metadata.
+
+No automatic objective-specific verifier is configured. Explicit promotion still
+trusts an unbound caller verdict; disk reload trusts existing packages, and no
+historical package is retroactively verified. The existing latest-200/24-hour
+review window is not a durable acquisition queue. Tool permissions are unchanged.
+Overall learning and all tabs remain PARTIAL; there is no model-weight training.
+
+The prior twenty-third combined HTTP run independently passed 51 cases with
+3 exclusions in 654.54 seconds; its full logs remain preserved. The latest gates
+above belong to the twenty-fourth frozen source, not relabeled earlier results.
+The first archive-inspector command used file arguments instead of the required
+directory and was rejected before inspection. The corrected directory invocation
+with require-packages passed for all ten archives; both records are retained.

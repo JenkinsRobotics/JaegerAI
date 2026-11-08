@@ -48,6 +48,7 @@ class SleepCycleResult:
     reflections_generated: int = 0
     skills_promoted: int = 0
     errors: list[str] = field(default_factory=list)
+    skill_reviews: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def duration_s(self) -> float:
@@ -178,18 +179,21 @@ class SleepTimeProcessor:
                     code = str(payload.get("code") or "")
                     if not skill_name or skill_name in self.skill_pipeline.list_promoted_skills():
                         continue
-                    cand = self.skill_pipeline.extract_candidate(
-                        name=skill_name,
-                        description=str(payload.get("description") or f"Learned skill {skill_name}"),
-                        code=code,
-                        source_turn_id=str(payload.get("source_turn_id") or cand_ev.event_id),
-                    )
-                    ver = self.skill_pipeline.verify_candidate(
-                        cand,
-                        lambda c: not self.skill_pipeline.is_placeholder_code(c),
-                    )
-                    if self.skill_pipeline.promote(cand, ver):
-                        result.skills_promoted += 1
+                    # Structural validity is not evidence that the objective holds.
+                    # This automatic path has no objective-specific verifier. Keep
+                    # the original event pending instead of manufacturing a passed
+                    # verdict or re-emitting the candidate on every idle cycle.
+                    placeholder = self.skill_pipeline.is_placeholder_code(code)
+                    result.skill_reviews.append({
+                        "candidate_event_id": cand_ev.event_id,
+                        "skill_name": skill_name,
+                        "status": "rejected_placeholder" if placeholder else "pending_verification",
+                        "reason": (
+                            "Candidate is a placeholder or lacks an executable definition"
+                            if placeholder else
+                            "No independent objective verifier is configured for automatic skill review"
+                        ),
+                    })
                 result.jobs_executed.append("skill_candidate_review")
             except Exception as exc:
                 err = f"Skill review job error: {exc}"
@@ -240,6 +244,7 @@ class SleepTimeProcessor:
             "claims_recorded": result.claims_recorded,
             "reflections_generated": result.reflections_generated,
             "skills_promoted": result.skills_promoted,
+            "skill_reviews": result.skill_reviews,
             "jobs": result.jobs_executed,
         }
         self.event_store.append(
