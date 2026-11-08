@@ -5,6 +5,7 @@ import json
 import sqlite3
 import time
 from urllib.error import HTTPError
+from types import SimpleNamespace
 from urllib.request import Request, urlopen
 
 import pytest
@@ -57,10 +58,29 @@ def test_default_report_delivery_survives_restart_and_denies_scope_drift(tmp_pat
         assert task and task['state'] == 'completed_verified', (task, (tmp_path / 'gateway.log').read_text()[-15000:])
         assert len(approved_ids) == 1
         assert gateway.request('/v1/approvals')[1]['approvals'] == []
-        assert not task['payload']['execution'].get('workspace'), task
+        # A default task now freezes the effective root without converting
+        # instance-path semantics into an explicitly selected project.
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        from jaeger_ai.core.runtime.execution_defaults import default_route_fingerprint, execution_project_root
+        root = tmp_path / 'instances/contract/workspace'
+        config = load_yaml(tmp_path / 'instances/contract/config.yaml', Config)
+        execution = task['payload']['execution']
+        assert task['payload']['background_admission_version'] == 1
+        assert execution['workspace'] == str(root.resolve())
+        assert execution['model'] == config.external_model.model == 'contract-model'
+        assert execution['provider'] == config.external_model.provider == 'openai'
+        assert execution['interaction_tier'] == config.automation.interaction_tier
+        assert execution['_instance_defaults'] == {
+            'workspace': str(root.resolve()), 'route_fingerprint': default_route_fingerprint(config)}
+        assert execution_project_root(execution, SimpleNamespace(workspace_dir=root)) is None
+        assert task['payload']['background_authority']['execution'] == execution
+        assert not gateway.request('/v1/sessions/' + sid)[1]['workspace']
         assert task['payload'].get('attempt', 0) == 0
         receipt = gateway.request('/v1/requests/' + tid + ':0')[1]
         assert receipt['status'] == 'completed' and not receipt['result'].get('halt_reason')
+        for key in ('workspace', 'model', 'provider', 'interaction_tier', '_instance_defaults'):
+            assert receipt['execution'][key] == execution[key]
+        assert task['payload']['background_admissions'][tid + ':0']['execution'] == receipt['execution']
         completion = receipt['result']['task_completion']
         assert completion['ok'] is True
         assert any(r.get('kind') == 'file_sha256' and r.get('sha256') == digest
@@ -84,7 +104,6 @@ def test_default_report_delivery_survives_restart_and_denies_scope_drift(tmp_pat
         assert not any(name == 'tool.failed' for name, _ in events)
         assert [data['tool'] for name, data in events if name == 'tool.completed'] == [
             'work_ledger', 'write_file', 'read_file', 'work_ledger', 'complete_task']
-        root = tmp_path / 'instances/contract/workspace'
         assert (root / 'durable-report.txt').read_bytes() == content
         file_stat = (root / 'durable-report.txt').stat()
         verified = task['payload']['verification']
@@ -126,6 +145,7 @@ def test_default_report_delivery_survives_restart_and_denies_scope_drift(tmp_pat
                 file_stat.st_ino, file_stat.st_mtime_ns, file_stat.st_size)
             assert gateway.request('/v1/approvals')[1]['approvals'] == []
             assert gateway.request('/v1/requests/' + tid + ':0')[1] == receipt
+            assert gateway.request('/v1/tasks/' + tid)[1]['payload']['execution'] == execution
 
         assert_no_reexecution()
         gateway.stop()

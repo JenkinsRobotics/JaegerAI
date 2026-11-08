@@ -171,13 +171,36 @@ def test_untrusted_worker_receipts_and_nonclean_outcomes_cannot_publish_artifact
     assert catalog(gateway, task_id=task.task_id) == []
 
 
-@pytest.mark.asyncio
-async def test_task_create_and_edit_cannot_install_worker_verification(artifact):
+@pytest.fixture
+def canonical_artifact_admission(artifact, tmp_path, monkeypatch):
+    """Real persisted lead and configured default scope; no model/provider call."""
+    from jaeger_ai.core.agent_registry import AgentRegistry
     from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.instance.schemas import Config, ExternalModelConfig, ModelConfig
+    from jaeger_ai.core.runtime.execution_defaults import configured_execution_defaults
     gateway, _, workspace = artifact
-    gateway._current_tier = lambda: 'work'
-    gateway._task_board_fields = lambda body: {}
-    gateway._session_agent_id = lambda parent: ''
+    monkeypatch.setenv('JAEGER_STATE_DIR', str(tmp_path))
+    monkeypatch.setenv('JAEGER_HOME', str(tmp_path))
+    registry = AgentRegistry(tmp_path)
+    lead = registry.create_agent('jaeger', metadata={'role': 'lead'}, scaffold_instance=False)
+    assert lead.id == 'native:jaeger'
+    gateway.store.ensure_session('default-origin', metadata={
+        'agent_id': lead.id, 'agent_pinned': True, 'route_checked': True})
+    layout = SimpleNamespace(workspace_dir=workspace)
+    config = Config(instance_name='artifact-fixture', model=ModelConfig(model_path='/dev/null'), external_model=ExternalModelConfig(
+        enabled=True, provider='openai', model='fixture-model'))
+    gateway._foreground_execution_defaults = lambda: configured_execution_defaults(layout, config)
+    gateway._current_tier = lambda: 'agent'
+    gateway._registry = lambda: registry
+    gateway._task_board_fields = lambda body: JaegerGatewayApp._task_board_fields(gateway, body)
+    gateway._session_agent_id = lambda parent: JaegerGatewayApp._session_agent_id(gateway, parent)
+    return artifact
+
+
+@pytest.mark.asyncio
+async def test_task_create_and_edit_cannot_install_worker_verification(canonical_artifact_admission):
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    gateway, _, workspace = canonical_artifact_admission
     forged = [{'kind': 'owner_file_sha256', 'path': str(workspace/'fake.md'), 'sha256': 'a'*64,
                'owner_artifact_scope': {'version': 1, 'mode': 'instance', 'workspace': str(workspace)}}]
     body = {'session_id': 'default-origin', 'goal': 'Research a topic', 'proposal': True,
@@ -188,10 +211,15 @@ async def test_task_create_and_edit_cannot_install_worker_verification(artifact)
         async def json(self): return body
     request = Request()
     response = await JaegerGatewayApp.handle_tasks(gateway, request)
-    assert response.status == 201
+    assert response.status == 201, response.text
     task_id = json.loads(response.text)['task_id']
     task = gateway.task_owner.store.get_task(task_id)
     assert task.state == TaskState.PAUSED and not task.payload.get('verification')
+    assert task.payload['background_admission_version'] == 1
+    assert task.payload['execution']['interaction_tier'] == 'agent'
+    assert task.payload['execution']['model'] == 'fixture-model'
+    assert task.payload['execution']['provider'] == 'openai'
+    assert task.payload['execution']['_instance_defaults']['workspace'] == str(workspace)
     body.update(goal='Revised topic', expected_updated_at=task.updated_at)
     request.match_info = {'id': task_id}
     assert (await JaegerGatewayApp.handle_task_edit(gateway, request)).status == 200
@@ -200,6 +228,38 @@ async def test_task_create_and_edit_cannot_install_worker_verification(artifact)
     assert catalog(gateway, task_id=task_id) == []
     body['execution'] = {'_instance_defaults': {'workspace': str(workspace)}}
     assert (await JaegerGatewayApp.handle_tasks(gateway, request)).status == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('missing, status, reason', [
+    ('identity', 400, 'enabled canonical lead'),
+    ('defaults', 400, 'scope is unresolved'),
+    ('unsupported-tier', 400, 'interaction_tier must be one of'),
+    ('chat', 403, 'disabled in Chat mode'),
+])
+async def test_unresolved_artifact_task_cannot_claim_canonical_admission(canonical_artifact_admission, missing, status, reason):
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    gateway, _, workspace = canonical_artifact_admission
+    if missing == 'identity':
+        gateway.store.ensure_session('default-origin', metadata={'agent_id': ''})
+    elif missing == 'defaults':
+        gateway._foreground_execution_defaults = lambda: {}
+    elif missing == 'unsupported-tier':
+        gateway._current_tier = lambda: 'work'
+    else:
+        gateway._current_tier = lambda: 'chat'
+    class Request(dict):
+        method = 'POST'
+        async def json(self):
+            return {'session_id': 'default-origin', 'goal': 'Research a topic', 'proposal': True,
+                    'request_id': 'unresolved', 'state': 'completed_verified',
+                    'payload': {'verification': [{'kind': 'owner_file_sha256'}]}}
+    response = await JaegerGatewayApp.handle_tasks(gateway, Request())
+    assert response.status == status, response.text
+    assert reason in json.loads(response.text)['error']
+    assert gateway.task_owner.store.list_tasks() == []
+    assert gateway.store.list_requests() == []
+    assert gateway.store.list_pending_approvals() == []
 
 
 @pytest.mark.parametrize('change', ['digest', 'scope', 'outside-path'])
