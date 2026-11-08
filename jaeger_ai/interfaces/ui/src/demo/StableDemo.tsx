@@ -1,5 +1,5 @@
 import {CompanionMode} from "./CompanionMode";
-import {ClipAvatar} from "../avatar/ClipAvatar";
+import {JaegerAvatar} from "../avatar/JaegerAvatar";
 import {STATUS_TEXT,type ClipState} from "../avatar/avatar";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { JaegerSource } from "../api/source";
@@ -354,7 +354,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Pencil size={18} /></button>
         </div>
         <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : currentTitle}>
-          <span className="jg-stable-demo__profile-avatar"><ClipAvatar portraitOverride={agent?.avatar_url} state={!ready || error ? "connecting" : avatarState} /></span>
+          <span className="jg-stable-demo__profile-avatar"><JaegerAvatar portraitOverride={agent?.avatar_url} state={!ready || error ? "connecting" : avatarState} /></span>
           <span className="jg-stable-demo__profile-copy"><strong>Jaeger<span className="jg-clip-status" role="status">{(ready && !error && avatarState === "idle" ? "Idle" : STATUS_TEXT[!ready || error ? "connecting" : avatarState])}</span></strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
         </div>
         <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />

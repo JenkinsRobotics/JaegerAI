@@ -1,4 +1,4 @@
-import {ClipAvatar} from "../avatar/ClipAvatar";
+import {JaegerAvatar} from "../avatar/JaegerAvatar";
 import {STATUS_TEXT,type ClipState} from "../avatar/avatar";
 /* Phone layout (≤ 700px or touch), rebuilt from a reference description of Grok Bot's iOS app — no window chrome.
  * List: top bar (user avatar + presence dot; round Search and New buttons), the lead featured large with a star
@@ -138,7 +138,7 @@ export function PhoneChat({ agentId, agentName, avatarUrl, avatarState="idle", o
       <header className="jg-pbar">
         <button type="button" className="jg-pround" aria-label="Menu" title="Menu" onClick={onBack}><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden><path d="M3 6h12M3 12h8" /></svg></button>
         <div className="jg-pbar__identity">
-          <span className="jg-pbar__avatar">{agentId === "native:jaeger" && !avatarUrl ? <ClipAvatar name={agentName} state={avatarState} /> : <AgentAvatar id={agentId} name={agentName} src={avatarUrl} size={94} />}</span>
+          <span className="jg-pbar__avatar">{agentId === "native:jaeger" && !avatarUrl ? <JaegerAvatar name={agentName} state={avatarState} /> : <AgentAvatar id={agentId} name={agentName} src={avatarUrl} size={94} />}</span>
           <span className="jg-pbar__name">{agentName}<span className="jg-clip-status" role="status">{STATUS_TEXT[avatarState]}</span></span>
         </div>
         <button type="button" className="jg-pround" aria-label="More" onClick={onInfo}><Icon name="ellipsis" size={18} /></button>

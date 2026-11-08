@@ -1,0 +1,7 @@
+.jg-jaeger-avatar { position:relative; display:inline-flex; flex:0 0 auto; border-radius:50%; }
+.jg-jaeger-avatar > .jg-clip-identity { position:absolute; inset:0; transition:opacity var(--jg-dur-base) var(--jg-ease-out-cubic); }
+.jg-jaeger-avatar > canvas { position:absolute; inset:0; width:100%; height:100%; border:2px solid var(--jg-color-border); border-radius:50%; background:radial-gradient(circle at 48% 32%,var(--aether-color-white,var(--jg-color-elevated)),var(--jg-color-inset)); opacity:0; transition:opacity var(--jg-dur-base) var(--jg-ease-out-cubic); touch-action:none; }
+.jg-jaeger-avatar[data-live-status="ready"] > canvas { opacity:1; }
+.jg-jaeger-avatar[data-live-status="ready"] > .jg-clip-identity { opacity:0; }
+.jg-jaeger-avatar > .jg-clip-status { position:absolute; top:100%; left:50%; transform:translateX(-50%); }
+@media (prefers-reduced-motion:reduce) { .jg-jaeger-avatar > canvas,.jg-jaeger-avatar > .jg-clip-identity { transition:none; } }
