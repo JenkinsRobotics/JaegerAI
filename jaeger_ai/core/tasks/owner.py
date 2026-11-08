@@ -717,12 +717,57 @@ class GatewayTaskOwner:
         return self.gateway.store.ensure_session(sid, title=task.goal[:100], profile='jaeger',
             workspace=str(task.payload['execution'].get('workspace') or ''), metadata=metadata)
 
+    def handoff_workspace(self, context):
+        """An inherited default is not a user-selected specialist project."""
+        from jaeger_ai.core.runtime.execution_defaults import inherit_instance_defaults, InstanceDefaultsConflict
+        execution = context.get('execution') or {}
+        source = self.gateway.store.get_request(context.get('request_id'))
+        marker = inherit_instance_defaults(source, execution,
+            session_id=context.get('session_id'), claimed=execution.get('_instance_defaults'))
+        if marker.get('workspace') != execution.get('workspace'):
+            raise InstanceDefaultsConflict('Cannot prove inherited instance workspace; no handoff')
+        return ''  # Preserve the specialist's prior instance-default behavior.
+
+    @staticmethod
+    def _instance_defaults_source(task):
+        marker = (task.payload.get('execution') or {}).get('_instance_defaults')
+        if marker is None:
+            return None
+        return {'request_id': task.payload.get('original_request_id') or task.provenance.get('request_id'),
+                'session_id': task.provenance.get('session_id'), 'claimed': marker}
+
+    def _validate_instance_defaults(self, task, execution, conn=None):
+        from jaeger_ai.core.runtime.execution_defaults import inherit_instance_defaults
+        origin = self._instance_defaults_source(task)
+        if origin is None:
+            return
+        parent = task.notification_policy.recipient_session_id
+        if parent and origin['session_id'] != parent:
+            from jaeger_ai.core.runtime.execution_defaults import InstanceDefaultsConflict
+            raise InstanceDefaultsConflict('Instance defaults source differs from task originating session; no dispatch')
+        if conn is None:
+            source = self.gateway.store.get_request(origin['request_id'])
+        else:
+            row = conn.execute('SELECT * FROM client_requests WHERE request_id=? AND session_id=?',
+                (origin['request_id'], origin['session_id'])).fetchone()
+            source = self.gateway.store._request_row(row) if row else None
+        marker = inherit_instance_defaults(source, execution,
+            session_id=origin['session_id'], claimed=origin['claimed'], authority=task.payload['execution'])
+        if execution.get('_instance_defaults') != marker:
+            from jaeger_ai.core.runtime.execution_defaults import InstanceDefaultsConflict
+            raise InstanceDefaultsConflict('Inherited instance mode differs from canonical source; no dispatch')
+
     def _admission_guard(self, conn, task, *, execution=None, prompt=None):
         """Revalidate revocation/cancellation in the canonical request commit."""
         row = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task.task_id,)).fetchone()
         current = DurableTask.from_dict(json.loads(row[0])) if row else None
         if current is None or current.is_terminal or current.cancellation or not current.provenance.get('authorized'):
             raise TaskAdmissionChanged('Task authorization or cancellation changed before admission; no dispatch')
+        if self._instance_defaults_source(task) is not None:
+            if (current.payload.get('execution') != task.payload.get('execution')
+                    or self._instance_defaults_source(current) != self._instance_defaults_source(task)):
+                raise TaskAdmissionChanged('Task instance scope changed before admission; no dispatch')
+            self._validate_instance_defaults(current, execution or current.payload['execution'], conn)
         if current.payload.get('foreground_resume_version') == 1 and current.payload.get('execution') != task.payload.get('execution'):
             raise TaskAdmissionChanged('Task execution authority changed before admission; no dispatch')
         if int(current.payload.get('attempt', 0)) != int(task.payload.get('attempt', 0)):
@@ -869,6 +914,13 @@ class GatewayTaskOwner:
                 self.store.update_task(task_id, hold_unknown)
                 return
         execution = self._continuation_execution(task)
+        try:
+            self._validate_instance_defaults(task, execution)
+            if row is not None and self._instance_defaults_source(task) is not None:
+                self._validate_instance_defaults(task, row.get('execution') or {})
+        except ValueError as exc:
+            self._retain_foreign_receipt(task_id, str(exc))
+            return
         if row is None or row.get('status') in {'admitted', 'running'} and rid not in self.gateway._running_tasks:
             try:
                 if task.provenance.get('webhook_subscription_id'):
@@ -902,7 +954,8 @@ class GatewayTaskOwner:
         if row is None:
             try:
                 admitted = self.gateway.store.admit_request(sid, prompt, request_id=rid, requested=execution,
-                    admission_guard=lambda conn: self._admission_guard(conn, task, execution=execution, prompt=prompt))
+                    admission_guard=lambda conn: self._admission_guard(conn, task, execution=execution, prompt=prompt),
+                    instance_defaults_source=self._instance_defaults_source(task))
             except ValueError as exc:
                 if isinstance(exc, TaskAdmissionChanged):
                     # The current durable row owns the decision. In particular,
@@ -921,7 +974,8 @@ class GatewayTaskOwner:
                     self._retain_foreign_receipt(task_id, reason or
                         'Continuation request identity conflict; inspect without replay')
                     return
-                if not task.provenance.get('webhook_subscription_id'):
+                from jaeger_ai.core.runtime.execution_defaults import InstanceDefaultsConflict
+                if not task.provenance.get('webhook_subscription_id') and not isinstance(exc, InstanceDefaultsConflict):
                     raise
                 reason = str(exc)
                 def hold_admission(current):

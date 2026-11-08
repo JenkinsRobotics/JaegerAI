@@ -67,6 +67,17 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
             stream.write(json.dumps({"model": self.model}) + "\n")
         messages = formatted.get("messages", [])
         request = current_request(messages)
+        if "CONTRACT-QUEUE-DEFAULT" in request:
+            responses = [m for m in messages if m.get('tool_call_id') == 'queue-default']
+            if not responses:
+                return {'choices':[{'message':{'role':'assistant','content':None,'tool_calls':[
+                    {'id':'queue-default','type':'function','function':{
+                        'name':'queue_background_task','arguments':json.dumps({
+                            'description':'CONTRACT-DURABLE: produce and verify the report'})}}
+                ]},'finish_reason':'tool_calls'}]}
+            assert any('task_id' in str(m.get('content','')) for m in responses), 'Task submission failed'
+            return {'choices':[{'message':{'role':'assistant','content':'Background report queued',
+                'tool_calls':[]},'finish_reason':'stop'}]}
         if "CONTRACT-CLARIFY" in request:
             # Wire tool messages carry tool_call_id, not name (OpenAI chat
             # format, openai.py format_messages). Match the result by the id

@@ -3662,15 +3662,18 @@ class JaegerGatewayApp:
         # receipts, locking, approvals, and SSE behavior as a new turn.
         # Invoke the shared admission path through a tiny internal dispatch
         # payload instead of duplicating the normal turn handler.
-        return await self._admit_and_start_retry(session_id, body, previous["request_id"])
+        return await self._admit_and_start_retry(session_id, body, previous["request_id"], source_execution=execution)
 
-    async def _admit_and_start_retry(self, session_id: str, body: dict[str, Any], retry_of: str) -> web.Response:
+    async def _admit_and_start_retry(self, session_id: str, body: dict[str, Any], retry_of: str,
+                                     *, source_execution: dict[str, Any] | None = None) -> web.Response:
         text = str(body.get("text") or "").strip()
         requested = self._requested_from_body(body)
         try:
             admitted = self.store.admit_request(
                 session_id, text, request_id=body["request_id"], requested=requested,
                 retry_of=retry_of,
+                instance_defaults_source={'request_id': retry_of, 'session_id': session_id,
+                    'expected': source_execution},
             )
         except (RequestConflict, RequestBusy, ValueError) as exc:
             return web.json_response({"error": str(exc)}, status=409 if isinstance(exc, RequestBusy) else 400)
@@ -3939,6 +3942,20 @@ class JaegerGatewayApp:
         if known:raise ValueError('Selected model is unavailable in the current observed catalog; no request admitted')
         return revision
 
+    @staticmethod
+    def _foreground_execution_defaults() -> dict[str, Any]:
+        from jaeger_ai.core.entity.runtime import EntityRuntime, load_instance_config_or_default
+        from jaeger_ai.core.runtime.execution_defaults import configured_execution_defaults
+
+        # Admission must not start a runtime (identity/recovery have effects).
+        # Production's resident owner already exists; unbooted/legacy paths
+        # remain unresolved and cannot acquire automatic continuation.
+        runtime = EntityRuntime._instance
+        layout = getattr(runtime, 'layout', None)
+        if layout is None:
+            return {}
+        return configured_execution_defaults(layout, load_instance_config_or_default(layout))
+
     async def handle_send_turn(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
@@ -3971,6 +3988,7 @@ class JaegerGatewayApp:
             admitted = self.store.admit_request(
                 session_id, text, request_id=request_id, requested=requested,
                 expected_model_revision=model_revision,
+                execution_defaults=self._foreground_execution_defaults,
             )
         except RequestConflict as exc:
             return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
@@ -5116,8 +5134,16 @@ class JaegerGatewayApp:
         else:
             # Pre-snapshot (digest v1) request recovered after upgrade.
             session = self.store.get_session(session_key) or {}
-            selection = session.get("metadata") or {}
+            selection = dict(session.get("metadata") or {})
+            # Historical session metadata was client-writable, never an
+            # admission-owned instance-mode proof.
+            selection.pop('_instance_defaults', None)
             lane, selected_model = split_routed_model_id(str(selection.get("model") or session.get("model") or ""))
+        from jaeger_ai.core.runtime.execution_defaults import execution_project_root
+        # Only a frozen instance workspace needs layout proof. Legacy/custom
+        # runtimes with no such marker retain their existing turn contract;
+        # the resolver still fails closed if a pinned workspace lacks layout.
+        project_root = execution_project_root(selection, getattr(runtime, "layout", None))
         callbacks, flush = self._turn_stream_callbacks(session_key, request_id)
         callbacks.context_references = context_references
         from jaeger_agent.tool_executor import tool_allowlist
@@ -5143,7 +5169,8 @@ class JaegerGatewayApp:
                     request_id=request_id,
                     callbacks=callbacks,
                     continuation_state=continuation_state,
-                    project_root=str(selection.get("workspace") or "") or None,
+                    project_root=project_root,
+                    admitted_default_route=(selection.get('_instance_defaults') or {}).get('route_fingerprint'),
                     confirmation_provider=_GatewayToolConfirmationProvider(self, session_key, request_id),
                     native_run_id=native,
                     model=selected_model or None,
@@ -7463,6 +7490,8 @@ class JaegerGatewayApp:
         if parent is None:
             return web.json_response({'error': 'Existing session_id required'}, status=400)
         execution = dict(body.get('execution') or {})
+        if '_instance_defaults' in execution:
+            return web.json_response({'error': 'Instance defaults are server-owned execution metadata'}, status=400)
         execution.setdefault('workspace', parent.get('workspace') or '')
         execution['caller'] = request.get('caller_actor')
         try:

@@ -63,3 +63,27 @@ def test_call_agent_ok_only_after_completed_child_result(monkeypatch, tmp_path):
     assert out["ok"] is True
     assert out["child_run_id"] == "run1"
     assert out["result"]["summary"] == "done"
+
+
+def test_handoff_workspace_needs_host_proof_and_preserves_explicit_project():
+    import pytest
+    from types import SimpleNamespace
+    opts = dict(from_agent_id='native:jaeger',require_approval=True,request_id='child',
+        parent_run_id='',permitted_context='',timeout_seconds=30,tools=[])
+    execution = {'workspace':'/instance/workspace','model':'default-pinned','provider':'openai',
+                 '_instance_defaults':{'workspace':'/instance/workspace'}}
+    turn = {'execution':execution}
+    with pytest.raises(ValueError, match='no handoff'):
+        mod._handoff_body('bounded work', turn, project_id='', **opts)
+    checked = []
+    def proof(context):
+        checked.append(context)
+        return ''
+    turn['owner'] = SimpleNamespace(handoff_workspace=proof)
+    body = mod._handoff_body('bounded work', turn, project_id='', **opts)
+    assert checked == [turn]
+    assert not {'workspace','model','provider','_instance_defaults'} & set(body)
+    body = mod._handoff_body('bounded work', turn, project_id='project', **opts)
+    assert body['project_id'] == 'project' and len(checked) == 1
+    body = mod._handoff_body('bounded work', {'execution':{'workspace':'/explicit'}}, project_id='', **opts)
+    assert body['workspace'] == '/explicit'

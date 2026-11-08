@@ -88,6 +88,10 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 - The [request-session ownership repair](assistant-core-request-identity-20261108.md)
   prevents cross-chat receipt replay and destination mutation, including legacy
   receipts. Its synthetic HTTP profile and cold skill-startup exclusions are explicit.
+- The later [default Chat admission repair](assistant-core-default-admission-20261108.md)
+  snapshots supported server defaults for ordinary new Chat while retaining
+  instance workspace semantics, authority and drift rejection. Unresolved routes,
+  historic work and queued default admission are not accepted by inference.
 - Source-backed capability presence does not prove native-host availability, real provider credentials, external connector authorization, output quality, or a completed autonomous workflow.
 
 ### Parallel workspace error-state repair

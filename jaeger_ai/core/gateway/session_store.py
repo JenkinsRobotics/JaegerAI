@@ -1514,6 +1514,8 @@ class GatewaySessionStore:
         requested: dict[str, Any] | None = None,
         expected_model_revision: int | None = None,
         admission_guard: Callable[[sqlite3.Connection], None] | None = None,
+        execution_defaults: Callable[[], dict[str, Any]] | None = None,
+        instance_defaults_source: dict[str, Any] | None = None,
         retry_of: str | None = None,
         _ack_events: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -1603,6 +1605,41 @@ class GatewaySessionStore:
                 raise RequestConflict("Conversation model changed during validation; no new request admitted")
             execution = self._resolve_execution(conn, session_id, choices, meta,
                                                 session["workspace"] if session else "")
+            # Server-owned defaults are evaluated only for a fresh admission,
+            # after replay/conflict checks. They never enter client identity or
+            # mutate session choices, and cannot add tool/caller authority.
+            if execution_defaults is not None and (
+                    not execution['workspace'] or
+                    (not execution['model'] and not execution['provider'])):
+                defaults = execution_defaults()
+                marker = {}
+                if not execution['model'] and not execution['provider']:
+                    if defaults.get('model') and defaults.get('provider'):
+                        execution.update(model=defaults['model'], provider=defaults['provider'])
+                        if defaults.get('route_fingerprint'):
+                            marker['route_fingerprint'] = defaults['route_fingerprint']
+                if not execution['workspace'] and defaults.get('workspace'):
+                    execution['workspace'] = defaults['workspace']
+                    marker['workspace'] = defaults['workspace']
+                if marker:
+                    execution['_instance_defaults'] = marker
+            # Retry and internal child tasks inherit from a canonical request,
+            # never a client marker or later configuration. Session identity is
+            # part of the proof even though request IDs are globally indexed.
+            if retry_of or instance_defaults_source is not None:
+                from jaeger_ai.core.runtime.execution_defaults import inherit_instance_defaults
+                origin = instance_defaults_source or {'request_id': retry_of, 'session_id': session_id}
+                if retry_of and (origin.get('request_id') != retry_of or origin.get('session_id') != session_id):
+                    from jaeger_ai.core.runtime.execution_defaults import InstanceDefaultsConflict
+                    raise InstanceDefaultsConflict('Retry source does not belong to originating session; no dispatch')
+                source_row = conn.execute('SELECT * FROM client_requests WHERE request_id=? AND session_id=?',
+                    (origin.get('request_id'), origin.get('session_id'))).fetchone()
+                marker = inherit_instance_defaults(
+                    self._request_row(source_row) if source_row else None, execution,
+                    session_id=origin.get('session_id'),
+                    claimed=origin.get('claimed'), expected=origin.get('expected'), allow_overrides=bool(retry_of))
+                if marker:
+                    execution['_instance_defaults'] = marker
             if "model" in choices:
                 meta["model"] = choices["model"]
                 if choices.get("provider"):

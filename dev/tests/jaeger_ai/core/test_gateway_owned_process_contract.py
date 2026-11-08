@@ -1479,13 +1479,16 @@ def test_scheduled_work_fires_once_and_survives_restart(gateway):
     assert sum("CONTRACT-ANSWER" in (t or "") for t in texts) == 1, session
 
 
+@pytest.mark.parametrize('global_defaults', [False, True], ids=['session-defaults', 'new-chat-defaults'])
 @pytest.mark.parametrize('explicit_tools', [False, True], ids=['minimal-chat', 'restricted-tools'])
-def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explicit_tools):
+def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explicit_tools, global_defaults):
     """Ordinary HTTP admission, real native checkpoints/ledger, one owner transfer."""
     workspace = gateway.root / 'instances/contract'
     sid, rid = 'foreground-parent', 'foreground-resume-source'
-    gateway.request('/v1/sessions', {'session_id':sid, 'profile':'jaeger',
-        'workspace':str(workspace), 'metadata':{'model':'contract-model','provider':'openai'}})
+    create = {'session_id':sid, 'profile':'jaeger'}
+    if not global_defaults:
+        create.update(workspace=str(workspace), metadata={'model':'contract-model','provider':'openai'})
+    gateway.request('/v1/sessions', create)
     # Normal Chat posts text/request_id and explicit empty attachment selection.
     # Resolve the configured session
     # choices and current tier at admission, not through privileged test fields.
@@ -1513,7 +1516,7 @@ def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explic
     assert original['status']=='completed' and original['result']['halt_reason']=='yielded'
     assert original['execution']['model']=='contract-model'
     assert original['execution']['provider']=='openai'
-    assert original['execution']['workspace']==str(workspace)
+    assert original['execution']['workspace']==str(workspace / 'workspace' if global_defaults else workspace)
     assert original['execution']['interaction_tier'] in {'agent','jaeger'}
     assert original['execution']['allowed_tools']==(sorted(tools) if explicit_tools else None)
     assert original['result']['task_id']==tid
@@ -1558,3 +1561,44 @@ def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explic
     messages=session.get('session',session)['messages']
     assert len([m for m in messages if m['role']=='assistant' and m['content']=='Foreground task resumed and verified'])==1
     assert (gateway.root/'foreground-resume-calls.jsonl').read_text()==before
+
+
+def test_new_chat_default_snapshot_survives_real_retry(gateway):
+    _, session = gateway.request('/v1/sessions', {})
+    sid = session['session_id']
+    gateway.request('/v1/sessions/'+sid+'/turns', {
+        'text':'Say CONTRACT-ANSWER', 'request_id':'default-retry-original', 'attachment_ids':[]})
+    original = gateway.wait_for_terminal(sid, 'default-retry-original')
+    assert original['status'] == 'completed'
+    assert original['execution']['_instance_defaults']['workspace'] == str(gateway.root/'instances/contract/workspace')
+    _, retry = gateway.request('/v1/sessions/'+sid+'/retry', {})
+    repeated = gateway.wait_for_terminal(sid, retry['request_id'])
+    assert repeated['status'] == 'completed', repeated
+    assert repeated['execution'] == original['execution']
+    assert repeated['result']['output'] == original['result']['output'] == 'CONTRACT-ANSWER'
+
+
+def test_new_chat_default_snapshot_survives_real_internal_task_submission(gateway):
+    _, session = gateway.request('/v1/sessions', {})
+    sid, rid = session['session_id'], 'default-queue-original'
+    gateway.request('/v1/sessions/'+sid+'/turns', {
+        'text':'Queue this work in the background: CONTRACT-QUEUE-DEFAULT',
+        'request_id':rid, 'attachment_ids':[]})
+    task = None
+    deadline = time.monotonic()+40
+    while time.monotonic() < deadline:
+        for approval in gateway.request('/v1/approvals')[1]['approvals']:
+            gateway.request('/v1/approvals/'+approval['approval_id'], {'approved':True,'decision':'once'})
+        rows = gateway.request('/v1/tasks')[1]['tasks']
+        task = next((t for t in rows if t['goal'].startswith('CONTRACT-DURABLE:')), None)
+        if task and task['state'] in {'completed_verified','failed','cancelled','needs_owner','blocked'}:
+            break
+        time.sleep(.05)
+    assert task and task['state'] == 'completed_verified', (task,(gateway.root/'gateway.log').read_text()[-18000:])
+    original = gateway.wait_for_terminal(sid, rid)
+    child = gateway.request('/v1/requests/'+task['task_id']+':0')[1]
+    assert child['execution']['_instance_defaults'] == original['execution']['_instance_defaults']
+    for key in ('workspace','model','provider','caller','allowed_tools','interaction_tier'):
+        assert child['execution'][key] == original['execution'][key]
+    assert child['result']['task_completion']['ok']
+    assert (gateway.root/'instances/contract/workspace/durable-report.txt').read_text() == 'DURABLE-VERIFIED-CONTENT'
