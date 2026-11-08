@@ -83,18 +83,23 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
         if 'CONTRACT-DURABLE' in request:
             # Script only the provider boundary; ledger, file tool, Gateway,
             # approvals, checkpoints and result delivery are production code.
-            completed_tools = [m.get('name') for m in messages if m.get('role') == 'tool']
             tool_messages = [m for m in messages if m.get('role') == 'tool']
             steps = [
                 ('work_ledger', {'action':'create', 'task_name':'Durable report', 'total_items':1,
                                  'verify':{'kind':'paths_exist', 'paths':['workspace/durable-report.txt']}}),
                 ('write_file', {'path':'workspace/durable-report.txt', 'content':'DURABLE-VERIFIED-CONTENT'}),
+                ('read_file', {'path':'workspace/durable-report.txt'}),
                 ('work_ledger', {'action':'update', 'completed_ids':['report'], 'remaining_count':0}),
-                ('complete_task', {}),
+                ('complete_task', {'summary':'Durable report verified',
+                    'evidence':'Wrote and read back workspace/durable-report.txt: DURABLE-VERIFIED-CONTENT'}),
             ]
             step = len(tool_messages)
             if step < len(steps):
                 name, args = steps[step]
+                if name == 'complete_task':
+                    assert any(m.get('tool_call_id') == 'durable-2' and
+                               'DURABLE-VERIFIED-CONTENT' in str(m.get('content', ''))
+                               for m in tool_messages), 'Durable report readback failed'
                 return {'choices':[{'message':{'role':'assistant','content':None,'tool_calls':[
                     {'id':f'durable-{step}', 'type':'function', 'function':{'name':name,'arguments':json.dumps(args)}}
                 ]},'finish_reason':'tool_calls'}]}

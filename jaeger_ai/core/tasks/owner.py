@@ -692,7 +692,13 @@ class GatewayTaskOwner:
         result = row.get('result') or {}
         if status in {'admitted', 'running'}:
             return
-        verified, evidence = self.verify(task, result) if status == 'completed' else (False, '')
+        # A fresh file may only be a checkpoint. A completed request means the
+        # slice ended, not that a yielded/blocked/failed objective is complete.
+        # The runtime contract emits no halt marker on a clean finish; any
+        # explicit backstop (including future markers) must not verify a file.
+        can_verify = (status == 'completed' and not result.get('error')
+                      and result.get('halt_reason') in (None, ''))
+        verified, evidence = self.verify(task, result) if can_verify else (False, '')
         current = self.store.get_task(task_id)
         children = await self._cancel_owned_children(current, row) if current and current.cancellation else []
         from jaeger_ai.core.gateway.handoff_cancellation import unconfirmed_ids
@@ -742,6 +748,12 @@ class GatewayTaskOwner:
                     )
                 except CompletionError as exc:
                     authoritative_transition(current, TaskState.FAILED, error=str(exc))
+            elif result.get('halt_reason'):
+                # Only the explicit yielded contract schedules another slice.
+                # Resetting a loop breaker's counters can repeat failed effects;
+                # retain the halt for review instead of consuming a retry.
+                authoritative_transition(current, TaskState.FAILED,
+                    error=str(result.get('error') or result['halt_reason']))
             elif current.retry_policy.can_retry():
                 current.retry_policy.current_retries += 1
                 current.payload['attempt'] = attempt + 1
