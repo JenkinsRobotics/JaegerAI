@@ -85,6 +85,9 @@ workspace destinations. The other shell's tests alone do not prove the actual en
   repair adds versioned, fully specified new-card transfer to the existing durable
   owner. Unresolved defaults, historical work and unsupported inputs do not silently
   resume. Overall stays PARTIAL.
+- The [request-session ownership repair](assistant-core-request-identity-20261108.md)
+  prevents cross-chat receipt replay and destination mutation, including legacy
+  receipts. Its synthetic HTTP profile and cold skill-startup exclusions are explicit.
 - Source-backed capability presence does not prove native-host availability, real provider credentials, external connector authorization, output quality, or a completed autonomous workflow.
 
 ### Parallel workspace error-state repair

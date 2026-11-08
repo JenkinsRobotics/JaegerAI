@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from jaeger_ai.core.gateway.session_store import RequestConflict
+
 from .completion import CompletionError, authoritative_transition
 from .models import DurableTask, Goal, NotificationPolicy, Receipt, TaskCard, TaskKind, TaskRunRecord, TaskState
 from .store import SqliteDurableTaskStore
@@ -906,6 +908,18 @@ class GatewayTaskOwner:
                     # The current durable row owns the decision. In particular,
                     # never overwrite a cancellation or a newer attempt with
                     # this executor's stale snapshot.
+                    return
+                if isinstance(exc, RequestConflict):
+                    # Another admission can claim this global id after the
+                    # precheck. Keep the task for reconciliation; never adopt,
+                    # bind, dispatch or cancel the colliding receipt.
+                    current = self.store.get_task(task_id)
+                    if current is None or f'{task_id}:{current.payload.get("attempt", 0)}' != rid:
+                        return
+                    reason = self._continuation_receipt_error(
+                        current, self.gateway.store.get_request(rid))
+                    self._retain_foreign_receipt(task_id, reason or
+                        'Continuation request identity conflict; inspect without replay')
                     return
                 if not task.provenance.get('webhook_subscription_id'):
                     raise
