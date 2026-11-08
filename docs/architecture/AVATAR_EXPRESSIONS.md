@@ -15,5 +15,15 @@ an occasional-expression direction; that requirement does not authorize changing
 the character's anatomy or material. Faithful replacement expressions still need
 visual review before deployment. The restored baseline retains its original grin.
 
-The previous concept sheets are references, not approved production assets.
-There is currently no expression-preview selector or automatic multi-pose atlas.
+## Signature grin variant
+
+The operator selected panel D's signature grin for the current avatar and the
+expression collection. `jaeger-signature-grin.png` is the isolated transparent
+variant used by the existing cutout rig. The original `jaeger-sculpted.png` remains
+available as the baseline reference. Do not adopt panel D's cheekbones or change
+the character into the rejected softened mascot.
+
+The current icon intentionally uses the signature grin as requested. Other poses
+remain concept references; there is no expression-preview selector or automatic
+multi-pose atlas. Future emotion work must preserve the original design and keep
+the stronger grin contextual rather than automatically applying it to errors.
