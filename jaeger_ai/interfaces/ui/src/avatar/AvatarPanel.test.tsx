@@ -31,9 +31,10 @@ describe("AvatarPanel", () => {
     const native = { id: "native:jaeger", name: "Jaeger" } as Agent;
     const { container } = render(<AvatarPanel agent={native} clipState="working" size={{ cls: "expanded", short: false }} />);
     expect(await screen.findByRole("img", { name: "Jaeger avatar" })).toBeTruthy();
-    expect(container.querySelector('video[src$="/working.mp4"]')).toBeTruthy();
+    expect(container.querySelector('.jg-jaeger-avatar[data-motion="rigged"]')).toBeTruthy();
+    expect(container.querySelectorAll(".jg-jaeger-cutout__part")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "Still" }));
-    expect(container.querySelector("video")).toBeNull();
+    expect(container.querySelector('.jg-jaeger-avatar[data-motion="still"]')).toBeTruthy();
   });
 });
 
