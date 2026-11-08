@@ -48,7 +48,7 @@ it("opens the page the URL names, redirects retired paths to sub-tabs and follow
   await settle();
   expect(location.pathname).toBe("/settings/models/compare");
   expect(front()).toBe("Settings");
-  expect(document.querySelector('[aria-label="Compare"]')).not.toBeNull();
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Compare"]')).not.toBeNull());
   await flush(() => { history.back(); });
   await flush(() => dispatchEvent(new PopStateEvent("popstate")));
   expect(["Agents", "Settings"]).toContain(front());

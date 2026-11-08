@@ -2,7 +2,7 @@
  * Work › Pipeline (task hub), Work › Production, and the "current task" banner shown in Research,
  * Studio and Production. Real data only: gateway tasks + the WebUI pipeline store + task artifacts.
  */
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { JaegerSource, TaskArtifact } from "../api/source";
 import type { Task } from "../api/types";
 import { Badge, Empty, PageHead, SkeletonRows, useToast } from "./ui";
@@ -17,16 +17,20 @@ export function usePipeline(source: JaegerSource) {
   const [tasks, setTasks] = useState<Task[]>();
   const [items, setItems] = useState<Record<string, PipelineRecord>>({});
   const [err, setErr] = useState<string>();
+  const request = useRef(0);
   const load = useCallback(async () => {
+    const id = ++request.current;
+    setTasks(undefined); setItems({}); setErr(undefined);
     try {
       const [t, p] = await Promise.all([source.tasks(), pipelineApi.list()]);
+      if (id !== request.current) return;
       // Pipeline tasks owned by WebUI jobs (e.g. YouTube research, id "yt:<playlist>") have no gateway task: list them too.
       const known = new Set(t.map((x) => x.task_id));
       const jobs = Object.values(p.items).filter((r) => !known.has(r.task_id)).map((r) => ({ task_id: r.task_id, goal: r.attachments.find((a) => a.kind === "source")?.label || r.task_id, state: "webui job" } as Task));
       setTasks([...t, ...jobs]); setItems(p.items); setErr(undefined);
-    } catch (e) { setErr((e as Error).message); }
+    } catch (e) { if (id === request.current) setErr((e as Error).message); }
   }, [source]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); return () => { ++request.current; }; }, [load]);
   return { tasks, items, err, load, setItems };
 }
 
@@ -43,15 +47,16 @@ export function StageStepper({ stage, compact }: { stage: Stage | null; compact?
   );
 }
 
-async function advance(rec: PipelineRecord | undefined, taskId: string, onNavigate: (to: string) => void, after: (r: PipelineRecord) => void, toast: (m: string, k?: "error") => void) {
+async function advance(rec: PipelineRecord | undefined, taskId: string, onNavigate: (to: string) => void, after: (r: PipelineRecord) => void, toast: (m: string, k?: "error") => void, isCurrent: () => boolean = () => true) {
   const to = nextStage(rec?.stage ?? null);
   if (!to) return;
   try {
     const r = await pipelineApi.setStage(taskId, to, rec?.revision);
+    if (!isCurrent()) return;
     after(r);
     toast(`Moved to ${STAGE_LABEL[to]}`);
     onNavigate(stagePath(to, taskId));
-  } catch (e) { toast((e as Error).message, "error"); }
+  } catch (e) { if (isCurrent()) toast((e as Error).message, "error"); }
 }
 
 export function PipelinePage({ source, params, onNavigate }: { source: JaegerSource; params: URLSearchParams; onNavigate: (to: string) => void }) {
@@ -70,7 +75,7 @@ export function PipelinePage({ source, params, onNavigate }: { source: JaegerSou
           <button type="button" className="jg-u-btn" onClick={() => void load()}>Refresh</button>
         </>} />
       <RunnerQueue onNavigate={onNavigate} />
-      <div className="jg-pipe-summary" aria-label="Tasks per stage">{STAGES.map((s, i) => <span key={s}><strong>{counts[i]}</strong> {STAGE_LABEL[s]}</span>)}</div>
+      {tasks && <div className="jg-pipe-summary" aria-label="Tasks per stage">{STAGES.map((s, i) => <span key={s}><strong>{counts[i]}</strong> {STAGE_LABEL[s]}</span>)}</div>}
       {err && <p className="jg-u-error" role="alert">{err}</p>}
       {!tasks && !err && <SkeletonRows n={4} />}
       {tasks && rows.length === 0 && <Empty title="No tasks yet">Create a task in Work › Tasks or ask Jaeger in Chat, then start it here.</Empty>}
@@ -145,52 +150,80 @@ export function TaskBanner({ source, taskId, stage, onNavigate, clearTo }: { sou
   const [rec, setRec] = useState<PipelineRecord>();
   const [open, setOpen] = useState(false);
   const [picks, setPicks] = useState<{ ref: string; label: string }[]>();
+  const [taskError, setTaskError] = useState<string>();
+  const [recordError, setRecordError] = useState<string>();
+  const [loading, setLoading] = useState(true);
+  const [attempt, retry] = useState(0);
+  const [pickError, setPickError] = useState<string>();
+  const pickRequest = useRef(0);
+  const contextGeneration = useRef(0);
+  useEffect(() => {
+    setTask(undefined); setRec(undefined); setPicks(undefined); setOpen(false); setPickError(undefined);
+    ++pickRequest.current;
+    ++contextGeneration.current;
+    return () => { ++pickRequest.current; ++contextGeneration.current; };
+  }, [source, taskId, stage]);
   useEffect(() => {
     let live = true;
-    void Promise.all([source.tasks().catch(() => []), pipelineApi.list().catch(() => ({ items: {} as Record<string, PipelineRecord> }))]).then(([ts, p]) => {
-      if (!live) return;
-      setTask(ts.find((t) => t.task_id === taskId) ?? null); setRec(p.items[taskId]);
-    });
+    setLoading(true); setTaskError(undefined); setRecordError(undefined);
+    void Promise.all([
+      source.tasks().then((ts) => { if (live) setTask(ts.find((t) => t.task_id === taskId) ?? null); }, (e: Error) => { if (live) setTaskError(`Task details unavailable: ${e.message}`); }),
+      pipelineApi.list().then((p) => { if (live) setRec(p.items[taskId]); }, (e: Error) => { if (live) setRecordError(`Task pipeline unavailable: ${e.message}`); }),
+    ]).then(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [source, taskId]);
+  }, [source, taskId, stage, attempt]);
   const pickKind: AttachKind = stage === "studio" ? "asset" : stage === "research" ? "document" : "deliverable";
   const loadPicks = async () => {
-    setOpen((o) => !o);
-    if (picks) return;
+    const id = ++pickRequest.current;
+    setPickError(undefined);
     try {
+      let choices: { ref: string; label: string }[];
       if (stage === "studio" || stage === "production") {
-        const [a, d] = await Promise.all([getJson<{ assets: { id: string; name: string }[] }>("/v1/studio/assets").catch(() => ({ assets: [] })), stage === "production" ? getJson<{ documents: { id: string; title: string }[] }>("/v1/documents").catch(() => ({ documents: [] })) : Promise.resolve({ documents: [] })]);
-        setPicks([...a.assets.map((x) => ({ ref: `asset:${x.id}`, label: x.name })), ...d.documents.map((x) => ({ ref: `document:${x.id}`, label: x.title || "Untitled" }))]);
+        const [a, d] = await Promise.all([getJson<{ assets: { id: string; name: string }[] }>("/v1/studio/assets"), stage === "production" ? getJson<{ documents: { id: string; title: string }[] }>("/v1/documents") : Promise.resolve({ documents: [] })]);
+        choices = [...a.assets.map((x) => ({ ref: `asset:${x.id}`, label: x.name })), ...d.documents.map((x) => ({ ref: `document:${x.id}`, label: x.title || "Untitled" }))];
       } else {
         const d = await getJson<{ documents: { id: string; title: string }[] }>("/v1/documents");
-        setPicks(d.documents.map((x) => ({ ref: `document:${x.id}`, label: x.title || "Untitled" })));
+        choices = d.documents.map((x) => ({ ref: `document:${x.id}`, label: x.title || "Untitled" }));
       }
-    } catch (e) { toast((e as Error).message, "error"); setPicks([]); }
+      if (id === pickRequest.current) setPicks(choices);
+    } catch (e) { if (id === pickRequest.current) setPickError(`Attachments unavailable: ${(e as Error).message}`); }
   };
   const attach = async (p: { ref: string; label: string }) => {
-    try { const a = await pipelineApi.attach(taskId, { kind: pickKind, ref: p.ref, label: p.label }); setRec((r) => r ? { ...r, attachments: [...r.attachments, a] } : r); toast(`Attached “${p.label}”`); } catch (e) { toast((e as Error).message, "error"); }
+    const generation = contextGeneration.current;
+    try {
+      const a = await pipelineApi.attach(taskId, { kind: pickKind, ref: p.ref, label: p.label });
+      if (generation !== contextGeneration.current) return;
+      setRec((r) => r?.task_id === taskId ? { ...r, attachments: [...r.attachments, a] } : r);
+      retry((n) => n + 1);
+      toast(`Attached “${p.label}”`);
+    } catch (e) { if (generation === contextGeneration.current) toast((e as Error).message, "error"); }
+  };
+  const advanceCurrent = () => {
+    const generation = contextGeneration.current;
+    return advance(rec, taskId, onNavigate, setRec, toast, () => generation === contextGeneration.current);
   };
   const nx = nextStage(rec?.stage ?? null);
   const scoped = rec?.attachments.filter((a) => stage === "research" ? a.kind === "source" || a.kind === "note" || a.kind === "document" : stage === "studio" ? a.kind === "asset" || a.kind === "note" : a.kind === "deliverable" || a.kind === "artifact") ?? [];
   return (
     <section className="jg-taskbanner" aria-label="Current task">
       <div className="jg-taskbanner__row">
-        <div className="jg-taskbanner__what"><span className="jg-u-note">Current task</span><strong>{task === undefined ? "Loading…" : task ? title(task) : taskId}</strong></div>
-        <StageStepper stage={rec?.stage ?? null} compact />
+        <div className="jg-taskbanner__what"><span className="jg-u-note">Current task</span><strong>{task === undefined ? (taskError ? taskId : "Loading…") : task ? title(task) : taskId}</strong></div>
+        {!rec && (loading || recordError) ? <span className="jg-u-note">{recordError ? "Stage unavailable" : "Loading stage…"}</span> : <StageStepper stage={rec?.stage ?? null} compact />}
         <div className="jg-ui-toolbar">
-          <button type="button" className="jg-u-btn" onClick={() => void loadPicks()} aria-expanded={open}>Attach {pickKind === "asset" ? "asset" : pickKind === "document" ? "document" : "deliverable"}</button>
-          {nx && rec && <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => void advance(rec, taskId, onNavigate, setRec, toast)}>Advance to {STAGE_LABEL[nx]}</button>}
+          <button type="button" className="jg-u-btn" disabled={loading || !!recordError} onClick={() => { setOpen(!open); if (!open && !picks) void loadPicks(); }} aria-expanded={open}>Attach {pickKind === "asset" ? "asset" : pickKind === "document" ? "document" : "deliverable"}</button>
+          {nx && rec && <button type="button" disabled={loading || !!recordError} className="jg-u-btn jg-u-btn--primary" onClick={() => void advanceCurrent()}>Advance to {STAGE_LABEL[nx]}</button>}
           <button type="button" className="jg-u-link" onClick={() => onNavigate(clearTo)}>Clear</button>
         </div>
       </div>
-      {task === null && <p className="jg-u-note">This task isn’t in the gateway’s task list any more; attachments still work.</p>}
+      {(taskError || recordError) && <p className="jg-u-error" role="alert">{[taskError, recordError].filter(Boolean).join(". ")} Last-known details may be shown. <button type="button" className="jg-u-btn" onClick={() => retry((n) => n + 1)}>Retry task details</button></p>}
+      {task === null && !taskError && <p className="jg-u-note">This task isn’t in the gateway’s task list any more; attachments still work.</p>}
       {scoped.length > 0 && <ul className="jg-taskbanner__chips">{scoped.map((a) => <li key={a.id}><Badge>{a.kind}</Badge> {a.kind === "source" && a.ref ? <a href={a.ref} target="_blank" rel="noreferrer noopener">{a.label || a.ref}</a> : a.text || a.label || a.ref}</li>)}</ul>}
       {open && (
         <div className="jg-taskbanner__picks">
-          {picks === undefined ? <SkeletonRows n={2} /> : picks.length === 0 ? <p className="jg-u-note">Nothing to attach yet.</p> : (
+          {pickError ? <p className="jg-u-error" role="alert">{pickError} <button type="button" className="jg-u-btn" onClick={() => void loadPicks()}>Retry attachments</button></p> : picks === undefined ? <SkeletonRows n={2} /> : picks.length === 0 ? <p className="jg-u-note">Nothing to attach yet.</p> : (
             <ul className="jg-u-list">{picks.map((p) => {
               const on = rec?.attachments.some((a) => a.ref === p.ref && a.kind === pickKind);
-              return <li key={p.ref}><button type="button" className="jg-u-row" disabled={on} onClick={() => void attach(p)}>{p.label}<span className="jg-u-note">{on ? "attached" : p.ref.split(":")[0]}</span></button></li>;
+              return <li key={p.ref}><button type="button" className="jg-u-row" disabled={on || loading || !!recordError} onClick={() => void attach(p)}>{p.label}<span className="jg-u-note">{on ? "attached" : p.ref.split(":")[0]}</span></button></li>;
             })}</ul>)}
         </div>)}
     </section>
@@ -199,22 +232,27 @@ export function TaskBanner({ source, taskId, stage, onNavigate, clearTo }: { sou
 
 /** Work › Production: a task's real outputs — gateway result, task artifacts, attached deliverables. */
 export function ProductionPage({ source, params, onNavigate }: { source: JaegerSource; params: URLSearchParams; onNavigate: (to: string) => void }) {
-  const { tasks, items, err, setItems } = usePipeline(source);
+  const { tasks, items, err, load, setItems } = usePipeline(source);
   const taskId = params.get("task");
   const inProd = (tasks ?? []).filter((t) => { const s = items[t.task_id]?.stage; return s === "production" || s === "review" || s === "done"; });
   const [arts, setArts] = useState<TaskArtifact[]>();
+  const [artifactError, setArtifactError] = useState<string>();
+  const [artifactAttempt, retryArtifacts] = useState(0);
   useEffect(() => {
-    setArts(undefined);
-    if (!taskId || !source.taskArtifacts) return;
-    source.taskArtifacts.list(taskId).then((r) => setArts(r.artifacts), () => setArts([]));
-  }, [source, taskId]);
+    let live = true;
+    setArts(undefined); setArtifactError(undefined);
+    if (taskId && source.taskArtifacts) {
+      source.taskArtifacts.list(taskId).then((r) => { if (live) setArts(r.artifacts); }, (e: Error) => { if (live) setArtifactError(e.message); });
+    }
+    return () => { live = false; };
+  }, [source, taskId, artifactAttempt]);
   const task = tasks?.find((t) => t.task_id === taskId);
   const rec = taskId ? items[taskId] : undefined;
   return (
     <div className="jg-u-page">
-      <PageHead title="Production" subtitle={taskId ? "Outputs and deliverables for the current task." : "Tasks in Production, Review or Done. Pick one to see its outputs."} />
+      <PageHead title="Production" subtitle={taskId ? "Outputs and deliverables for the current task." : "Tasks in Production, Review or Done. Pick one to see its outputs."} actions={<button type="button" className="jg-u-btn" onClick={() => { void load(); retryArtifacts((n) => n + 1); }}>Refresh</button>} />
       {err && <p className="jg-u-error" role="alert">{err}</p>}
-      {!taskId && (!tasks ? <SkeletonRows n={3} /> : inProd.length === 0 ? <Empty title="Nothing in production">Advance a task from Work › Pipeline when it’s ready to produce.</Empty> : (
+      {!taskId && !err && (!tasks ? <SkeletonRows n={3} /> : inProd.length === 0 ? <Empty title="Nothing in production">Advance a task from Work › Pipeline when it’s ready to produce.</Empty> : (
         <ul className="jg-pipe-list">{inProd.map((t) => (
           <li key={t.task_id} className="jg-u-card jg-pipe-card">
             <div className="jg-pipe-card__head"><button type="button" className="jg-pipe-card__title" onClick={() => onNavigate(`/work/production?task=${encodeURIComponent(t.task_id)}`)}>{title(t)}</button><Badge tone={stateTone(t.state)}>{t.state ?? "unknown"}</Badge></div>
@@ -223,14 +261,14 @@ export function ProductionPage({ source, params, onNavigate }: { source: JaegerS
       {taskId && (
         <div className="jg-u-grid">
           <section className="jg-u-card"><h2>Result</h2>
-            {task ? (task.result != null ? <pre className="jg-pipe-result">{typeof task.result === "string" ? task.result : JSON.stringify(task.result, null, 2)}</pre> : <p className="jg-u-note">{task.error || `No result yet (gateway state: ${task.state ?? "unknown"}).`}</p>) : <SkeletonRows n={2} />}
+            {task ? (task.result != null ? <pre className="jg-pipe-result">{typeof task.result === "string" ? task.result : JSON.stringify(task.result, null, 2)}</pre> : <p className="jg-u-note">{task.error || `No result yet (gateway state: ${task.state ?? "unknown"}).`}</p>) : err ? <p className="jg-u-note">Result unavailable. Refresh to retry.</p> : tasks ? <p className="jg-u-note">This task is not in the current task list.</p> : <SkeletonRows n={2} />}
           </section>
           <section className="jg-u-card"><h2>Task artifacts <span className="jg-u-count">{arts?.length ?? ""}</span></h2>
-            {!source.taskArtifacts ? <p className="jg-u-note">This gateway doesn’t expose task artifacts.</p> : arts === undefined ? <SkeletonRows n={2} /> : arts.length === 0 ? <p className="jg-u-note">No files produced by this task.</p> : (
+            {!source.taskArtifacts ? <p className="jg-u-note">This gateway doesn’t expose task artifacts.</p> : artifactError ? <p className="jg-u-error" role="alert">Task artifacts unavailable: {artifactError} <button type="button" className="jg-u-btn" onClick={() => retryArtifacts((n) => n + 1)}>Retry artifacts</button></p> : arts === undefined ? <SkeletonRows n={2} /> : arts.length === 0 ? <p className="jg-u-note">No files produced by this task.</p> : (
               <ul className="jg-u-list">{arts.map((a) => <li key={a.attachment_id} className="jg-pipe-attach__row"><span>{a.name}</span><span className="jg-u-note">{a.mime} · {Math.round(a.size / 1024)} KB</span></li>)}</ul>)}
           </section>
           <section className="jg-u-card jg-u-card--wide"><h2>Deliverables</h2>
-            {rec ? <Attachments taskId={taskId} rec={rec} onChange={(r) => setItems((m) => ({ ...m, [r.task_id]: r }))} kinds={[]} filter={["deliverable", "asset", "document", "artifact"]} /> : <p className="jg-u-note">Use “Attach deliverable” above to add Studio assets or documents.</p>}
+            {err ? <p className="jg-u-note">Deliverables unavailable. Refresh to retry.</p> : !tasks ? <SkeletonRows n={2} /> : rec ? <Attachments taskId={taskId} rec={rec} onChange={(r) => setItems((m) => ({ ...m, [r.task_id]: r }))} kinds={[]} filter={["deliverable", "asset", "document", "artifact"]} /> : <p className="jg-u-note">Use “Attach deliverable” above to add Studio assets or documents.</p>}
           </section>
         </div>)}
     </div>

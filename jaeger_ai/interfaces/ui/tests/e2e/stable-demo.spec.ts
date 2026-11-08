@@ -33,7 +33,7 @@ async function pickPage(page: Page, name: string) {
   if (!await page.locator('#jaeger-navigation').isVisible()) await page.getByRole('button', {name:'Toggle navigation'}).click();
   if (['Work','Research','Machine','Tasks'].includes(name) && !await page.locator('.jg-stable-demo__more').evaluate(el => (el as HTMLDetailsElement).open)) await page.getByLabel('More tools', {exact:true}).click();
   await page.getByRole('navigation', {name:'Jaeger navigation'}).getByRole('button', {name, exact:true}).click();
-  if ((page.viewportSize()?.width ?? 1280) <= 820) await page.getByRole('button', {name:'Close sidebar'}).click();
+  if ((page.viewportSize()?.width ?? 1280) <= 820) await expect(page.locator('#jaeger-navigation')).toBeHidden();
 }
 
 test('default screen exposes the current workspace navigation and chat controls', async ({ page }) => {
@@ -88,7 +88,7 @@ test('a stale device-local selection resumes the durable Gateway conversation', 
   const durable = await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'));
   expect(durable).toBeTruthy();
   await page.evaluate(() => localStorage.setItem('jaeger.stable-demo.session.v1', 'missing-browser-contract'));
-  await page.reload();
+  await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe(durable);
 });
@@ -290,3 +290,24 @@ for (const scenario of [
   await expect(input).toBeVisible();
  });
 }
+
+test('conversation deep links override device selection and survive reload', async ({page}) => {
+  await openChat(page);
+  const linked = await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'));
+  expect(linked).toBeTruthy();
+  await page.evaluate(() => localStorage.setItem('jaeger.stable-demo.session.v1', 'different-device-selection'));
+  await page.goto(`/?session=${encodeURIComponent(linked!)}`);
+  await expect(page.getByRole('textbox', {name:'Message',exact:true})).toBeEnabled();
+  expect(await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe(linked);
+  await page.reload();
+  await expect(page.getByRole('textbox', {name:'Message',exact:true})).toBeEnabled();
+  expect(new URL(page.url()).searchParams.get('session')).toBe(linked);
+});
+
+test('existing settings deep links render real appearance controls', async ({page}) => {
+  await openChat(page);
+  await page.goto('/settings/appearance');
+  await expect(page.locator('.jg-sheet__page')).toBeVisible();
+  await expect(page.locator('.jg-sheet__page')).toContainText('Appearance');
+  await expect(page.getByRole('radio', {name:'Light',exact:true})).toBeVisible();
+});

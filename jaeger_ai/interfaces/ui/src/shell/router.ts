@@ -117,9 +117,13 @@ export function navigate(to: PageId | string, opts: { replace?: boolean } = {}):
   // The in-memory MockSource is selected from this development-only flag at boot.
   // Keep it across internal navigation so a Vite reload cannot silently switch the
   // preview to the live Gateway (which presents as an unrelated 500 chat failure).
-  if (import.meta.env.DEV && !url.includes("?")) {
+  if (import.meta.env.DEV) {
     const mock = new URLSearchParams(location.search).get("mock");
-    if (mock === "1" || mock === "true") url += `?mock=${mock}`;
+    const target = new URL(url, location.origin);
+    if ((mock === "1" || mock === "true") && !target.searchParams.has("mock")) {
+      target.searchParams.set("mock", mock);
+      url = target.pathname + target.search + target.hash;
+    }
   }
   if (url === location.pathname + location.search) return;
   if (opts.replace) history.replaceState(null, "", url); else history.pushState(null, "", url);

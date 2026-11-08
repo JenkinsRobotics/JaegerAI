@@ -574,7 +574,7 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
     try:
         stack.start()
         with playwright.sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+            browser = pw.chromium.launch(headless=True, executable_path=os.environ.get("JAEGER_TEST_CHROMIUM"))
             context = browser.new_context(viewport={"width": 1280, "height": 900})
             # An owned browser must not visit external URLs or operator listeners.
             context.route("**/*", lambda route: route.continue_()
@@ -673,7 +673,7 @@ def test_owned_browser_clarification_survives_reload_and_answers_once(tmp_path, 
         _, home = stack.request("/v1/agents/native:jaeger/home", caller="webui")
         session_id = home["session_id"]
         with playwright.sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+            browser = pw.chromium.launch(headless=True, executable_path=os.environ.get("JAEGER_TEST_CHROMIUM"))
             context = browser.new_context(viewport={"width": 1280, "height": 900})
             context.add_init_script("localStorage.setItem('jaeger.stable-demo.session.v1', " + json.dumps(session_id) + ")")
             context.route("**/*", lambda route: route.continue_()
@@ -1388,6 +1388,31 @@ def test_skill_discover_load_and_owner_turn(gateway):
     })
     row = gateway.wait_for_terminal("skill-session", "skill-turn")
     assert row["status"] == "completed", row
+    gateway.stop()
+    gateway.start()
+    catalog = gateway.request('/v1/runtime/skills?q=contract-ritual')[1]
+    assert any(skill['name'] == 'contract-ritual' for skill in catalog['skills'])
+    # A fresh interpreter must load the saved recipe, rather than inheriting
+    # this test's catalog/cache. This checks retrieval, not model-weight training.
+    check = subprocess.run(
+        [sys.executable, '-c', '''
+import json, sys
+from pathlib import Path
+from jaeger_ai.core.instance.instance import InstanceLayout
+from jaeger_agent.core.workspace import bind
+bind(InstanceLayout(Path(sys.argv[1])))
+from jaeger_agent.tools.skills import skill
+print(json.dumps(skill(action="view", name="contract-ritual")))
+''', str(layout.root)],
+        cwd=gateway.root,
+        env={**os.environ, 'PYTHONPATH': os.pathsep.join([
+            str(REPO), str(REPO / 'packages/jaeger-agent'), str(REPO / 'packages/jaeger-os')]),
+             'JAEGER_STATE_DIR': str(gateway.root), 'JAEGER_HOME': str(gateway.root),
+             'JAEGER_INSTANCE_DIR': str(layout.root), 'PYTHONDONTWRITEBYTECODE': '1'},
+        capture_output=True, text=True, timeout=30, check=True,
+    )
+    recipe = json.loads(check.stdout)
+    assert recipe['ok'] is True and 'SKILL-APPLIED' in recipe['instructions']
     assert row["result"]["output"] == "CONTRACT-ANSWER"
 
 

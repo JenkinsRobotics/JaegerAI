@@ -8,11 +8,13 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
+  cacheDir: path.join(tmpdir(), "jaeger-ui-vitest-cache"),
   plugins: [react()],
   test: {
     // Environment
@@ -24,7 +26,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
-      reportsDirectory: './coverage',
+      reportsDirectory: path.join(process.env.JAEGER_UI_TEST_OUTPUT || path.join(tmpdir(), 'jaeger-ui-vitest'), 'coverage'),
       exclude: [
         'node_modules/',
         'src/test/',
@@ -51,7 +53,7 @@ export default defineConfig({
     // Reporters
     reporters: ['verbose', 'json'],
     outputFile: {
-      json: './test-results/results.json',
+      json: path.join(process.env.JAEGER_UI_TEST_OUTPUT || path.join(tmpdir(), 'jaeger-ui-vitest'), 'results.json'),
     },
   },
 

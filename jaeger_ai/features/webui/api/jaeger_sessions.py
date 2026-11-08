@@ -146,6 +146,13 @@ def _proxy_stream(handler, session_id: str, query: str, *, upstream_path: str | 
     req.add_header("Accept", "text/event-stream")
     _add_caller_auth(req)
     req.add_header("Cache-Control", "no-cache")
+    # Native EventSource reconnects use a header rather than a query string.
+    # Dropping it replays a session from zero and loses global events that
+    # arrived during the disconnect. Forward only the cursor, never the
+    # browser's cookies or authorization (the proxy has its own caller).
+    cursor = getattr(handler, "headers", {}).get("Last-Event-ID")
+    if cursor is not None:
+        req.add_header("Last-Event-ID", cursor)
 
     try:
         upstream = urlopen(req, timeout=STREAM_CONNECT_TIMEOUT)
@@ -177,18 +184,13 @@ def _proxy_stream(handler, session_id: str, query: str, *, upstream_path: str | 
 
     try:
         while True:
-            chunk = upstream.read(1)
+            # HTTPResponse.read1 performs at most one underlying read. Unlike
+            # read(n), it does not wait for n bytes, so deltas remain live
+            # without writing and flushing the browser socket for every byte.
+            read_available = getattr(upstream, "read1", None)
+            chunk = read_available(64 * 1024) if read_available else upstream.read(1)
             if not chunk:
                 break
-            # Read whatever else is buffered without blocking on more.
-            pending = getattr(upstream, "fp", None)
-            if pending is not None:
-                try:
-                    extra = upstream.read(len(getattr(pending, "_rbuf", b"")) or 0)
-                    if extra:
-                        chunk += extra
-                except Exception:  # noqa: BLE001 — best-effort batching only
-                    pass
             handler.wfile.write(chunk)
             handler.wfile.flush()
     except (BrokenPipeError, ConnectionResetError):

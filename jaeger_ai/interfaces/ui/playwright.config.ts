@@ -7,12 +7,16 @@
  */
 
 import { defineConfig, devices } from '@playwright/test'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
+const outputRoot = process.env.JAEGER_UI_TEST_OUTPUT || join(tmpdir(), 'jaeger-ui-playwright')
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:5173'
 
 export default defineConfig({
   // Test directory
   testDir: './tests/e2e',
+  outputDir: join(outputRoot, 'artifacts'),
 
   // Run tests in parallel
   fullyParallel: true,
@@ -28,8 +32,8 @@ export default defineConfig({
 
   // Reporter
   reporter: [
-    ['html', { outputFolder: 'playwright-report' }],
-    ['json', { outputFile: 'test-results/results.json' }],
+    ['html', { outputFolder: join(outputRoot, 'report') }],
+    ['json', { outputFile: join(outputRoot, 'results.json') }],
     ['list'],
   ],
 
@@ -60,7 +64,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], launchOptions: { executablePath: process.env.JAEGER_TEST_CHROMIUM } },
     },
     {
       name: 'firefox',
@@ -73,7 +77,7 @@ export default defineConfig({
     // Mobile viewports
     {
       name: 'Mobile Chrome',
-      use: { ...devices['Pixel 5'] },
+      use: { ...devices['Pixel 5'], launchOptions: { executablePath: process.env.JAEGER_TEST_CHROMIUM } },
     },
     {
       name: 'Mobile Safari',
@@ -83,7 +87,7 @@ export default defineConfig({
 
   // Run local dev server before starting the tests
   webServer: {
-    command: 'python3.12 ../../../dev/scripts/ui_browser_contract.py',
+    command: `${process.env.JAEGER_TEST_PYTHON || 'python3'} ../../../dev/scripts/ui_browser_contract.py`,
     url: BASE_URL,
     reuseExistingServer: false,
     timeout: 120000,

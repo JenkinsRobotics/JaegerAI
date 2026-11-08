@@ -53,13 +53,15 @@ def main():
     subprocess.run(['npm', 'run', 'build'], cwd=work, env=env, check=True)
     if not (work / 'dist/index.html').is_file():
         raise RuntimeError('UI build produced no index.html')
-    inputs = {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest()
+    # Fingerprint the inputs actually compiled, not the developer checkout:
+    # it may have changed while npm was building this isolated snapshot.
+    inputs = {str(p.relative_to(work)): hashlib.sha256(p.read_bytes()).hexdigest()
               for folder in ('src', 'public', 'vendor', 'scripts')
-              for p in sorted((source / folder).rglob('*')) if p.is_file()}
+              for p in sorted((work / folder).rglob('*')) if p.is_file()}
     for name in shared_files:
-        inputs['../ide/media/' + name] = hashlib.sha256((shared / name).read_bytes()).hexdigest()
+        inputs['../ide/media/' + name] = hashlib.sha256((snapshot / 'ide' / 'media' / name).read_bytes()).hexdigest()
     for name in ('package.json', 'package-lock.json', 'vite.config.ts', 'index.html', 'tsconfig.json'):
-        inputs[name] = hashlib.sha256((source / name).read_bytes()).hexdigest()
+        inputs[name] = hashlib.sha256((work / name).read_bytes()).hexdigest()
     (work / 'dist/build.json').write_text(json.dumps({
         'mock': args.mock, 'sourceSha256': hashlib.sha256(
             json.dumps(inputs, sort_keys=True).encode()).hexdigest(),
