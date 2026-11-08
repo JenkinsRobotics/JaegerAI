@@ -14,6 +14,10 @@ def register(mcp, client_for_context):
         enabled()
         return client_for_context(ctx)._call(method, path, body)
 
+    def require_message_authority(ctx, tool):
+        if getattr(client_for_context(ctx), "caller", None) == "muse":
+            raise PermissionError(f"Caller 'muse' may not use {tool}")
+
     @mcp.tool()
     @_off_event_loop
     def send_message(
@@ -29,6 +33,7 @@ def register(mcp, client_for_context):
         ctx: Context | None = None,
     ) -> dict:
         """Store untrusted message data; this never starts a goal or a tool."""
+        require_message_authority(ctx, "send_message")
         return call(
             ctx,
             "POST",
@@ -179,6 +184,7 @@ def register(mcp, client_for_context):
         work waits for Matthew in the Approvals inbox. Returns ids to poll with
         task_status / task_result.
         """
+        require_message_authority(ctx, "handoff_task")
         thread = thread or _new_id("thread")
         ident = id or _new_id("handoff")
         if to == "jaeger":
