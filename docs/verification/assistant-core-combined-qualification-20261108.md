@@ -1,7 +1,12 @@
 # Historical candidate 27 qualification, 2026-11-08
 
-This report preserves the earlier candidate evidence. Current reconciled source
-and gates are in [reconciled qualification](assistant-core-reconciled-qualification-20261108.md).
+## Current background-admission qualification
+
+See [assistant-core-background-admission-qualification-20261108.md](assistant-core-background-admission-qualification-20261108.md) for the exact ccda0c source/test freeze, all 18 selected final zero-exit groups, package provenance, new default/native authority, original-fingerprint replay, current-lease returned slices and terminal/workspace scope corrections. The measurements below remain historical and are not relabeled as new results. Overall and every tab remain **PARTIAL**. Background terminal journals and automatic interrupted Research replay remain absent. The data-preserving release/rollback proposal requires fresh runtime-state comparison and separate approval. Framework evolution remains deferred.
+
+
+This report preserves the earlier candidate evidence. The intervening version13 source
+and gates are in [reconciled qualification](assistant-core-reconciled-qualification-20261108.md); the current source is linked above.
 
 ## Candidate and boundaries
 
