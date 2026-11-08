@@ -3,7 +3,7 @@ name: v0.13.0 Feature Tests
 on:
   workflow_call:
   push:
-    branches: [main, develop, master]
+    branches: [master]
     paths:
       - 'jaeger_ai/interfaces/ui/**'
       - 'jaeger_ai/interfaces/ide/**'
@@ -18,7 +18,7 @@ on:
       - 'dev/scripts/ui_browser_contract.py'
       - '.github/workflows/v013-tests.yml'
   pull_request:
-    branches: [main, develop, master]
+    branches: [master]
     paths:
       - 'jaeger_ai/interfaces/ui/**'
       - 'jaeger_ai/interfaces/ide/**'
@@ -32,6 +32,10 @@ on:
       - 'dev/tests/fixtures/**'
       - 'dev/scripts/ui_browser_contract.py'
       - '.github/workflows/v013-tests.yml'
+
+concurrency:
+  group: v013-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   PYTHONDONTWRITEBYTECODE: 1

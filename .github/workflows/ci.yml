@@ -5,6 +5,9 @@ on:
   workflow_call:
 permissions:
   contents: read
+concurrency:
+  group: jaeger-ci-${{ github.ref }}
+  cancel-in-progress: true
 env:
   JAEGER_NO_ATTACH: "1"
   JAEGER_TEST_HEADLESS: "1"
