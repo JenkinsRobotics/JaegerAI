@@ -1029,3 +1029,36 @@ async def test_disconnect_does_not_cancel_accepted_work(tmp_path: Path):
     if task:
         await asyncio.wait_for(task, timeout=2)
     assert store.get_request("1" * 32)["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_ollama_images_require_admitted_attachments(monkeypatch, tmp_path):
+    import base64
+    captured = []
+    private = tmp_path / 'private.png'
+    private.write_bytes(b'private-image')
+    admitted = tmp_path / 'admitted.png'
+    admitted.write_bytes(b'admitted-image')
+
+    class Response:
+        status = 200
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def text(self): return '{"message":{"content":"done"}}'
+
+    class Session:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def post(self, url, *, json, headers=None):
+            captured.append(json)
+            return Response()
+
+    monkeypatch.setattr('jaeger_ai.core.gateway.server.ClientSession', Session)
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / 'images.sqlite3'))
+    history = [{'role': 'assistant', 'content': f'stored at {private}'}]
+    await app._ollama_chat(f'file: {private}', model='owned-model', history=history)
+    assert all('images' not in message for message in captured[-1]['messages'])
+    await app._ollama_chat(f'file: {private}', model='owned-model', history=history,
+        attachments=[{'safe_path': str(admitted), 'mime_type': 'image/png'}])
+    assert captured[-1]['messages'][-1]['images'] == [base64.b64encode(b'admitted-image').decode()]

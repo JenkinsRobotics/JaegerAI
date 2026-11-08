@@ -52,3 +52,18 @@ def test_advertised_cli_check_uses_existing_owner_without_upgrade_or_migration(t
     monkeypatch.setattr(update_verb,'_migrate_instance_with_backup',lambda *a,**k:pytest.fail('Read-only check must not migrate'))
     assert update_verb._cmd_update_argv(['--check','--channel','latest'])==0
     assert 'install method' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_update_plan_reports_recovery_ref_and_startup_revision(gw, tmp_path, monkeypatch, owned_checkout):
+    app, http = gw
+    revision = subprocess.check_output(['git', '-C', str(owned_checkout), 'rev-parse', 'HEAD'], text=True).strip()
+    from jaeger_ai.contract.updates import UPDATE_PREVIOUS_GIT_REF
+    subprocess.run(['git', '-C', str(owned_checkout), 'update-ref', UPDATE_PREVIOUS_GIT_REF, revision], check=True)
+    monkeypatch.setattr(instance, 'install_root', lambda: owned_checkout)
+    monkeypatch.setattr(app, 'source_revision_at_start', 'a' * 40)
+    response = await http.get('/v1/runtime/updates/plan')
+    plan = await response.json()
+    assert plan['runtime_source_revision'] == 'a' * 40
+    assert plan['source_checkout_revision'] == revision
+    assert plan['rollback']['available'] is True

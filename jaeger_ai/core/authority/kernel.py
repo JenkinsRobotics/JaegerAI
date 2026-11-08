@@ -24,7 +24,7 @@ Invariants:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 import logging
 from pathlib import Path
@@ -318,6 +318,20 @@ class PolicyKernel:
                     return d
                 if modified_args is not None:
                     current_args = modified_args
+                    # Rewrites must pass the same argument-dependent rules as
+                    # the original proposal. Do not rerun arbitrary hooks.
+                    target = current_args.get("path") or current_args.get("TargetFile")
+                    rewritten = replace(proposal, arguments=current_args,
+                                        target_path=str(target) if target else proposal.target_path)
+                    if (d := step("framework_grant_after_hook", self._check_framework_grant(rewritten))) is not None:
+                        return d
+                    if (d := step("protected_targets_after_hook", self._check_protected_targets(rewritten))) is not None:
+                        return d
+                    rule_decision, rule_info = self._check_review_rules(
+                        rewritten, instance_root=instance_root, dry_run=dry_run, extra_rules=extra_rules)
+                    if (d := step("review_rules_after_hook", rule_decision, **rule_info)) is not None:
+                        return d
+                    proposal = rewritten
                     # A hook rewrite is judged again: it cannot turn a call into
                     # a destructive one without the fresh-approval gate.
                     destructive = self._check_destructive(proposal, current_args)

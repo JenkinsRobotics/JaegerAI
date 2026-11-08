@@ -721,46 +721,9 @@ def _boot_mac_shell(env: dict[str, str], dev: bool = False) -> int | None:
 # ─── main ─────────────────────────────────────────────────────────────
 
 def cmd_update() -> int:
-    """`jaeger update` — the dev update loop, one command:
-    git pull, reinstall deps if they changed, rebuild the dev app if the
-    Swift tree changed, then a doctor hint. Safe on a dirty tree (ff-only)."""
-    import hashlib
-    req = REPO / "requirements.txt"
-    before = hashlib.sha1(req.read_bytes()).hexdigest() if req.exists() else ""
-    say("git pull --ff-only…", prefix="update")
-    pull = subprocess.run(["git", "-C", str(REPO), "pull", "--ff-only"],
-                          capture_output=True, text=True)
-    print(pull.stdout.strip() or pull.stderr.strip())
-    if pull.returncode != 0:
-        fail("pull failed (no upstream, diverged, or offline) — resolve and rerun")
-        return 1
-    changed = subprocess.run(
-        ["git", "-C", str(REPO), "diff", "--name-only", "HEAD@{1}", "HEAD"],
-        capture_output=True, text=True).stdout.splitlines() \
-        if "Already up to date" not in pull.stdout else []
-    after = hashlib.sha1(req.read_bytes()).hexdigest() if req.exists() else ""
-    if before != after or any(f in ("pyproject.toml",) for f in changed):
-        say("dependencies changed — reinstalling…", prefix="update")
-        from jaeger_ai.cli.verbs.update_verb import _reinstall_deps
-        if _reinstall_deps(REPO):
-            fail("package refresh failed — rerun ./install.sh")
-            return 1
-        ok("packages refreshed")
-    # Staleness beats "what did THIS pull change": the bundle's build-commit
-    # stamp catches pulls done by hand outside this command and rebuilds that
-    # failed last time — a diff-keyed check misses both.
-    from jaeger_ai.cli._common import mac_app_is_stale
-    try:
-        _dev_bundle = mac_app_bundle(REPO)
-    except ValueError as _e:
-        fail(f"invalid JAEGER_MAC_BUILD: {_e}")
-        return 1
-    if mac_app_is_stale(REPO, _dev_bundle):
-        say("Canonical Mac shell lags the tree — rebuilding JaegerShell.app…",
-            prefix="update")
-        subprocess.run(["bash", str(REPO / "jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh")])
-    ok("up to date — run `jaeger dev --health` to verify")
-    return 0
+    """The developer flag uses the canonical updater's branch workflow."""
+    from jaeger_ai.cli.verbs.update_verb import _cmd_update_argv
+    return _cmd_update_argv(["--channel", "latest"])
 
 
 def main() -> int:

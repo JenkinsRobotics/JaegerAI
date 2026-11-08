@@ -109,6 +109,22 @@ def latest_version(repo: str | None = None, *, timeout: float = 5.0) -> str | No
     return pick_latest(tags)
 
 
+def latest_release(repo: str | None = None, *, timeout: float = 5.0) -> str | None:
+    """The latest published stable release, excluding draft/prerelease tags."""
+    url = f"https://api.github.com/repos/{repo or repo_slug()}/releases/latest"
+    request = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json", "User-Agent": "jaeger-update"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("draft") or payload.get("prerelease"):
+            return None
+        tag = payload.get("tag_name")
+        return tag if isinstance(tag, str) and parse_version(tag) else None
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+
 def update_status(repo: str | None = None, *, timeout: float = 5.0) -> dict:
     """``{'current', 'latest', 'available'}`` — the shape the tray menu, the
     Studio banner, and ``doctor`` all want. ``latest`` is ``None`` offline;

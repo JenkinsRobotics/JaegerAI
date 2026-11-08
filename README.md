@@ -202,6 +202,24 @@ engines, and JaegerAI in dependency order. The environment defaults to
 updates to refresh installed code. Writable skills and operator state live
 under `~/.jaeger`, or the configured state directory.
 
+For the MacBook development → Mac Studio test workflow, develop and verify on
+master, then select the exact tested commit on the Studio with
+`jaeger update --ref <commit>`. Quit the native app and stop Gateway/WebUI
+services first; the updater refuses to replace code while those services run.
+Use `--channel latest` to select master, or the default `stable` channel for the
+latest published stable release. Product updates pin the fetched commit;
+developer checkouts keep their existing fast-forward branch workflow.
+
+A successful update installs coordinated packages/UI, rebuilds the Mac shell,
+and checks migrations in a fresh process. It never restarts services. Reopen
+the rebuilt shell after restarting and check Settings → Update and recovery:
+the native build, Gateway startup revision, and source checkout must agree.
+`--check` checks local schemas only, not remote update availability.
+`jaeger update --rollback` restores the retained product code and reinstalls
+its packages; schema downgrades require the instance backup made before migration.
+Historical versions predating coordinated migration support need a separate
+installation rather than an in-place update.
+
 For the one-line installer, `JAEGER_INSTALL_ROOT` selects the source checkout;
 `JAEGER_STATE_DIR` (then `JAEGER_HOME`) selects operator state.
 

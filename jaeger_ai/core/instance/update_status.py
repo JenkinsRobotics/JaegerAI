@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 from jaeger_ai import __version__
-from jaeger_ai.contract.updates import DEFAULT_UPDATE_CHANNEL, UPDATE_CHANNELS
+from jaeger_ai.contract.updates import DEFAULT_UPDATE_CHANNEL, UPDATE_CHANNELS, UPDATE_PREVIOUS_GIT_REF
 from jaeger_ai.core.instance import instance
 from jaeger_ai.core.instance.schemas import SCHEMA_VERSION
 
@@ -33,6 +33,17 @@ def snapshot(gateway, *, channel=DEFAULT_UPDATE_CHANNEL):
                 dirty = bool(result.stdout.strip())
         except (OSError, subprocess.TimeoutExpired):
             pass  # unknown is not a clean checkout or an available update
+    rollback_available = (root / '.update-prev').is_dir()
+    if (root / '.git').exists():
+        try:
+            rollback_available = subprocess.run(
+                ['git', '-C', str(root), 'rev-parse', '--verify', UPDATE_PREVIOUS_GIT_REF],
+                capture_output=True, text=True, timeout=2, check=False).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            rollback_available = False
+    runtime_revision = getattr(gateway, 'source_revision_at_start', None)
+    if not isinstance(runtime_revision, str) or not re.fullmatch('[a-f0-9]{40,64}', runtime_revision):
+        runtime_revision = None
     schema = None
     manifest = Path(gateway._instance_root()) / 'manifest.json'
     try:
@@ -63,6 +74,7 @@ def snapshot(gateway, *, channel=DEFAULT_UPDATE_CHANNEL):
     return {'component': 'jaeger-update-plan', 'reported_package_version': __version__,
             'install_method': method, 'channel': channel, 'channels': list(UPDATE_CHANNELS),
             'source_checkout_revision': revision, 'source_checkout_dirty': dirty,
+            'runtime_source_revision': runtime_revision,
             'identity_scope': 'checkout_metadata_not_loaded_runtime_or_signed_bundle_proof',
             'active_instance_schema': schema, 'installed_schema': SCHEMA_VERSION,
             'migration_state': 'unknown' if schema is None else 'current' if schema == SCHEMA_VERSION else 'review_required',
@@ -72,8 +84,8 @@ def snapshot(gateway, *, channel=DEFAULT_UPDATE_CHANNEL):
             'automatic_install_supported': False, 'automatic_restart_supported': False,
             'check_command': ['jaeger', 'update', '--check', '--channel', channel],
             'manual_update_command': ['jaeger', 'update', '--channel', channel],
-            'rollback': {'supported_by': 'existing_cli_product_backup_only',
-                         'available': (root / '.update-prev').is_dir(),
+            'rollback': {'supported_by': 'existing_cli_product_recovery',
+                         'available': rollback_available,
                          'command': ['jaeger', 'update', '--rollback'],
                          'requires_explicit_operator_review': True},
             'limits': ['No remote release checked or candidate signature verified.',

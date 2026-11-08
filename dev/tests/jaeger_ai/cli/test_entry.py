@@ -102,4 +102,12 @@ def test_bare_and_agent_flags_run_the_agent():
 
 
 def test_update_preserves_help_without_running_update():
-    assert route(['update', '--help']) == [PY, '-m', 'jaeger_ai.cli.devtools', '--update', '--help']
+    assert route(['update', '--help']) == [PY, '-m', 'jaeger_ai.cli.verbs.dispatch', 'update', '--help']
+
+
+def test_developer_update_flags_reach_the_canonical_updater(tmp_path, monkeypatch):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / 'pyproject.toml').write_text('')
+    monkeypatch.setattr(entry, '_REPO_ROOT', tmp_path)
+    for flag in ('--check', '--finish-update', '--ref'):
+        assert route(['update', flag]) == [PY, '-m', 'jaeger_ai.cli.verbs.dispatch', 'update', flag]

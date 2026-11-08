@@ -85,15 +85,7 @@ def _route(argv: list[str], py: str) -> list[str]:
     if cmd == "finance":
         return [py, "-m", "jaeger_ai.features.finance.cli", *rest]
     if cmd == "update":
-        # Two updaters, one word: in a DEV CHECKOUT `jaeger update` is the
-        # git-pull dev loop (devtools); in a clean product install it must
-        # fall through to the real end-user updater (cli/verbs/update_verb,
-        # reached via the main dispatch). Detect the checkout by the repo
-        # markers next to this package — a pip install has neither.
-        _repo = _REPO_ROOT
-        if ((_repo / "pyproject.toml").exists() and (_repo / ".git").exists()
-                and not (_repo / ".jaeger-product-install").exists()):
-            return [py, "-m", "jaeger_ai.cli.devtools", "--update", *rest]
+        # One updater owns product pins, developer pulls, preflight and migrations.
         return [py, "-m", "jaeger_ai.cli.verbs.dispatch", "update", *rest]
     if cmd in ("--dev", "dev"):
         # Developer toolbox (dev TUI, dev-state app build/run, health,

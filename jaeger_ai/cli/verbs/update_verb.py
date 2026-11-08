@@ -1,22 +1,11 @@
-"""``jaeger update`` (INST-7) — upgrade the framework + walk every
-instance, prompting per-instance to apply pending migrations.
+"""Coordinated product updates and per-instance migration.
 
-What this verb actually does:
-
-  1. Detect the install method and run the matching upgrade:
-       - dev clone (.git)  → fast-forward git pull + editable reinstall;
-       - clean curl install → download the target release tarball and
-         swap the product files in place (no git), keeping ``.venv/`` +
-         ``.jaeger_ai/``. ``--ref`` pins a version; ``--rollback`` reverts.
-       - pip / pipx        → the matching upgrade command.
-  2. Print "Restart `jaeger` to apply" — we don't auto-restart a
-     running daemon. The user picks when to take the agent down.
-  3. Scan ``~/.jaeger/instances/<name>/`` for stale manifests and
-     interactively prompt to back up + migrate each one. Skipped on
-     ``--no-migrate``; just listed on ``--check``.
-
-``--check`` runs neither the upgrade nor the migration; it prints
-what WOULD happen and exits 0 / 1 based on staleness.
+Product Git installs pin a fetched revision and retain a recovery ref. Archive
+installs swap allowlisted source with a recovery copy. Developer checkouts keep
+their fast-forward branch workflow. Environments and operator state stay external.
+App/services must be stopped before code replacement; no service is restarted.
+Migrations are discovered in a fresh upgraded process and failures propagate.
+``--check`` inspects local schemas only; it never checks remote availability.
 """
 
 from __future__ import annotations
@@ -34,7 +23,9 @@ from pathlib import Path
 
 from typing import Any
 
-from jaeger_ai.contract.updates import DEFAULT_UPDATE_CHANNEL, UPDATE_CHANNELS
+from jaeger_ai.contract.updates import (
+    DEFAULT_UPDATE_CHANNEL, UPDATE_CHANNELS, UPDATE_PREVIOUS_GIT_REF, UPDATE_PENDING_GIT_REF,
+)
 
 
 def _detect_method() -> str:
@@ -67,7 +58,7 @@ def _upgrade_command(method: str) -> list[str] | None:
 # allowlist — keep the two in sync.
 
 _PRODUCT = (
-    "jaeger_ai", "packages", "scripts", "vendor", "apps", ".gitmodules",
+    "jaeger_ai", "packages", "scripts", "apps", ".gitmodules",
     "install.sh", "run.sh", "jaeger",
     "requirements.txt", "pyproject.toml",
     "jaeger.toml", "jaeger.windowed.toml",
@@ -79,6 +70,92 @@ _STAGING_DIR = ".update-staging"  # new product assembled here before the swap
 # branch (master), not just a release tag.
 _ARCHIVE_URL = "https://github.com/{repo}/archive/{ref}.tar.gz"
 _LATEST_BRANCH = "master"   # the `latest` channel = development HEAD
+
+
+def _preflight_update(home: Path) -> int:
+    """Refuse to replace code while clients/services can still execute it."""
+    import errno
+    import socket
+    from jaeger_ai.contract.ports import GATEWAY_PORT, WEBUI_PORT, LOOPBACK
+
+    for port in (GATEWAY_PORT, int(os.environ.get("JAEGER_WEBUI_PORT") or WEBUI_PORT)):
+        try:
+            with socket.create_connection((LOOPBACK, port), timeout=1):
+                print(f"[jaeger update] service still listening on {port}. "
+                      "Quit Jaeger and stop its services before updating; nothing changed.", file=sys.stderr)
+                return 1
+        except OSError as exc:
+            if exc.errno != errno.ECONNREFUSED:
+                print(f"[jaeger update] cannot verify stopped services: {exc}", file=sys.stderr)
+                return 1
+    if sys.platform == "darwin":
+        result = subprocess.run(["pgrep", "-x", "JaegerShell"], capture_output=True, text=True)
+        if result.returncode != 1:
+            print("[jaeger update] quit the native Jaeger shell before updating "
+                  "(or process inspection failed); nothing changed.", file=sys.stderr)
+            return 1
+    return 0
+
+
+def _git(home: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(home), *args],
+                          capture_output=True, text=True, check=True)
+
+
+def _update_product_git(home: Path, *, ref: str | None = None) -> int:
+    """Pin a product checkout to a fetched commit, retaining its recovery ref."""
+    from jaeger_ai.core import version_check
+    if _preflight_update(home):
+        return 1
+    try:
+        if _git(home, "status", "--porcelain").stdout.strip():
+            print("[jaeger update] product checkout has uncommitted changes; nothing changed.", file=sys.stderr)
+            return 1
+        pending = subprocess.run(["git", "-C", str(home), "show-ref", "--verify", "--quiet", UPDATE_PENDING_GIT_REF], check=False)
+        if pending.returncode != 1:
+            print("[jaeger update] previous installation is incomplete; use --rollback "
+                  "before another update. Recovery was retained.", file=sys.stderr)
+            return 1
+        selected = ref or version_check.latest_release(version_check.repo_slug())
+        if not selected or selected.startswith("-"):
+            print("[jaeger update] cannot resolve update version; pass --ref or retry.", file=sys.stderr)
+            return 1
+        # Fetch only the selected ref. FETCH_HEAD is then resolved exactly once;
+        # no moving branch is consulted during installation.
+        _git(home, "fetch", "--no-tags", "origin", selected)
+        commit = _git(home, "rev-parse", "--verify", "FETCH_HEAD^{commit}").stdout.strip()
+        previous = _git(home, "rev-parse", "HEAD").stdout.strip()
+        if ref is None:
+            ancestor = subprocess.run(["git", "-C", str(home), "merge-base", "--is-ancestor", commit, previous], check=False)
+            if ancestor.returncode == 0:
+                print(f"[jaeger update] installed revision {previous} already contains stable {selected}.")
+                return 0
+            if ancestor.returncode != 1:
+                return ancestor.returncode
+        candidate = _git(home, "show", commit + ":jaeger_ai/cli/verbs/update_verb.py").stdout
+        if "--finish-update" not in candidate:
+            print("[jaeger update] target predates coordinated migration support. "
+                  "Use a separate installation for this historical version; nothing changed.", file=sys.stderr)
+            return 1
+        # Compare-and-create prevents two updaters from replacing one another's
+        # recovery point after both passed the read-only preflight.
+        _git(home, "update-ref", UPDATE_PENDING_GIT_REF, commit, "")
+        _git(home, "update-ref", UPDATE_PREVIOUS_GIT_REF, previous)
+        _git(home, "checkout", "--detach", commit)
+        print(f"[jaeger update] selected {selected} → {commit}; previous revision retained for --rollback.")
+        rc = _reinstall_deps(home)
+        if not rc:
+            rc = _rebuild_mac_shell(home, only_if_stale=True)
+        if rc:
+            print("[jaeger update] installation incomplete; keep services stopped. "
+                  "Run jaeger update --rollback to restore the previous revision.", file=sys.stderr)
+        else:
+            _git(home, "update-ref", "-d", UPDATE_PENDING_GIT_REF)
+        return rc or 0
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"[jaeger update] product update failed: {exc}; keep services stopped. "
+              "A retained previous revision can be restored with --rollback.", file=sys.stderr)
+        return 1
 
 
 def _reinstall_deps(home: Path) -> int:
@@ -194,7 +271,7 @@ def _update_download(home: Path, *, ref: str | None = None,
         if force:
             ref = current                       # reinstall the current version
         else:
-            latest = version_check.latest_version(repo)
+            latest = version_check.latest_release(repo)
             if latest is None:
                 print("[jaeger update] couldn't reach GitHub to check for updates "
                       "— try again, or pass --ref.", file=sys.stderr)
@@ -207,6 +284,8 @@ def _update_download(home: Path, *, ref: str | None = None,
     if force:
         print(f"[jaeger update] reinstalling {ref} — clean re-fetch of the product.")
 
+    if _preflight_update(home):
+        return 1
     staging, prev = home / _STAGING_DIR, home / _PREV_DIR
     shutil.rmtree(staging, ignore_errors=True)
     try:
@@ -254,23 +333,27 @@ def _rebuild_mac_shell(home: Path, *, only_if_stale: bool = False) -> int:
     except ValueError as exc:
         print(f"[jaeger update] Mac build configuration invalid: {exc}", file=sys.stderr)
         return 1
+    if sys.platform != "darwin":
+        return 0
     if shutil.which("swift") is None:
         print("[jaeger update] Swift unavailable; canonical Mac shell was not built", file=sys.stderr)
-        return 0
+        return 1
     result = subprocess.run(["bash", str(script)], stdout=subprocess.DEVNULL)
     print(f"[jaeger update] canonical Mac shell build exited {result.returncode}")
     return result.returncode
 
 
 def jaeger_exe() -> Path:
-    """The install's ``jaeger`` launcher — the venv console script if
-    present, else the wrapper script at the install root. Shared by the
+    """The source-bound wrapper, falling back to the active external console. Shared by the
     CLI and the app-bridge ``run_update`` command below, so both spawn the SAME
     executable a hand-typed ``jaeger update`` would run."""
     from jaeger_ai.core.instance.instance import install_root
     home = install_root()
-    venv = Path(os.environ.get("JAEGER_VENV") or home / ".venv") / "bin" / "jaeger"
-    return venv if venv.exists() else home / "jaeger"
+    wrapper = home / "jaeger"
+    if wrapper.is_file():
+        return wrapper
+    venv = Path(os.environ.get("JAEGER_VENV") or sys.prefix) / "bin/jaeger"
+    return venv if venv.is_file() else wrapper
 
 
 def run_update_subprocess(*, ref: str | None = None,
@@ -303,7 +386,7 @@ def run_update_subprocess(*, ref: str | None = None,
             text=True, timeout=timeout, check=False)
     except subprocess.TimeoutExpired as exc:
         return {"ok": False, "returncode": None,
-                "output": exc.stdout or "", "restart_required": False,
+                "output": exc.stdout or "", "restart_required": True,
                 "error": f"update timed out after {timeout:.0f}s"}
     except (OSError, subprocess.SubprocessError) as exc:
         return {"ok": False, "returncode": None, "output": "",
@@ -318,6 +401,27 @@ def _do_rollback(home: Path) -> int:
     """``jaeger update --rollback`` — restore the product the last
     download-update stashed, then resync deps. One level only (the prev dir is
     consumed)."""
+    if _preflight_update(home):
+        return 1
+    if (home / ".git").exists():
+        try:
+            if _git(home, "status", "--porcelain").stdout.strip():
+                print("[jaeger update] working tree is dirty; rollback refused.", file=sys.stderr)
+                return 1
+            commit = _git(home, "rev-parse", "--verify", UPDATE_PREVIOUS_GIT_REF + "^{commit}").stdout.strip()
+            _git(home, "checkout", "--detach", commit)
+            rc = _reinstall_deps(home)
+            if not rc:
+                rc = _rebuild_mac_shell(home)
+            if rc:
+                print("[jaeger update] rollback incomplete; recovery ref retained. Retry --rollback.", file=sys.stderr)
+                return rc
+            _git(home, "update-ref", "-d", UPDATE_PREVIOUS_GIT_REF)
+            _git(home, "update-ref", "-d", UPDATE_PENDING_GIT_REF)
+            return 0
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"[jaeger update] Git rollback failed: {exc}", file=sys.stderr)
+            return 1
     prev = home / _PREV_DIR
     items = [p.name for p in prev.iterdir()] if prev.exists() else []
     if not items:
@@ -349,12 +453,18 @@ def _update_editable(*, ref: str | None = None) -> int:
     repo = install_root()  # jaeger_ai/ -> install root
     if not (repo / ".git").exists():
         return _update_download(repo, ref=ref)
+    if _preflight_update(repo):
+        return 1
     dirty = subprocess.run(["git", "-C", str(repo), "status", "--porcelain"],
                            capture_output=True, text=True)
     if dirty.stdout.strip():
         print("[jaeger update] working tree has uncommitted changes — pull yourself:")
         print(f"                 cd {repo} && git pull --ff-only && ./install.sh")
-        return 0
+        return 1
+    if ref is not None and ref != _LATEST_BRANCH:
+        print("[jaeger update] pinned refs require a product install; select the "
+              "desired ref explicitly in your developer checkout.", file=sys.stderr)
+        return 1
     print(f"[jaeger update] pulling latest in {repo}…")
     pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only"], check=False)
     if pull.returncode != 0:
@@ -371,14 +481,16 @@ def _update_editable(*, ref: str | None = None) -> int:
 
 
 def _run_upgrade(method: str, *, ref: str | None = None) -> int:
-    if method in ("dev-checkout", "product-checkout"):
-        # Both are editable Git trees. The product marker changes routing and
-        # ensures this full updater (including instance migration) is used.
+    if method == "product-checkout":
+        from jaeger_ai.core.instance.instance import install_root
+        home = install_root()
+        return _update_product_git(home, ref=ref) if (home / ".git").exists() else _update_download(home, ref=ref)
+    if method == "dev-checkout":
         return _update_editable(ref=ref)
     cmd = _upgrade_command(method)
     if cmd is None:
         print("[jaeger update] unknown install method — upgrade manually.")
-        return 0
+        return 1
     print(f"[jaeger update] running: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, check=False)
@@ -478,7 +590,9 @@ def _resolve_ref(ref: str | None, channel: str) -> str | None:
 
 def _cmd_update_argv(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="jaeger update", add_help=False)
-    parser.add_argument("--check", action="store_true",
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--finish-update", action="store_true", help=argparse.SUPPRESS)
+    mode.add_argument("--check", action="store_true",
                         help="don't upgrade or migrate — print plan + exit")
     parser.add_argument("--no-migrate", action="store_true",
                         help="run the framework upgrade but skip migration scan")
@@ -487,8 +601,8 @@ def _cmd_update_argv(argv: list[str]) -> int:
     parser.add_argument("--channel", choices=UPDATE_CHANNELS, default=DEFAULT_UPDATE_CHANNEL,
                         help="stable = newest release tag (default); "
                              "latest = development HEAD (master)")
-    parser.add_argument("--rollback", action="store_true",
-                        help="revert the last download-update (clean installs)")
+    mode.add_argument("--rollback", action="store_true",
+                        help="restore the previous product revision and rebuild installed packages")
     parser.add_argument("-h", "--help", action="store_true")
     args = parser.parse_args(argv)
     if args.help:
@@ -499,15 +613,19 @@ def _cmd_update_argv(argv: list[str]) -> int:
             "  Upgrade the framework via the detected install method, then\n"
             "  prompt to back up and migrate each stale instance.\n"
             "\n"
-            "  Clean (curl/product) installs download + apply in place — no git\n"
-            "  needed. Channels: stable (newest release tag, default) · latest\n"
+            "  Quit the app and stop Gateway/WebUI services before updating.\n"
+            "  Product Git installs pin a fetched commit; archive installs swap source.\n"
+            "  Channels: stable (published stable release, default) · latest\n"
             "  (master / development HEAD). --ref pins an exact tag/branch/sha\n"
             "  and overrides --channel; $JAEGER_REF is honoured when neither is\n"
-            "  set. --rollback reverts the previous download-update. Dev clones\n"
+            "  set. --rollback restores the previous product code. Dev clones\n"
             "  fast-forward via git.\n",
             file=sys.stderr,
         )
         return 0
+
+    if args.finish_update:
+        return _finish_update(no_migrate=args.no_migrate)
 
     if args.rollback:
         from jaeger_ai.core.instance.instance import install_root
@@ -526,39 +644,56 @@ def _cmd_update_argv(argv: list[str]) -> int:
             label = "clean install (download + apply)"
     print(f"[jaeger update] install method: {label}")
 
-    stale = _list_stale_instances()
-    if stale:
-        print(f"[jaeger update] {len(stale)} instance(s) need migration "
-              f"after upgrade:")
-        for entry in stale:
-            print(f"  - {entry['name']} (current: {entry['current_version']})")
-    else:
-        print("[jaeger update] all instances are at the installed core "
-              "version — no migration needed post-upgrade.")
-
     if args.check:
-        return 0 if not stale else 1
+        return _finish_update(check=True)
 
+    from jaeger_ai.core.instance.instance import install_root
+    if _preflight_update(install_root()):
+        return 1
     rc = _run_upgrade(method, ref=_resolve_ref(args.ref, args.channel))
     if rc != 0:
         return rc
+    return _finish_update_subprocess(no_migrate=args.no_migrate)
 
-    if not args.no_migrate and stale:
-        print()
-        print("[jaeger update] migrating instances…")
+
+def _finish_update_subprocess(*, no_migrate: bool = False) -> int:
+    """Load migration discovery and execution from the newly installed core."""
+    argv = [str(jaeger_exe()), "update", "--finish-update"]
+    if no_migrate:
+        argv.append("--no-migrate")
+    result = subprocess.run(argv, check=False)
+    if result.returncode:
+        print("[jaeger update] post-install checks failed; keep services stopped. "
+              "Inspect the error and use --rollback if needed.", file=sys.stderr)
+    return result.returncode
+
+
+def _finish_update(*, no_migrate: bool = False, check: bool = False) -> int:
+    stale = [] if no_migrate else _list_stale_instances()
+    if stale:
+        print(f"[jaeger update] {len(stale)} instance(s) need migration:")
         for entry in stale:
-            name = entry["name"]
-            print()
-            print(f"[jaeger update] {name!r}: {entry['current_version']} "
-                  f"→ installed core")
-            if not _ask_yn(f"  back up + migrate {name!r}?", True):
-                print(f"[jaeger update]   {name!r}: skipped.")
-                continue
-            _migrate_instance_with_backup(name)
-
-    print()
-    print("[jaeger update] Restart `jaeger` to apply the new framework "
-          "(stop any running daemon with `jaeger stop` first).")
+            print(f"  - {entry['name']} (current: {entry['current_version']})")
+    else:
+        print("[jaeger update] no migration needed for the installed core.")
+    if check:
+        print("[jaeger update] local schema check only; remote updates were not checked.")
+        return 1 if stale else 0
+    failed = 0
+    for entry in stale:
+        name = entry["name"]
+        if not _ask_yn(f"  back up + migrate {name!r}?", True):
+            print(f"[jaeger update] {name!r}: migration deferred.")
+            failed = failed or 1
+            continue
+        rc = _migrate_instance_with_backup(name)
+        failed = failed or rc
+    if failed:
+        print("[jaeger update] migrations incomplete; update is not complete. "
+              "Keep services stopped and retry the migration or restore a backup.", file=sys.stderr)
+        return failed
+    print("[jaeger update] Restart `jaeger` to apply, then verify the running "
+          "Gateway and native app revisions. No services were restarted.")
     return 0
 
 
@@ -591,12 +726,21 @@ def _cmd_reinstall_argv(argv: list[str]) -> int:
 
     from jaeger_ai.core.instance.instance import install_root
     home = install_root()
+    if args.ref and (home / ".git").exists():
+        if (home / ".jaeger-product-install").is_file():
+            return _cmd_update_argv(["--ref", args.ref])
+        print("[jaeger reinstall] select the desired ref explicitly in your developer checkout.", file=sys.stderr)
+        return 1
+    if _preflight_update(home):
+        return 1
     if (home / ".git").exists():
         print(f"[jaeger reinstall] dev clone at {home} — repairing the editable "
               "install (code is your working tree; not re-fetching).")
         rc = _reinstall_deps(home)
         if rc == 0:
             print("[jaeger reinstall] done. Restart `jaeger` to apply.")
+        if rc == 0:
+            rc = _rebuild_mac_shell(home, only_if_stale=True)
         return rc
     return _update_download(home, ref=args.ref, force=True)
 
