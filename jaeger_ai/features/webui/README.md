@@ -73,3 +73,16 @@ These tests prove the Gateway default, mirror semantics, admission, attachment
 scope, terminal usage, and tool/activity event boundaries. They do not prove a
 configured live provider or a physical phone. Live acceptance belongs to the
 Gateway/WebUI golden journey in `docs/docs/PRODUCT.md`.
+
+## Ollama Cloud inventory
+
+The Models page discovers all cloud models from Ollama's public
+`https://ollama.com/api/tags` catalog, including models not yet added to the
+local daemon. `/v1/models/cloud` enriches them through the public `/api/show`
+endpoint; context limits come from the reported architecture's
+`model_info.<architecture>.context_length`. Unknown limits remain labelled
+Unknown. These are provider maxima, not the current runtime context allocation.
+Results cache for five minutes; Refresh explicitly reloads them. Partial
+metadata failures keep models visible; catalog failures preserve the last
+successful inventory with a warning. Discovery sends no credentials or prompts
+and never pulls models. “Add to Ollama” is an explicit, confirmed action.

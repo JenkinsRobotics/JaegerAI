@@ -2,7 +2,7 @@
 import { getJson, sendJson } from "./webui";
 import { csrfHeader } from "../api/gateway";
 
-export interface LocalModel { name: string; size: number; modified_at?: string; family?: string; parameters?: string; quantization?: string; format?: string; context?: number; loaded: boolean; vram?: number }
+export interface LocalModel { remote_model?: string; remote_host?: string; name: string; size: number; modified_at?: string; family?: string; parameters?: string; quantization?: string; format?: string; context?: number; loaded: boolean; vram?: number }
 export interface Pull { name: string; state: "running" | "done" | "error"; status: string; completed: number; total: number }
 export interface Hardware { chip: string | null; memory: number | null; cpu_cores: number | null; perf_cores: number | null; gpu_cores: number | null; note: string }
 
@@ -23,7 +23,7 @@ export const loadModels = () => getJson<{ models: LocalModel[]; pulls: Pull[] }>
 export const loadHardware = () => getJson<Hardware>("/v1/models/hardware");
 
 // ── Provider catalog (WebUI /api/models: only configured providers appear) ──
-export interface CatalogModel { id: string; name: string; label?: string; size_gb?: number; capabilities?: string[]; multimodal?: boolean; tool_use?: boolean }
+export interface CatalogModel { context_length?: number | null; id: string; name: string; label?: string; size_gb?: number; capabilities?: string[]; multimodal?: boolean; tool_use?: boolean }
 export interface CatalogGroup { provider: string; provider_id: string; status?: string; credentials_available?: boolean; endpoint?: string; host?: string; models: CatalogModel[] }
 export interface Catalog { active_provider?: string; default_model?: string; default_model_full_id?: string; groups: CatalogGroup[] }
 export interface ProviderKey { id: string; has_key: boolean; key_source?: string; is_oauth?: boolean }
@@ -35,10 +35,13 @@ export const setDefaultModel = (model: string, provider: string) => sendJson("PO
 export const isDefault = (c: Catalog | null | undefined, providerId: string, name: string) =>
   !!c && (c.default_model_full_id === `@${providerId}:${name}` || (c.default_model === name && c.active_provider === providerId));
 
-export interface Row { key: string; name: string; providerId: string; local?: LocalModel; catalog?: CatalogModel }
+export interface CloudModel { name: string; local_name: string; context_length: number | null; capabilities: string[] }
+export const loadCloudModels = (refresh = false) => getJson<{ models: CloudModel[]; stale: boolean; error?: string }>(`/v1/models/cloud${refresh ? "?refresh=1" : ""}`);
+export const contextText = (value?: number | null) => value && value > 0 ? value.toLocaleString("en-US") + " tokens" : "Unknown";
+export interface Row { cloud?: CloudModel; needsAdd?: boolean; key: string; name: string; providerId: string; local?: LocalModel; catalog?: CatalogModel }
 /** One row per model per provider; Ollama groups are enriched with the Mac's real /api/tags details. */
 export interface Group { id: string; title: string; group?: CatalogGroup; rows: Row[] }
-export function inventory(catalog: Catalog | null, local: LocalModel[] | null): Group[] {
+export function inventory(catalog: Catalog | null, local: LocalModel[] | null, cloud: CloudModel[] = []): Group[] {
   const byName = new Map((local ?? []).map((m) => [m.name, m]));
   const groups: Group[] = (catalog?.groups ?? []).map((g): Group => ({ id: g.provider_id, title: g.provider, group: g, rows: g.models.map((c) => ({ key: `${g.provider_id}:${c.name}`, name: c.name, providerId: g.provider_id, catalog: c, local: g.provider_id.startsWith("ollama") ? byName.get(c.name) : undefined })) }));
   // Ollama models the catalog doesn't list (e.g. embeddings) still belong to the local inventory.
@@ -52,6 +55,21 @@ export function inventory(catalog: Catalog | null, local: LocalModel[] | null): 
     const cl = groups.find((g) => g.id === "ollama-cloud");
     const cloudRows = rows.filter((r) => r.providerId === "ollama-cloud");
     if (cl) cl.rows.push(...cloudRows); else if (cloudRows.length) groups.push({ id: "ollama-cloud", title: "Ollama Cloud", group: undefined, rows: cloudRows });
+  }
+  if (cloud.length) {
+    let group = groups.find((g) => g.id === "ollama-cloud");
+    if (!group) { group = { id: "ollama-cloud", title: "Ollama Cloud", rows: [] }; groups.push(group); }
+    for (const model of cloud) {
+      const installed = (local ?? []).find((m) => m.remote_model === model.name || m.name === model.local_name);
+      const row = group.rows.find((r) => r.name === model.name || r.name === model.local_name || r.name === installed?.name);
+      if (row) {
+        row.cloud = model;
+        row.local ??= installed;
+      } else {
+        const name = installed?.name ?? model.local_name;
+        group.rows.push({ key: `ollama-cloud:${name}`, name, providerId: "ollama-cloud", local: installed, cloud: model, needsAdd: !installed });
+      }
+    }
   }
   return groups.sort((a, b) => Number(b.id === "ollama-local") - Number(a.id === "ollama-local"));
 }
