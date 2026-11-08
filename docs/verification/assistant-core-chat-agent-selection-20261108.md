@@ -21,24 +21,24 @@ identity, including an attempt to claim a historical unassigned chat, returns
 409. Existing archived state, metadata, timestamps and messages are preserved.
 
 The old metadata:null-as-empty behavior is retained for both default and selected
-agents. The first candidate unnecessarily tightened this to400; that was corrected
+agents. The first candidate unnecessarily tightened this to 400; that was corrected
 before integration. Invalid non-object metadata and invalid/null selectors are
 rejected without creating a chat. No model/provider/tool permission is expanded.
 
 ## Qualification
 
-- Fail-before against the unmodified handler:21 failures and one default-lead
+- Fail-before against the unmodified handler: 21 failures and one default-lead
   control pass. Actual responses selected native:jaeger instead of native:selected.
-- Corrected isolated scope:116 tests passed, including25 new selection cases,
+- Corrected isolated scope: 116 tests passed, including 25 new selection cases,
   existing default-admission, operator continuity, session hygiene and registry.
-- Independent final review:21 additional handler controls passed, including
+- Independent final review: 21 additional handler controls passed, including
   archived retries, null compatibility, aliases/conflicts and caller-prefix denial.
 - A real local HTTP check uses production authentication middleware and routes
   for POST creation, GET detail and filtered listing. Unauthenticated and restricted
   callers are denied. Daemon startup is suppressed in that narrow HTTP test;
   it does not claim real provider or agent-turn execution.
-- Merged main checks: repository verification430; production75; security203 with
-  two skips; durable/recovery427. All passed. Critical lint and whitespace passed.
+- Merged main checks: repository verification 430; production 75; security 203 with
+  two skips; durable/recovery 427. All passed. Critical lint and whitespace passed.
   Source hashes were checked before commit. Counts overlap.
 
 Exact final runner and logs are preserved as run-fourteenth-final.sh and the
@@ -50,14 +50,16 @@ credentials, remote write, merge or deployment were used.
 
 This is backend selection qualification, not rendered browser/phone testing or
 model execution by every selectable agent. Raw malformed JSON can still follow
-the preexisting request.json exception path and return500. General corrupted
+the preexisting request.json exception path and return 500. General corrupted
 registry behavior is not newly qualified by these typed-selector controls.
 
 The default-lead request-identity/recovery increment remains separate. Full owned
 HTTP and rebuilt-archive qualification for the combined next candidate must be
-rerun; the preceding43-test HTTP result belongs to the thirteen-commit snapshot,
+rerun; the preceding 43-test HTTP result belongs to the thirteen-commit snapshot,
 not this changed creation handler. Overall and per-tab acceptance stay PARTIAL.
 
 The subsequent [default-lead journal increment](assistant-core-default-lead-journal-20261108.md)
 uses this exact pinned-selection behavior and separately qualifies fresh stable
 lead identity. It does not turn other selected agents into journal-qualified leads.
+
+See the later [combined qualification](assistant-core-combined-qualification-20261108.md) for final integrated gates. The scoped candidate results above are not substituted for those gates.

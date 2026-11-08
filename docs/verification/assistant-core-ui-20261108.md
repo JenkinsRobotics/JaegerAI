@@ -103,7 +103,7 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 - The [reconciliation repair](assistant-core-reconciliation-20261108.md) preserves
   failed/cancelled terminal state and streamed partial text instead of suppressing
   failure. It also protects newer session ownership and eligible queue progression.
-  Real native-bridge recovery and resident full-request receipts remain unqualified.
+  Real native-bridge restart remains unqualified. Later [combined qualification](assistant-core-combined-qualification-20261108.md) covers bounded resident request seals, stable lead identity, selected-agent handling and specialist scope, without claiming browser or external-account acceptance.
 - Source-backed capability presence does not prove native-host availability, real provider credentials, external connector authorization, output quality, or a completed autonomous workflow.
 
 ### Parallel workspace error-state repair
