@@ -171,7 +171,7 @@ function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onD
 
 /** Preserve interactive cards and notices outside the shared work disclosure. */
 export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete") {
-  const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { activity: ChatPart[] }> = [];
+  const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { activity: ChatPart[] } | { diagnostic: ChatPart[] }> = [];
   const {work,visible} = partitionChatParts(parts);
   // Reuse shared classification while preserving the original event order.
   // Commentary is always readable, even when more tool rounds follow it.
@@ -198,6 +198,11 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
         out[out.length-1] = {marker:{...prev,agents}};
       } else out.push({marker:part});
     } else if (part.kind === "confirmation" || part.kind === "question") out.push({card:part});
+    else if (["modelIdentity", "modelContext", "knowledgeContext"].includes(part.kind)) {
+      const previous = out.at(-1);
+      if (previous && "diagnostic" in previous) previous.diagnostic.push(part);
+      else out.push({diagnostic:[part]});
+    }
     else {
       const startsNew = part.kind === "markdownContent" && last && "bubble" in last && last.bubble.some(p=>p.kind==="markdownContent");
       if(last && "bubble" in last && !startsNew) last.bubble.push(part);
@@ -901,6 +906,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
                 : "activity" in seg ? <ActivityFold key={`activity:${i}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
+                : "diagnostic" in seg ? <div key={`diagnostic:${i}`} className="jg-turn-diagnostic" data-sender="assistant">{seg.diagnostic.map((p,j)=><BubblePart key={j} part={p} links={links} live={false} style={streamStyle}/>)}</div>
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
               {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} />}

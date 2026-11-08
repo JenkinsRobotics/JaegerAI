@@ -12,7 +12,7 @@ it('keeps commentary and separate tool groups in chronological order after repla
  for(const state of ['pending','complete'] as const){
   const rows=segments(parts,state);
   expect(rows.map(r=>'bubble'in r?'text':'activity'in r?'tools':'card'in r?'card':'marker')).toEqual(['text','tools','text','tools','card','text']);
-  expect(rows.flatMap(r=>'bubble'in r?r.bubble:'activity'in r?r.activity:'card'in r?[r.card]:[r.marker])).toEqual(parts);
+  expect(rows.flatMap(r=>'bubble'in r?r.bubble:'activity'in r?r.activity:'card'in r?[r.card]:'diagnostic'in r?r.diagnostic:[r.marker])).toEqual(parts);
  }
 });
 it('reconciles live provisional text into commentary and one explicit final result',()=>{
@@ -51,6 +51,16 @@ it('shows retained reasoning as its own expandable thought row',()=>{
  expect(screen.queryByText('private diagnostic')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:/Show activity/}));
  expect(screen.getByText('private diagnostic')).toBeTruthy();
+});
+it('keeps model receipts outside assistant answer bubbles',()=>{
+ const rows=segments([
+  {kind:'markdownContent',text:'Done',role:'final',itemId:'final'},
+  {kind:'modelIdentity',actualModel:null,scope:'unknown'},
+ ],'complete');
+ expect(rows).toEqual([
+  {bubble:[{kind:'markdownContent',text:'Done',role:'final',itemId:'final'}]},
+  {diagnostic:[{kind:'modelIdentity',actualModel:null,scope:'unknown'}]},
+ ]);
 });
 it('agent chip uses real handoff events and does not claim replies are finished work',()=>{
  const turns:ChatTurn[]=[{turnId:'t',message:'Help',state:'pending',parts:[{kind:'handoff',handoffId:'h',agentId:'review',agentName:'Reviewer',direction:'to',count:1,status:'delivered'}]}];

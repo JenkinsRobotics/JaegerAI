@@ -22,6 +22,7 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
   const [saving, setSaving] = useState<RuntimeAutonomy>();
   const [error, setError] = useState<string>();
   const trigger = useRef<HTMLButtonElement>(null);
+  const refreshGeneration = useRef(0);
   const available = Boolean(host.runtimeAutonomy && host.setRuntimeAutonomy);
   useExclusivePopup(open, () => setOpen(false), trigger.current);
 
@@ -38,6 +39,8 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
 
   const select = async (mode: RuntimeAutonomy) => {
     if (!host.setRuntimeAutonomy || saving || mode === current) { if (mode === current) setOpen(false); return; }
+    refreshGeneration.current += 1;
+    setReading(false);
     setSaving(mode);
     setError(undefined);
     try {
@@ -54,10 +57,11 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
 
   const refresh = async () => {
     if (!host.runtimeAutonomy) return;
+    const generation = ++refreshGeneration.current;
     setReading(true);
-    try { const snapshot = await host.runtimeAutonomy(); setCurrent(snapshot.autonomy); setError(undefined); }
-    catch { setCurrent(undefined); setError("Cannot verify approval mode. Retry before changing permissions."); }
-    finally { setReading(false); }
+    try { const snapshot = await host.runtimeAutonomy(); if (generation === refreshGeneration.current) { setCurrent(snapshot.autonomy); setError(undefined); } }
+    catch { if (generation === refreshGeneration.current) { setCurrent(undefined); setError("Cannot verify approval mode. Retry before changing permissions."); } }
+    finally { if (generation === refreshGeneration.current) setReading(false); }
   };
   const active = current ? details(current) : {label: "Approval mode unavailable"};
   return (
@@ -86,7 +90,7 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
               role="menuitemradio"
               aria-checked={current === mode.id}
               className={mode.id === "auto" ? "is-full-access" : undefined}
-              disabled={Boolean(saving) || reading || !current}
+              disabled={Boolean(saving) || !current}
               onClick={() => void select(mode.id)}
             >
               <Shield size={18} />

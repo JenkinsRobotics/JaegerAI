@@ -344,16 +344,21 @@ def _rebuild_mac_shell(home: Path, *, only_if_stale: bool = False) -> int:
 
 
 def jaeger_exe() -> Path:
-    """The source-bound wrapper, falling back to the active external console. Shared by the
+    """The source-bound wrapper, with an explicit external environment override. Shared by the
     CLI and the app-bridge ``run_update`` command below, so both spawn the SAME
     executable a hand-typed ``jaeger update`` would run."""
     from jaeger_ai.core.instance.instance import install_root
     home = install_root()
     wrapper = home / "jaeger"
-    if wrapper.is_file():
-        return wrapper
-    venv = Path(os.environ.get("JAEGER_VENV") or sys.prefix) / "bin/jaeger"
-    return venv if venv.is_file() else wrapper
+    configured_venv = os.environ.get("JAEGER_VENV")
+    if configured_venv:
+        venv_exe = Path(configured_venv) / "bin/jaeger"
+        if venv_exe.is_file():
+            return venv_exe
+    # Do not let an unrelated globally installed console script change which
+    # installation the in-app updater mutates.  The install-root wrapper is the
+    # stable target even while a source checkout is still creating its venv.
+    return wrapper
 
 
 def run_update_subprocess(*, ref: str | None = None,

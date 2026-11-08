@@ -126,7 +126,8 @@ def test_tool_failure_is_sanitized_and_replays_from_durable_cursor(tmp_path):
         "success": False,
         "ok": False,
         "elapsed_s": 1.235,
-        "text": "Failed after 1.235s",
+        "text": "Ran a command — failed",
+        "summary": "Ran a command — failed",
     }
     # A shell command is shown inline on purpose; every other argument, the result
     # and the error are never published.
@@ -317,5 +318,10 @@ def test_tool_outcome_retains_permission_category_without_error_contents(tmp_pat
     store.complete_request("request", status="completed", result={}, assistant_text="Fixture declined")
     parts = store.get_session("session")["messages"][-1]["parts"]
     assert next(part for part in parts if "status" in part)["status"] == "denied"
-    assert parts[-1] == {"type": "text", "text": "Fixture declined"}
+    assert parts[-1] == {
+        "type": "text",
+        "text": "Fixture declined",
+        "role": "final",
+        "item_id": "final",
+    }
     assert "PRIVATE-ERROR" not in json.dumps(parts)

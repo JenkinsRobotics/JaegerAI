@@ -60,13 +60,12 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
   const sleep = opts.sleep ?? defaultSleep;
   let cursor = opts.cursor;
   let attempt = 0;
-  let answer = "";
   let generation = 0;
   const reconcile = async (): Promise<{ state: TurnState }> => {
     try {
       const row = await opts.source.requestStatus?.(opts.sessionId, opts.requestId);
       if (row?.request_id === opts.requestId && row.session_id === opts.sessionId) {
-        const state = requestOutcome(row, opts.onPart, answer);
+        const state = requestOutcome(row, opts.onPart);
         if (state) return { state };
       }
     } catch { /* unavailable lookup cannot settle execution */ }
@@ -91,7 +90,7 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
         const row = await opts.source.requestStatus!(opts.sessionId, opts.requestId);
         if (terminal || local.signal.aborted || ownerGeneration !== generation) return;
         if (row?.request_id !== opts.requestId || row.session_id !== opts.sessionId || (opts.turnId && row.turn_id && row.turn_id !== opts.turnId)) return;
-        const state = requestOutcome(row, opts.onPart, answer);
+        const state = requestOutcome(row, opts.onPart);
         if (state) { terminal = state; local.abort(); settleStatus(); }
       } catch { /* A failed lookup is not proof of execution failure. Keep the stream. */ }
       finally { polling = false; }
@@ -109,7 +108,6 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
         progressed = true;
         const mapped = mapEvent(event, opts.agentName);
         mapped?.parts.forEach((part) => {
-          if (part.kind === "markdownContent") answer += part.text;
           opts.onPart(part);
         });
         if (mapped?.state) { terminal = mapped.state; local.abort(); }
