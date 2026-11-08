@@ -96,6 +96,7 @@ export interface ChatHost {
   readonly taskArtifacts?:import("../api/source").TaskArtifacts;
   readonly sessionFiles?: import("../api/source").SessionFiles;
   readonly sessionQueue?: import("../api/source").SessionQueue;
+  readonly messageReadState?: import("../api/source").JaegerSource["messageReadState"];
   readonly messageReactions?: import("../api/source").JaegerSource["messageReactions"];
   readonly modelSettings?: import("../api/source").ModelSettings;
   readonly runtimeAutonomy?: import("../api/source").JaegerSource["runtimeAutonomy"];

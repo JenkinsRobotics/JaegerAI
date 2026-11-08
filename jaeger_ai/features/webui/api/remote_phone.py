@@ -18,6 +18,11 @@ def route(handler, parsed, method: str) -> bool:
         return _pair(handler)
     if method == "GET" and path == "/api/remote/phone-status":
         return _phone_status(handler)
+    if method == "GET" and path == "/api/remote/connection-info":
+        # Uses the existing configured remote origin; no new pairing, tunnel,
+        # credential, or public listener is created by sharing a conversation.
+        from jaeger_ai.features.remote_access.service import phone_url
+        return j(handler, {"webui_origin": phone_url()})
     if method == "GET" and path == "/api/remote/devices":
         return _devices(handler)
     if method == "POST" and path == "/api/remote/devices/revoke":

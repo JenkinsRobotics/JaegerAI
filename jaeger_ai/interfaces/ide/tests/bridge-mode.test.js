@@ -10,9 +10,19 @@ const path = require('node:path');
 const Module = require('node:module');
 
 const realHome = process.env.HOME;
+const realState = process.env.JAEGER_STATE_DIR;
+const realJaegerHome = process.env.JAEGER_HOME;
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jaeger-bridge-home-'));
 process.env.HOME = home;
-after(() => { process.env.HOME = realHome; fs.rmSync(home, { recursive: true, force: true }); });
+process.env.JAEGER_STATE_DIR = path.join(home, '.jaeger');
+process.env.JAEGER_HOME = path.join(home, '.jaeger');
+after(() => {
+  process.env.HOME = realHome;
+  for (const [key,value] of [['JAEGER_STATE_DIR',realState],['JAEGER_HOME',realJaegerHome]]) {
+    if (value === undefined) delete process.env[key]; else process.env[key] = value;
+  }
+  fs.rmSync(home, { recursive: true, force: true });
+});
 const root = path.join(__dirname, '..');
 const ExtensionMode = { Production: 1, Development: 2, Test: 3 };
 

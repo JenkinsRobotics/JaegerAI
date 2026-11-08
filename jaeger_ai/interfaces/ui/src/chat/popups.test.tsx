@@ -8,6 +8,7 @@ import type { Agent } from "../api/types";
 import { MinimalChat } from "./MinimalChat";
 import { WebHost } from "./webHost";
 import type { JaegerSource } from "../api/source";
+vi.mock("./drafts", () => ({ readDraft: async () => ({ text: "", files: [] }), writeDraft: async () => undefined }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let el: HTMLDivElement; let root: Root;
@@ -81,7 +82,7 @@ describe("composer + and message menus", () => {
     Object.defineProperty(bubble, "innerText", { configurable: true, get: () => "Hi! Done." });
     await act(async () => { bubble.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
     const labels = items().map((t) => (t ?? "").replace(/[\uE000-\uF8FF]/g, "").trim()).filter((t) => /[A-Za-z]/.test(t));
-    expect(labels).toEqual(["Reply", "Copy", "Copy request ID"]);
+    expect(labels).toEqual(["Reply", "Mark as unread", "Copy", "Select Text", "Copy Request ID"]);
     expect(document.querySelectorAll('[aria-label^="React "]').length).toBe(5);
     const reply = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((n) => n.textContent?.includes("Reply"))!;
     await act(async () => { reply.click(); });

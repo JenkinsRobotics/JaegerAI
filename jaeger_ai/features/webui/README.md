@@ -86,3 +86,22 @@ Results cache for five minutes; Refresh explicitly reloads them. Partial
 metadata failures keep models visible; catalog failures preserve the last
 successful inventory with a warning. Discovery sends no credentials or prompts
 and never pulls models. “Add to Ollama” is an explicit, confirmed action.
+
+## Conversation continuity
+
+`/chat?session=<id>` addresses one Gateway-owned conversation. Explicit links
+take precedence over the browser's last-opened chat; missing, inaccessible or
+invalid IDs remain errors instead of opening another conversation. Share and
+Copy link include the session ID. A local native window uses the configured
+paired HTTPS origin when available, without transferring credentials in links.
+A fresh device can resume the existing operator-selected session; independent
+windows keep their own navigation and drafts. The connection display identifies
+the execution host reported by the Gateway.
+
+Ollama Cloud supplies model inference. Jaeger retains session history, context
+assembly, tools, approvals, event replay and task ownership. Connecting a model
+directly to another chat extension does not attach that extension to Jaeger's
+conversation. The optional OpenAI-compatible surface needs a stable conversation
+key (`X-Jaeger-Session-Id` or `user`) to reuse history; it does not implement a
+client-side tool round-trip. Honcho is optional long-term derived memory, not a
+replacement for Gateway sessions or runtime ownership.

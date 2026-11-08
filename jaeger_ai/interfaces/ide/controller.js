@@ -533,7 +533,7 @@ class JaegerController {
     const config = vscode.workspace.getConfiguration('jaeger');
     const gatewayUrl = normalizeGatewayUrl(config.get('gatewayUrl') || 'http://127.0.0.1:33418');
     const webuiUrl = config.get('webuiUrl') || gatewayUrl.replace(':33418', ':8790');
-    const url = `${webuiUrl}/?ui=apple&session=${sessionId}`;
+    const url = `${webuiUrl.replace(/\/$/, '')}/chat?session=${encodeURIComponent(sessionId)}`;
 
     if (config.get('openChatInBrowser', false)) {
       await vscode.env.openExternal(vscode.Uri.parse(url));
