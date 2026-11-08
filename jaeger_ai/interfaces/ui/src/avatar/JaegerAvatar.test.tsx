@@ -1,34 +1,37 @@
-import { fireEvent, render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { JaegerAvatar } from "./JaegerAvatar";
+import { act, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { EXPRESSIONS, JaegerAvatar, STATE_EXPRESSION } from "./JaegerAvatar";
+import { AVATAR_STATES } from "./avatar";
 
-describe("Jaeger cutout avatar", () => {
-  it("uses the canonical artwork for the body, smile, and both arm layers", () => {
-    const { container } = render(<JaegerAvatar state="idle" />);
-    const rig = container.querySelector(".jg-jaeger-avatar")!;
-    const images = Array.from(container.querySelectorAll<HTMLImageElement>(".jg-jaeger-cutout img"));
-    expect(rig).toHaveAttribute("data-motion", "rigged");
-    expect(images).toHaveLength(4);
-    expect(new Set(images.map(image => image.src)).size).toBe(1);
-    expect(container.querySelector("canvas")).toBeNull();
+afterEach(() => vi.useRealTimers());
+describe("Jaeger expressions", () => {
+  it.each(AVATAR_STATES)("maps %s to a non-mischievous activity expression", state => {
+    const { container } = render(<JaegerAvatar state={state} />);
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-expression", EXPRESSIONS[STATE_EXPRESSION[state]]);
+    expect(STATE_EXPRESSION[state]).toBeLessThan(7);
   });
-
-  it("tracks the pointer with the smile without replacing the artwork", () => {
-    const { container } = render(<JaegerAvatar state="working" />);
-    const rig = container.querySelector<HTMLElement>(".jg-jaeger-avatar")!;
-    Object.defineProperty(rig, "getBoundingClientRect", { value: () => ({ left: 0, top: 0, width: 100, height: 100 }) });
-    const move = new Event("pointermove", { bubbles: true });
-    Object.defineProperties(move, { clientX: { value: 75 }, clientY: { value: 25 } });
-    fireEvent(rig, move);
-    expect(rig.style.getPropertyValue("--jg-look-x")).toBe("0.60px");
-    expect(rig.style.getPropertyValue("--jg-look-y")).toBe("-0.35px");
-    fireEvent.pointerLeave(rig);
-    expect(rig.style.getPropertyValue("--jg-look-x")).toBe("0px");
+  it("offers all approved expressions and returns to automatic after eight seconds", () => {
+    vi.useFakeTimers();
+    const { container, getByLabelText } = render(<JaegerAvatar />);
+    const picker = getByLabelText("Avatar expression");
+    expect(picker.querySelectorAll("option")).toHaveLength(13);
+    fireEvent.change(picker, { target: { value: "11" } });
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-expression", "Peekaboo");
+    expect(container.querySelector<HTMLElement>(".jg-jaeger-emote")!.style.backgroundPosition).toBe("100% 100%");
+    act(() => vi.advanceTimersByTime(8000));
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-expression", "Idle");
   });
-
-  it("keeps custom portraits on the existing fallback path", () => {
-    const { container } = render(<JaegerAvatar portraitOverride="/custom.png" />);
-    expect(container.querySelector(".jg-jaeger-cutout")).toBeNull();
+  it("clears a playful preview when runtime activity changes", () => {
+    const { container, getByLabelText, rerender } = render(<JaegerAvatar />);
+    fireEvent.change(getByLabelText("Avatar expression"), { target: { value: "9" } });
+    rerender(<JaegerAvatar state="connecting" />);
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-expression", "Resting");
+  });
+  it("supports still mode and custom portraits", () => {
+    const { container, rerender } = render(<JaegerAvatar still />);
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-motion", "still");
+    rerender(<JaegerAvatar portraitOverride="/custom.png" />);
     expect(container.querySelector("img")).toHaveAttribute("src", "/custom.png");
+    expect(container.querySelector("select")).toBeNull();
   });
 });
