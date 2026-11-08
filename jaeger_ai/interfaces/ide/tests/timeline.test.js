@@ -168,3 +168,17 @@ test('search count is a durable turn row and replays once', () => {
     requestId: 'r', searches: 3, completed: 2, failed: 1, live: false });
   assert.strictEqual(applyEvents(first, [event]), first);
 });
+
+test('shared work partition preserves controls and separates intermediate text from the answer', () => {
+  const { partitionTurn } = require('../media/timeline');
+  const rows = [
+    {kind:'answer',text:'Inspecting'}, {kind:'reasoning',text:'summary'},
+    {kind:'approval'}, {kind:'tool'}, {kind:'question'}, {kind:'error'},
+    {kind:'answer',text:'Result'},
+  ];
+  const {work,visible}=partitionTurn(rows);
+  assert.deepEqual(work,[rows[0],rows[1],rows[3]]);
+  assert.deepEqual(visible,[rows[2],rows[4],rows[5],rows[6]]);
+  assert.equal(work.length+visible.length,rows.length);
+  assert.deepEqual(partitionTurn([{kind:'answer',text:'plain answer'}]).work,[]);
+});

@@ -1,3 +1,4 @@
+import {partitionChatParts} from "./workGrouping";
 import {useChatAvatar} from "../avatar/useChatAvatar";
 import {displayDate, displayDayKey, displayDayDistance, useDevicePreferences} from "../settings/devicePreferences";
 import {TaskArtifacts} from '../library/TaskArtifacts';
@@ -148,39 +149,47 @@ function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onD
   return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided ?? part.decision} onDecide={(d) => onDecide(part.callId, d)} />;
 }
 
-/** Split a response into bubbles, cards, centered markers and one steps fold.
- * Back-to-back "Messaged" markers fold into one "Messaged X and Y", like the
- * target. While the turn runs its tools show only as the progress line; after,
- * they all fold into ONE summary row below the reply. A tool still marked
- * running in an ended turn counts as stopped. */
+/** Preserve interactive cards and notices outside the shared work disclosure. */
 export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete") {
-  const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { steps: ToolPart[] }> = [];
-  const steps: ToolPart[] = [];
-  const ended = state === "complete" || state === "failed" || state === "cancelled";
-  for (const part of parts) {
-    const last = out[out.length - 1];
-    if (part.kind === "toolInvocation") {
-      if (state === "pending") continue;
-      steps.push(ended && (part.state === "executing" || part.state === "streaming") ? { ...part, state: state === "cancelled" ? "cancelled" : "unknown" } : part);
-    } else if (part.kind === "progress") {
-      continue; // live only: the progress line
-    } else if (part.kind === "handoff") {
+  const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { activity: ChatPart[] }> = [];
+  const {work,visible} = partitionChatParts(parts);
+  const ended = state !== "pending";
+  const activity = work.map(({part}) => part.kind === "toolInvocation" && ended && (part.state === "executing" || part.state === "streaming")
+    ? {...part,state:state === "cancelled" ? "cancelled" as const : "unknown" as const} : part);
+  if (activity.length) out.push({activity});
+  for (const {part} of visible) {
+    const last = out.at(-1);
+    if (part.kind === "handoff") {
       const prev = last && "marker" in last ? last.marker : undefined;
       if (prev && prev.direction === "to" && part.direction === "to" && prev.status === part.status) {
-        const agents = [...(prev.agents ?? [{ id: prev.agentId, name: prev.agentName }])];
-        if (!agents.some((a) => a.id === part.agentId)) agents.push({ id: part.agentId, name: part.agentName });
-        out[out.length - 1] = { marker: { ...prev, agents } };
-      } else out.push({ marker: part });
-    } else if (part.kind === "confirmation" || part.kind === "question") out.push({ card: part });
+        const agents = [...(prev.agents ?? [{id:prev.agentId,name:prev.agentName}])];
+        if (!agents.some(a=>a.id===part.agentId)) agents.push({id:part.agentId,name:part.agentName});
+        out[out.length-1] = {marker:{...prev,agents}};
+      } else out.push({marker:part});
+    } else if (part.kind === "confirmation" || part.kind === "question") out.push({card:part});
     else {
-      // Each new markdown block after text starts its own bubble, like the target.
-      const startsNew = part.kind === "markdownContent" && last && "bubble" in last && last.bubble.some((p) => p.kind === "markdownContent");
-      if (last && "bubble" in last && !startsNew) last.bubble.push(part);
-      else out.push({ bubble: [part] });
+      const startsNew = part.kind === "markdownContent" && last && "bubble" in last && last.bubble.some(p=>p.kind==="markdownContent");
+      if(last && "bubble" in last && !startsNew) last.bubble.push(part);
+      else out.push({bubble:[part]});
     }
   }
-  if (steps.length) out.push({ steps });
   return out;
+}
+
+export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boolean;links:Links;style:StreamStyleParams}) {
+  const [open,setOpen]=useState(false);
+  useEffect(()=>{if(!live)setOpen(false);},[live]);
+  const tools=parts.filter((p):p is ToolPart=>p.kind==="toolInvocation");
+  return <div className="jg-steps jg-turn-activity" data-sender="assistant">
+    <button type="button" className="jg-steps__summary" aria-expanded={open} onClick={()=>setOpen(!open)}>
+      <span>{live ? "Working" : "Activity"}{tools.length ? " · "+stepsSummary(tools) : ""}</span>
+      <span className="jg-steps__toggle">{open ? "Hide activity" : "Show activity"}</span>
+    </button>
+    {open && <div className="jg-turn-activity__body">{parts.map((part,i)=>
+      part.kind==="progress" ? <p key={i}>{part.message}</p> :
+      <BubblePart key={i} part={part} links={links} style={style} live={false}/>
+    )}</div>}
+  </div>;
 }
 
 /** A text-only activity bubble; avatar motion belongs in the conversation header. */
@@ -843,7 +852,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
-                : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
+                : "activity" in seg ? <ActivityFold key="activity" parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
               {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} />}

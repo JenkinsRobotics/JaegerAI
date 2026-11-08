@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => {
         { find: /^@aether\/ui$/, replacement: here("./vendor/aether-ui/src/index.ts") },
       ],
     },
-    server: { host: "127.0.0.1", strictPort: true, proxy },
+    server: { host: "127.0.0.1", strictPort: true, proxy, fs: { allow: [here("."), here("../ide/media")] } },
     preview: { host: "127.0.0.1", strictPort: true, proxy },
     build: { outDir: "dist", emptyOutDir: true },
     test: { environment: "jsdom", include: ["src/**/*.test.ts", "src/**/*.test.tsx"] },

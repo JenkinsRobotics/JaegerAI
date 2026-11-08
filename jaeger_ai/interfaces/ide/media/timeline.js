@@ -37,6 +37,21 @@
       requestId: rid, text, live: true }];
   }
 
+  // Shared presentation contract used by the IDE panel and browser/Mac chat.
+  // Only structured work boundaries reclassify earlier text; never inspect prose.
+  function partitionTurn(items) {
+    const workKinds = new Set(['reasoning', 'tool', 'progress', 'checkpoint', 'plan']);
+    let boundary = -1;
+    items.forEach((item, index) => {
+      if (['tool', 'progress', 'checkpoint'].includes(item.kind)) boundary = index;
+    });
+    const work = [], visible = [];
+    items.forEach((item, index) => {
+      (workKinds.has(item.kind) || (item.kind === 'answer' && index < boundary) ? work : visible).push(item);
+    });
+    return { work, visible };
+  }
+
   function applyTool(rows, event) {
     const rid = requestId(event);
     // Text preceding a tool call is commentary, not the final answer.
@@ -153,5 +168,5 @@
     return changed || cursor !== state.cursor ? { cursor, seen, rows } : state;
   }
 
-  return { applyEvents, createTimelineState, isStreamEvent: event => STREAM_EVENTS.has(event.event) };
+  return { partitionTurn, applyEvents, createTimelineState, isStreamEvent: event => STREAM_EVENTS.has(event.event) };
 });
