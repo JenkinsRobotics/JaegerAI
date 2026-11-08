@@ -86,11 +86,11 @@ claim to repair that missing implementation.
 
 The final implementation was qualified on the exact selected-agent repair base,
 not on an earlier checkout that still discarded the new-chat selector. Final
-candidate747d41f2909340db436fe22e945c79ee70d9e014 passed321 deterministic controls
+candidate 747d41f2909340db436fe22e945c79ee70d9e014 passed 321 deterministic controls
 and three authenticated owned WebUI/HTTP journeys. Main integration compared all
 seven changed runtime/test files byte-for-byte with that candidate; critical lint
 and whitespace checks passed. Independent external controls passed6 tests, and
-focused cancellation/identity/route/queue controls passed42 tests. Counts overlap.
+focused cancellation/identity/route/queue controls passed 42 tests. Counts overlap.
 
 Actual HTTP evidence distinguishes:
 - Agent home: first request is qualified and sealed.
@@ -100,9 +100,9 @@ Actual HTTP evidence distinguishes:
   after the existing router commits route_checked, a later lead request seals.
 
 All three preserve result/transcript and provider call counts over test-Gateway
-restart and same-request replay. Qualified UI input comparison matched866 files
-against the prior910-test build. No rendered browser or actual provider account
-was exercised. The first missing-build HTTP503 was setup failure, not a journal
+restart and same-request replay. Qualified UI input comparison matched 866 files
+against the prior 910-test build. No rendered browser or actual provider account
+was exercised. The first missing-build HTTP 503 was setup failure, not a journal
 pass; it was fixed by supplying the already qualified unchanged UI artifact.
 
 Historical markerless admissions never captured their original agent. If a past
@@ -121,3 +121,5 @@ The subsequent [specialist skill-scope repair](assistant-core-specialist-scope-2
 replaces the missing import with the existing scoped context manager. Its actual
 unshimmed OWNER autoroute qualification supersedes only the missing-symbol limit,
 not the explicitly bounded journal eligibility or historical identity limits.
+
+The later [combined qualification](assistant-core-combined-qualification-20261108.md) records integrated gates and the actual process-loss test. Earlier candidate results above remain historical evidence.

@@ -54,6 +54,31 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
         dump_yaml,
     )
 
+    # Test-local process-loss barrier. No production environment switch or
+    # endpoint exists. The parent kills only this fixture's recorded child.
+    fault = json.loads(os.environ.get("JAEGER_CONTRACT_RECEIPT_FAULT", "null"))
+    if fault is not None:
+        original_commit = JaegerGatewayApp._commit_owner_outcome
+
+        def fault_commit(self, request_id, *args, **kwargs):
+            row = self.store.get_request(request_id)
+            nominated = (request_id == fault["request_id"]
+                         and row["session_id"] == fault["session_id"])
+            if not nominated:
+                return original_commit(self, request_id, *args, **kwargs)
+            if fault["phase"] == "after_seal":
+                original_commit(self, request_id, *args, **kwargs)
+            else:
+                assert fault["phase"] == "before_seal"
+            # _commit_owner_outcome returns only AFTER the shared SQLite
+            # transaction has committed. Parent independently reads proof.
+            (state / "receipt-fault-ready.json").write_text(json.dumps({
+                **fault, "pid": os.getpid(),
+            }))
+            threading.Event().wait()  # Only parent SIGKILL releases this child.
+
+        JaegerGatewayApp._commit_owner_outcome = fault_commit
+
     def current_request(messages):
         """The request this call serves: the last user message, minus the
         other-session context EntityRuntime prefixes above its "Current
@@ -67,6 +92,10 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
             stream.write(json.dumps({"model": self.model}) + "\n")
         messages = formatted.get("messages", [])
         request = current_request(messages)
+        from jaeger_agent.task_port import current_task_context
+        with (state / "provider-requests.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"request": request,
+                "request_id": (current_task_context() or {}).get("request_id")}) + "\n")
         if "CONTRACT-QUEUE-DEFAULT" in request:
             responses = [m for m in messages if m.get('tool_call_id') == 'queue-default']
             if not responses:

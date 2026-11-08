@@ -26,9 +26,9 @@ refusal before effects. Superseded candidates and failures remain preserved.
 
 - Fail-before: all four initial scope regressions failed with the missing-symbol
   ImportError. A fifth test later covered cancellation during the worker thread.
-- Final composition on the exact selected-agent/lead-recovery base:174 focused
+- Final composition on the exact selected-agent/lead-recovery base: 174 focused
   tests passed, including full journal/identity/selection and specialist controls.
-- Independent final scope/journal suite:139 passed. Three further independent
+- Independent final scope/journal suite: 139 passed. Three further independent
   controls cover failure settlement, preparation cancellation without dispatch,
   and specialist-to-ordinary isolation within the same asyncio task.
 - Actual unshimmed no-selector HTTP creation -> calendar routing -> Entity OWNER
@@ -36,8 +36,8 @@ refusal before effects. Superseded candidates and failures remain preserved.
   a forbidden file write; the original caller and restrictive grant remained,
   no file was created and no permission expansion was requested.
 - Hygiene9 passed; whitespace and critical lint passed. Main integration compared
-  server.py byte-for-byte with reviewed candidate2c9e326b94195b579d675e23ac42e53e57141eea,
-  SHA256770d9e22e3a5cd2bdfc0bd2461eecb9efb066ce6899595d4465c06a578e0d7d2.
+  server.py byte-for-byte with reviewed candidate 2c9e326b94195b579d675e23ac42e53e57141eea,
+  SHA-256 770d9e22e3a5cd2bdfc0bd2461eecb9efb066ce6899595d4465c06a578e0d7d2.
 
 Counts overlap. Exact commands/logs and independent controls accompany the review
 artifact. The diagnostic shim used earlier to isolate the lead-routing regression
@@ -54,3 +54,5 @@ parity with external assistants. It does not certify an unknown effect as stoppe
 Full combined main build/HTTP/process gates follow separately. No production
 runtime change, live provider/account, publication, merge or deployment occurred.
 Overall and per-tab acceptance remain PARTIAL.
+
+See the later [combined qualification](assistant-core-combined-qualification-20261108.md) for final integrated gates. The scoped candidate results above are not substituted for those gates.
