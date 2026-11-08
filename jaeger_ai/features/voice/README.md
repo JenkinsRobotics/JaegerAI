@@ -69,3 +69,15 @@ session, Gateway and Entity with only the capture swapped.
 * The older `jaeger --voice` / `jaeger_ai/plugins/voice_loop.py` path loads
   its own local model and does not go through the Entity. It is a separate
   assistant and should not be used where continuity matters.
+
+## Chat voice mode
+
+The shared chat records on the client device and sends an explicitly started
+utterance to `/api/jaeger/transcribe`. The WebUI uses `jaeger-whisper-stt`'s
+cached `base.en` model through `OfflineTranscriber`; capability probes never
+start capture or download weights. Audio is bounded to 8 MB and deleted after
+decoding. Transcripts use the currently selected Gateway session and the same
+request admission, steering, queue, approvals and history as typed chat.
+`/api/jaeger/tts` renders Kokoro WAV clips for client-side playback. Closing
+voice mode releases that client's microphone and playback only. Microphone and
+speaker permissions and audibility must be qualified on the actual client.

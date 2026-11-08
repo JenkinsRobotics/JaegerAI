@@ -181,9 +181,9 @@ describe("composer while Jaeger is working", () => {
 
       await type("Use the compact layout");
       await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!.click(); });
-      expect(steer).toHaveBeenCalledWith("s1", started!.turnId, "Use the compact layout");
+      expect(steer).toHaveBeenCalledWith("s1", started!.turnId, "Use the compact layout", expect.any(String));
       expect(el.querySelector('[aria-label="Message sent to the active turn"] .jg-bubble--user')?.textContent).toBe("Use the compact layout");
-      expect(el.querySelector('[aria-label="Message sent to the active turn"] .jg-busy-message__status')?.textContent).toBe("Sent to Jaeger");
+      expect(el.querySelector('[aria-label="Message sent to the active turn"] .jg-busy-message__status')?.textContent).toBe("Sent to Jaeger · steer");
       expect(el.querySelector('[aria-label^="Message action:"]')).toBeNull();
       expect(el.querySelector('.jg-composer__chips')?.textContent ?? "").not.toContain("Steered");
 
@@ -258,4 +258,20 @@ describe("jump button (DOM)", () => {
     act(() => root.unmount());
     el.remove();
   });
+});
+
+describe('follow-up delivery identity',()=>{
+ it('keeps repeated queued text visible until the same request ID appears in history',async()=>{
+  const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
+  const enqueue=vi.fn(async(session_id:string,_text:string,request_id:string)=>({session_id,request_id,status:'queued'}));
+  const host={capabilities:{voice:false},startTurn:vi.fn((request:StartTurnRequest)=>{request.onAccepted?.();return {cancel(){},done:new Promise(()=>{})};}),respondToConfirmation:vi.fn(),copy:vi.fn(),openExternal:vi.fn(),sessions:{list:vi.fn(),load:vi.fn(async(id:string)=>({id,title:'t',turns:[{turnId:'old',requestId:'old',message:'Repeat',parts:[],state:'complete'}]}))},sessionQueue:{list:vi.fn(async(session_id:string)=>({session_id,items:[]})),enqueue,steer:vi.fn(),update:vi.fn(),reorder:vi.fn(),status:vi.fn()}} as unknown as ChatHost;
+  const type=async(value:string)=>{const field=el.querySelector<HTMLTextAreaElement>('.jg-composer__input')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});};
+  try{
+   await act(async()=>root.render(<MinimalChat host={host} sessionId="repeated-queue"/>));await type('Begin task');await act(async()=>el.querySelector<HTMLButtonElement>('[aria-label="Send"]')!.click());
+   for(let i=0;i<2;i++){await type('Repeat');await act(async()=>el.querySelector<HTMLButtonElement>('[aria-label="Queue next message"]')!.click());}
+   expect(enqueue).toHaveBeenCalledTimes(2);expect(enqueue.mock.calls[0][2]).not.toBe(enqueue.mock.calls[1][2]);
+   expect(el.querySelectorAll('[aria-label="Message queued for the next turn"]')).toHaveLength(2);
+   expect([...el.querySelectorAll('.jg-bubble--user')].filter(row=>row.textContent==='Repeat')).toHaveLength(3);
+  }finally{await act(async()=>root.unmount());el.remove();}
+ });
 });

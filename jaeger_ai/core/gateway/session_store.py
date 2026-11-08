@@ -2169,6 +2169,16 @@ class GatewaySessionStore:
             return {"events": events, "has_more": len(rows) > limit,
                     "next_cursor": events[-1]["event_id"] if events else after}
 
+    def steering_record(self, session_id: str, request_id: str, steering_id: str) -> dict[str, Any] | None:
+        """Read the original steering receipt from durable activity, even after event retention."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT event_id, data_json FROM activity_history WHERE session_id=? AND event='turn.steer' "
+                "AND json_extract(data_json, '$.request_id')=? AND json_extract(data_json, '$.steering_id')=? "
+                "ORDER BY event_id LIMIT 1", (session_id, request_id, steering_id),
+            ).fetchone()
+        return {**json.loads(row['data_json']), 'event_id': row['event_id']} if row else None
+
     def replay_events(
         self,
         session_id: str,

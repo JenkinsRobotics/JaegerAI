@@ -10,6 +10,7 @@ export type ToolInvocationState = "streaming" | "waitingForConfirmation" | "exec
 export type AssistantContentRole = "provisional" | "commentary" | "final";
 
 export type ChatPart =
+  | { kind: "userGuidance"; text: string; steeringId: string }
   | {kind:"plan";plan:Array<{step:string;status:"pending"|"in_progress"|"completed"}>;explanation:string}
   | {kind:"checkpoint";text:string}
   | {kind:"sources";sources:Array<{kind:"url"|"file";location:string;title?:string}>}
@@ -158,6 +159,7 @@ export function isSessionMissingError(error: unknown): boolean {
 
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
+  if (part.kind === "userGuidance") return parts.some(row => row.kind === "userGuidance" && row.steeringId === part.steeringId) ? parts : [...parts, part];
   if (part.kind === "knowledgeContext") { const index = parts.findIndex(p => p.kind === "knowledgeContext"); return index < 0 ? [...parts, part] : parts.map((p, i) => i === index ? part : p); }
   if (part.kind === "handoff") {
     const index = parts.findIndex((p) => p.kind === "handoff" && p.handoffId === part.handoffId && p.direction === part.direction);
