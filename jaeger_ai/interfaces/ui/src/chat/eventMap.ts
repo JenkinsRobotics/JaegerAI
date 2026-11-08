@@ -71,6 +71,12 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       parts.push({ kind: "confirmation", callId: str(p.approval_id ?? p.id ?? p.call_id), title: str(p.title ?? (p.tool ? `Run ${str(p.tool)}?` : "Approval needed")), message: str(p.prompt ?? p.summary ?? p.message) });
       return { parts };
     }
+    case "approval.resolved": {
+      const id=str(p.approval_id ?? p.id);
+      const decision=typeof p.approved==='boolean' ? (p.approved?'approve':'deny') :
+        ['deny','cancelled','expired'].includes(str(p.decision)) ? 'deny' : ['once','session','always','allow','yes'].includes(str(p.decision)) ? 'approve' : undefined;
+      return id && decision ? {parts:[{kind:'confirmation',callId:id,title:'',message:'',decision}]} : null;
+    }
     case "clarify.request": {
       const choices = Array.isArray(p.choices) ? p.choices.map(str).filter(Boolean) : [];
       return { parts: [{ kind: "question", callId: str(p.clarify_id), title: str(p.question), sessionId: str(p.session_id) || undefined,

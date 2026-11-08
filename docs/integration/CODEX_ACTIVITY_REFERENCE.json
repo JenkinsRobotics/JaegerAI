@@ -1,0 +1,2288 @@
+{
+  "description": "Scoped static reference inventory of observable Codex activity labels; not a runtime capability claim or an exhaustive list of generated progress messages.",
+  "app_version": "26.1103.41825",
+  "artifact_sha256": "766faa8a3da8f6d6902c751d5b6b29395a6c5bf3c966ef7f8ca3f629d931df85",
+  "rea_parent_evidence": "ev_e47eecea9fc671423e7a199347142b116737955e8b895561225958f75950d4be",
+  "unique_label_keys": 211,
+  "source_occurrences": 246,
+  "sources": [
+    {
+      "path": "webview/assets/async/225284.63835849b6.js",
+      "sha256": "6957f674f8a57d07870d7de357c9889f7201eabd6e4a5aac99eb2eddcd948b00",
+      "bytes": 550883
+    },
+    {
+      "path": "webview/assets/async/884655.2edb304734.js",
+      "sha256": "fc8855fae94a552a960ad172394e7dfcc9ce82dac611cf8dc2818a68693a8330",
+      "bytes": 460771
+    },
+    {
+      "path": "webview/assets/async/152406.4e29bf6647.js",
+      "sha256": "8f7b016fce2b5f3b1e97bb2c93dd037cd32fb9f9cb38514a6f5df8e5f7480c22",
+      "bytes": 71655
+    },
+    {
+      "path": "webview/assets/async/982192.c08524f9a5.js",
+      "sha256": "73460accde82a2e2948192180254db573f0ec5d11b076112fd89519daa803b42",
+      "bytes": 66082
+    }
+  ],
+  "limitations": [
+    "Read-only static strings and bounded REA analysis of four selected JS files; no runtime reachability or private-data access.",
+    "Semantic coverage partial due explicit resource bounds and unselected files.",
+    "Seven unrelated unpacked native members contradict declared ASAR hashes; record-and-continue retains observed bytes as untrusted.",
+    "No claim that finite label inventory includes dynamically generated model progress descriptions."
+  ],
+  "labels": [
+    {
+      "id": "localConversation.toolActivity.active.read",
+      "label": "<action>Reading</action> <detail>{target}</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 107373
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 436829
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.readSkill",
+      "label": "<action>Reading</action> <detail>{skillName} skill</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 107574
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 437030
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.readInternalKnowledge",
+      "label": "<action>Reading</action> <detail>Internal Knowledge</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 107813
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 437269
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.search.folder",
+      "label": "<action>Searching</action> <detail>files in {folder} folder</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 108087
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 437543
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.search.query",
+      "label": "<action>Searching</action> <detail>for {query}</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 108330
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 437786
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.search.files",
+      "label": "<action>Searching</action> <detail>files</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 108553
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 438009
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.list.files",
+      "label": "<action>Listing</action> <detail>files</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 108762
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 438218
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.list.folder",
+      "label": "<action>Listing</action> <detail>files in {folder} folder</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 108966
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 438422
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.command.stopped",
+      "label": "<action>Stopped command</action>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 109206
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 438662
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.command.stopped.detail",
+      "label": "<action>Stopped</action> <detail>{command}</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 109413
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 438869
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.command.ran",
+      "label": "<action>Ran command</action>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 109632
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 439088
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.command.ran.detail",
+      "label": "<action>Ran</action> <detail>{command}</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 109826
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 439282
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.command.running",
+      "label": "<action>Running command</action>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 110040
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 439496
+        }
+      ]
+    },
+    {
+      "id": "localConversation.toolActivity.active.command.running.detail",
+      "label": "<action>Running</action> <detail>{command}</detail>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 110246
+        },
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 439702
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.editedFiles.leading",
+      "label": "{count, plural, one {Edited a file} other {Edited files}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 124404
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.editedFiles",
+      "label": "{count, plural, one {edited a file} other {edited files}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 124642
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.stoppedCreating.leading",
+      "label": "{count, plural, one {Stopped creating a file} other {Stopped creating files}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 124875
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.stoppedCreating",
+      "label": "{count, plural, one {stopped creating a file} other {stopped creating files}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 125150
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.loadedTools.leading",
+      "label": "{count, plural, one {Loaded a tool} other {Loaded tools}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 125412
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.loadedTools",
+      "label": "{count, plural, one {loaded a tool} other {loaded tools}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 125762
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.readFiles.leading",
+      "label": "Read files",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 126109
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.readFiles",
+      "label": "read files",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 126493
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.commands.leading",
+      "label": "{count, plural, one {Ran a command} other {Ran commands}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 126899
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.commands",
+      "label": "{count, plural, one {ran a command} other {ran commands}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 127356
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.source.browser",
+      "label": "the browser",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 127892
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.integrations.leading",
+      "label": "Used {sources} {sourceCount, plural, one {integration} other {integrations}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 128088
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.integrations",
+      "label": "used {sources} {sourceCount, plural, one {integration} other {integrations}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 128357
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.sources.leading",
+      "label": "Used {sources}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 128612
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.sources",
+      "label": "used {sources}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 128809
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.calledTools.leading",
+      "label": "{count, plural, one {Called a tool} other {Called tools}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 128997
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.calledTools",
+      "label": "{count, plural, one {called a tool} other {called tools}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 129241
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.webSearch.leading",
+      "label": "Searched the web",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 129476
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.summary.webSearch",
+      "label": "searched the web",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 129671
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.repeatedCodexCallCount",
+      "label": "· {count, plural, one {# call} other {# calls}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 133119
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.repeatedToolCalls",
+      "label": "{toolName} · {count, plural, one {# call} other {# calls}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 133397
+        }
+      ]
+    },
+    {
+      "id": "thinkingShimmer.default",
+      "label": "Thinking",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 144981
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 36417
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.completed",
+      "label": "Worked",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 152083
+        }
+      ]
+    },
+    {
+      "id": "localConversation.workedFor",
+      "label": "Worked for {time}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 162576
+        }
+      ]
+    },
+    {
+      "id": "localConversation.autoReviewInterruptionWarning",
+      "label": "Turn ended by Auto-review",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 282994
+        }
+      ]
+    },
+    {
+      "id": "localConversation.autoReviewInterruptionWarning.nextSteps",
+      "label": "Auto-review stopped this turn after repeated denials. Add more context or choose a different permission mode to continue.",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 283333
+        }
+      ]
+    },
+    {
+      "id": "localConversation.autoReviewInterruptionWarning.details",
+      "label": "Task interruption details",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 283678
+        }
+      ]
+    },
+    {
+      "id": "localConversation.approvalRequest.inProgress",
+      "label": "Awaiting approval",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 286436
+        }
+      ]
+    },
+    {
+      "id": "localConversation.optimizationInterrupted",
+      "label": "Optimization interrupted",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 288128
+        }
+      ]
+    },
+    {
+      "id": "localConversation.compactionInterrupted",
+      "label": "Compaction interrupted",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 288324
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.approving",
+      "label": "Approving…",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 295468
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.approve",
+      "label": "Approve",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 295666
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.backgroundTerminalStatusUnknown",
+      "label": "Background terminal status unknown",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 301845
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.searchedForInPath",
+      "label": "<verb>Searched</verb> for {query} in {path}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 306043
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.searchingForInPath",
+      "label": "<verb>Searching</verb> for {query} in {path}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 306342
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.searchedFor",
+      "label": "<verb>Searched</verb> for {query}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 306831
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.searchingFor",
+      "label": "<verb>Searching</verb> for {query}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 307069
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.searchedForFiles",
+      "label": "<verb>Searched</verb> for files",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 307539
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.searchingForFiles",
+      "label": "<verb>Searching</verb> for files",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 307782
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.exploredFilesInPath",
+      "label": "<verb>Listed</verb> files in {path}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 308586
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.exploringFilesInPath",
+      "label": "<verb>Listing</verb> files in {path}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 308828
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.exploredFiles",
+      "label": "<verb>Listed</verb> files",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 309295
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.exploringFiles",
+      "label": "<verb>Listing</verb> files",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 309520
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.read",
+      "label": "<verb>Read</verb> {path}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 311147
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.readSkillDefinition.steps.finished",
+      "label": "<verb>Read</verb> {skillName} skill",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 311764
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.readSkillDefinition.steps.inProgress",
+      "label": "<verb>Reading</verb> {skillName} skill",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 312124
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.readSkillDefinition.technical",
+      "label": "<verb>Read</verb> {skillName} skill",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 312443
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.autoReviewDeclinedSpecificCommand",
+      "label": "Command declined by auto-review: {command}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 313381
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.autoReviewDeclinedCommand",
+      "label": "Command declined by auto-review",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 313656
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.stoppedCheckingCurrentDateTimeWithElapsed",
+      "label": "Stopped checking the current date and time after {elapsed}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 314455
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.stoppedCheckingCurrentDateTimeWithoutElapsed",
+      "label": "Stopped checking the current date and time",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 314748
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.checkingCurrentDateTimeWithElapsed",
+      "label": "Checking the current date and time for {elapsed}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 315177
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.checkingCurrentDateTimeWithoutElapsed",
+      "label": "Checking the current date and time",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 315453
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.checkedCurrentDateTimeWithElapsed",
+      "label": "Checked the current date and time in {elapsed}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 315732
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.checkedCurrentDateTimeWithoutElapsed",
+      "label": "Checked the current date and time",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 316002
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.background.started.skillScript",
+      "label": "Started background terminal running {fileName} from {skillName} skill",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 317083
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.startedBackgroundTerminalWithCommand",
+      "label": "Started background terminal with {command}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 317506
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.startedBackgroundTerminal",
+      "label": "Started background terminal",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 317907
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.runningGenericCommandWithElapsed",
+      "label": "Running command for {elapsed}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 318204
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.runningGenericCommandWithoutElapsed",
+      "label": "Running command",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 318445
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.stoppedBackgroundTerminalWithCommand",
+      "label": "Background terminal stopped with {command}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 318944
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.background.finished.skillScript",
+      "label": "Background terminal finished running {fileName} from {skillName} skill",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 319297
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.finishedBackgroundTerminalWithCommand",
+      "label": "Ran {command}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 319728
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.stoppedBackgroundTerminal",
+      "label": "Background terminal stopped",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 320170
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.finishedBackgroundTerminal",
+      "label": "Background terminal finished",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 320460
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.stoppedSpecificCommandWithElapsed",
+      "label": "Stopped {command} after {elapsed}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 320925
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.stoppedSpecificCommandWithoutElapsed",
+      "label": "Stopped {command}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 321188
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.ranSpecificCommandWithElapsed",
+      "label": "Ran {command} in {elapsed}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 321646
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.ranSpecificCommandWithoutElapsed",
+      "label": "Ran {command}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 321895
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.stoppedGenericCommandWithElapsed",
+      "label": "Stopped command after {elapsed}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 322347
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.stoppedGenericCommandWithoutElapsed",
+      "label": "Stopped command",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 322590
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.ranGenericCommandWithElapsed",
+      "label": "Ran command in {elapsed}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 322993
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.ranGenericCommandWithoutElapsed",
+      "label": "Ran command",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 323222
+        }
+      ]
+    },
+    {
+      "id": "toolSummaryForCmd.skillScript",
+      "label": "script {fileName} from {skillName} skill",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 323832
+        }
+      ]
+    },
+    {
+      "id": "localConversation.imageView.summary",
+      "label": "{imageCount, plural, one {Viewed an image} other {Viewed # images}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 327626
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpForm.requestedInformation",
+      "label": "{serverName} requested information",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 329819
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpForm.requestsInformation",
+      "label": "{serverName} requests information",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 330059
+        }
+      ]
+    },
+    {
+      "id": "localConversation.agentActivity.pluginInstallationRequired",
+      "label": "{appName} needs to use a plugin",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 333482
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpServerElicitation.pluginInstalled",
+      "label": "Installed {pluginName}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 335923
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpServerElicitation.pluginNotInstalled",
+      "label": "{appName} did not install {pluginName}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 336182
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpServerElicitation.requestedPermission",
+      "label": "Requested permission",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 337833
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpServerElicitation.completedRequest",
+      "label": "Completed request",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 338119
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpServerElicitation.accepted",
+      "label": "Accepted",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 338440
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpServerElicitation.cancelled",
+      "label": "Cancelled",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 338621
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpServerElicitation.declined",
+      "label": "Declined",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 338805
+        }
+      ]
+    },
+    {
+      "id": "localConversation.mcpServerElicitation.completed",
+      "label": "Completed",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 338982
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.interrupt.inProgress",
+      "label": "Interrupting",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 343895
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.interrupt.completed",
+      "label": "Interrupted",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 344078
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.interrupt.failed",
+      "label": "Failed to interrupt",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 344256
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.list.inProgress",
+      "label": "Listing",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 344436
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.list.completed",
+      "label": "Listed",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 344590
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.list.failed",
+      "label": "Failed to list",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 344739
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.action.interrupted",
+      "label": "Interrupted",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 344905
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.spawn.inProgress",
+      "label": "Creating",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 345103
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.spawn.completed",
+      "label": "Created",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 345284
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.spawn.failed",
+      "label": "Failed to create",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 345458
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.sendInput.inProgress",
+      "label": "Messaging",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 345643
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.sendInput.completed",
+      "label": "Messaged",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 345832
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.sendInput.failed",
+      "label": "Failed to message",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 346014
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.resume.inProgress",
+      "label": "Resuming",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 346200
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.resume.completed",
+      "label": "Resumed",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 346384
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.resume.failed",
+      "label": "Failed to resume",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 346561
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.close.inProgress",
+      "label": "Closing",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 346744
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.close.completed",
+      "label": "Closed",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 346924
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.close.failed",
+      "label": "Failed to close",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 347097
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.spawn.inProgress",
+      "label": "Creating",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 347274
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.spawn.completed",
+      "label": "Created",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 347452
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.spawn.failed",
+      "label": "Failed creating",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 347623
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.sendInput.inProgress",
+      "label": "Messaging",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 347804
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.sendInput.completed",
+      "label": "Messaged",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 347990
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.sendInput.failed",
+      "label": "Failed messaging",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 348169
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.resume.inProgress",
+      "label": "Resuming",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 348351
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.resume.completed",
+      "label": "Resumed",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 348532
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.resume.failed",
+      "label": "Failed resuming",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 348706
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.close.inProgress",
+      "label": "Closing",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 348885
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.close.completed",
+      "label": "Closed",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 349062
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.close.failed",
+      "label": "Failed closing",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 349232
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.sendInput.messaged.inProgress",
+      "label": "Messaging",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 349420
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.sendInput.messaged.completed",
+      "label": "Messaged",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 349622
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.rowAction.sendInput.messaged.failed",
+      "label": "Failed to message",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 349817
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.agentState.pendingInit",
+      "label": "pending init",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 350005
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.agentState.running",
+      "label": "running",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 350173
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.agentState.interrupted",
+      "label": "interrupted",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 350332
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.agentState.shutdown",
+      "label": "shutdown",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 350500
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.agentState.completed",
+      "label": "completed",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 350660
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.agentState.errored",
+      "label": "errored",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 350821
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.agentState.notFound",
+      "label": "not found",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 350977
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.header.count",
+      "label": " {count, plural, one {an agent} other {# agents}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 354421
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.row.generic",
+      "label": "{action}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 356849
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.row.spawn.createdWithInstructions",
+      "label": "<row>Created {agent} with the instructions: {instructions}</row>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 357138
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.row.sendInput.messagedWithPrompt",
+      "label": "<row>{action} {agent}: {prompt}</row>",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 357575
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.row.agent",
+      "label": "{action} {agent}{stateSuffix}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 358024
+        }
+      ]
+    },
+    {
+      "id": "localConversation.multiAgentAction.meta.prompt",
+      "label": "Input: {prompt}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 358733
+        }
+      ]
+    },
+    {
+      "id": "localConversation.subagentActivity.messageSentToParent",
+      "label": "Sent message to parent",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 387086
+        }
+      ]
+    },
+    {
+      "id": "localConversation.subagentActivity.messageSentToAgent",
+      "label": "Sent message to {agent}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 387286
+        }
+      ]
+    },
+    {
+      "id": "localConversation.subagentActivity.defaultName",
+      "label": "Agent",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 505190
+        }
+      ]
+    },
+    {
+      "id": "localConversation.subagentActivity.summary.startedWorking",
+      "label": "{displayName} started working",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 505360
+        }
+      ]
+    },
+    {
+      "id": "localConversation.subagentActivity.summary.updated",
+      "label": "{displayName} updated",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 505557
+        }
+      ]
+    },
+    {
+      "id": "localConversation.subagentActivity.summary.interrupted",
+      "label": "{displayName} interrupted",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 505746
+        }
+      ]
+    },
+    {
+      "id": "localConversation.subagentActivity.summary.completed",
+      "label": "{displayName} finished",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 505938
+        }
+      ]
+    },
+    {
+      "id": "localConversation.subagentActivity.openSubagent",
+      "label": "Open {displayName} subagent",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 506135
+        }
+      ]
+    },
+    {
+      "id": "subagents.activity.summary",
+      "label": "{count, select, 1 {<first>Subagent</first>} 2 {<first>Subagent</first> and <second>Subagent</second>} 3 {<first>Subagent</first>, <second>Subagent</second> and <third>Subagent</third>} other {<first>Subagent</first>, <second>Subagent</second> and <more>{hiddenCount} more</more>}} {status, select, active {started working} updated {updated} interrupted {{count, plural, one {was interrupted} other {were interrupted}}} completed {finished} failed {finished with errors} progress {made progress} other {started working}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 538795
+        }
+      ]
+    },
+    {
+      "id": "subagents.activity.unnamed.ariaLabel",
+      "label": "Subagent",
+      "locations": [
+        {
+          "source": "webview/assets/async/225284.63835849b6.js",
+          "byte_offset": 540486
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.calledTool",
+      "label": "Called tool",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 60821
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.calledToolName",
+      "label": "Called {toolName}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 60986
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.callingTool",
+      "label": "Calling tool",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 61156
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.callingToolName",
+      "label": "Calling {toolName}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 61322
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.editedFiles",
+      "label": "Edited {fileCount, plural, one {# file} other {# files}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 61492
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.editingFiles",
+      "label": "Editing {fileCount, plural, one {# file} other {# files}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 61692
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.newThread",
+      "label": "New chat",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 61889
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.ranCommand",
+      "label": "Ran command",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 62048
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.runningCommand",
+      "label": "Running command",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 62209
+        }
+      ]
+    },
+    {
+      "id": "avatarOverlay.session.searchedWeb",
+      "label": "Searched web",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 62549
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskCreated.body",
+      "label": "Working on delegated request",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 297131
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskCreated.title",
+      "label": "Created chat",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 297338
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskCreatedWithTitle.title",
+      "label": "Created chat: {title}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 297497
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskReturned.title",
+      "label": "Task returned",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 297803
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskReturnedWithTitle.title",
+      "label": "Returned from {title}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 297974
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdate.title",
+      "label": "Task update",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 298200
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdateWithTitle.title",
+      "label": "Update from {title}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 298376
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskMessageSent.title",
+      "label": "Message sent",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 298607
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskMessageSentWithTitle.title",
+      "label": "Sent to {title}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 298778
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdate.running",
+      "label": "Task is still working",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 299068
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdate.completed",
+      "label": "Task finished",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 299251
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdate.interrupted",
+      "label": "Task was interrupted",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 299432
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdate.failed",
+      "label": "Task failed",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 299620
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdate.stopped",
+      "label": "Task stopped",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 299789
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdate.notFound",
+      "label": "Chat is no longer available",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 299963
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.taskUpdate.generic",
+      "label": "Task sent an update",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 300147
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.codexStatus.thinking",
+      "label": "Thinking",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 449171
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.codexStatus.runningCommand",
+      "label": "Running command",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 449390
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.codexStatus.editingFiles",
+      "label": "Editing {count, plural, =0 {files} one {a file} other {# files}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 449581
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.codexStatus.waitingForThread",
+      "label": "Waiting for chat",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 450327
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.codexStatus.searchingWebFor",
+      "label": "Searching the web for {query}",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 450601
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.codexStatus.searchingWeb",
+      "label": "Searching the web",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 450811
+        }
+      ]
+    },
+    {
+      "id": "realtimeVoice.codexStatus.additionalTools",
+      "label": "+{count} more",
+      "locations": [
+        {
+          "source": "webview/assets/async/884655.2edb304734.js",
+          "byte_offset": 451050
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.actionSummary.editingFile",
+      "label": "Editing {file}",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 12101
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 7713
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.actionSummary.editingFiles",
+      "label": "Editing {fileCount, plural, one {a file} other {# files}}",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 12321
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 7933
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.actionSummary.mcpToolCall",
+      "label": "MCP {toolName} on {connector}",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 12588
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 8200
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.actionSummary.networkAccess",
+      "label": "Network access to {target}",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 12821
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 8433
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.actionSummary.permissionRequest",
+      "label": "Permission request",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 13065
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 8677
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.actionSummary.permissionRequestWithReason",
+      "label": "Permission request: {reason}",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 13328
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 8940
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.summary.inProgress",
+      "label": "Checking whether this action can proceed",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 13585
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 9197
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.summary.aborted",
+      "label": "Auto-review ended without a decision",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 13814
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 9426
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.summary.timedOut",
+      "label": "Auto-review couldn’t reach a decision in time",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 14055
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 9667
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.summary.approved",
+      "label": "This action was approved",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 14307
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 9919
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.summary.denied",
+      "label": "This action wasn’t approved",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 14540
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 10152
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.summary.deniedHighRisk",
+      "label": "This action wasn’t approved because it was assessed as high risk",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 14782
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 10394
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.title.inProgress",
+      "label": "Auto-reviewing",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 15072
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 10684
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.title.approved",
+      "label": "Auto-review approved",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 15269
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 10881
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.title.denied",
+      "label": "Auto-review denied",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 15471
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 11083
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.title.deniedHighRisk",
+      "label": "Auto-review denied high risk",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 15675
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 11287
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.title.timedOut",
+      "label": "Auto-review timed out",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 15900
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 11512
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.title.aborted",
+      "label": "Auto-review stopped",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 16095
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 11707
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.actionSummary.request",
+      "label": "Request",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 16296
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 11908
+        }
+      ]
+    },
+    {
+      "id": "localConversation.automaticApprovalReview.actionSummary.writeStdin",
+      "label": "Send input to process {processId}: {stdin}",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 17239
+        },
+        {
+          "source": "webview/assets/async/982192.c08524f9a5.js",
+          "byte_offset": 12851
+        }
+      ]
+    },
+    {
+      "id": "localConversation.workedFor.v2",
+      "label": "Worked for {time}",
+      "locations": [
+        {
+          "source": "webview/assets/async/152406.4e29bf6647.js",
+          "byte_offset": 27072
+        }
+      ]
+    }
+  ]
+}

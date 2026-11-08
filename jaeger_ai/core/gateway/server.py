@@ -7164,6 +7164,7 @@ class JaegerGatewayApp:
         row_origin = ((resolved or {}).get("metadata") or {}).get("origin")
         if resolved is not None:
             payload["session_id"] = resolved.get("session_id")
+            payload["request_id"] = resolved.get("request_id")
         if row_origin:
             payload["origin"] = row_origin
         for key, value in (extra or {}).items():

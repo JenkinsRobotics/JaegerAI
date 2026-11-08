@@ -54,5 +54,6 @@ async def test_session_stream_carries_reasoning_tool_approval_and_handoff(tmp_pa
     assert want <= set(seen), sorted(seen)
     assert seen["approval.request"]["options"] == ["once", "session", "deny"]
     assert seen["approval.resolved"]["approval_id"] == approval["approval_id"]
+    assert seen["approval.resolved"]["request_id"] == "r1"
     assert seen["session.handoff"]["to_agent_id"] == agent_id
     assert seen["tool.started"]["request_id"] == "r1" and seen["turn.reasoning.done"]["duration_ms"] >= 0
