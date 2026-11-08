@@ -92,6 +92,8 @@ async def test_incomplete_retained_ancestry_never_becomes_empty_tree(env,fault):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('state',['waiting_for_approval','failed','blocked'])
 async def test_accepted_native_lifecycle_change_after_projection_is_not_verified(env,monkeypatch,state):
+    produce = env.runtime.before_answer
+    env.runtime.before_answer = lambda native: (separate_child(env, native, False), produce(native))
     persist=env.app._persist_terminal
     def after_projection(*args,**kwargs):
         persist(*args,**kwargs)
@@ -169,6 +171,8 @@ async def test_producer_enrollment_protects_truncated_older_native_from_foreign_
 
 @pytest.mark.asyncio
 async def test_native_transition_failure_precedes_task_completion_publication(env, monkeypatch):
+    produce = env.runtime.before_answer
+    env.runtime.before_answer = lambda native: (separate_child(env, native, False), produce(native))
     transition = SqliteRunStore.transition
     persist = env.app._persist_terminal
     def fail_completion(self, ident, state, **kwargs):

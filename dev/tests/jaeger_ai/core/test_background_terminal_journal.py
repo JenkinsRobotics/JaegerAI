@@ -101,7 +101,9 @@ async def test_crash_seal_boundary_is_recoverable_once_without_execution(env, mo
     saved = journal(env)
     assert bool(saved['terminal_json']) == (phase == 'after_seal')
     native = env.store.get_request(env.rid)['native_run_id']
-    assert SqliteRunStore().get(native).state == 'active'  # Never fake completion to obtain proof.
+    # Only independently verified final work is legally completed before seal.
+    # A pre-seal slice remains active and cannot acquire completion from that label.
+    assert SqliteRunStore().get(native).state == ('completed' if phase == 'after_seal' else 'active')
     for _ in range(2):
         app = restart(env)
         recovered = app._recover_sealed_owner_results()
