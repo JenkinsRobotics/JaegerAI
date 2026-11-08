@@ -32,12 +32,10 @@ CODE_CLI_CANDIDATES = (
     "~/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
 )
 VSIX_MAX_BYTES = 50 * 1024 * 1024
-PINNED_VSCODE = "1.142."
 PROBE_TTL_S = 30.0
 INSTALL_TIMEOUT_S = 120
 PROBE_TIMEOUT_S = 15
 OWNER_INSTALL_CALLERS = frozenset({"webui", "menubar", "cli"})
-_VSIX_RE = re.compile(r"^jaeger-chat-(\d+)\.(\d+)\.(\d+)\.vsix$")
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -116,13 +114,19 @@ class ConnectApps:
 
     # ── probes (read-only) ──────────────────────────────────────────────
     def find_vsix(self) -> dict[str, Any] | None:
+        app = self.app("vscode") or {}
+        extension_id = app.get("install", {}).get("extension_id", "")
+        if not extension_id:
+            return None
+        name = re.escape(extension_id.rsplit(".", 1)[-1])
+        vsix_re = re.compile(rf"^{name}-(\d+)\.(\d+)\.(\d+)\.vsix$")
         root = self.apps_dir()
         if not root.is_dir():
             return None
         real_root = root.resolve()
         best = None
         for entry in root.iterdir():
-            match = _VSIX_RE.match(entry.name)
+            match = vsix_re.match(entry.name)
             if not match:
                 continue
             real = entry.resolve()
@@ -149,7 +153,7 @@ class ConnectApps:
         return isinstance(allowed, list) and extension_id in allowed
 
     def _probe_vscode(self, app: dict[str, Any]) -> dict[str, Any]:
-        ext = app["state_probe"]["extension_id"]
+        ext = app["install"]["extension_id"]
         now = self.clock()
         code = self.code_cli()
         if code is None:
@@ -168,15 +172,17 @@ class ConnectApps:
                 installed = ver or None
         state: dict[str, Any] = {"checked_at": now}
         vscode_version = ((version_out.stdout or "").splitlines() or [""])[0].strip()
+        proposed_api = app["state_probe"].get("argv_proposed_api")
+        version_prefix = app["state_probe"].get("vscode_version_prefix")
         if installed:
             state.update(value="installed", version=installed)
         elif not self.apps_dir().is_dir():
             state.update(value="needs_setup", detail="apps_dir_missing")
         elif self.find_vsix() is None:
             state.update(value="needs_setup", detail="vsix_missing")
-        elif not self.argv_has_proposed_api(app["state_probe"].get("argv_proposed_api") or ext):
+        elif proposed_api and not self.argv_has_proposed_api(proposed_api):
             state.update(value="needs_setup", detail="argv_missing")
-        elif vscode_version and not vscode_version.startswith(PINNED_VSCODE):
+        elif version_prefix and vscode_version and not vscode_version.startswith(version_prefix):
             state.update(value="needs_setup", detail="vscode_version_mismatch")
         else:
             state.update(value="not_installed")
@@ -227,7 +233,7 @@ class ConnectApps:
         if code is None:
             return 409, {"error": "VS Code 'code' CLI not found", "state": state}, None
         if vsix is None:
-            return 409, {"error": "Jaeger Chat vsix not found", "state": state}, None
+            return 409, {"error": "Jaeger IDE vsix not found", "state": state}, None
         if state.get("value") == "installed" and state.get("version") == vsix["version"]:
             return 200, {"id": app_id, "changed": False, "state": state}, None
         with self._lock:
