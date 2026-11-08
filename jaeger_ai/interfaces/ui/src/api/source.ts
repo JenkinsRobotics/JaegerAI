@@ -3,6 +3,12 @@ import type { ChatSession } from "../chat/host";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export type RuntimeAutonomy = "ask" | "scoped" | "auto";
+export type RuntimeTier = "chat" | "agent" | "jaeger";
+export interface RuntimeTierSnapshot {
+  tier: RuntimeTier;
+  options: RuntimeTier[];
+  descriptions?: Partial<Record<RuntimeTier, string>>;
+}
 export interface RuntimeAutonomySnapshot {
   autonomy: RuntimeAutonomy;
   options: RuntimeAutonomy[];
@@ -256,6 +262,8 @@ export interface JaegerSource {
   sessionQueue?: SessionQueue;
   runtimeAutonomy?(): Promise<RuntimeAutonomySnapshot>;
   setRuntimeAutonomy?(autonomy: RuntimeAutonomy): Promise<RuntimeAutonomySnapshot>;
+  runtimeTier?(): Promise<RuntimeTierSnapshot>;
+  setRuntimeTier?(tier: RuntimeTier): Promise<RuntimeTierSnapshot>;
   messageReactions?: {
     load(sessionId: string): Promise<ReactionSnapshot>;
     save(sessionId: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }): Promise<ReactionSnapshot>;

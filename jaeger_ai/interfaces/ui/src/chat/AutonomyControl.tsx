@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RuntimeAutonomy } from "../api/source";
-import { Check, Shield } from "../components/Icons";
+import { Check, Shield, ToolShield } from "../components/Icons";
 import { useExclusivePopup } from "../popups/coordinator";
 import type { ChatHost } from "./host";
 
@@ -64,7 +64,7 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
         title={available ? "Choose how Jaeger asks before using tools" : "Approval mode is unavailable"}
         onClick={() => { setError(undefined); setOpen(value => !value); }}
       >
-        <Shield size={16} />
+        <ToolShield size={20} />
         <span className="jg-composer__policy-label">{active.label}</span>
       </button>
       {open && (

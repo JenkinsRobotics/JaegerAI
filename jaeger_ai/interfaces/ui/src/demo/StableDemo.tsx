@@ -350,7 +350,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       <header className="jg-stable-demo__header" aria-label="Conversation toolbar">
         <div className="jg-stable-demo__header-start">
           <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle navigation" title="Toggle navigation" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><PanelLeft size={18} /></button>
-          <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} /></button>
+          <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Pencil size={18} /></button>
         </div>
         <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : currentTitle}>
           <span className="jg-stable-demo__profile-avatar"><ClipAvatar portraitOverride={agent?.avatar_url} state={!ready || error ? "connecting" : avatarState} /></span>

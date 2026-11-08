@@ -3,8 +3,8 @@
  *
  * Click the microphone to dictate into the chat composer with the browser's
  * speech recognition. Text is only inserted into the composer — nothing
- * is sent until the operator presses Send. Hidden where the browser has no
- * speech recognition (the native Mac app has its own voice controls).
+ * is sent until the operator presses Send. Unsupported browsers keep a
+ * disabled microphone with a reason; native Mac hosts have their own controls.
  */
 import { useEffect, useRef, useState } from "react";
 import { MicIcon } from "../icons";
@@ -37,7 +37,7 @@ export function VoiceDictation() {
   const [error, setError] = useState<string>();
   const rec = useRef<Recognition | null>(null);
   useEffect(() => () => rec.current?.stop(), []);
-  if (!Ctor) return null;
+  if (!Ctor) return <div className="jg-voice"><button type="button" className="jg-composer__icon" disabled aria-label="Dictation unavailable in this browser" title="This browser does not support speech recognition. You can use keyboard dictation."><MicIcon /></button></div>;
   const start = () => {
     if (listening) return;
     const r = new Ctor();
