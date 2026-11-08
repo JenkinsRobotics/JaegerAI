@@ -191,13 +191,15 @@ class AgentRegistry:
         *,
         kind: AgentKind | str | None = None,
         role: AgentRole | str | None = None,
+        read_only: bool = False,
     ) -> list[AgentRecord]:
         """Return merged catalog: discovered native + builtin/registered third-party."""
         # Product shape: lead + standing specialists always present (idempotent).
         try:
             from jaeger_ai.core.agent_registry.specialists import ensure_standing_specialists
 
-            ensure_standing_specialists(self)
+            if not read_only:
+                ensure_standing_specialists(self)
         except Exception:
             pass
         want: AgentKind | None = None
@@ -241,11 +243,27 @@ class AgentRegistry:
         )
         return agents
 
-    def get_agent(self, agent_id: str) -> AgentRecord | None:
+    def get_agent(self, agent_id: str, *, read_only: bool = False) -> AgentRecord | None:
+        """Read-only authority lookup requires a persisted canonical entry.
+
+        Unlike UI discovery, it never seeds missing agents or substitutes an
+        instance-directory inference for a deleted/unreadable registry entry.
+        """
+        if read_only and (self._revision is None or agent_id not in self._data.get('agents', {})):
+            return None  # Unreadable registry is not authority to infer an identity.
+        if read_only:
+            raw = self._data['agents'][agent_id]
+            if (raw.get('id') != agent_id or raw.get('kind') not in {kind.value for kind in AgentKind}
+                    or raw.get('role') not in {role.value for role in AgentRole}
+                    or not isinstance(raw.get('metadata', {}), dict)):
+                return None  # Display/discovery coercions are not authority evidence.
+            # Catalog merging may contain another key claiming this record.id.
+            # Only the exact persisted canonical entry owns authority.
+            return AgentRecord.from_dict(raw)
         needle = str(agent_id or "").strip()
         if not needle:
             return None
-        for record in self.list_agents():
+        for record in self.list_agents(read_only=read_only):
             if record.id == needle or record.name == needle:
                 return record
         return None

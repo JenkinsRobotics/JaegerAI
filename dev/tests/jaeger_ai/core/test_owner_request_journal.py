@@ -122,6 +122,10 @@ def env(tmp_path, monkeypatch, request):
     # No task card for this conversational objective. The actual producer,
     # callback, continuation, classification and persistence remain intact.
     choices = dict(getattr(request, 'param', {}))
+    if choices.pop('_lead', False):
+        assert app._registry().get_agent('native:jaeger').role.value == 'lead'
+        store.ensure_session('s', metadata={'agent_id': 'native:jaeger', 'home': True, 'agent_pinned': True})
+        monkeypatch.setattr(app, '_resolve_session_agent', JaegerGatewayApp._resolve_session_agent.__get__(app))
     prompt = choices.pop('_prompt', 'hello')
     if choices.pop('_workspace', False):
         choices['workspace'] = str(tmp_path)
@@ -890,7 +894,7 @@ async def test_real_yielded_journal_preserves_canonical_durable_run_transfer(env
     env.runtime.before_answer = complete
     await env.app.task_owner._execute(task.task_id)
     child = env.store.get_request('turn:r:0')
-    assert child['native_run_id'] == original['native_run_id']
+    assert child['native_run_id'] == original['native_run_id'], child
     assert child['status'] == 'completed'
     assert env.app.task_owner.store.get_task(task.task_id).state.value == 'completed_verified'
     assert env.store.owner_request_receipt('r') is None  # Never retroactively seal a transferred source.
@@ -1089,3 +1093,226 @@ async def test_real_foreground_cancel_handler_requires_return_and_children(env, 
     if pending_child:
         assert not started
         assert not [e for e in env.app.event_bus.get_replay_events('s') if e.event == 'turn.cancelled']
+
+
+@pytest.mark.asyncio
+async def test_default_lead_without_admission_identity_stays_excluded(env, monkeypatch):
+    """The real registry's default UI identity is not the unassigned control."""
+    env.store.update_metadata('s', {'agent_id': 'native:jaeger', 'agent_pinned': True, 'route_checked': True})
+    monkeypatch.setattr(env.app, '_resolve_session_agent',
+                        JaegerGatewayApp._resolve_session_agent.__get__(env.app))
+    agent = env.app._resolve_session_agent('s')
+    assert agent.id == 'native:jaeger'
+    assert agent.role.value == 'lead'
+    assert 'agent_id' not in env.row['execution']
+    await execute(env)
+    assert env.runtime.calls == 1
+    assert journal(env) is None
+    assert env.store.owner_request_receipt('r') is None
+
+
+def test_unresolved_lead_does_not_acquire_an_inferred_admission_identity(env):
+    """Evidence against granting journal eligibility from mutable session role."""
+    choices = {'model': 'scripted', 'provider': 'scripted', 'allowed_tools': [], 'caller': 'agent:test'}
+    env.store.ensure_session('lead-chat', metadata={'agent_id': 'native:jaeger', 'agent_pinned': True})
+    lead = env.store.admit_request('lead-chat', 'hello', request_id='lead', requested=choices)
+    assert lead['execution'] == env.row['execution']
+    assert lead['digest'] == env.row['digest']
+    # Mutable assignment is not covered by the immutable request identity.
+    env.store.update_metadata('lead-chat', {'agent_id': 'native:reviewer'})
+    assert env.store.get_request('lead')['execution'] == lead['execution']
+    assert env.store.get_request('lead')['digest'] == lead['digest']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+async def test_canonical_default_lead_producer(env):
+    assert owner_receipts.canonical_lead(env.row['execution']['_owner_agent'])
+    await test_actual_producer_commits_full_snapshot_and_normal_projection(env)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+@pytest.mark.parametrize('window', ['before', 'after'])
+async def test_canonical_default_lead_sealed_recovery(env, monkeypatch, window):
+    await test_controlled_crash_window_requires_committed_whole_request_proof(env, monkeypatch, window)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+@pytest.mark.parametrize('pending', [False, True])
+async def test_canonical_default_lead_every_accepted_effect(env, pending):
+    await test_real_continuation_qualifies_every_accepted_run(env, pending)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True, '_prompt': 'Inspect this project', '_workspace': True, 'interaction_tier': 'agent'}], indirect=True)
+async def test_canonical_default_lead_yield_compatibility(env, tmp_path, monkeypatch):
+    await test_real_yielded_journal_preserves_canonical_durable_run_transfer(env, tmp_path, monkeypatch)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+@pytest.mark.parametrize('window', ['dispatch', 'seal', 'recovery'])
+@pytest.mark.parametrize('drift', ['assignment', 'route', 'role', 'kind', 'invalid_kind', 'invalid_role', 'invalid_version', 'duplicate_shadow', 'disabled', 'missing', 'unreadable'])
+async def test_canonical_default_lead_refuses_identity_drift_without_seeding(env, monkeypatch, window, drift):
+    path = env.app._registry().path
+    def change():
+        if drift == 'assignment':
+            env.store.update_metadata('s', {'agent_id': 'native:reviewer'})
+        elif drift == 'route':
+            env.store.update_metadata('s', {'home': False, 'agent_pinned': False, 'route_checked': False})
+        elif drift == 'unreadable':
+            path.write_text('not json')
+        else:
+            data = json.loads(path.read_text())
+            if drift == 'missing':
+                del data['agents']['native:jaeger']
+            elif drift == 'invalid_version':
+                data['version'] = 'invalid'
+            elif drift == 'duplicate_shadow':
+                data['agents']['native:jaeger']['metadata']['disabled'] = True
+                shadow = json.loads(json.dumps(data['agents']['native:jaeger']))
+                shadow['metadata']['disabled'] = False
+                data['agents']['native:duplicate'] = shadow
+            elif drift.startswith('invalid_'):
+                data['agents']['native:jaeger'][drift.removeprefix('invalid_')] = 'invalid'
+            elif drift == 'disabled':
+                data['agents']['native:jaeger']['metadata']['disabled'] = True
+            else:
+                data['agents']['native:jaeger'][drift] = 'specialist' if drift == 'role' else 'third_party'
+            path.write_text(json.dumps(data))
+        return path.read_bytes()
+    if window == 'dispatch':
+        expected = change()
+        await execute(env)
+        assert env.runtime.calls == 0
+        assert env.store.get_request('r')['status'] == 'failed'
+    elif window == 'seal':
+        changed = []
+        env.runtime.before_answer = lambda run: changed.append(change())
+        await execute(env)
+        expected = changed[0]
+        assert env.store.get_request('r')['status'] == 'execution_unknown'
+    else:
+        def crash(*args, **kwargs):
+            raise Crash()
+        monkeypatch.setattr(env.app, '_persist_terminal', crash)
+        with pytest.raises(Crash):
+            await execute(env)
+        expected = change()
+        app = restart(env)
+        assert (await app.handle_reconcile(Request())).status == 409
+        assert env.runtime.calls == 1
+    assert path.read_bytes() == expected  # Receipt validation must never seed/repair a registry.
+    if window != 'recovery':
+        assert journal(env) is None or journal(env)['terminal_json'] is None
+
+
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+def test_canonical_default_lead_queue_freezes_identity_and_ignores_client_marker(env):
+    queued = env.store.enqueue_request('s', 'next', request_id='queued', requested={'_owner_agent': {'id': 'forged'}})
+    assert queued['execution']['_owner_agent'] == env.row['execution']['_owner_agent']
+    env.store.update_metadata('s', {'agent_id': 'native:reviewer'})
+    env.store.update_status('s', 'idle')
+    promoted = env.store.promote_next_queue_item('s')
+    assert promoted['execution'] == queued['execution']
+    assert env.store.enqueue_request('s', 'next', request_id='queued')['execution'] == queued['execution']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+async def test_canonical_default_lead_retry_preserves_identity_and_refuses_drift(env):
+    await execute(env)
+    original = env.row['execution']
+    retry = env.store.admit_request('s', 'hello', request_id='retry', retry_of='r')
+    assert retry['execution']['_owner_agent'] == original['_owner_agent']
+    env.store.update_status('s', 'idle')
+    env.store.update_metadata('s', {'agent_id': 'native:reviewer'})
+    from jaeger_ai.core.gateway.session_store import RequestConflict
+    with pytest.raises(RequestConflict, match='Retry agent identity changed'):
+        env.store.admit_request('s', 'hello', request_id='refused', retry_of='r')
+    assert env.store.get_request('refused') is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+@pytest.mark.parametrize('field,value', [('digest', 'foreign'), ('execution_json', '{}'), ('native_run_id', 'foreign'), ('native_session', 'owner:foreign')])
+async def test_canonical_default_lead_immutable_route_grant_and_binding(env, monkeypatch, field, value):
+    await test_reconciliation_refuses_identity_or_authority_drift(env, monkeypatch, field, value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+@pytest.mark.parametrize('pending', [False, True])
+async def test_canonical_default_lead_returned_cancel_all_effects(env, pending):
+    await test_returned_interrupted_continuation_qualifies_all_effects(env, pending)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+async def test_canonical_default_lead_cancel_card_proof_recovery(env, monkeypatch, tmp_path):
+    await test_returned_cancel_card_and_proof_atomic_before_projection_crash(env, monkeypatch, tmp_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True, '_prompt': 'Inspect this project', '_workspace': True, 'interaction_tier': 'agent'}], indirect=True)
+@pytest.mark.parametrize('pending_child', [False, True])
+async def test_canonical_default_lead_cancel_handler_preserves_descendant_boundary(env, monkeypatch, pending_child):
+    await test_real_foreground_cancel_handler_requires_return_and_children(env, monkeypatch, pending_child)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [
+    {'_lead': True, 'options': {'background': True}},
+    {'_lead': True, 'is_subordinate': True},
+    {'_lead': True, 'provider': 'cli'},
+    {'_lead': True, 'model': '@framework/default'},
+], indirect=True)
+async def test_canonical_default_lead_unsupported_modes_remain_excluded(env):
+    await test_unsupported_modes_are_not_journaled(env)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+async def test_canonical_default_lead_async_cancel_stays_unknown(env, monkeypatch):
+    await test_async_cancelled_worker_cannot_commit_late_proof(env, monkeypatch)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('env', [{'_lead': True}], indirect=True)
+async def test_canonical_default_lead_drift_does_not_block_cancel_signal(env):
+    env.runtime.answers = [('Interrupted.', 'interrupted')]
+    def cancel_after_drift(run_id):
+        env.store.update_metadata('s', {'agent_id': 'native:reviewer'})
+        assert env.app._cancellations.cancel('r') is not None
+        assert env.store.mark_request_status('r', 'cancelling')['status'] == 'cancelling'
+    env.runtime.before_answer = cancel_after_drift
+    await execute(env)
+    assert env.store.get_request('r')['status'] == 'execution_unknown'
+    assert journal(env)['terminal_json'] is None
+
+
+@pytest.mark.asyncio
+async def test_real_default_create_preserves_unpinned_first_turn_routing(env, monkeypatch):
+    from jaeger_ai.core.agent_registry.router import suggest_specialist
+    env.app._registry().list_agents()
+    monkeypatch.setattr(env.app, '_resolve_session_agent', JaegerGatewayApp._resolve_session_agent.__get__(env.app))
+    response = await env.app.handle_create_session(Request(session_id='route-control', source='webui', title='New chat'))
+    created = json.loads(response.body)
+    assert response.status == 201 and created['agent_id'] == 'native:jaeger'
+    assert not created['metadata'].get('agent_pinned')
+    assert suggest_specialist('check my calendar') == 'native:everyday'
+    row = env.store.admit_request('route-control', 'check my calendar', request_id='route-control-request', requested={
+        'model': 'scripted', 'provider': 'scripted', 'allowed_tools': [], 'caller': 'agent:test'})
+    assert '_owner_agent' not in row['execution']
+    # Exercise the actual routing producer, without claiming specialist runtime
+    # acceptance (baseline has a separate missing bind_skill_scope import).
+    assert env.app._auto_route(env.store.get_session('route-control'), row['input_text'])
+    routed = env.store.get_session('route-control')
+    assert routed['agent_id'] == 'native:everyday'
+    assert routed['metadata']['route_checked'] is True
+    assert env.app._resolve_session_agent('route-control').role.value == 'specialist'
+    assert env.store.get_request(row['request_id'])['execution'] == row['execution']
+    assert not env.store.has_owner_request_journal(row['request_id'])
+    assert len([e for e in env.app.event_bus.get_replay_events('route-control') if e.event == 'session.handoff']) == 1

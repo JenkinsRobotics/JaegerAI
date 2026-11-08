@@ -31,6 +31,50 @@ def identity(row: Any) -> dict[str, Any]:
     )}
 
 
+
+
+def stable_agent_assignment(metadata: dict[str, Any]) -> bool:
+    """The existing Gateway triage has committed, or this assignment is pinned."""
+    return bool(metadata.get('route_checked') or metadata.get('home') or metadata.get('agent_pinned'))
+
+
+def session_agent_identity(session_id: str, metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """Read the canonical assignment without creating agents or trusting request markers."""
+    from .session_store import _session_agent
+    from jaeger_ai.core.agent_registry import AgentRegistry
+    agent_id = _session_agent(session_id, metadata)
+    if not agent_id:
+        return None
+    try:
+        agent = AgentRegistry().get_agent(agent_id, read_only=True)
+    except (ValueError, TypeError, OSError):
+        agent = None  # Malformed registry state cannot escape the dispatch fence.
+    if agent is None or agent.id != agent_id:
+        return {'id': agent_id, 'kind': None, 'role': None, 'disabled': True}
+    return {'id': agent.id, 'kind': agent.kind.value, 'role': agent.role.value,
+            'disabled': agent.disabled}
+
+
+def check_agent_identity(conn: Any, row: Any) -> None:
+    if row is None:
+        raise OwnerReceiptConflict('Missing admitted agent identity')
+    execution = json.loads(row['execution_json'] or '{}')
+    if '_owner_agent' not in execution:
+        return  # Historical admissions never acquire a new identity.
+    session = conn.execute('SELECT metadata_json FROM sessions WHERE session_id=?', (row['session_id'],)).fetchone()
+    metadata = json.loads(session['metadata_json']) if session else {}
+    actual = session_agent_identity(row['session_id'], metadata) if session else None
+    if (not stable_agent_assignment(metadata) or actual != execution['_owner_agent']
+            or not actual or actual['disabled'] or not actual['kind'] or not actual['role']):
+        raise OwnerReceiptConflict('Admitted agent identity changed or is unavailable')
+
+
+def canonical_lead(identity: Any) -> bool:
+    from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
+    from jaeger_ai.core.agent_registry.types import AgentKind, AgentRole
+    return identity == {'id': LEAD_AGENT_ID, 'kind': AgentKind.NATIVE.value,
+                        'role': AgentRole.LEAD.value, 'disabled': False}
+
 def migrate(conn: Any) -> None:
     conn.execute('CREATE TABLE IF NOT EXISTS owner_request_journal ('
                  'request_id TEXT PRIMARY KEY REFERENCES client_requests(request_id) ON DELETE CASCADE, '
@@ -59,6 +103,7 @@ def begin(store: Any, request_id: str, session_id: str, lease: dict[str, Any]) -
             raise OwnerReceiptConflict('Request is not a fresh resident admission')
         if conn.execute('SELECT 1 FROM owner_request_journal WHERE request_id=?', (request_id,)).fetchone():
             raise OwnerReceiptConflict('Resident request already has a producer; never replay')
+        check_agent_identity(conn, row)
         conn.execute('INSERT INTO owner_request_journal VALUES (?, ?, ?, ?, ?, ?, NULL)',
                      (request_id, token, lease['owner_pid'], lease['started_at'], encoded(identity(row)), '[]'))
     return token
@@ -76,6 +121,7 @@ def accept(conn: Any, row: Any, run_id: str, native_session: str, token: str | N
         for source in sources:
             original = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (source['request_id'],)).fetchone()
             _bound(original, source)
+            check_agent_identity(conn, original)
             # Only the existing TaskOwner's canonical transfer guard can share
             # an UNSEALED yielded run. A sealed request never relinquishes it.
             if (journal is not None or source['request_id'] not in allowed_sources
@@ -90,6 +136,7 @@ def accept(conn: Any, row: Any, run_id: str, native_session: str, token: str | N
             raise OwnerReceiptConflict('Missing resident producer journal')
         return
     _bound(row, journal)
+    check_agent_identity(conn, row)
     _lease(conn, journal['lease_pid'], journal['lease_started_at'])
     if (not token or token != journal['producer_token'] or journal['terminal_json'] is not None
             or row['status'] not in {'admitted', 'running', 'awaiting_approval'}
@@ -114,6 +161,7 @@ def accepted_runs(store: Any, request_id: str, token: str) -> list[str]:
         if journal is None or journal['producer_token'] != token or journal['terminal_json'] is not None:
             raise OwnerReceiptConflict('Missing or settled resident producer')
         _bound(row, journal)
+        check_agent_identity(conn, row)
         _lease(conn, journal['lease_pid'], journal['lease_started_at'])
         return json.loads(journal['native_runs_json'])
 
@@ -124,6 +172,7 @@ def producer_in_transaction(conn: Any, request_id: str, token: str, runs: list[s
     if journal is None or journal['producer_token'] != token:
         raise OwnerReceiptConflict('Foreign resident producer')
     _bound(row, journal)
+    check_agent_identity(conn, row)
     _lease(conn, journal['lease_pid'], journal['lease_started_at'])
     allowed = {'admitted', 'running', 'awaiting_approval'} | ({'cancelling'} if returned_cancelled else set())
     if (not runs or row['status'] not in allowed
@@ -171,6 +220,7 @@ def read(conn: Any, row: Any) -> dict[str, Any] | None:
     if journal is None or journal['terminal_json'] is None:
         return None
     _bound(row, journal)
+    check_agent_identity(conn, row)
     proof = json.loads(journal['terminal_json'])
     runs = json.loads(journal['native_runs_json'])
     if (not runs or proof.get('native_run_ids') != runs or proof.get('source') != SOURCE

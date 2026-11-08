@@ -4408,7 +4408,8 @@ class JaegerGatewayApp:
         visible notice and one-click undo. Home sessions and chats the owner
         assigned (``agent_pinned``) are never moved. True when it handed off."""
         meta = (session or {}).get("metadata") or {}
-        if not session or meta.get("route_checked") or meta.get("home") or meta.get("agent_pinned"):
+        from .owner_receipts import stable_agent_assignment
+        if not session or stable_agent_assignment(meta):
             return False
         from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
 
@@ -4436,14 +4437,24 @@ class JaegerGatewayApp:
             logger.debug("auto-route failed", exc_info=True)
             return False
 
-    def _resolve_session_agent(self, session_id: str):
+    @staticmethod
+    def _journal_lead_identity(execution, agent, session_agent_id) -> bool:
+        from .owner_receipts import canonical_lead
+        identity = execution.get('_owner_agent')
+        return (canonical_lead(identity) and agent is not None
+                and session_agent_id == identity['id'] == agent.id
+                and getattr(agent.kind, 'value', agent.kind) == identity['kind']
+                and getattr(agent.role, 'value', agent.role) == identity['role']
+                and not agent.disabled)
+
+    def _resolve_session_agent(self, session_id: str, *, read_only: bool = False):
         """Look up the session's AgentRecord via AgentRegistry (or None)."""
         session = self.store.get_session(session_id)
         agent_id = self._session_agent_id(session)
         if not agent_id:
             return None
         try:
-            return self._registry().get_agent(agent_id)
+            return self._registry().get_agent(agent_id, read_only=True) if read_only else self._registry().get_agent(agent_id)
         except Exception:  # noqa: BLE001 — chat must not fail closed on registry
             logger.exception("Failed to resolve session agent %s", agent_id)
             return None
@@ -5402,10 +5413,21 @@ class JaegerGatewayApp:
         Cancellation is explicit; a dropped SSE client does not stop work.
         """
         session = self.store.get_session(session_id)
-        if self._auto_route(session, text):
+        identity_error = None
+        if (execution or {}).get('_owner_agent') is not None:
+            from .owner_receipts import check_agent_identity, OwnerReceiptConflict
+            try:
+                with self.store._get_conn() as conn:
+                    row = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id or turn_id,)).fetchone()
+                    check_agent_identity(conn, row)
+            except OwnerReceiptConflict as exc:
+                identity_error = exc
+        elif self._auto_route(session, text):
             session = self.store.get_session(session_id)
         session_agent_id = self._session_agent_id(session)
-        agent = self._resolve_session_agent(session_id)
+        agent = None if identity_error else (self._resolve_session_agent(session_id, read_only=True)
+                 if (execution or {}).get('_owner_agent') is not None
+                 else self._resolve_session_agent(session_id))
         system_prompt = self._system_prompt_for_agent(agent)
         agent_fields: dict[str, Any] = {}
         if session_agent_id:
@@ -5479,6 +5501,13 @@ class JaegerGatewayApp:
                 logger.debug("attachment materialize failed", exc_info=True)
 
         try:
+            if identity_error is not None:
+                raise identity_error
+            if (execution or {}).get('_owner_agent') is not None:
+                from .owner_receipts import check_agent_identity
+                with self.store._get_conn() as conn:
+                    row = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (rid,)).fetchone()
+                    check_agent_identity(conn, row)
             if self._cancellations.is_cancelled(rid):
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
                 return
@@ -5596,7 +5625,9 @@ class JaegerGatewayApp:
                         and execution is not None and session_key == session_id
                         and (admitted_request or {}).get('digest_version') == 2
                         and not original.get('attachments') and not original.get('options')
-                        and not original.get('is_subordinate') and not role_s
+                        and not original.get('is_subordinate')
+                        and ((not role_s and not session_agent_id and '_owner_agent' not in original)
+                             or (role_s == 'lead' and self._journal_lead_identity(original, agent, session_agent_id)))
                         and original.get('provider') != 'cli'
                         and not str(original.get('model') or '').startswith('@')):
                     from .owner_receipts import begin

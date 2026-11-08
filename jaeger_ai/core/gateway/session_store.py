@@ -1626,6 +1626,10 @@ class GatewaySessionStore:
                     raise InstanceDefaultsConflict('Retry source does not belong to originating session; no dispatch')
                 source_row = conn.execute('SELECT * FROM client_requests WHERE request_id=? AND session_id=?',
                     (origin.get('request_id'), origin.get('session_id'))).fetchone()
+                if retry_of and source_row is not None:
+                    prior_agent = _row_meta(source_row['execution_json']).get('_owner_agent')
+                    if prior_agent is not None and execution.get('_owner_agent') != prior_agent:
+                        raise RequestConflict('Retry agent identity changed; no dispatch')
                 marker = inherit_instance_defaults(
                     self._request_row(source_row) if source_row else None, execution,
                     session_id=origin.get('session_id'),
@@ -1780,7 +1784,11 @@ class GatewaySessionStore:
             if unknown:
                 raise ValueError(f"Unknown attachment id(s): {', '.join(unknown)}")
             selected = list(wanted)
+        from .owner_receipts import session_agent_identity, canonical_lead, stable_agent_assignment
+        agent_identity = session_agent_identity(session_id, meta)
         return {
+            **({'_owner_agent': agent_identity} if canonical_lead(agent_identity) and stable_agent_assignment(meta)
+               and not choices.get('is_subordinate') and not choices.get('options') else {}),
             "model": model or None,
             "provider": provider or None,
             "attachments": [

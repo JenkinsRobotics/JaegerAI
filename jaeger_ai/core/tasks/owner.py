@@ -788,12 +788,14 @@ class GatewayTaskOwner:
         if int(current.payload.get('attempt', 0)) != int(task.payload.get('attempt', 0)):
             raise TaskAdmissionChanged('Task attempt changed before admission; no dispatch')
         if current.payload.get('foreground_resume_version') == 1:
-            original = conn.execute('SELECT status, execution_json FROM client_requests WHERE request_id=?',
+            original = conn.execute('SELECT * FROM client_requests WHERE request_id=?',
                                    (current.payload['original_request_id'],)).fetchone()
             if (not original or original['status'] != 'completed'
                     or json.loads(original['execution_json']) != current.payload['execution']
                     or self.gateway._cancellations.is_cancelled(current.payload['original_request_id'])):
                 raise TaskAdmissionChanged('Original foreground authority or cancellation changed; no dispatch')
+            from jaeger_ai.core.gateway.owner_receipts import check_agent_identity
+            check_agent_identity(conn, original)
             if execution is not None:
                 # Commit the per-attempt contract with request admission. Owner
                 # feedback may change later; the admitted inputs never do.
@@ -813,6 +815,10 @@ class GatewayTaskOwner:
     @staticmethod
     def _continuation_execution(task):
         execution = json.loads(json.dumps(task.payload['execution']))
+        # Foreground journal identity stays on the canonical source request.
+        # Its existing admission guard validates that source; a durable child
+        # never claims fresh foreground receipt eligibility.
+        execution.pop('_owner_agent', None)
         execution['is_subordinate'] = True
         execution['options'] = {**(execution.get('options') or {}), 'background': True,
                                 'source': 'durable_task', 'task_id': task.task_id,
