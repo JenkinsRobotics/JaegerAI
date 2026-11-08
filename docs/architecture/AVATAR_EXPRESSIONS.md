@@ -23,7 +23,21 @@ variant used by the existing cutout rig. The original `jaeger-sculpted.png` rema
 available as the baseline reference. Do not adopt panel D's cheekbones or change
 the character into the rejected softened mascot.
 
-The current icon intentionally uses the signature grin as requested. Other poses
-remain concept references; there is no expression-preview selector or automatic
-multi-pose atlas. Future emotion work must preserve the original design and keep
-the stronger grin contextual rather than automatically applying it to errors.
+## Approved pose collection
+
+The operator approved poses 1, 2, 3, 5, 6, 7, 8, 10, 11, and 12 from the revised
+lean-character sheet. Poses 4 (Resolute) and 9 (Laughing) were explicitly rejected
+and are not included in the production atlas, selector, or activity mappings.
+`jaeger-approved-poses.png` contains the ten approved poses on a transparent 5-by-2
+grid, in the order above. Keep `APPROVED_POSES` aligned with that ordering.
+
+Idle retains the unchanged `jaeger-signature-grin.png` icon and its cutout rig.
+Working and making something use Calculating (3); waiting uses Your move (5);
+connecting uses Resting (7); completion uses Eureka (6). The existing chat hook
+owns activity and completion timing. Facepalm and playful poses never activate
+automatically from errors or inferred sentiment. Listening is a selectable pose,
+not a claim that voice capture is active.
+
+The small avatar selector previews any approved pose for eight seconds, then
+returns to automatic. Activity changes clear previews immediately. Reduced motion
+and still mode disable the pose fade. This is 2D pose switching, not a 3D rig.

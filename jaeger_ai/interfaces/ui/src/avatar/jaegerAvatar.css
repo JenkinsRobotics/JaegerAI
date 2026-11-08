@@ -91,10 +91,16 @@
 }
 
 .jg-jaeger-avatar > .jg-clip-status { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); }
+.jg-jaeger-pose { position:absolute; inset:0; background-size:500% 200%; background-repeat:no-repeat; pointer-events:none; }
+.jg-jaeger-avatar[data-motion="rigged"] .jg-jaeger-pose { animation:jg-jaeger-pose-appear .25s ease-out; }
+.jg-jaeger-pose-picker { position:absolute; right:0; bottom:0; width:24px; height:24px; border:1px solid var(--jg-color-border); border-radius:50%; background:var(--jg-color-pane); color:var(--jg-color-text); cursor:pointer; font-size:12px; }
+.jg-jaeger-pose-picker:focus-visible { outline:2px solid var(--jg-color-accent); outline-offset:2px; }
+@keyframes jg-jaeger-pose-appear { from { opacity:.4; } to { opacity:1; } }
 .jg-stable-demo__profile-avatar:has(.jg-jaeger-avatar) { width: 94px; height: 94px; flex-basis: 94px; }
 .jg-pbar__avatar:has(.jg-jaeger-avatar) { width: 94px; height: 94px; }
 
 @media (prefers-reduced-motion: reduce) {
+  .jg-jaeger-pose,
   .jg-jaeger-cutout,
   .jg-jaeger-cutout__part { animation: none !important; }
 }
