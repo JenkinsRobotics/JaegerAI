@@ -70,6 +70,8 @@ jobs:
             fi
           done
       - name: Install suite
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Keep the packaging toolchain on a patched release. setuptools is
           # installed in the runner environment and is therefore audited even
@@ -77,6 +79,16 @@ jobs:
           python -m pip install --upgrade pip "setuptools>=83"
           case "${{ matrix.suite }}" in
             root)
+              # Install the exact official spaCy model through the authenticated
+              # Releases API. Direct github.com asset URLs intermittently return
+              # an immediate 504 on hosted runners and pip does not retry them.
+              model_dir="$RUNNER_TEMP/jaeger-spacy-model"
+              mkdir -p "$model_dir"
+              gh release download en_core_web_sm-3.8.0 \
+                --repo explosion/spacy-models \
+                --pattern 'en_core_web_sm-3.8.0-py3-none-any.whl' \
+                --dir "$model_dir" --clobber
+              python -m pip install "$model_dir/en_core_web_sm-3.8.0-py3-none-any.whl"
               # Honor the app's binding version while installing its packages,
               # instead of compiling a newer binding and then replacing it.
               sed -n '/^llama-cpp-python==/p' requirements.txt > "$RUNNER_TEMP/jaeger-ci-constraints.txt"
