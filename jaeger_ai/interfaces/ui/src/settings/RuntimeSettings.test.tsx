@@ -85,3 +85,13 @@ it('requires explicit review to cancel an uncommitted pending choice without und
  const click=(label:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===label)!.click();
  try{await act(async()=>root.render(<RuntimeSettings settings={settings} sessionId="owned-cancel"/>));await act(async()=>el.querySelector('button')!.click());await act(async()=>click('Review pending model cancellation'));expect(cancelPending).not.toHaveBeenCalled();await act(async()=>click('Confirm pending model cancellation'));expect(cancelPending).toHaveBeenCalledExactlyOnceWith('owned-cancel',intent);expect(document.body.textContent).toContain('cancelled before commit');expect(document.body.textContent).not.toContain('Loading models');expect(localStorage.getItem(key)).toBeNull();expect(localStorage.getItem(key+'.draft')).toBe(intent.model);expect(settings.saveVersioned).not.toHaveBeenCalled();}finally{await act(async()=>root.unmount());el.remove();localStorage.clear();}
 });
+it('shows the configured default model without opening the picker',async()=>{
+ const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
+ const settings={inventory:async()=>({providers:[],active:{provider:'owned',model:'configured-model'}}),read:async()=>({session_id:'default-model',model:null}),save:vi.fn()};
+ try {
+  await act(async()=>root.render(<RuntimeSettings settings={settings} sessionId="default-model"/>));
+  expect(el.querySelector('.jg-runtime-trigger')?.textContent).toContain('configured-model');
+  expect(el.querySelector('.jg-runtime-trigger')?.getAttribute('title')).toContain('Provider execution is verified separately');
+  expect(settings.save).not.toHaveBeenCalled();
+ } finally {await act(async()=>root.unmount());el.remove();}
+});
