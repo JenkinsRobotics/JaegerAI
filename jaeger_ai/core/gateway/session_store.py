@@ -160,6 +160,17 @@ def _row_meta(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _message_read_state(meta: dict[str, Any]) -> dict[str, Any]:
+    """Do not let imported/older caller metadata break the session read model."""
+    value = meta.get('message_read_state')
+    if isinstance(value, dict) and type(value.get('event_id')) is int and value['event_id'] >= 0:
+        marker = value.get('unread')
+        if marker is None or (isinstance(marker, dict) and isinstance(marker.get('request_id'), str)
+                              and marker['request_id'] and marker.get('role') in ('user', 'assistant')):
+            return {'unread': marker, 'event_id': value['event_id']}
+    return {'unread': None, 'event_id': 0}
+
+
 MESSAGE_KINDS = frozenset({"message", "channel_message", "summary", "handoff_request", "handoff_result", "task_result"})
 MESSAGES_PAGE_MAX = 200
 
@@ -714,6 +725,7 @@ class GatewaySessionStore:
                     "status": r["status"],
                     "message_count": r["message_count"],
                     "metadata": meta,
+                    "unread": _message_read_state(meta)["unread"],
                     "agent_id": _session_agent(r["session_id"], meta),
                     # Sidebar row without N follow-up reads (Agents View).
                     "last_message_preview": _list_preview(r["last_content"]),
@@ -810,6 +822,7 @@ class GatewaySessionStore:
                 "updated_at": row["updated_at"],
                 "status": row["status"],
                 "metadata": meta,
+                "unread": _message_read_state(meta)["unread"],
                 "agent_id": _session_agent(row["session_id"], meta),
                 "messages": [
                     {
@@ -922,6 +935,7 @@ class GatewaySessionStore:
             messages = messages[:max(0, int(keep_count))]
         branch_id = uuid.uuid4().hex
         metadata = dict(source.get("metadata") or {})
+        metadata.pop("message_read_state", None)
         metadata.update({"source": "fork", "parent_session_id": session_id})
         branch = self.ensure_session(
             branch_id,
@@ -2071,6 +2085,41 @@ class GatewaySessionStore:
             if message_id is not None and rating in {"positive", "negative"}:
                 result[str(message_id)] = rating
         return result
+
+    def message_read_state(self, session_id: str) -> dict[str, Any]:
+        """One explicit unread boundary per conversation, shared by all clients."""
+        with self._get_conn() as conn:
+            row = conn.execute('SELECT metadata_json FROM sessions WHERE session_id=?', (session_id,)).fetchone()
+            if row is None:
+                raise KeyError('Session not found')
+            return _message_read_state(_row_meta(row['metadata_json']))
+
+    def set_message_read_state(self, session_id: str, unread: dict[str, str] | None) -> dict[str, Any]:
+        if unread is not None and (
+            not isinstance(unread, dict) or set(unread) != {'request_id', 'role'}
+            or not isinstance(unread['request_id'], str) or not unread['request_id'].strip()
+            or not isinstance(unread['role'], str) or unread['role'] not in {'user', 'assistant'}
+        ):
+            raise ValueError('Valid request_id and user or assistant role required')
+        with self._immediate() as conn:
+            row = conn.execute('SELECT metadata_json FROM sessions WHERE session_id=?', (session_id,)).fetchone()
+            if row is None:
+                raise KeyError('Session not found')
+            if unread is not None and conn.execute(
+                'SELECT 1 FROM client_requests WHERE session_id=? AND request_id=?',
+                (session_id, unread['request_id']),
+            ).fetchone() is None:
+                raise KeyError('Request not found in this conversation')
+            meta = _row_meta(row['metadata_json'])
+            previous = _message_read_state(meta)
+            if previous['unread'] == unread:
+                return {**previous, '_event': None}
+            event = self._insert_event(conn, session_id, 'session.read_state', {'unread': unread})
+            snapshot = {'unread': unread, 'event_id': event['event_id']}
+            meta['message_read_state'] = snapshot
+            # A read marker must not change transcript activity ordering.
+            conn.execute('UPDATE sessions SET metadata_json=? WHERE session_id=?', (json.dumps(meta), session_id))
+            return {**snapshot, '_event': event}
 
     def message_reactions(self, session_id: str) -> dict[str, Any]:
         """Durable per-request/per-role decoration, independent of SSE retention."""

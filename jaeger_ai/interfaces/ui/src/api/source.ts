@@ -95,6 +95,8 @@ export interface LibraryControls {
   operation(id: string): Promise<{ receipt: (ControlResult & { document?: { id: string } }) | null }>;
 }
 
+export interface MessageReadState { unread: { request_id: string; role: "user" | "assistant" } | null; event_id: number }
+
 export interface ReactionSnapshot { reactions: Record<string, string[]>; event_id: number; allowed_emojis: string[] }
 export interface QueuedRequest extends RequestSnapshot { input_text: string; queue_position?: number; updated_at: number }
 export interface SessionQueue {
@@ -236,6 +238,8 @@ export interface ChannelSnapshot {
 }
 export interface TaskProposalReceipt { task_id: string; status: string; replayed: boolean; request_id: string; origin_session_id: string }
 export interface JaegerSource {
+  connectionInfo?(): Promise<{host?:string;commit?:string;service?:string;webui_origin?:string}>;
+  operatorSession?(): Promise<{active_session_id:string|null;revision:number}>;
   semanticClaimControls?:SemanticClaimControls;
   episodes?: EpisodeControls;
   semanticClaims?(options:{query:string;includeInactive:boolean;before?:number}):Promise<SemanticClaims>;
@@ -264,6 +268,11 @@ export interface JaegerSource {
   setRuntimeAutonomy?(autonomy: RuntimeAutonomy): Promise<RuntimeAutonomySnapshot>;
   runtimeTier?(): Promise<RuntimeTierSnapshot>;
   setRuntimeTier?(tier: RuntimeTier): Promise<RuntimeTierSnapshot>;
+  messageReadState?: {
+    load(sessionId: string): Promise<MessageReadState>;
+    save(sessionId: string, body: NonNullable<MessageReadState["unread"]>): Promise<MessageReadState>;
+    clear(sessionId: string): Promise<MessageReadState>;
+  };
   messageReactions?: {
     load(sessionId: string): Promise<ReactionSnapshot>;
     save(sessionId: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }): Promise<ReactionSnapshot>;

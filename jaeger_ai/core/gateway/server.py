@@ -17,6 +17,7 @@ import os
 import re
 import threading
 import uuid
+import socket
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable
@@ -1647,6 +1648,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}/clarify", self.handle_list_clarify)
         self.app.router.add_post("/v1/sessions/{id}/clarify/{clarify_id}", self.handle_answer_clarify)
         self.app.router.add_get("/v1/sessions/{id}/feedback", self.handle_message_feedback)
+        for method in ("GET", "POST", "DELETE"):
+            self.app.router.add_route(method, "/v1/sessions/{id}/read-state", self.handle_message_read_state)
         self.app.router.add_post("/v1/sessions/{id}/retry", self.handle_retry_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
         self.app.router.add_get("/v1/sessions/{id}/queue", self.handle_get_queue)
@@ -2096,6 +2099,7 @@ class JaegerGatewayApp:
         payload = {
             "status": status,
             "service": "jaeger-gateway",
+            "host": socket.gethostname(),
             "version": JAEGER_VERSION,
             "commit": git_commit,
             "model": active_model,
@@ -3594,6 +3598,26 @@ class JaegerGatewayApp:
             "session_id": branch["session_id"], "parent_session_id": session_id,
         })
         return web.json_response(branch, status=201)
+
+    async def handle_message_read_state(self, request: web.Request) -> web.Response:
+        session_id = request.match_info['id']
+        try:
+            if request.method == 'GET':
+                return web.json_response(self.store.message_read_state(session_id))
+            body = None
+            if request.method == 'POST':
+                body = await request.json() if request.can_read_body else {}
+                if not isinstance(body, dict):
+                    raise ValueError('JSON object required')
+            snapshot = self.store.set_message_read_state(session_id, body)
+        except KeyError as exc:
+            return web.json_response({'error': exc.args[0]}, status=404)
+        except ValueError as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        event = snapshot.pop('_event', None)
+        if event:
+            self.event_bus.fanout(event)
+        return web.json_response(snapshot)
 
     async def handle_message_feedback(self, request: web.Request) -> web.Response:
         from jaeger_ai.contract.message_feedback import REACTION_EMOJIS
