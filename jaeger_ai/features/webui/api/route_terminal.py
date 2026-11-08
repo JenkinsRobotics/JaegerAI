@@ -54,6 +54,13 @@ def _terminal_session_lookup(body_or_query: dict) -> tuple[str, Any]:
             s = SimpleNamespace(workspace=str(gateway_read_workspace(sid)))
         except KeyError:
             raise KeyError("Session not found") from None
+    else:
+        # Legacy model lookup is not profile-authorized by itself. Do not use
+        # file-manager fallbacks that invent a default workspace for this shell.
+        from .profiles import _profiles_match, get_active_profile_name
+        if (getattr(s, "session_id", sid) != sid
+                or not _profiles_match(getattr(s, "profile", None), get_active_profile_name())):
+            raise KeyError("Session not found")
     return sid, s
 
 
