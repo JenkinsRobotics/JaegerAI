@@ -25,7 +25,7 @@ from jaeger_ai.core.gateway import handoff_outputs as _handoff_outputs
 from jaeger_ai.core.sqlite_connection import ClosingConnection
 
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
@@ -316,7 +316,7 @@ class GatewaySessionStore:
             conn.execute("BEGIN IMMEDIATE")
             yield conn
             conn.execute("COMMIT")
-        except Exception:
+        except BaseException:
             conn.execute("ROLLBACK")
             self._pending_events.items = []
             raise
@@ -571,6 +571,10 @@ class GatewaySessionStore:
                 )
             """)
             current = 16
+        if current < 17:
+            from .owner_receipts import migrate
+            migrate(conn)
+            current = 17
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -1800,6 +1804,8 @@ class GatewaySessionStore:
         native_run_id: str,
         native_session: str,
         status: str = "running",
+        owner_receipt_token: str | None = None,
+        native_reuse_guard: Callable | None = None,
     ) -> dict[str, Any] | None:
         now = time.time()
         with self._immediate() as conn:
@@ -1808,6 +1814,8 @@ class GatewaySessionStore:
             ).fetchone()
             if row is None:
                 return None
+            from .owner_receipts import accept
+            accept(conn, row, native_run_id, native_session, owner_receipt_token, native_reuse_guard)
             # execution_unknown is an outcome awaiting reconciliation, not a state to resume
             # from: a worker still unwinding after a stop must not turn it back into 'running'.
             if row["status"] in {"completed", "failed", "cancelled", "execution_unknown"}:
@@ -1822,6 +1830,48 @@ class GatewaySessionStore:
             ).fetchone()
             return self._request_row(updated) if updated else None
 
+    def has_owner_request_journal(self, request_id: str) -> bool:
+        with self._get_conn() as conn:
+            return conn.execute('SELECT 1 FROM owner_request_journal WHERE request_id=?', (request_id,)).fetchone() is not None
+
+    def owner_request_receipt(self, request_id: str) -> dict[str, Any] | None:
+        from .owner_receipts import read
+        with self._get_conn() as conn:
+            row = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id,)).fetchone()
+            return read(conn, row) if row is not None else None
+
+    def sealed_owner_requests(self) -> list[str]:
+        with self._get_conn() as conn:
+            return [row[0] for row in conn.execute(
+                "SELECT r.request_id FROM client_requests r JOIN owner_request_journal j "
+                "ON j.request_id=r.request_id WHERE j.terminal_json IS NOT NULL "
+                "AND r.status NOT IN ('completed', 'failed', 'cancelled') ORDER BY r.created_at")]
+
+    def mark_owner_projection_pending(self, request_id: str, lease: dict[str, Any]) -> None:
+        """A sealed result awaits projection; never replace newer session truth."""
+        from .owner_receipts import read, _lease
+        with self._immediate() as conn:
+            _lease(conn, lease['owner_pid'], lease['started_at'])
+            row = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id,)).fetchone()
+            if row is None or row['status'] in {'completed', 'failed', 'cancelled'} or read(conn, row) is None:
+                return
+            if _row_meta(row['result_json']).get('owner_result_pending_projection'):
+                return
+            now = time.time()
+            result = {'status': 'execution_unknown', 'owner_result_pending_projection': True,
+                      'error': 'A committed owner result awaits safe projection; no replay', 'turn_id': row['turn_id']}
+            conn.execute("UPDATE client_requests SET status='execution_unknown', result_json=?, updated_at=? WHERE request_id=?",
+                         (json.dumps(result), now, request_id))
+            event = self._insert_event(conn, row['session_id'], 'turn.unknown',
+                                       {**result, 'request_id': request_id}, now)
+            self._queue_event(event)
+            latest = conn.execute("SELECT data_json FROM activity_history WHERE session_id=? AND event='turn.start' "
+                                  "ORDER BY event_id DESC LIMIT 1", (row['session_id'],)).fetchone()
+            owner = _row_meta(latest['data_json']) if latest else {}
+            if owner.get('request_id') == request_id and owner.get('turn_id') == row['turn_id']:
+                conn.execute("UPDATE sessions SET status='execution_unknown', updated_at=? WHERE session_id=? "
+                             "AND status IN ('running', 'cancelling', 'awaiting_approval')", (now, row['session_id']))
+
     def complete_request(
         self,
         request_id: str,
@@ -1832,6 +1882,7 @@ class GatewaySessionStore:
         session_status: str | None = None,
         event_name: str | None = None,
         follow_ups: list[str] | None = None,
+        owner_recovery_lease: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Commit result, transcript and terminal event together, once."""
         event_name = event_name or {
@@ -1840,6 +1891,9 @@ class GatewaySessionStore:
         }[status]
         now = time.time()
         with self._immediate() as conn:
+            if owner_recovery_lease is not None:
+                from .owner_receipts import _lease
+                _lease(conn, owner_recovery_lease['owner_pid'], owner_recovery_lease['started_at'])
             row = conn.execute(
                 "SELECT * FROM client_requests WHERE request_id=?", (request_id,)
             ).fetchone()
@@ -1849,6 +1903,15 @@ class GatewaySessionStore:
                 payload = self._request_row(row)
                 payload["replayed"] = True
                 return payload
+            from .owner_receipts import read, encoded, OwnerReceiptConflict
+            proof = read(conn, row)
+            if proof is not None and encoded({
+                'status': status, 'result': result, 'assistant_text': assistant_text,
+                'session_status': session_status, 'follow_ups': follow_ups,
+            }) != encoded({key: proof[key] for key in (
+                'status', 'result', 'assistant_text', 'session_status', 'follow_ups',
+            )}):
+                raise OwnerReceiptConflict('Projection conflicts with immutable resident outcome')
             conn.execute(
                 "UPDATE client_requests SET status=?, result_json=?, updated_at=? WHERE request_id=?",
                 (status, json.dumps(result), now, request_id),
@@ -1992,6 +2055,16 @@ class GatewaySessionStore:
     def mark_request_status(self, request_id: str, status: str) -> dict[str, Any] | None:
         now = time.time()
         with self._immediate() as conn:
+            from .owner_receipts import read
+            existing = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id,)).fetchone()
+            if existing is not None:
+                journal = conn.execute('SELECT * FROM owner_request_journal WHERE request_id=?', (request_id,)).fetchone()
+                if journal is not None:
+                    from .owner_receipts import _bound, _lease
+                    _bound(existing, journal)
+                    if existing['status'] == 'execution_unknown' or read(conn, existing) is not None:
+                        return self._request_row(existing)
+                    _lease(conn, journal['lease_pid'], journal['lease_started_at'])
             changed = conn.execute(
                 "UPDATE client_requests SET status=?, updated_at=? WHERE request_id=? "
                 "AND status NOT IN ('completed', 'failed', 'cancelled') "

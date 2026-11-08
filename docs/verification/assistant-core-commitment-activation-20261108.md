@@ -71,3 +71,11 @@ Exact commands, the failed chronology, independent controls, source hashes and
 HTTP durable evidence accompany the review artifact. Rebuild both jaeger-agent
 and root wheel/source archives after this change; stale agent archives must not
 be carried forward merely because their version string is unchanged.
+
+## Later combined gate
+
+The [corrected request-journal increment](assistant-core-owner-request-journal-20261108.md)
+re-ran the final combined runtime: 120 agent tests, 402 durable/recovery tests,
+43 owned HTTP checks (three established exclusions), repository/production/security
+and rebuilt-package gates passed. It preserves the earlier cron failure and the
+subsequently caught journal cancellation regression rather than erasing either.
