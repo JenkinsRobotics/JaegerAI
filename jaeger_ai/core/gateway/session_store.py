@@ -1846,8 +1846,12 @@ class GatewaySessionStore:
             ).fetchone()
             if row is None:
                 return None
-            if native_binding_guard is not None:
-                native_binding_guard(conn, self._request_row(row), native_run_id, native_session)
+            from .owner_receipts import protected_background_sources
+            protected = protected_background_sources(conn, native_run_id)
+            permitted = (native_binding_guard(conn, self._request_row(row), native_run_id, native_session)
+                         if native_binding_guard is not None else None)
+            if protected and (not permitted or not protected.issubset(permitted)):
+                raise RequestConflict('Native run belongs to a protected background task; exact owner transfer required')
             from .owner_receipts import accept
             accept(conn, row, native_run_id, native_session, owner_receipt_token, native_reuse_guard)
             # execution_unknown is an outcome awaiting reconciliation, not a state to resume
