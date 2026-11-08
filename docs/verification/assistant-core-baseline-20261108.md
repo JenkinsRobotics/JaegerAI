@@ -141,7 +141,7 @@ merge and deployment decisions.
 
 ## Final verification
 
-The code under review is the PR head based on the canonical revision above.
+The code under review is the local candidate based on the canonical revision above.
 Record the exact checkout with `git rev-parse HEAD`; do not substitute the live
 runtime's commit label. The final tested source fingerprint is
 `b30f963e51fd2695dc2dafab1c02bb547b23d9738910d3363c81c929713736b2`, with
