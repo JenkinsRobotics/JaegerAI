@@ -220,3 +220,25 @@ No unsupported control or tab is promoted to PASS by these scoped results.
   preserves full supplied details alongside progress previews, marks unsupported
   values unavailable and masks known credentials. Fresh production UI build and
   913 tests in 201 files pass; DOM/CSS evidence is not visual phone/browser QA.
+
+
+## Current reconciled source qualification
+
+All tabs remain PARTIAL. The current source is documented in
+[reconciled qualification](assistant-core-reconciled-qualification-20261108.md).
+It preserves prior work and incorporates pinned upstream 315f6ea, with fresh
+944-test/205-file UI verification and production build (873 source files,
+863 manifest inputs). These are source/DOM checks, not rendered phone/browser QA.
+
+- Chat/navigation: opaque historic IDs, exact links, read/unread state and message
+  actions/reactions retain ownership and chronology across authenticated Gateway
+  and WebUI routes. Independent namespace and delayed-selection probes pass.
+- Research: new explicit contracts enforce designated report/ledger consistency
+  and exact checked-result bytes under per-task paths. Legacy tasks are labeled
+  unchecked. This does not establish factual truth, authentic retrieval or
+  interruption recovery during research.
+- Connect Apps: upstream's canonical IDE identity and registry-controlled setup
+  are included and tested with synthetic installer boundaries, not an actual
+  desktop extension installation.
+- Other tabs retain the documented scoped results and unqualified real-account,
+  native-host and optional-package limits. No live-runtime pass is inferred.

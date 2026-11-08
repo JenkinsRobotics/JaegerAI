@@ -1,4 +1,9 @@
-# Cooperative research report journey
+# Historical cooperative research report journey
+
+The later [Research consistency contract](assistant-core-research-consistency-20261108.md)
+and [reconciled qualification](assistant-core-reconciled-qualification-20261108.md)
+supersede the automatic-enforcement gap for explicitly contracted new Research
+tasks. This file preserves the earlier cooperative test-only evidence.
 
 This is test-only qualification of the existing Research path. Automatic source
 evidence enforcement and factual research quality remain PARTIAL.

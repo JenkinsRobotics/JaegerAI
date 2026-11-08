@@ -27,3 +27,14 @@ Original reproduction accepts missing citations, fabricated IDs and an unrelated
 Owned HTTP tests use real isolated Gateway/WebUI/task/tool/approval/SQLite/Documents routes with scripted model and retrieval boundaries and reserved `.invalid` URLs. They are not live-provider or rendered-browser proof. The retained no-mock UI build supplies only WebUI static assets. Focused React tests separately exercise the changed request, labels and save payload. Initial HTTP runs failed503 at the WebUI shell because the test used the wrong dist environment variable; corrected to `JAEGER_WEBUI_UI_DIST` and failures retained. An initial UI typecheck fixture omitted sibling IDE media declarations; corrected external copy and retained both logs.
 
 Independent review found hidden/inline-code citation markers, invalid URL ports, and dictionary-stringified originating-chat delivery. Each was corrected with regression coverage before final validation. A subsequent independent review rejected candidate `7cbc977` for indented/unclosed/HTML code citations, trailing-slash URL equivalence, path-read symlink races, and unhandled self-symlinks. Its failing controls are retained; the final correction excludes non-prose markers, preserves URL path slashes, and uses pinned no-follow descriptor reads. A second review rejected `b05823e` because it reopened the root for each artifact and did not catch root-resolution errors; the final version pins the pair together and tests both issues.
+
+
+## Reconciled integration
+
+The exact reviewed increment applies without conflicts to upstream merge
+3910e43fee6fd1fc2a62e2966a2f4c11dd9c3c24, producing source
+ce03f21806c61c769b615ba479721533b1dcedc0. Independent integration reruns pass
+163 controls (70 Research boundaries plus 93 route/unread cases). Full combined
+HTTP passes 56 cases with 3 exclusions; fresh UI passes 944 tests. See the
+[reconciled report](assistant-core-reconciled-qualification-20261108.md) for all
+gates, exact provenance, retained storage failures and qualification limits.

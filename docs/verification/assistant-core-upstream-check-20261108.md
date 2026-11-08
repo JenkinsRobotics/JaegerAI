@@ -1,10 +1,17 @@
-# Canonical upstream snapshots
+# Canonical upstream snapshots and reconciliation
 
-The isolated candidate remains based on
+Current update: the preserved candidate has now been reconciled in a separate
+isolated branch at merge 3910e43, then combined with the Research contract at
+ce03f218. See [current qualification](assistant-core-reconciled-qualification-20261108.md).
+A final read-only query at 2026-11-08T20:07:22Z confirms HEAD/master still
+315f6eacbf99cab11b6a3edf3441a545140ca4c4. No newer upstream is omitted at that
+observation. The following sections retain earlier inspection history.
+
+The original isolated candidate remains based on
 ff71bb769bc56e4c6d7be6d540a86be73e291e07, canonical master when work began.
 The latest read-only query at 2026-11-08T19:28:16Z confirmed the canonical
 https://github.com/JenkinsRobotics/JaegerAI.git default branch is master at
-315f6eacbf99cab11b6a3edf3441a545140ca4c4. The candidate is not combined with
+315f6eacbf99cab11b6a3edf3441a545140ca4c4. At that initial inspection, the candidate was not combined with
 that revision. No main-checkout fetch, reset, merge, rebase or remote write was
 performed during this inspection.
 
@@ -55,10 +62,10 @@ commit timestamps and account associations do not establish push/start times,
 human versus agent involvement, causation, or whether separate work was active.
 No successful remote write from this isolated work is recorded.
 
-The current candidate and original branch must be preserved before reconciling
-upstream in a separate isolated integration branch. Both sets of behavior need
-careful overlap review, independent review and fresh affected tests. No combined
-compatibility is claimed in this candidate's results. The next step is isolated
-reconciliation, not a default-branch merge or runtime action.
+The original candidate/branch were preserved before reconciling upstream
+in a separate isolated integration branch. Both sets of behavior need
+careful overlap review, independent review and fresh affected tests. The earlier inspection did not establish combined compatibility. The later
+reconciled report now records exact independent review and fresh combined
+tests. No default-branch merge or runtime action occurred.
 Runtime-local work remains separate and must not be overwritten. A future live
 release still requires its own data-preserving plan and explicit approval.
