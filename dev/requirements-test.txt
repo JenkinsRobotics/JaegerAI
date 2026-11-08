@@ -25,7 +25,7 @@ mypy>=1.7
 # Test utilities
 faker>=22.0
 freezegun>=1.5.5
-responses>=0.24  # Mock HTTP requests
+responses>=0.26.3  # Mock HTTP requests
 
 # Swift testing helpers (via subprocess)
 # No direct Python package needed
