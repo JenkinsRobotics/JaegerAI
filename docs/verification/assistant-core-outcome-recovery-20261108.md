@@ -152,6 +152,6 @@ checked the corrected tool sequence and receipt assertions. This supersedes the
 older journey's completion evidence, which had been masked by the production bug.
 
 A separate foreground audit has reproduced halted Chat turns showing success.
-That next bounded producer repair is kept separate from this committed durable
-increment. No overall product completion or foreground automatic-resume claim is
+That bounded producer repair is recorded separately in the
+[foreground truth increment](assistant-core-foreground-truth-20261108.md). No overall product completion or foreground automatic-resume claim is
 made here.

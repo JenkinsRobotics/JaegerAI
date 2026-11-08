@@ -5586,7 +5586,12 @@ class JaegerGatewayApp:
                     turn_result = await asyncio.to_thread(_sync_react, prompt)
             else:
                 turn_result = await asyncio.to_thread(_model_only_lane if model_only else _sync_react, prompt)
-            if prepared is not None and not turn_result.get("error"):
+            halt = str(turn_result.get("halt_reason") or "")
+            # A returned controller backstop is not a successful conversation.
+            # Owner decisions and durable slice yields retain their existing
+            # task-level semantics; every other halt is a failed request.
+            terminal_status = "failed" if halt and halt not in {"blocked", "needs_owner", "yielded"} else "completed"
+            if prepared is not None and not turn_result.get("error") and terminal_status == "completed":
                 try:
                     await asyncio.to_thread(runtime.finish_turn, prepared, str(turn_result.get("text") or ""))
                 except Exception:
@@ -5610,7 +5615,8 @@ class JaegerGatewayApp:
                 models=(model, backend),
             )
             if not card_task_id:
-                self._present(session_id, "done", intent="conversation", status="completed")
+                self._present(session_id, "failed" if terminal_status == "failed" else "done",
+                              intent="conversation", status=terminal_status)
 
             self.event_bus.publish(session_id, "turn.delta", {
                 "turn_id": turn_id,
@@ -5638,7 +5644,8 @@ class JaegerGatewayApp:
                 "model_field_scope": "configured_route",
                 "model_identity_scope": "provider_reported" if actual_model else "unknown",
                 "output": response_text,
-                "status": "completed",
+                "status": terminal_status,
+                **({"error": halt} if terminal_status == "failed" else {}),
                 "backend": backend,
                 "model": model,
                 "turn_id": turn_id,
@@ -5660,7 +5667,7 @@ class JaegerGatewayApp:
             if timing is not None:
                 timing.turn_finish_ms = timing.now()
                 result["timing"] = timing.snapshot()
-            self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text, record_entity_event=False)
+            self._persist_terminal(rid, session_id, terminal_status, result, assistant_text=response_text, record_entity_event=False)
         except asyncio.CancelledError:
             # Global Stop cancels this task. Persist how the request ended (cancelled, or
             # execution_unknown when an effect is pending) so it is never left 'running'.
