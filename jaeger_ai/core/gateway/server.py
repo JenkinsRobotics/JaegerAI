@@ -6399,6 +6399,21 @@ class JaegerGatewayApp:
     def _native_receipt(self, native_run_id: str | None, native_session: str | None) -> dict[str, Any] | None:
         if not native_run_id or not native_session:
             return None
+        if native_session.startswith(OWNER_RUN_SESSION_PREFIX):
+            # This binding is produced by the resident Entity's on_run hook,
+            # not the bridge. Its SqliteRunStore checkpoints describe inner
+            # ReAct steps, not the whole request's continuation, owner decision,
+            # or terminal effect settlement. Even a matching bridge row cannot
+            # attest this producer's outcome. Until the owner has a durable
+            # request-qualified receipt, preserve uncertainty without replay.
+            return {
+                "turn_id": native_run_id,
+                "session_id": native_session,
+                "status": "unknown",
+                "execution_unknown": True,
+                "source": "resident_owner",
+                "error": "owner_request_receipt_unavailable",
+            }
         try:
             from jaeger_ai.core.runtime.native_turns import NativeTurns
             root = self._instance_root() / "run"
