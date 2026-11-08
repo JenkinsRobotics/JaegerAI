@@ -32,7 +32,7 @@ describe("AvatarPanel", () => {
     const { container } = render(<AvatarPanel agent={native} clipState="working" size={{ cls: "expanded", short: false }} />);
     expect(await screen.findByRole("img", { name: "Jaeger avatar" })).toBeTruthy();
     expect(container.querySelector('.jg-jaeger-avatar[data-motion="rigged"]')).toBeTruthy();
-    expect(container.querySelectorAll(".jg-jaeger-cutout__part")).toHaveLength(3);
+    expect(container.querySelector('.jg-jaeger-avatar[data-pose="3"] .jg-jaeger-pose[title="Calculating"]')).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Still" }));
     expect(container.querySelector('.jg-jaeger-avatar[data-motion="still"]')).toBeTruthy();
   });
