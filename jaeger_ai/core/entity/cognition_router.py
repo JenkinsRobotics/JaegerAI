@@ -528,6 +528,8 @@ class SleepTimeHandler(CognitionStrategyHandler):
                 "text": f"Completed sleep-time cycle {cycle.cycle_id} in {cycle.duration_s:.2f}s",
                 "claims_recorded": cycle.claims_recorded,
                 "reflections_generated": cycle.reflections_generated,
+                "skills_promoted": cycle.skills_promoted,
+                "skill_reviews": cycle.skill_reviews,
                 "action_taken": True,
                 "llm_invoked": False,
             }
