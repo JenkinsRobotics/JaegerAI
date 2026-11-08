@@ -117,7 +117,14 @@ export interface TaskPresentation {revision:number;pinned:boolean;todo_done:bool
 export type TaskPresentationAction="pin"|"unpin"|"mark_read"|"mark_unread"|"todo_done"|"todo_open";
 export interface TaskPresentationIntent {operation_id:string;action:TaskPresentationAction;expected_revision:number;expected_updated_at:number}
 export interface TaskPresentationReceipt {ok:boolean;scope:"task_presentation";actor:string;task_id:string;operation_id:string;action:TaskPresentationAction;presentation?:TaskPresentation;error?:string;http_status:number}
+export interface ResearchContract {
+  version: 1;
+  kind: "citation_consistency";
+  report_path: "research-report.md";
+  ledger_path: "sources.json";
+}
 export interface Task {
+  payload?: { research_contract?: ResearchContract };
   presentation?: TaskPresentation;
   task_id: string;
   goal?: string;

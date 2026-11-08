@@ -360,7 +360,7 @@ export interface JaegerSource {
   };
   agentHome?(agentId: string): Promise<{ session_id: string; agent_id: string }>;
   taskActions?: {
-    create(body: { session_id: string; goal: string; request_id: string; proposal: true }): Promise<TaskProposalReceipt>;
+    create(body: { session_id: string; goal: string; request_id: string; proposal: true; research_contract?: import("./types").ResearchContract }): Promise<TaskProposalReceipt>;
     lookup?(sessionId: string, requestId: string): Promise<{ session_id: string; request_id: string; tasks: Task[] }>;
     edit(id: string, goal: string, expected_updated_at: number): Promise<Task>;
     approve(id: string, expected_updated_at: number): Promise<void>;

@@ -393,7 +393,7 @@ export class GatewayClient implements JaegerSource {
   };
   taskActions = {
     lookup: (sessionId: string, requestId: string) => this.json<{ session_id: string; request_id: string; tasks: Task[] }>(`/v1/task-submissions/${encodeURIComponent(requestId)}?session_id=${encodeURIComponent(sessionId)}`),
-    create: (body: { session_id: string; goal: string; request_id: string; proposal: true }) => this.json<import("./source").TaskProposalReceipt>("/v1/tasks", body),
+    create: (body: Parameters<NonNullable<JaegerSource["taskActions"]>["create"]>[0]) => this.json<import("./source").TaskProposalReceipt>("/v1/tasks", body),
     edit: (id: string, goal: string, expected_updated_at: number) => this.json<Task>(`/v1/tasks/${encodeURIComponent(id)}`, { goal, expected_updated_at }, "PATCH"),
     approve: async (id: string, expected_updated_at: number) => { await this.json(`/v1/tasks/${encodeURIComponent(id)}/approve`, { expected_updated_at }); },
     cancel: async (id: string) => { await this.json(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {}); },

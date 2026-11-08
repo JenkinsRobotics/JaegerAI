@@ -98,7 +98,12 @@ class GatewayTaskOwner:
         return sorted(set(paths))
 
     def submit(self, goal: str, *, context: dict, artifacts: list[str] | None = None,
-               proposal: bool = False, key: str = '', workflow_reference: dict | None = None) -> dict:
+               proposal: bool = False, key: str = '', workflow_reference: dict | None = None, research_contract: dict | None = None) -> dict:
+        if research_contract is not None:
+            from .research import validate_contract
+            if context.get('source') != 'client':
+                raise ValueError('Research contract requires explicit client admission')
+            research_contract = validate_contract(research_contract)
         workflow_provenance = {}
         if workflow_reference is not None:
             if (not isinstance(workflow_reference, dict) or set(workflow_reference) != {'id', 'revision', 'digest'}
@@ -123,6 +128,14 @@ class GatewayTaskOwner:
         workspace = str(execution.get('workspace') or '')
         paths = self.artifact_paths(workspace, artifacts)
         submission_id = context.get('client_submission_id')
+        if submission_id is not None and not isinstance(submission_id, str):
+            raise ValueError('Client submission ID must be text')
+        identity = ('client:' + submission_id) if submission_id else key or json.dumps([context.get('request_id') or '', ' '.join(goal.casefold().split())])
+        tid = 'task_' + hashlib.sha256(json.dumps([parent, identity]).encode()).hexdigest()[:24]
+        research_artifacts = None
+        if research_contract is not None:
+            from .research import artifact_paths
+            research_artifacts = artifact_paths(tid)
         fingerprint = None
         if submission_id:
             from .store import TaskConflict
@@ -130,21 +143,22 @@ class GatewayTaskOwner:
                 raise ValueError('Client submission ID must be text of at most128 characters')
             fingerprint = hashlib.sha256(json.dumps({'goal': goal, 'execution': execution, 'artifacts': paths,
                 'proposal': proposal, 'agent_id': context.get('agent_id') or '', 'eta': context.get('eta'),
-                'runner': context.get('runner') or 'native'}, sort_keys=True).encode()).hexdigest()
+                'runner': context.get('runner') or 'native', **({'research_contract': research_contract, 'research_artifacts': research_artifacts} if research_contract is not None else {})}, sort_keys=True).encode()).hexdigest()
             matches = self.store.client_submissions(parent, submission_id)
             if len(matches) > 1:
                 raise TaskConflict('Multiple legacy tasks share this submission identity; inspect them without replay')
             if matches:
                 previous = matches[0]
                 previous_fingerprint = previous.provenance.get('submission_fingerprint')
-                same = previous_fingerprint == fingerprint if previous_fingerprint else (previous.goal == goal and previous.payload.get('execution') == execution and previous.payload.get('artifacts') == paths and previous.agent_id == str(context.get('agent_id') or '') and previous.runner == str(context.get('runner') or 'native') and previous.eta == context.get('eta'))
+                same = previous_fingerprint == fingerprint if previous_fingerprint else (previous.goal == goal and previous.payload.get('execution') == execution and previous.payload.get('artifacts') == paths and previous.agent_id == str(context.get('agent_id') or '') and previous.runner == str(context.get('runner') or 'native') and previous.eta == context.get('eta') and previous.payload.get('research_contract') == research_contract)
                 if not same:
                     raise TaskConflict('Client submission identity conflicts with admitted work')
                 return {'ok': True, 'task_id': previous.task_id, 'status': previous.state.value, 'replayed': True,
                         'session_id': f'task:{previous.task_id}', 'authorized': previous.provenance.get('authorized', False)}
-        identity = ('client:' + submission_id) if submission_id else key or json.dumps([context.get('request_id') or '', ' '.join(goal.casefold().split())])
-        tid = 'task_' + hashlib.sha256(json.dumps([parent, identity]).encode()).hexdigest()[:24]
         payload = {'execution': execution, 'artifacts': paths}
+        if research_contract is not None:
+            payload['research_contract'] = research_contract
+            payload['research_artifacts'] = research_artifacts
         task = DurableTask(tid, 'native:jaeger', goal, kind=TaskKind.LONG_RUNNING,
             state=TaskState.QUEUED if approved else TaskState.PAUSED, payload=payload,
             notification_policy=NotificationPolicy(recipient_session_id=parent),
@@ -835,10 +849,15 @@ class GatewayTaskOwner:
                   + task.goal)
         if task.payload.get('artifacts'):
             prompt += '\nRequired result artifacts: ' + json.dumps(task.payload['artifacts'])
+        if 'research_contract' in task.payload:
+            from .research import guidance
+            prompt += '\n' + guidance(task.payload['research_contract'])
+            prompt += '\nResearch artifact paths: ' + json.dumps(task.payload['research_artifacts'], sort_keys=True)
+            prompt += '\nUse these owner-designated task-specific paths instead of the contract basenames.'
         if task.error:
             prompt += '\nOwner verification requires correction: ' + str(task.error)
         if task.result:
-            prompt += '\nPrevious checkpoint (continue from verified work):\n' + str(task.result)
+            prompt += '\nPrevious checkpoint (retained work, not necessarily verified):\n' + str(task.result)
         return prompt
 
     def native_reuse_guard(self, task_id: str, run_id: str, native_session: str):
@@ -1135,6 +1154,9 @@ class GatewayTaskOwner:
                     )
                 except CompletionError as exc:
                     authoritative_transition(current, TaskState.FAILED, error=str(exc))
+            elif can_verify and 'research_contract' in current.payload:
+                authoritative_transition(current, TaskState.NEEDS_OWNER,
+                    evidence={'retained_partial_result': current.result}, error=str(evidence))
             elif status == 'cancelled':
                 authoritative_transition(current, TaskState.CANCELLED)
             elif status == 'execution_unknown':
@@ -1255,8 +1277,17 @@ class GatewayTaskOwner:
     def verify(task, result):
         # Capture scope once. The checked paths and the emitted provenance must
         # describe the same root even if instance binding changes during hashing.
-        root = GatewayTaskOwner._verify_root(task)
-        verified, evidence = GatewayTaskOwner._verify_files(task, result, root)
+        try:
+            root = GatewayTaskOwner._verify_root(task)
+        except (OSError, RuntimeError, ValueError):
+            if 'research_contract' not in task.payload:
+                raise
+            root = None
+        if 'research_contract' in task.payload:
+            from .research import verify_research
+            verified, evidence = verify_research(task, result, root)
+        else:
+            verified, evidence = GatewayTaskOwner._verify_files(task, result, root)
         if not verified:
             return verified, evidence
         execution = task.payload.get('execution') or {}
@@ -1271,6 +1302,9 @@ class GatewayTaskOwner:
             # _verify_files returns owner-resolved checked paths, not raw
             # worker claims. Never resolve them again after the file check.
             row = {'kind': 'owner_file_sha256', 'path': receipt['path'], 'sha256': receipt['sha256']}
+            if 'research_contract' in task.payload:
+                row['research_artifact'] = receipt['research_artifact']
+                row['citation_consistency'] = receipt['citation_consistency']
             if instance and root is not None:
                 row['owner_artifact_scope'] = {'version': 1, 'mode': 'instance', 'workspace': str(root)}
             receipts.append(row)
@@ -1363,7 +1397,10 @@ class GatewayTaskOwner:
     def _deliver(self, task):
         if task.payload.get('delivered'):
             return
-        text = str(task.result or task.error or task.state.value)
+        if 'research_contract' in task.payload and isinstance(task.result, dict):
+            text = str(task.result.get('text') or task.error or task.state.value)
+        else:
+            text = str(task.result or task.error or task.state.value)
         if task.state not in {TaskState.COMPLETED, TaskState.COMPLETED_VERIFIED}:
             text = f'Background task {task.state.value}: {task.goal}\n{task.error or ""}\n\n{text}'
         receipt = self.gateway.store.deliver_task_result(task.task_id,

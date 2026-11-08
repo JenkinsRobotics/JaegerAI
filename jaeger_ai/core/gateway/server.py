@@ -7953,12 +7953,16 @@ class JaegerGatewayApp:
             submission_id = body.get('request_id')
             if submission_id is not None and (not isinstance(submission_id, str) or not submission_id.strip() or len(submission_id) > 128):
                 raise ValueError('request_id must be nonempty text of at most128 characters')
+            if 'research_contract' in body:
+                from jaeger_ai.core.tasks.research import validate_contract
+                validate_contract(body['research_contract'])
             board = self._task_board_fields(body)
             board.setdefault('agent_id', self._session_agent_id(parent))
             result = self.task_owner.submit(str(body.get('goal') or ''),
                 context={'session_id': parent['session_id'], 'source': 'client', 'execution': execution,
                          'request_id': submission_id, 'client_submission_id': submission_id, **board},
-                artifacts=body.get('artifacts'), proposal=bool(body.get('proposal')))
+                artifacts=body.get('artifacts'), proposal=bool(body.get('proposal')),
+                research_contract=body.get('research_contract'))
         except ValueError as exc:
             from jaeger_ai.core.tasks.store import TaskConflict
             return web.json_response({'error': str(exc)}, status=409 if isinstance(exc, TaskConflict) else 400)
