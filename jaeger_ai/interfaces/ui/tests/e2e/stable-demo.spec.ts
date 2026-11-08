@@ -177,35 +177,56 @@ for (const width of [390, 794, 1280, 1600]) {
   });
 }
 
-test('approval selections persist through the real isolated Gateway and refresh',async({page})=>{
+test('approval selections persist through the real isolated Gateway and refresh',async({page},testInfo)=>{
+ test.setTimeout(90000);
  await openChat(page);
  const initial=await (await page.request.get('/v1/runtime/autonomy')).json();
+ const expandComposer=async()=>{
+  const field=page.getByRole('textbox',{name:'Message',exact:true});
+  if(testInfo.project.use.isMobile) await field.tap(); else await field.focus();
+  await expect(page.getByRole('button',{name:/^Approval mode:/})).toBeVisible();
+ };
  try {
   for(const [mode,label] of [['scoped','Approve for me'],['auto','Full access'],['ask','Ask for approval']]) {
-   await page.getByRole('button',{name:/^Approval mode:/}).click();
+   // The phone composer intentionally collapses secondary controls until it is
+   // focused. Expand it before operating or asserting on the approval control.
+   await expandComposer();
+   const approval=page.getByRole('button',{name:/^Approval mode:/});
+   if(testInfo.project.use.isMobile) await approval.tap(); else await approval.click();
    const option=page.getByRole('menuitemradio',{name:new RegExp(label)});
    await expect(option).toBeEnabled();await option.click();
    await expect(page.getByRole('button',{name:`Approval mode: ${label}`})).toBeVisible();
    expect((await (await page.request.get('/v1/runtime/autonomy')).json()).autonomy).toBe(mode);
-   await page.reload();await expect(page.getByRole('button',{name:`Approval mode: ${label}`})).toBeVisible();
+   await page.reload();
+   await expandComposer();
+   await expect(page.getByRole('button',{name:`Approval mode: ${label}`})).toBeVisible();
   }
  } finally {await page.request.post('/v1/runtime/autonomy',{data:{autonomy:initial.autonomy}});}
 });
-test('minimap jumps to loaded turns without sending a message',async({page})=>{
+test('minimap jumps to loaded turns without sending a message',async({page},testInfo)=>{
  test.setTimeout(90000);
  await openChat(page);
  const field=page.getByRole('textbox',{name:'Message',exact:true});
  for(let i=0;i<2;i++){
-  const before=await page.locator('.jg-bubble--assistant').count();
-  await field.fill(`Say BROWSER-CONTRACT-ANSWER ${i}`);
+  const marker=`BROWSER-CONTRACT-ANSWER ${testInfo.project.name} retry-${testInfo.retry} turn-${i}`;
+  await field.fill(`Say ${marker}`);
   await expect(page.getByRole('button',{name:'Send',exact:true})).toBeEnabled();
   await field.press('Enter');
   await expect(field).toHaveValue('');
-  await expect(page.locator('.jg-bubble--assistant')).toHaveCount(before+1);
-  await expect(page.locator('.jg-bubble--assistant').last()).toContainText('BROWSER-CONTRACT-ANSWER');
+  // History pagination can add older bubbles while the turn runs. Observe the
+  // unique durable answer instead of racing the total rendered bubble count.
+  await expect(page.locator('.jg-bubble--assistant').filter({hasText:marker}).last()).toBeVisible({timeout:30000});
   await expect(page.getByRole('button',{name:/^Stop current turn/})).toHaveCount(0,{timeout:30000});
  }
  const minimap=page.getByRole('navigation',{name:'Conversation minimap'});
+ if((page.viewportSize()?.width??0)<=600){
+  // The compact layout deliberately removes this desktop-only rail and its
+  // chat margin. The turns remain loaded and the page must stay in bounds.
+  await expect(page.locator('.jg-conversation-minimap')).toBeHidden();
+  expect(await page.locator('.jg-conversation-minimap button').count()).toBeGreaterThanOrEqual(2);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  return;
+ }
  await expect(minimap).toBeVisible();
  const count=await minimap.getByRole('button').count();expect(count).toBeGreaterThanOrEqual(2);
  await minimap.getByRole('button').first().click();

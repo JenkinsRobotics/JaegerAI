@@ -7,6 +7,7 @@ import type { Agent } from "../api/types";
 export type HostKind = "vscode" | "native" | "web";
 
 export type ToolInvocationState = "streaming" | "waitingForConfirmation" | "executing" | "completed" | "cancelled" | "failed" | "denied" | "rejected" | "unsupported" | "unknown";
+export type AssistantContentRole = "provisional" | "commentary" | "final";
 
 export type ChatPart =
   | {kind:"plan";plan:Array<{step:string;status:"pending"|"in_progress"|"completed"}>;explanation:string}
@@ -17,9 +18,9 @@ export type ChatPart =
   | {kind:"modelIdentity";actualModel:string|null;scope:string}
   | { kind: "modelContext"; outline: import("./modelContext").ModelContextOutline }
   | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
-  | { kind: "markdownContent"; text: string }
+  | { kind: "markdownContent"; text: string; role?: AssistantContentRole; itemId?: string }
   | { kind: "thinking"; text: string; durationMs?: number }
-  | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown }
+  | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string }
   | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny" }
   | { kind: "progress"; message: string }
   | { kind: "error"; message: string }
@@ -165,8 +166,24 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
     const index=parts.findIndex(p=>p.kind===part.kind);
     if(index>=0)return parts.map((p,i)=>i===index?part:p);
   }
+  if (part.kind === "markdownContent" && part.role === "final") {
+    const provisional = parts.map((p, i) => p.kind === "markdownContent" && (p.role ?? "provisional") === "provisional" ? i : -1).filter(i => i >= 0);
+    if (provisional.length) {
+      const [first, ...rest] = provisional;
+      return parts.map((p, i) => i === first ? part : p).filter((_, i) => !rest.includes(i));
+    }
+    const existing = parts.findIndex(p => p.kind === "markdownContent" && p.role === "final");
+    if (existing >= 0) return parts.map((p, i) => i === existing ? part : p);
+  }
+  if (part.kind === "toolInvocation") {
+    parts = parts.map(p => p.kind === "markdownContent" && (p.role ?? "provisional") === "provisional" ? {...p, role:"commentary" as const} : p);
+  }
   const last = parts[parts.length - 1];
-  if ((part.kind === "markdownContent" || part.kind === "thinking") && last?.kind === part.kind) {
+  if (part.kind === "markdownContent" && last?.kind === "markdownContent" &&
+      (part.role ?? "provisional") === (last.role ?? "provisional") && (part.itemId ?? "") === (last.itemId ?? "")) {
+    return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text }];
+  }
+  if (part.kind === "thinking" && last?.kind === "thinking") {
     return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];
   }
   if (part.kind === "toolInvocation" || part.kind === "confirmation" || part.kind === "question") {

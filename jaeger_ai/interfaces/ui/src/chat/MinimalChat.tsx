@@ -112,7 +112,10 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
     case "knowledgeContext":
       return <details className="jg-knowledge-context"><summary>Knowledge context · {part.documents.length} documents</summary><ul>{part.documents.map(doc => <li key={doc.id}>{doc.title} · revision {doc.revision}<small> · {doc.digest.slice(0, 12)}</small></li>)}</ul><p>Loaded as reference material. Tool permissions and approvals are unchanged.</p></details>;
     case "markdownContent":
-      return <RevealMarkdown text={part.text} live={live} links={links} style={style} />;
+      return <section className={`jg-assistant-content jg-assistant-content--${part.role ?? "provisional"}`}
+        aria-label={part.role === "final" ? "Final result" : part.role === "commentary" ? "Progress update" : "Assistant response"}>
+        <RevealMarkdown text={part.text} live={live} links={links} style={style} />
+      </section>;
     case "thinking":
       return <details className="jg-thinking"><summary>{part.durationMs === undefined ? "Thinking" : `Thought for ${seconds(part.durationMs)} s`}</summary><p>{part.text}</p></details>;
     case "progress":
@@ -134,7 +137,7 @@ function ToolLine({ part }: { part: ToolPart }) {
   return <details className={`jg-tool jg-tool--${part.state}`}>
     <summary><span className="jg-tool__verb">{verb}</span>{" "}
       {mono ? <code className="jg-tool__target">{target}</code> : <span className="jg-tool__target">{target}</span>}
-      <span className="jg-tool__outcome"> · {part.state}</span></summary>
+      <span className="jg-tool__outcome"> · {part.summary ?? part.state}</span></summary>
     <div className="jg-tool__details"><strong>{part.toolName}</strong>
       <pre>{output === undefined ? "No output retained for this tool call." : output.slice(0,16000)}</pre>
       {output && output.length>16000 && <small>Output preview truncated.</small>}
@@ -180,7 +183,9 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
       ? {...original,state:state === "cancelled" ? "cancelled" as const : "unknown" as const} : original;
     if(workIndices.has(index)) {
       const previous=out.at(-1);
-      if(previous && "activity" in previous) previous.activity.push(part);
+      const reasoning=part.kind==="thinking";
+      const sameActivity=previous && "activity" in previous && previous.activity.every(item=>(item.kind==="thinking")===reasoning);
+      if(sameActivity && previous && "activity" in previous) previous.activity.push(part);
       else out.push({activity:[part]});
       continue;
     }
@@ -206,14 +211,20 @@ export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boo
   const [open,setOpen]=useState(false);
   useEffect(()=>{if(!live)setOpen(false);},[live]);
   const tools=parts.filter((p):p is ToolPart=>p.kind==="toolInvocation");
+  const reasoning=parts.filter((p):p is Extract<ChatPart,{kind:"thinking"}>=>p.kind==="thinking");
+  const reasoningMs=reasoning.reduce((total,part)=>total+(part.durationMs??0),0);
+  const summary=tools.length ? stepsSummary(tools) : reasoning.length
+    ? (live && reasoning.some(part=>part.durationMs===undefined) ? "Thinking…" : reasoningMs ? `Thought for ${seconds(reasoningMs)} s` : "Reasoning")
+    : live ? "Working" : "Activity";
   return <div className="jg-steps jg-turn-activity" data-sender="assistant">
     <button type="button" className="jg-steps__summary" aria-label={`${open ? "Hide" : "Show"} activity${tools.length ? ": "+stepsSummary(tools) : ""}`} aria-expanded={open} onClick={()=>setOpen(!open)}>
-      <span className="jg-stream-icon" aria-hidden="true"><GlyphCode/></span>
-      <span className="jg-steps__text">{tools.length ? stepsSummary(tools) : parts.every(p=>p.kind==="thinking") ? "Thinking" : live ? "Working" : "Activity"}</span>
+      <span className="jg-stream-icon" aria-hidden="true">{reasoning.length ? <WaveIcon/> : <GlyphCode/>}</span>
+      <span className="jg-steps__text">{summary}</span>
       <span className="jg-steps__toggle" aria-label={open ? "Hide activity" : "Show activity"}><ChevronIcon/></span>
     </button>
     {open && <div className="jg-turn-activity__body">{parts.map((part,i)=>
       part.kind==="progress" ? <p key={i}>{part.message}</p> :
+      part.kind==="thinking" ? <section key={i} className="jg-reasoning-diagnostic" aria-label="Reasoning diagnostic"><strong>{part.durationMs === undefined ? "Reasoning" : `Reasoning · ${seconds(part.durationMs)} s`}</strong>{part.text && <p>{part.text}</p>}</section> :
       <BubblePart key={i} part={part} links={links} style={style} live={false}/>
     )}</div>}
   </div>;
@@ -235,7 +246,11 @@ export function showsProgress(turn: ChatTurn): boolean {
   return !(last?.kind === "markdownContent" && last.text);
 }
 
-const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
+const replyText = (turn: ChatTurn) => {
+  const content = turn.parts.filter((p):p is Extract<ChatPart,{kind:"markdownContent"}> => p.kind === "markdownContent");
+  const final = content.filter(p=>p.role==="final");
+  return (final.length ? final : content.filter(p=>p.role!=="commentary")).map(p=>p.text).join("\n\n");
+};
 
 /** Inline transcript retention budget (turns); older durable pages are refetched on demand. */
 export const RETAINED_TURNS_MAX = 400;
@@ -304,6 +319,11 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   /** Grok's "Composer actions" (the + button) and "Message actions" (right-click a bubble) menus. */
   const plus = useRef<HTMLButtonElement>(null);
   const [composerMenu, setComposerMenu] = useState(false);
+  // On iOS, moving focus from the software-keyboard textarea to a toolbar
+  // button can dismiss the keyboard before the synthetic click is delivered.
+  // Once the user enters the composer, keep its compact toolbar expanded so
+  // approval, run-mode, and model controls remain stable tap targets.
+  const [composerExpanded, setComposerExpanded] = useState(false);
   const [messageMenu, setMessageMenu] = useState<{ x: number; y: number; text: string; turnId?: string; requestId?: string; role: "user" | "assistant" } | null>(null);
   /** Authoritative durable reactions; request+role are independent targets. */
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
@@ -912,7 +932,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       <MessageMenu at={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} requestId={messageMenu?.requestId} reactionEmojis={messageMenu?.requestId ? reactionEmojis : []} onAction={onMessageAction} onClose={() => setMessageMenu(null)} />
       {reactionError && <p role="alert">{reactionError}</p>}
       {session && <AgentActivity turns={session.turns} onOpen={host.openHandoff ? id=>host.openHandoff?.(id) : undefined}/> }
-      <form ref={composer} className="jg-composer" data-expanded={Boolean(draft || files.length || quote || preparingFiles || draftError || deliveryNotice || fileNote)} onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
+      <form ref={composer} className="jg-composer" data-expanded={Boolean(composerExpanded || draft || files.length || quote || preparingFiles || draftError || deliveryNotice || fileNote)} onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
             {files.map((f) => (
@@ -931,7 +951,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         {preparingFiles && <div role="status">Preparing attachments…</div>}
         {draftError && <div role="alert">{draftError}</div>}
         {deliveryNotice && <div className="jg-composer__notice" role="alert">{deliveryNotice}</div>}
-        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : active ? "Follow up" : agent.id === "native:jaeger" ? "Do anything" : `Ask ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
+        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : active ? "Follow up" : agent.id === "native:jaeger" ? "Do anything" : `Ask ${agent.name}`} value={draft} onFocus={()=>setComposerExpanded(true)} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         {active && hasText && <div className="jg-followup-actions" role="group" aria-label="Follow-up delivery">
           {host.sessionQueue && <button type="button" className="jg-busy-mode" aria-label="Queue next message" disabled={followUpBusy} onClick={() => void submitWhileBusy("queue")}>Queue next</button>}
           <button type="submit" className="jg-busy-mode" aria-label="Send message" disabled={followUpBusy || !host.sessionQueue?.steer}>Send now</button>

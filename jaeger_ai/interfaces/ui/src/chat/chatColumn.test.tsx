@@ -14,10 +14,11 @@ describe("chat column", () => {
       { kind: "progress", message: "Checking" }, { kind: "markdownContent", text: "done" },
     ];
     const segs = segments(parts, "complete");
-    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "bubble", "activity", "bubble"]);
-    expect("activity" in segs[0] && segs[0].activity.filter(p=>p.kind==="toolInvocation").map(t=>t.callId)).toEqual(["a"]);
-    expect(segs[1]).toEqual({bubble:[{kind:"markdownContent",text:"Looking"}]});
-    expect(segs[3]).toEqual({bubble:[{kind:"markdownContent",text:"done"}]});
+    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "activity", "bubble", "activity", "bubble"]);
+    expect("activity" in segs[0] && segs[0].activity.every(p=>p.kind==="thinking")).toBe(true);
+    expect("activity" in segs[1] && segs[1].activity.filter(p=>p.kind==="toolInvocation").map(t=>t.callId)).toEqual(["a"]);
+    expect(segs[2]).toEqual({bubble:[{kind:"markdownContent",text:"Looking"}]});
+    expect(segs[4]).toEqual({bubble:[{kind:"markdownContent",text:"done"}]});
     // The same grouping is available while streaming and after completion.
     expect(segments(parts, "pending")).toEqual(segs);
     // A tool left running in an ended turn reads as stopped.

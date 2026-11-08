@@ -317,6 +317,46 @@ def _safe_tool_event_name(value: Any) -> str:
     return name
 
 
+def _tool_public_target(args: Any) -> str:
+    """Return one bounded, redacted target suitable for public progress copy."""
+    if not isinstance(args, dict):
+        return ""
+    from jaeger_os.core.safety.redact import redact_text
+    for key in _APPROVAL_TARGET_KEYS:
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            return _inline_text(redact_text(value.strip()), 120).replace("\n", " ")
+    return ""
+
+
+def _tool_public_message(name: Any, args: Any, *, finished: bool = False, ok: bool = True) -> str:
+    """Describe observable tool work without exposing payloads or claiming more than its receipt."""
+    safe_name = _safe_tool_event_name(name)
+    lowered = safe_name.lower()
+    target = _tool_public_target(args)
+    if any(word in lowered for word in ("web_search", "search_web", "internet_search")):
+        present, past = "Searching the web", "Searched the web"
+    elif any(word in lowered for word in ("fetch", "browser", "read_url", "open_url", "scrape")):
+        present, past = "Reading a page", "Read a page"
+    elif any(word in lowered for word in ("write", "edit", "patch", "replace", "copy_file", "move_file", "delete_file")):
+        present, past = "Editing", "Edited"
+    elif any(word in lowered for word in ("read", "view", "list_dir", "search_files", "glob", "grep")):
+        present, past = "Reading", "Read"
+    elif any(word in lowered for word in ("shell", "exec", "command", "terminal", "execute_code", "run_")):
+        present, past = "Running a command", "Ran a command"
+        target = ""
+    elif any(word in lowered for word in ("handoff", "delegate", "agent")):
+        present, past = "Checking with another agent", "Checked with another agent"
+    else:
+        present, past = f"Using {safe_name}", f"Used {safe_name}"
+    label = past if finished else present
+    if target and label in {"Editing", "Edited", "Reading", "Read"}:
+        label = f"{label} {target}"
+    if finished and not ok:
+        return f"{label} — failed"
+    return label
+
+
 def _safe_tool_duration(value: Any) -> float:
     """Normalize the sole tool-result datum allowed onto the public stream."""
     try:
@@ -4838,6 +4878,7 @@ class JaegerGatewayApp:
         ids = {"turn_id": row.get("turn_id") or request_id, "request_id": request_id}
         lock = threading.Lock()
         pending: list[str] = []
+        text_item: list[str | None] = [None]
         last = [time.monotonic()]
         # ``AgentCallbacks`` predates call ids.  Starts and finishes are serial
         # at the loop boundary (including parallel read batches), so a FIFO per
@@ -4852,7 +4893,12 @@ class JaegerGatewayApp:
                 pending.clear()
                 last[0] = time.monotonic()
             if text:
-                self.event_bus.publish(session_id, "turn.delta", {**ids, "delta": text, "channel": "provisional"})
+                if text_item[0] is None:
+                    text_item[0] = f"text_{uuid.uuid4().hex}"
+                self.event_bus.publish(session_id, "turn.delta", {
+                    **ids, "delta": text, "channel": "provisional",
+                    "content_type": "provisional", "item_id": text_item[0],
+                })
 
         reasoning_started: list[float | None] = [None]
         # Reasoning arrives a few characters at a time; like text deltas it is
@@ -4893,6 +4939,7 @@ class JaegerGatewayApp:
 
         def on_reasoning(text: str) -> None:
             flush()
+            text_item[0] = None
             if text:
                 with lock:
                     if reasoning_started[0] is None:
@@ -4912,10 +4959,14 @@ class JaegerGatewayApp:
             flush()
             end_reasoning()
             raw_name = str(name or "")
+            activity_id = f"tool_{uuid.uuid4().hex}"
             if timing is not None:
                 timing.tool_start(_safe_tool_event_name(name))
-            self.event_bus.publish(session_id, "turn.progress", {**ids, "channel": "progress"})
-            activity_id = f"tool_{uuid.uuid4().hex}"
+            self.event_bus.publish(session_id, "turn.progress", {
+                **ids, "channel": "commentary", "content_type": "commentary",
+                "activity_id": activity_id, "message": _tool_public_message(name, data),
+            })
+            text_item[0] = None
             with lock:
                 active_tools.setdefault(raw_name, []).append(activity_id)
             if raw_name in {"write_file", "append_file", "patch", "delete_file", "move_file", "copy_file"} and isinstance(data, dict):
@@ -4968,6 +5019,8 @@ class JaegerGatewayApp:
                     plan_payload["explanation"] = result["explanation"][:500]
             from jaeger_ai.contract.tool_outcomes import tool_outcome
             outcome = tool_outcome(bool(ok), result)
+            succeeded = bool(ok)
+            public_summary = _tool_public_message(name, args, finished=True, ok=succeeded)
             del args, result, error
             flush()
             end_reasoning()
@@ -4979,7 +5032,6 @@ class JaegerGatewayApp:
                 activity_id = queued.pop(0) if queued else f"tool_{uuid.uuid4().hex}"
                 if queued == []:
                     active_tools.pop(raw_name, None)
-            succeeded = bool(ok)
             snapshots = file_snapshots.pop(activity_id, [])
             if snapshots:
                 try:
@@ -4991,11 +5043,7 @@ class JaegerGatewayApp:
                     logger.warning("File change checkpoint could not settle for %s", raw_name)
             duration = _safe_tool_duration(elapsed_s)
             phase = "completed" if succeeded else "failed"
-            detail = (
-                f"Completed in {duration:.3f}s"
-                if succeeded
-                else f"Failed after {duration:.3f}s"
-            )
+            detail = public_summary
             self.event_bus.publish(session_id, f"tool.{phase}", {
                 **ids,
                 "session_id": session_id,
@@ -5008,6 +5056,7 @@ class JaegerGatewayApp:
                 "ok": succeeded,
                 "elapsed_s": duration,
                 "text": detail,
+                "summary": detail,
                 **({"output": output_text} if output_text else {}),
             })
             if sources:

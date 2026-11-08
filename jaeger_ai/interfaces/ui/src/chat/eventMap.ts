@@ -25,7 +25,9 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       return { parts: [{ kind: "knowledgeContext", documents }] };
     }
     case "turn.delta":
-      return { parts: [{ kind: "markdownContent", text: str(p.delta ?? p.text) }] };
+      return { parts: [{ kind: "markdownContent", text: str(p.delta ?? p.text),
+        ...((p.content_type || p.channel) ? {role: ["commentary","final"].includes(str(p.content_type ?? p.channel)) ? str(p.content_type ?? p.channel) as "commentary"|"final" : "provisional" as const} : {}),
+        ...(p.item_id ? {itemId:str(p.item_id)} : {}) }] };
     case "turn.reasoning":
       return { parts: [{ kind: "thinking", text: str(p.text ?? p.delta), durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined }] };
     case "turn.reasoning.done":
@@ -53,12 +55,12 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "executing" }] };
     case "tool.done":
     case "tool.completed":
-      return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "completed", output: p.output ?? p.result }] };
+      return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "completed", output: p.output ?? p.result, summary: str(p.summary ?? p.text) || undefined }] };
     case "tool.error":
     case "tool.failed":
       return {
         parts: [
-          { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: (["denied", "rejected", "unsupported", "unknown", "cancelled"].includes(str(p.outcome)) ? str(p.outcome) : "failed") as ToolInvocationState, output: p.error },
+          { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: (["denied", "rejected", "unsupported", "unknown", "cancelled"].includes(str(p.outcome)) ? str(p.outcome) : "failed") as ToolInvocationState, output: p.error, summary: str(p.summary ?? p.text) || undefined },
           { kind: "error", message: str(p.error ?? p.message ?? "Tool failed") },
         ],
       };
@@ -85,8 +87,10 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       return { parts: [{ kind: "handoff", status: (h.metadata as Payload | undefined)?.delivery_message_id ? "delivered" : str(h.status || "unverified"), handoffId: str(h.id ?? h.handoff_id), agentId, agentName: agentName(agentId), count: 1, direction }] };
     }
     case "turn.finish":
-    case "turn.reconciled":
-      return { parts: [], state: "complete" };
+    case "turn.reconciled": {
+      const output = str(p.output);
+      return { parts: output ? [{kind:"markdownContent",text:output,role:"final",itemId:"final"}] : [], state: "complete" };
+    }
     case "turn.unknown":
       return { parts: [{ kind: "error", message: str(p.error ?? p.message ?? "The gateway lost track of this turn. It will not be resent.") }], state: "unknown" };
     case "turn.cancelled":

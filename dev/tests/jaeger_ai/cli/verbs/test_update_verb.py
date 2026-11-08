@@ -481,6 +481,7 @@ def test_rebuild_mac_shell_skips_when_never_built(tmp_path, monkeypatch, capsys)
 
 def test_rebuild_mac_shell_runs_build_script(tmp_path, monkeypatch, capsys):
     script = _shell_layout(tmp_path)
+    monkeypatch.setattr(U.sys, "platform", "darwin")
     ran: list = []
 
     class _R:
@@ -499,6 +500,7 @@ def test_rebuild_mac_shell_builds_when_app_missing(tmp_path, monkeypatch, capsys
     installed' half of the deployed-station bug)."""
     import shutil as _sh
     script = _shell_layout(tmp_path)
+    monkeypatch.setattr(U.sys, "platform", "darwin")
     _sh.rmtree(tmp_path / "jaeger_ai" / "interfaces" / "macos-shell" / ".build")
     ran: list = []
 
@@ -516,6 +518,7 @@ def test_rebuild_mac_shell_dev_checkout_builds_dev_flavor(tmp_path, monkeypatch)
     """Flavor follows the install: dev/ present -> debug build via --dev
     (mirrors install.sh); same JaegerAI.app bundle either way."""
     script = _shell_layout(tmp_path)
+    monkeypatch.setattr(U.sys, "platform", "darwin")
     (tmp_path / "dev").mkdir()
     ran: list = []
 
@@ -540,6 +543,7 @@ def test_rebuild_mac_shell_only_if_stale_skips_fresh(tmp_path, monkeypatch):
 
 def test_rebuild_mac_shell_warns_without_toolchain(tmp_path, monkeypatch, capsys):
     _shell_layout(tmp_path)
+    monkeypatch.setattr(U.sys, "platform", "darwin")
     monkeypatch.setattr(U.shutil, "which", lambda name: None)
     U._rebuild_mac_shell(tmp_path)
     assert "was not built" in capsys.readouterr().err
@@ -579,6 +583,7 @@ def test_run_update_subprocess_invokes_jaeger_update(tmp_path, monkeypatch):
     upgrade logic — with stdin closed (non-interactive)."""
     repo = tmp_path / "repo"
     (repo / "jaeger_ai").mkdir(parents=True)
+    (repo / "jaeger").write_text("#!/bin/sh\n")
     monkeypatch.setattr(
         "jaeger_ai.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_ai")
     calls = []
@@ -605,6 +610,7 @@ def test_run_update_subprocess_invokes_jaeger_update(tmp_path, monkeypatch):
 def test_run_update_subprocess_pins_ref(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / "jaeger_ai").mkdir(parents=True)
+    (repo / "jaeger").write_text("#!/bin/sh\n")
     monkeypatch.setattr(
         "jaeger_ai.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_ai")
     calls = []

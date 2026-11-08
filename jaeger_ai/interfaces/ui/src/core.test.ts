@@ -25,7 +25,7 @@ describe("eventMap + applyPart", () => {
       { event: "tool.done", payload: { call_id: "c1", tool: "ls", output: "ok" } },
     ]) mapEvent(event)?.parts.forEach((p) => { parts = applyPart(parts, p); });
     expect(parts).toHaveLength(2);
-    expect(parts[0]).toEqual({ kind: "markdownContent", text: "Hello" });
+    expect(parts[0]).toEqual({ kind: "markdownContent", text: "Hello", role:"commentary" });
     expect(parts[1]).toMatchObject({ kind: "toolInvocation", callId: "c1", state: "completed", output: "ok" });
   });
   it("ends turns", () => {
