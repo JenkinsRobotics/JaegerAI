@@ -139,3 +139,27 @@ def test_authority_layer_integration():
     assert decision.is_authorized is False
     assert decision.status == AuthorizationStatus.DENIED
     assert "untrusted" in decision.reason
+
+
+@pytest.mark.parametrize('arguments, expected', [
+    ({'path': '/tmp/project/.jaeger_ai/state.db'}, AuthorityDecisionType.DENY),
+    ({'path': '/tmp/project/.jaeger_agent/state.db'}, AuthorityDecisionType.DENY),
+    ({'path': '/tmp/allowed.txt'}, AuthorityDecisionType.MODIFY),
+])
+def test_hook_rewrites_recheck_protected_targets(kernel, monkeypatch, arguments, expected):
+    monkeypatch.setattr(kernel, '_check_shell_hooks', lambda *a: (None, arguments))
+    decision = kernel.evaluate(ProposedAction(
+        tool_name='write_file', arguments={'path': '/tmp/original.txt'},
+        target_path='/tmp/original.txt'))
+    assert decision.decision == expected
+    if expected == AuthorityDecisionType.DENY:
+        assert decision.policy_name == 'protected_targets'
+
+
+def test_hook_rewrites_recheck_branch_protection(kernel, monkeypatch):
+    monkeypatch.setattr(kernel, '_check_shell_hooks',
+                        lambda *a: (None, {'remote': 'origin', 'branch': 'master'}))
+    decision = kernel.evaluate(ProposedAction(
+        tool_name='git_push', arguments={'remote': 'origin', 'branch': 'feature'}))
+    assert decision.decision == AuthorityDecisionType.REQUIRE_APPROVAL
+    assert decision.policy_name == 'protected_branch'

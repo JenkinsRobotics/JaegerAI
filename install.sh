@@ -104,7 +104,16 @@ case "$(uname -s)" in
     fi ;;
 esac
 
-# 2. Create or reuse the .venv
+# Share the updater's read-only preflight before changing the external env.
+# This import is stdlib-only, so it also works before a first installation.
+PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "$PY" -B - "$REPO_ROOT" <<'PYTHON'
+from pathlib import Path
+import sys
+from jaeger_ai.cli.verbs.update_verb import _preflight_update
+raise SystemExit(_preflight_update(Path(sys.argv[1])))
+PYTHON
+
+# 2. Create or reuse the external environment
 if [[ ! -d "$VENV" ]]; then
   echo "→ Creating the Python environment at $VENV..."
   "$PY" -m venv "$VENV"
@@ -227,13 +236,13 @@ if [[ "$PRODUCT_MODE" -eq 0 ]]; then
   echo "  ./jaeger dev --health     verify the install"
 else
   # curl one-liner (scripts/install.sh passes --product) — build the
-  # PRODUCT app; it's what `./jaeger` launches. No Swift toolchain
-  # (Linux/headless) → terminal remains the surface, quietly.
-  if command -v swift >/dev/null 2>&1; then
+  # PRODUCT app; it's what `./jaeger` launches. A failed native build on
+  # macOS is an incomplete install, never a successful terminal fallback.
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    command -v swift >/dev/null 2>&1 || { echo "Swift is required for the Mac shell" >&2; exit 1; }
     echo; echo "building canonical JaegerShell.app (development target)…"
-    bash "$REPO_ROOT/jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh" >/dev/null \
-      && echo "✓ Canonical development Mac shell ready; production installation remains deferred" \
-      || echo "⚠ Swift app build failed — ./jaeger falls back to the terminal"
+    bash "$REPO_ROOT/jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh"
+    echo "✓ Canonical development Mac shell ready; production installation remains deferred"
   fi
   if [[ "$(uname -s)" == "Darwin" ]]; then
     echo "Mac production installation is deferred; no old SwiftUI app is installed automatically."

@@ -16,11 +16,15 @@ import pytest
 
 from jaeger_ai.cli.verbs import update_verb as U
 
+_REAL_PREFLIGHT = U._preflight_update
+
 
 @pytest.fixture(autouse=True)
-def isolated_environment_selection(monkeypatch):
+def isolated_environment_selection(monkeypatch, tmp_path):
     # Individual cases opt into a configured environment explicitly.
     monkeypatch.delenv("JAEGER_VENV", raising=False)
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(U, "_preflight_update", lambda home: 0)
 
 
 # ── helpers ────────────────────────────────────────────────────────
@@ -28,7 +32,7 @@ def isolated_environment_selection(monkeypatch):
 
 def _make_instance(home: Path, name: str, schema_version: str = "0.5.0") -> Path:
     """Build a minimal valid instance dir under HOME."""
-    inst = home / ".jaeger_ai" / "instances" / name
+    inst = home / "instances" / name
     inst.mkdir(parents=True)
     (inst / "identity.yaml").write_text(f"name: {name}\nrole: r\npersonality: p\n",
                                          encoding="utf-8")
@@ -192,7 +196,7 @@ def test_update_runs_upgrade_and_skips_migrate_on_no_migrate(tmp_path, monkeypat
     # Upgrade was attempted.
     assert any("install" in c and "-U" in c for c in upgrade_calls)
     # Migration was NOT run — the manifest is still at the old version.
-    inst_mf = tmp_path / ".jaeger_ai" / "instances" / "default" / "manifest.json"
+    inst_mf = tmp_path / "instances" / "default" / "manifest.json"
     assert json.loads(inst_mf.read_text())["schema_version"] == "0.4.0"
 
 
@@ -231,7 +235,7 @@ def test_update_dev_checkout_dirty_prints_hint(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(U, "_detect_method", lambda: "dev-checkout")
     calls = _fake_editable_repo(tmp_path, monkeypatch, dirty=True)
     code = U._cmd_update_argv(["--no-migrate"])
-    assert code == 0
+    assert code == 1
     out = capsys.readouterr().out
     assert "uncommitted changes" in out and "git pull" in out
     assert any("status" in c for c in calls)         # checked status
@@ -252,7 +256,7 @@ def test_update_dev_checkout_clean_pulls_and_reinstalls(tmp_path, monkeypatch, c
     refresh = next(c for c in calls if any("install-packages.py" in a for a in c))
     assert "-e" not in refresh
     assert sum("/packages/" in a for a in refresh) == 4
-    assert "Restart" in capsys.readouterr().out
+    assert any("--finish-update" in c for c in calls)
 
 
 # ── download + apply (clean / no-.git install) ─────────────────────
@@ -359,7 +363,7 @@ def test_clean_install_routes_to_download(tmp_path, monkeypatch):
 def test_update_download_noop_when_current(tmp_path, monkeypatch, capsys):
     import jaeger_ai
     from jaeger_ai.core import version_check
-    monkeypatch.setattr(version_check, "latest_version",
+    monkeypatch.setattr(version_check, "latest_release",
                         lambda *a, **k: jaeger_ai.__version__)
     assert U._update_download(tmp_path) == 0
     assert "already up to date" in capsys.readouterr().out
@@ -367,7 +371,7 @@ def test_update_download_noop_when_current(tmp_path, monkeypatch, capsys):
 
 def test_update_download_unreachable_returns_1(tmp_path, monkeypatch, capsys):
     from jaeger_ai.core import version_check
-    monkeypatch.setattr(version_check, "latest_version", lambda *a, **k: None)
+    monkeypatch.setattr(version_check, "latest_release", lambda *a, **k: None)
     assert U._update_download(tmp_path) == 1
     assert "couldn't reach GitHub" in capsys.readouterr().err
 
@@ -556,14 +560,15 @@ def test_mac_app_is_stale_basics(tmp_path):
 # ── app-bridge run_update (0.8 in-app updates) ──────────────────────
 
 
-def test_jaeger_exe_prefers_venv_console_script(tmp_path, monkeypatch):
+def test_jaeger_exe_uses_external_environment_without_a_repo_venv(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / "jaeger_ai").mkdir(parents=True)
     monkeypatch.setattr(
         "jaeger_ai.core.instance.instance.PACKAGE_ROOT", repo / "jaeger_ai")
     # No venv yet -> falls back to the wrapper script at the install root.
     assert U.jaeger_exe() == repo / "jaeger"
-    venv_bin = repo / ".venv" / "bin"
+    venv_bin = tmp_path / "external-venv" / "bin"
+    monkeypatch.setenv("JAEGER_VENV", str(venv_bin.parent))
     venv_bin.mkdir(parents=True)
     (venv_bin / "jaeger").write_text("#!/bin/sh\n")
     assert U.jaeger_exe() == venv_bin / "jaeger"
@@ -652,3 +657,175 @@ def test_run_update_subprocess_missing_binary_never_raises(tmp_path, monkeypatch
     res = U.run_update_subprocess()
     assert res == {"ok": False, "returncode": None, "output": "",
                     "restart_required": False, "error": "no such file"}
+
+
+def test_migration_failures_are_not_update_success(monkeypatch):
+    monkeypatch.setattr(U, '_list_stale_instances', lambda: [
+        {'name': 'default', 'current_version': 'old'}])
+    monkeypatch.setattr(U, '_ask_yn', lambda *a: True)
+    monkeypatch.setattr(U, '_migrate_instance_with_backup', lambda name: 2)
+    assert U._cmd_update_argv(['--finish-update']) == 2
+
+
+def test_migration_discovery_runs_only_after_upgrade(monkeypatch):
+    calls = []
+    monkeypatch.setattr(U, '_detect_method', lambda: 'product-checkout')
+    monkeypatch.setattr(U, '_list_stale_instances', lambda: pytest.fail('old process scanned schemas'))
+    monkeypatch.setattr(U, '_run_upgrade', lambda *a, **k: calls.append('upgrade') or 0)
+    monkeypatch.setattr(U, '_finish_update_subprocess', lambda **k: calls.append('fresh-process') or 3)
+    assert U._cmd_update_argv([]) == 3
+    assert calls == ['upgrade', 'fresh-process']
+
+
+def test_failed_upgrade_never_runs_migrations(monkeypatch):
+    monkeypatch.setattr(U, '_detect_method', lambda: 'pip')
+    monkeypatch.setattr(U, '_run_upgrade', lambda *a, **k: 7)
+    monkeypatch.setattr(U, '_finish_update_subprocess', lambda **k: pytest.fail('migration after failure'))
+    assert U._cmd_update_argv([]) == 7
+
+
+def test_fresh_process_reads_new_schema(tmp_path, monkeypatch):
+    import sys
+    executable = tmp_path / 'jaeger'
+    schema = tmp_path / 'schema.txt'
+    schema.write_text('new-schema')
+    executable.write_text(f'#!{sys.executable}\n'
+        'import pathlib, sys\n'
+        'assert sys.argv[1:] == ["update", "--finish-update"]\n'
+        f'assert pathlib.Path({str(schema)!r}).read_text() == "new-schema"\n')
+    executable.chmod(0o755)
+    monkeypatch.setattr(U, 'jaeger_exe', lambda: executable)
+    assert U._finish_update_subprocess() == 0
+
+
+def _real_product_repository(tmp_path, monkeypatch):
+    import subprocess
+    origin = tmp_path / 'origin'
+    origin.mkdir()
+    run = lambda *args, **kw: subprocess.run(['git', *args], check=True, capture_output=True, text=True, **kw)
+    run('init', str(origin))
+    run('-C', str(origin), 'config', 'user.email', 'isolated@example.invalid')
+    run('-C', str(origin), 'config', 'user.name', 'Isolated test')
+    updater = origin / 'jaeger_ai/cli/verbs/update_verb.py'
+    updater.parent.mkdir(parents=True)
+    updater.write_text('# coordinated updater supports --finish-update\n')
+    (origin / 'version.txt').write_text('old')
+    run('-C', str(origin), 'add', 'version.txt', 'jaeger_ai')
+    run('-C', str(origin), 'commit', '-m', 'old')
+    old = run('-C', str(origin), 'rev-parse', 'HEAD').stdout.strip()
+    run('-C', str(origin), 'tag', 'v1.0.0')
+    (origin / 'version.txt').write_text('new')
+    run('-C', str(origin), 'commit', '-am', 'new')
+    new = run('-C', str(origin), 'rev-parse', 'HEAD').stdout.strip()
+    run('-C', str(origin), 'tag', 'v2.0.0')
+    home = tmp_path / 'product'
+    run('clone', str(origin), str(home))
+    monkeypatch.setattr(U, '_reinstall_deps', lambda home: 0)
+    monkeypatch.setattr(U, '_rebuild_mac_shell', lambda home, **kw: 0)
+    return home, old, new
+
+
+def test_product_git_update_honors_pin_and_rollback(tmp_path, monkeypatch):
+    home, old, new = _real_product_repository(tmp_path, monkeypatch)
+    assert U._update_product_git(home, ref='v1.0.0') == 0
+    assert (home / 'version.txt').read_text() == 'old'
+    assert U._git(home, 'rev-parse', 'HEAD').stdout.strip() == old
+    assert U._git(home, 'rev-parse', U.UPDATE_PREVIOUS_GIT_REF).stdout.strip() == new
+    assert U._do_rollback(home) == 0
+    assert (home / 'version.txt').read_text() == 'new'
+    assert U._git(home, 'status', '--porcelain').stdout == ''
+
+
+def test_product_git_update_stable_resolves_tag(tmp_path, monkeypatch):
+    from jaeger_ai.core import version_check
+    home, old, new = _real_product_repository(tmp_path, monkeypatch)
+    U._git(home, 'checkout', '--detach', old)
+    monkeypatch.setattr(version_check, 'latest_release', lambda *a, **kw: 'v2.0.0')
+    assert U._update_product_git(home) == 0
+    assert U._git(home, 'rev-parse', 'HEAD').stdout.strip() == new
+
+
+def test_product_git_refuses_dirty_checkout(tmp_path, monkeypatch):
+    home, old, new = _real_product_repository(tmp_path, monkeypatch)
+    (home / 'version.txt').write_text('operator work')
+    assert U._update_product_git(home, ref=old) == 1
+    assert (home / 'version.txt').read_text() == 'operator work'
+    assert U._git(home, 'rev-parse', 'HEAD').stdout.strip() == new
+
+
+def test_product_git_failure_retains_recovery_ref(tmp_path, monkeypatch):
+    home, old, new = _real_product_repository(tmp_path, monkeypatch)
+    monkeypatch.setattr(U, '_reinstall_deps', lambda home: 17)
+    assert U._update_product_git(home, ref=old) == 17
+    assert U._git(home, 'rev-parse', U.UPDATE_PREVIOUS_GIT_REF).stdout.strip() == new
+    assert U._update_product_git(home, ref=old) == 1
+    assert U._git(home, 'rev-parse', U.UPDATE_PREVIOUS_GIT_REF).stdout.strip() == new
+    monkeypatch.setattr(U, '_reinstall_deps', lambda home: 0)
+    assert U._do_rollback(home) == 0
+    assert U._git(home, 'rev-parse', 'HEAD').stdout.strip() == new
+
+
+def test_preflight_refuses_live_services_without_changing_files(tmp_path, monkeypatch):
+    import socket
+    from contextlib import nullcontext
+    sentinel = tmp_path / 'version.txt'
+    sentinel.write_text('untouched')
+    monkeypatch.setattr(socket, 'create_connection', lambda *a, **kw: nullcontext())
+    assert _REAL_PREFLIGHT(tmp_path) == 1
+    assert sentinel.read_text() == 'untouched'
+
+
+def test_preflight_refuses_running_native_shell(tmp_path, monkeypatch):
+    import errno
+    import socket
+    from types import SimpleNamespace
+    def stopped(*a, **kw):
+        raise ConnectionRefusedError(errno.ECONNREFUSED, 'refused')
+    monkeypatch.setattr(socket, 'create_connection', stopped)
+    monkeypatch.setattr(U.sys, 'platform', 'darwin')
+    monkeypatch.setattr(U.subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=0))
+    assert _REAL_PREFLIGHT(tmp_path) == 1
+
+
+def test_preflight_process_inspection_failure_is_closed(tmp_path, monkeypatch):
+    import errno
+    import socket
+    from types import SimpleNamespace
+    def stopped(*a, **kw):
+        raise ConnectionRefusedError(errno.ECONNREFUSED, 'refused')
+    monkeypatch.setattr(socket, 'create_connection', stopped)
+    monkeypatch.setattr(U.sys, 'platform', 'darwin')
+    monkeypatch.setattr(U.subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=2))
+    assert _REAL_PREFLIGHT(tmp_path) == 1
+
+
+def test_product_git_refuses_target_without_coordinated_migrations(tmp_path, monkeypatch):
+    home, old, new = _real_product_repository(tmp_path, monkeypatch)
+    U._git(home, 'config', 'user.email', 'isolated@example.invalid')
+    U._git(home, 'config', 'user.name', 'Isolated test')
+    (home / 'jaeger_ai/cli/verbs/update_verb.py').write_text('# historical updater\n')
+    U._git(home, 'commit', '-am', 'historical updater fixture')
+    historical = U._git(home, 'rev-parse', 'HEAD').stdout.strip()
+    U._git(home, 'push', 'origin', 'HEAD:refs/heads/historical')
+    U._git(home, 'checkout', '--detach', new)
+    assert U._update_product_git(home, ref='historical') == 1
+    assert U._git(home, 'rev-parse', 'HEAD').stdout.strip() == new
+
+
+@pytest.mark.parametrize('argv', [['--check', '--rollback'], ['--check', '--finish-update']])
+def test_read_only_check_cannot_be_combined_with_mutation(monkeypatch, argv):
+    monkeypatch.setattr(U, '_do_rollback', lambda *a: pytest.fail('read-only rollback'))
+    monkeypatch.setattr(U, '_finish_update', lambda **kw: pytest.fail('conflicting modes'))
+    with pytest.raises(SystemExit) as result:
+        U._cmd_update_argv(argv)
+    assert result.value.code == 2
+
+
+def test_product_reinstall_ref_uses_canonical_pinned_update(tmp_path, monkeypatch):
+    (tmp_path / '.git').mkdir()
+    (tmp_path / '.jaeger-product-install').touch()
+    monkeypatch.setattr('jaeger_ai.core.instance.instance.install_root', lambda: tmp_path)
+    calls = []
+    monkeypatch.setattr(U, '_cmd_update_argv', lambda argv: calls.append(argv) or 7)
+    assert U._cmd_reinstall_argv(['--ref', 'owned-commit']) == 7
+    assert calls == [['--ref', 'owned-commit']]

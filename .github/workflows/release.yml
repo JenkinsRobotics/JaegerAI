@@ -2,68 +2,93 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., 0.13.0)'
-        required: true
-        default: '0.13.0'
+
+permissions:
+  contents: read
 
 env:
-  PYTHONDONTWRITEBYTECODE: 1
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONPYCACHEPREFIX: /tmp/jaeger-release-pycache
 
 jobs:
+  qualification:
+    uses: ./.github/workflows/ci.yml
+  feature-qualification:
+    uses: ./.github/workflows/v013-tests.yml
   release:
-    name: Create Release
+    name: Build qualified release
+    needs: [qualification, feature-qualification]
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Require an immutable version tag matching the package
+        run: |
+          python3 - <<'PYTHON'
+          import ast, os, subprocess
+          from pathlib import Path
+          if os.environ['GITHUB_REF_TYPE'] != 'tag':
+              raise SystemExit('Select a version tag to release; branches cannot be published')
+          tree = ast.parse(Path('jaeger_ai/__init__.py').read_text())
+          version = next(ast.literal_eval(n.value) for n in tree.body
+                         if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == '__version__' for t in n.targets))
+          if os.environ['GITHUB_REF_NAME'] != 'v' + version:
+              raise SystemExit('Release tag must match the package version')
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          tagged = subprocess.check_output(['git', 'rev-parse', os.environ['GITHUB_REF'] + '^{commit}'], text=True).strip()
+          if head != tagged:
+              raise SystemExit('Checkout differs from release tag')
+          PYTHON
+
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '22.23.2'
+          cache: npm
           cache-dependency-path: jaeger_ai/interfaces/ui/package-lock.json
 
-      - name: Install dependencies
-        run: |
-          pip install -e .
-          pip install build twine
+      - name: Install packaging toolchain
+        run: python -m pip install build twine
 
-      - name: Build frontend
-        working-directory: jaeger_ai/interfaces/ui
+      - name: Build coordinated distributions with the production UI
         run: |
-          npm ci
-          npm run build
+          python scripts/install-packages.py --no-install --sdist --wheel-dir "$RUNNER_TEMP/jaeger-dist" \
+            packages/jaeger-os packages/jaeger-agent packages/jaeger-kokoro-tts packages/jaeger-whisper-stt .
 
-      - name: Build Python package
+      - name: Validate the exact Python distributions to publish
         run: |
-          python -m build
+          python dev/scripts/inspect_release_artifacts.py "$RUNNER_TEMP/jaeger-dist"
+          python -m twine check "$RUNNER_TEMP"/jaeger-dist/*
 
-      - name: Build IDE extension
+      - name: Verify installed wheels and restart persistence
+        run: |
+          python -m venv "$RUNNER_TEMP/installed"
+          "$RUNNER_TEMP/installed/bin/python" -m pip install "$RUNNER_TEMP"/jaeger-dist/*.whl
+          cd "$RUNNER_TEMP"
+          PYTHONPATH= "$RUNNER_TEMP/installed/bin/python" "$GITHUB_WORKSPACE/scripts/check-installed-release.py" --version "${GITHUB_REF_NAME#v}"
+
+      - name: Build required IDE extension
         working-directory: jaeger_ai/interfaces/ide
         run: |
-          npm ci || true
-          # Package VSIX if vsce is available
-          npx --yes @vscode/vsce package --no-dependencies || echo "VSIX packaging skipped"
+          node --test tests/*.test.js
+          npx --yes @vscode/vsce package --no-dependencies --out "$RUNNER_TEMP/jaeger.vsix"
+          test -s "$RUNNER_TEMP/jaeger.vsix"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*
-            jaeger_ai/interfaces/ui/dist/**
-            jaeger_ai/interfaces/ide/*.vsix
+            ${{ runner.temp }}/jaeger-dist/*
+            ${{ runner.temp }}/jaeger.vsix
+          fail_on_unmatched_files: true
           generate_release_notes: true
           draft: false
           prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

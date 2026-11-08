@@ -862,6 +862,8 @@ class JaegerGatewayApp:
         background_client: Any = None,
         orchestration: Any | None = None,
     ) -> None:
+        from jaeger_ai.core.gateway.git_info import git_commit
+        self.source_revision_at_start = git_commit(str(Path(__file__).resolve().parent))
         # Explicit stores are used by embedded/test gateways and never attach
         # to the operator's running bridge unless a client is supplied.
         if background_client is None and store is None:
@@ -2033,8 +2035,7 @@ class JaegerGatewayApp:
         )
         all_green = required_ok
         status = "ok" if all_green else "unhealthy"
-        from jaeger_ai.core.gateway.git_info import git_commit as _git_commit
-        git_commit = _git_commit(str(Path(__file__).resolve().parent))
+        git_commit = self.source_revision_at_start
 
         active_model = "unknown"
         try:
@@ -4675,13 +4676,12 @@ class JaegerGatewayApp:
         if not messages or messages[-1] != {"role": "user", "content": text}:
             messages.append({"role": "user", "content": text})
 
-        # Multimodal / Vision extraction: find uploaded image references in attachments, history, or text
+        # Only admission-selected attachments may become model input. Conversation
+        # text (including assistant history) never authorizes a filesystem read.
         import base64
-        import re
         from pathlib import Path
 
         image_b64s: list[str] = []
-        all_text_blobs = [text] + [str(item.get("content") or "") for item in (history or [])]
         seen_paths: set[str] = set()
 
         for att in (attachments or []):
@@ -4695,28 +4695,6 @@ class JaegerGatewayApp:
                         image_b64s.append(base64.b64encode(p.read_bytes()).decode("utf-8"))
                     except Exception:
                         pass
-        for blob in all_text_blobs:
-            for match in re.finditer(r"stored at\s+([^\s]+\.(?:png|jpg|jpeg|webp|gif))", blob, re.IGNORECASE):
-                img_path = match.group(1).strip()
-                if img_path not in seen_paths:
-                    seen_paths.add(img_path)
-                    p = Path(img_path)
-                    if p.is_file():
-                        try:
-                            image_b64s.append(base64.b64encode(p.read_bytes()).decode("utf-8"))
-                        except Exception:
-                            pass
-            for match in re.finditer(r"(?:image attachment|attached image|file):\s*(?:[^\s]+\s+at\s+)?([^\s)]+\.(?:png|jpg|jpeg|webp|gif))", blob, re.IGNORECASE):
-                img_path = match.group(1).strip()
-                if img_path not in seen_paths:
-                    seen_paths.add(img_path)
-                    p = Path(img_path)
-                    if p.is_file():
-                        try:
-                            image_b64s.append(base64.b64encode(p.read_bytes()).decode("utf-8"))
-                        except Exception:
-                            pass
-
         if image_b64s and messages:
             messages[-1]["images"] = image_b64s
             # Respect a model the operator or certification says has VISION.

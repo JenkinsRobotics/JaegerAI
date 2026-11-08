@@ -43,6 +43,7 @@ def _env(tmp_path: Path, fakebin: Path) -> dict[str, str]:
     env.pop("JAEGER_STATE_DIR", None)
     env.pop("JAEGER_INSTALL_ROOT", None)
     env["HOME"] = str(tmp_path)
+    env["JAEGER_REF"] = "master"
     env["JAEGER_REPO_URL"] = "https://example.invalid/JaegerAI.git"
     env["PATH"] = os.pathsep.join((str(fakebin), env.get("PATH", "")))
     return env
@@ -113,3 +114,16 @@ def test_product_installer_refuses_to_copy_running_legacy_install(tmp_path, larg
     assert result.returncode == 1
     assert "still running" in result.stdout
     assert not (tmp_path / "JaegerAI").exists()
+
+
+def test_product_installer_resumes_existing_clone_before_state_copy(tmp_path):
+    old_state = _legacy_state(tmp_path)
+    fakebin = _fake_commands(tmp_path)
+    checkout = tmp_path / 'JaegerAI'
+    (checkout / '.git').mkdir(parents=True)
+    (checkout / 'install.sh').write_text('#!/bin/bash\nexit 0\n')
+    result = subprocess.run(['bash', str(INSTALLER)], env=_env(tmp_path, fakebin),
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30)
+    assert result.returncode == 0, result.stdout
+    assert (tmp_path / '.jaeger/instances/lilith/memory/memory.db').read_bytes() == b'operator-memory'
+    assert old_state.is_dir()

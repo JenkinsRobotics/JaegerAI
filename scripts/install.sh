@@ -42,10 +42,9 @@ if [[ "$JAEGER_INSTALL_ROOT_WAS_SET" -eq 0 \
     MIGRATE_LEGACY=1
   fi
 fi
-JAEGER_REF="${JAEGER_REF:-master}"
+JAEGER_REF="${JAEGER_REF:-stable}"
 REPO_URL="${JAEGER_REPO_URL:-https://github.com/JenkinsRobotics/JaegerAI.git}"
 # Raw URL for the upgrade hint (github.com → raw.githubusercontent.com, no .git).
-RAW_URL="$(printf '%s' "$REPO_URL" | sed 's#github.com#raw.githubusercontent.com#; s#\.git$##')/$JAEGER_REF/scripts/install.sh"
 
 cat <<EOF
 ╔══════════════════════════════════════════════╗
@@ -173,13 +172,63 @@ fi
 echo "✓ prereqs OK (git, C toolchain, $PY → python$PY_VERSION)"
 export PY   # the in-repo install.sh picks up the same interpreter
 
-# 2. Clone (or update) JaegerAI directly into the install dir — the repo
-#    root already IS the clean product (0.9 split; no monorepo copy step).
+# Resolve the product default through a published stable release, not a moving
+# development branch. Explicit JAEGER_REF=master opts into development.
+if [[ "$JAEGER_REF" == stable ]]; then
+  JAEGER_REF="$("$PY" - "$REPO_URL" <<'PYTHON'
+import json, sys, urllib.parse, urllib.request
+url = urllib.parse.urlparse(sys.argv[1])
+if url.hostname != 'github.com':
+    raise SystemExit('Set JAEGER_REF explicitly for a non-GitHub source')
+repo = url.path.strip('/').removesuffix('.git')
+request = urllib.request.Request(f'https://api.github.com/repos/{repo}/releases/latest',
+    headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'jaeger-install'})
+with urllib.request.urlopen(request, timeout=30) as response:
+    release = json.load(response)
+tag = release.get('tag_name')
+if release.get('draft') or release.get('prerelease') or not isinstance(tag, str) or not tag or tag.startswith('-'):
+    raise SystemExit('No published stable release available')
+print(tag)
+PYTHON
+)"
+fi
+RAW_URL="$(printf '%s' "$REPO_URL" | sed 's#github.com#raw.githubusercontent.com#; s#\.git$##')/$JAEGER_REF/scripts/install.sh"
+[[ "$JAEGER_REF" != -* ]] || { echo "Invalid JAEGER_REF" >&2; exit 1; }
+
+# 2. Clone or select an immutable commit. Existing installs use the canonical
+# updater (including its service preflight and rollback) rather than an
+# independent checkout/pull path that can replace live source.
 if [[ -d "$JAEGER_INSTALL_ROOT/.git" ]]; then
-  echo "→ updating $JAEGER_INSTALL_ROOT"
-  git -C "$JAEGER_INSTALL_ROOT" fetch origin --tags --quiet
-  git -C "$JAEGER_INSTALL_ROOT" checkout "$JAEGER_REF" --quiet
-  git -C "$JAEGER_INSTALL_ROOT" pull --ff-only origin "$JAEGER_REF" --quiet 2>/dev/null || true
+  if [[ -n "$(git -C "$JAEGER_INSTALL_ROOT" status --porcelain)" ]]; then
+    echo "✗ install checkout has local changes; nothing changed" >&2
+    exit 1
+  fi
+  if [[ "$MIGRATE_LEGACY" -eq 1 ]]; then
+    # Resume an interrupted clone/state-copy operation without losing that
+    # recovery path to the normal installed-product updater.
+    git -C "$JAEGER_INSTALL_ROOT" fetch --no-tags origin "$JAEGER_REF" --quiet
+    CURRENT="$(git -C "$JAEGER_INSTALL_ROOT" rev-parse HEAD)"
+    SELECTED="$(git -C "$JAEGER_INSTALL_ROOT" rev-parse --verify 'FETCH_HEAD^{commit}')"
+    if [[ "$CURRENT" != "$SELECTED" ]]; then
+      echo "✗ recovery checkout differs from selected ref; preserve it and select its original JAEGER_REF" >&2
+      exit 1
+    fi
+  else
+  # Older installed updaters ignored --ref. Refuse that path instead of
+  # silently following its upstream branch or replacing running code.
+  PYTHONPATH="$JAEGER_INSTALL_ROOT" "$PY" -B - "$JAEGER_INSTALL_ROOT" <<'PYTHON'
+from pathlib import Path
+import sys
+try:
+    from jaeger_ai.cli.verbs.update_verb import _preflight_update
+except ImportError:
+    raise SystemExit('Installed updater predates safe pinned updates; install into a separate location')
+raise SystemExit(_preflight_update(Path(sys.argv[1])))
+PYTHON
+  echo "→ updating $JAEGER_INSTALL_ROOT through jaeger update"
+  "$JAEGER_INSTALL_ROOT/jaeger" update --ref "$JAEGER_REF"
+  exit $?
+  fi
 else
   if [[ -e "$JAEGER_INSTALL_ROOT" ]]; then
     echo "✗ $JAEGER_INSTALL_ROOT exists but is not a git repo — move it aside or set JAEGER_INSTALL_ROOT" >&2
@@ -187,7 +236,11 @@ else
   fi
   echo "→ cloning JaegerAI into $JAEGER_INSTALL_ROOT"
   mkdir -p "$(dirname "$JAEGER_INSTALL_ROOT")"
-  git clone --branch "$JAEGER_REF" "$REPO_URL" "$JAEGER_INSTALL_ROOT" --quiet
+  git clone --no-checkout "$REPO_URL" "$JAEGER_INSTALL_ROOT" --quiet
+  git -C "$JAEGER_INSTALL_ROOT" fetch --no-tags origin "$JAEGER_REF" --quiet
+  COMMIT="$(git -C "$JAEGER_INSTALL_ROOT" rev-parse --verify 'FETCH_HEAD^{commit}')"
+  git -C "$JAEGER_INSTALL_ROOT" checkout --detach "$COMMIT" --quiet
+  echo "  selected revision: $COMMIT"
 fi
 
 # Carry the complete operator-state root into the correctly named install.

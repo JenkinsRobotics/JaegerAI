@@ -132,3 +132,27 @@ def test_cached_update_status_corrupt_cache_degrades_to_live_check(tmp_path, mon
     monkeypatch.setattr(V, "latest_version", lambda *a, **k: "2.0.0")
     st = V.cached_update_status(_Layout(root))
     assert st["latest"] == "2.0.0"
+
+
+def test_latest_release_uses_published_release_not_highest_tag(monkeypatch):
+    import io
+    import json
+    from jaeger_ai.core import version_check
+    seen = []
+    def response(request, **kwargs):
+        seen.append(request.full_url)
+        return io.BytesIO(json.dumps({'tag_name': 'v1.2.0', 'draft': False, 'prerelease': False}).encode())
+    monkeypatch.setattr(version_check.urllib.request, 'urlopen', response)
+    assert version_check.latest_release('owner/repo') == 'v1.2.0'
+    assert seen == ['https://api.github.com/repos/owner/repo/releases/latest']
+
+
+def test_latest_release_rejects_prerelease_and_malformed_payloads(monkeypatch):
+    import io
+    import json
+    from jaeger_ai.core import version_check
+    for payload in ({'tag_name': 'v2.0.0-rc1', 'prerelease': True},
+                    {'tag_name': 'v1.0.0', 'draft': True}, [], {'tag_name': 7}):
+        monkeypatch.setattr(version_check.urllib.request, 'urlopen',
+                            lambda *a, **kw: io.BytesIO(json.dumps(payload).encode()))
+        assert version_check.latest_release('owner/repo') is None

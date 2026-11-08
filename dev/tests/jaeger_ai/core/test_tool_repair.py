@@ -61,3 +61,11 @@ def test_repair_tool_call_aliases():
     )
     assert name == "write_file"
     assert args == {"file_path": "notes.md", "content": "contents"}
+
+
+def test_valid_arguments_preserve_exact_strings_and_keys():
+    import json
+    expected = {' content ': '  indented\n', 'quoted': '"quoted"',
+                'nested': {'literal': "'value'"}, 'items': ['  keep  ']}
+    assert safe_parse_tool_arguments(json.dumps(expected)) == expected
+    assert safe_parse_tool_arguments(expected) == expected

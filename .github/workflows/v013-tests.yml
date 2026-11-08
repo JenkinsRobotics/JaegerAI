@@ -1,6 +1,7 @@
 name: v0.13.0 Feature Tests
 
 on:
+  workflow_call:
   push:
     branches: [main, develop, master]
     paths:

@@ -9,3 +9,14 @@ it('channel changes request a real local plan and never expose an enabled apply/
   expect(el.textContent).toContain('jaeger update --check --channel latest');expect(el.querySelectorAll('button')).toHaveLength(1);expect(el.textContent).toContain('not executed here');
  }finally{await act(async()=>root.unmount());el.remove();localStorage.removeItem('jaeger.ui.update-review-channel.v1');}
 });
+
+it('warns when the native shell or Gateway startup revision differs from checkout',async()=>{
+ window.jaegerNative={post:async()=>({version:'0.13.0',build:'0.13.0+11111111',dev_build:true})};
+ const source={updatePlan:async()=>({component:'jaeger-update-plan',channel:'stable',reported_package_version:'0.13.0',install_method:'product-checkout',source_checkout_revision:'2'.repeat(40),runtime_source_revision:'3'.repeat(40),source_checkout_dirty:false,identity_scope:'checkout_only',migration_state:'current',active_instance_schema:'0.5.0',installed_schema:'0.5.0',work:{active_requests:0,unknown_requests:0,nonterminal_tasks:0},restart_blockers:[],restart_policy:'manual',release_state:'not_probed',signature_state:'not_probed',check_command:[],manual_update_command:[],rollback:{available:true,command:[]},limits:[]})}as unknown as JaegerSource;
+ localStorage.removeItem('jaeger.ui.update-review-channel.v1');const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
+ try{
+  await act(async()=>root.render(<UpdatePlanPanel source={source}/>));
+  expect(el.querySelector('[role="alert"]')?.textContent).toContain('different revisions');
+  expect(el.textContent).toContain('Gateway startup revision '+ '3'.repeat(40));
+ }finally{await act(async()=>root.unmount());el.remove();delete window.jaegerNative;}
+});
