@@ -1326,6 +1326,23 @@ def test_durable_task_uses_real_owner_tools_and_delivers_after_restart(gateway):
         time.sleep(0.05)
     assert task['state'] == 'completed_verified', (task, (gateway.root/'gateway.log').read_text()[-15000:])
     assert (workspace/'workspace/durable-report.txt').read_text() == 'DURABLE-VERIFIED-CONTENT'
+    # A fresh file alone used to mask this fixture's rejected complete_task
+    # call. Require the actual ledger/tool receipt, not merely task state.
+    assert task['payload'].get('attempt', 0) == 0
+    _, receipt = gateway.request('/v1/requests/' + tid + ':0')
+    assert receipt['status'] == 'completed'
+    assert not receipt['result'].get('halt_reason')
+    completion = receipt['result']['task_completion']
+    assert completion['ok'] is True
+    assert any(r.get('kind') == 'file_sha256' and r.get('sha256') ==
+               hashlib.sha256(b'DURABLE-VERIFIED-CONTENT').hexdigest()
+               for r in completion['verification_receipts'])
+    import sqlite3
+    with sqlite3.connect(f'file:{gateway.root / "gateway_sessions.sqlite3"}?mode=ro', uri=True) as conn:
+        failures = [json.loads(row[0]) for row in conn.execute(
+            "SELECT data_json FROM events WHERE event='tool.failed'")]
+    assert not any(event.get('request_id') == tid + ':0' and
+                   event.get('tool') == 'complete_task' for event in failures)
     before = (gateway.root/'provider-calls.jsonl').read_text()
     gateway.stop()
     gateway.start()

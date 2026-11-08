@@ -168,6 +168,8 @@ dev/scripts/run_tests.sh --integration -- --timeout=120 \
 
 A follow-on audit reproduced a separate task-owner precedence defect: a fresh
 partial artifact can override a yielded or blocked worker outcome and falsely
-complete a durable task. That repair is being prepared separately from this
-frozen increment. It is an additional reason not to treat these passing scoped
-gates as complete product acceptance or deploy this candidate.
+complete a durable task. That defect was left outside this frozen
+third increment and is repaired in the subsequent
+[outcome/recovery increment](assistant-core-outcome-recovery-20261108.md). Passing
+scoped gates still do not establish complete product acceptance or authorize
+deployment.
