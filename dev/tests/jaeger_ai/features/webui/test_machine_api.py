@@ -52,3 +52,11 @@ def test_route_is_get_only_and_404s_unknown_source(m):
     m.route(None, parsed("/v1/machine/logs", "source=nope"), "GET", None, j); assert out["status"] == 404
     m.route(None, parsed("/v1/machine/logs", "source=gateway&lines=2"), "GET", None, j); assert out["status"] == 200 and len(out["body"]["lines"]) == 2
     m.route(None, parsed("/v1/machine/logs"), "POST", None, j); assert out["status"] == 405
+
+
+def test_provider_error_url_credentials_are_not_visible_in_logs(m, tmp_path):
+    (tmp_path / "logs" / "gateway.log").write_text(
+        "ERROR provider unavailable https://dummy-user:dummy-password@provider.invalid/v1\n")
+    text = m.tail("gateway")["lines"][0]["text"]
+    assert "dummy-password" not in text
+    assert "provider unavailable" in text and "provider.invalid" in text

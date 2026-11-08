@@ -232,3 +232,101 @@ async def test_an_image_name_in_recalled_history_does_not_make_an_image_turn(app
     await app._execute_turn("s", admitted["turn_id"], "What is my audit memory token?", request_id="r5")
 
     assert lanes == ["entity_react"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detail,secret", [
+    ("401 rejected Authorization: Bearer dummy-provider-credential", "dummy-provider-credential"),
+    ("503 unavailable https://user:dummy-password@provider.invalid/v1", "dummy-password"),
+    ("400 invalid model api_key=dummy-query-credential", "dummy-query-credential"),
+    ('401 rejected headers={"Authorization": "Basic dummy-basic-credential"}', "dummy-basic-credential"),
+    ('503 unavailable https://provider.invalid?api_key=dummy-url-key&model=unavailable', "dummy-url-key"),
+])
+@pytest.mark.parametrize("raised", [False, True])
+async def test_provider_failure_keeps_cause_but_not_credentials(app, monkeypatch, caplog, detail, secret, raised):
+    import json
+    runtime = _StubRuntime()
+    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: runtime))
+    if raised:
+        def fail(*args, **kwargs):
+            try:
+                raise ValueError(detail)
+            except ValueError as cause:
+                raise RuntimeError(detail) from cause
+        monkeypatch.setattr(app, "_owner_react_turn", fail)
+    else:
+        _agent_loop(monkeypatch, app, {"text": "", "error": detail})
+    admitted = app.store.admit_request("s", "make the files", request_id="secret-error")
+    await app._execute_turn("s", admitted["turn_id"], "make the files", request_id="secret-error")
+    [terminal] = _terminal_events(app)
+    assert terminal.event == "turn.failed"
+    assert detail.split()[0] in terminal.data["error"]
+    assert secret not in json.dumps(terminal.data)
+    assert secret not in json.dumps(app.store.get_request("secret-error"))
+    reopened = GatewaySessionStore(app.store.path)
+    assert secret not in json.dumps(reopened.replay_events("s"))
+    assert secret not in json.dumps(reopened.get_request("secret-error"))
+    assert secret not in json.dumps(reopened.list_messages("s"))
+    assert secret not in caplog.text
+    assert secret not in json.dumps([e.data for e in app.event_bus.get_replay_events("s", since_event_id=0)])
+    assert runtime.finished == []
+
+
+@pytest.mark.asyncio
+async def test_native_provider_failure_receipt_is_redacted_without_mutating_source(app, monkeypatch, tmp_path):
+    import json
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+
+    runtime = _StubRuntime()
+    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: runtime))
+    _agent_loop(monkeypatch, app, {"error": "503 provider unavailable"})
+    admitted = app.store.admit_request("s", "make the files", request_id="receipt-error")
+    app.store.bind_native("receipt-error", native_run_id="dummy-native", native_session="dummy-session")
+    receipt = {"status": "failed", "execution_unknown": False,
+               "reply": {"error": '401 headers={"Authorization": "Bearer dummy-nested-secret"}'}}
+    monkeypatch.setattr(app, "_instance_root", lambda: tmp_path)
+    monkeypatch.setattr(NativeTurns, "get", lambda *a, **kw: receipt)
+    await app._execute_turn("s", admitted["turn_id"], "make the files", request_id="receipt-error")
+    assert app.store.get_request("receipt-error")["status"] == "failed"
+    assert "dummy-nested-secret" not in json.dumps(app.store.get_request("receipt-error"))
+    assert "dummy-nested-secret" not in json.dumps(app.store.replay_events("s"))
+    # The same exposure boundary serves reconciliation, without changing source proof.
+    assert "dummy-nested-secret" not in json.dumps(app._native_receipt("dummy-native", "dummy-session"))
+    assert "dummy-nested-secret" in json.dumps(receipt)
+
+
+def test_native_receipt_lookup_error_log_is_redacted(app, monkeypatch, tmp_path, caplog):
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+
+    def failed(*args, **kwargs):
+        raise ValueError("provider receipt api_key=dummy-receipt-key is malformed")
+
+    monkeypatch.setattr(app, "_instance_root", lambda: tmp_path)
+    monkeypatch.setattr(NativeTurns, "get", failed)
+    result = app._native_receipt("dummy-native", "dummy-session")
+    assert result == {"execution_unknown": True, "error": "ValueError"}
+    assert "dummy-receipt-key" not in caplog.text
+    assert "malformed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_review_completed_receipt_recovers_exception_without_losing_evidence(app, monkeypatch, tmp_path):
+    import json
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: _StubRuntime()))
+    _agent_loop(monkeypatch, app, {"error": "503 provider unavailable"})
+    admitted=app.store.admit_request('s','make the files',request_id='complete-review')
+    app.store.bind_native('complete-review',native_run_id='native-done',native_session='dummy-session')
+    native=NativeTurns(tmp_path/'run')
+    native.accept('native-done','dummy-session')
+    reply={'text':'Verified diagnostic report', 'usage':{'total_tokens':20}, 'metadata':{'author':'worker'}}
+    native.finish('native-done','dummy-session',reply)
+    monkeypatch.setattr(app,'_instance_root',lambda:tmp_path)
+    await app._execute_turn('s',admitted['turn_id'],'make the files',request_id='complete-review')
+    row=app.store.get_request('complete-review')
+    assert row['status']=='completed'
+    assert row['result']['output']==reply['text']
+    assert row['result']['native_receipt']['reply']==reply
+    assert native.get('native-done','dummy-session')['reply']==reply
+    [event]=_terminal_events(app)
+    assert event.event=='turn.finish'

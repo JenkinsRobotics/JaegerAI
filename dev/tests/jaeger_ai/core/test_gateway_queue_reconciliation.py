@@ -303,3 +303,26 @@ def test_missing_or_mismatched_admission_proof_preserves_historical_session(reco
     assert store.get_request('active')['status'] == 'completed'
     assert store.get_session('s')['status'] == 'execution_unknown'
     assert store.promote_next_queue_item('s') is None
+
+
+@pytest.mark.asyncio
+async def test_review_completed_native_receipt_preserves_accounting(recovered, monkeypatch, tmp_path):
+    from jaeger_ai.core.runtime.native_turns import NativeTurns
+    native=NativeTurns(tmp_path/'run')
+    native.accept('native','native-session')
+    usage={'prompt_tokens':12, 'completion_tokens':8, 'total_tokens':20}
+    reply={'text':'Completed diagnostic report', 'halt_reason':'complete_task',
+           'usage':usage, 'metadata':{'author':'test-worker', 'tool_count':2},
+           'diagnostics': {'error':'401 api_key=dummy-nested-secret'}}
+    native.finish('native','native-session',reply)
+    monkeypatch.setattr(recovered.app,'_instance_root',lambda:tmp_path)
+    response=await recovered.app.handle_reconcile(Request())
+    payload=json.loads(response.text)
+    assert response.status==200 and payload['status']=='completed'
+    exposed=payload['result']['reconciliation']['reply']
+    assert exposed['usage']==usage
+    assert exposed['metadata']==reply['metadata']
+    assert exposed['text']==reply['text']
+    assert 'dummy-nested-secret' not in json.dumps(payload)
+    assert native.get('native','native-session')['reply']==reply
+    assert [row['request_id'] for row in recovered.started]==['next']

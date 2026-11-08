@@ -203,3 +203,9 @@ No unsupported control or tab is promoted to PASS by these scoped results.
   verification instead of promoting a merely non-placeholder procedure. Its
   missing objective verifier, caller-verdict and disk-reload trust boundaries
   remain explicit. No tab is promoted to PASS by this correction.
+
+
+- Chat/Machine/Settings diagnostic scope: the [provider-failure correction](assistant-core-provider-failure-redaction-20261108.md)
+  tests recognized credential removal from failed-turn replay/logs and Machine
+  log tail while preserving operational receipt data. This is pattern-based,
+  synthetic backend qualification, not a universal secrecy or real-account pass.

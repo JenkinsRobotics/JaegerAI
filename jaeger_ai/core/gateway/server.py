@@ -160,6 +160,29 @@ _SECRET_TEXT = re.compile(
 )
 
 
+def _redact_native_receipt(value: Any, *, diagnostic: bool = False) -> Any:
+    """Copy credential diagnostics without rewriting operational receipt fields."""
+    from jaeger_ai.core.redaction import MASK, redact_text
+
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            label = str(key).lower().replace("-", "_")
+            if label in {"api_key", "apikey", "access_token", "refresh_token", "authorization",
+                         "auth", "password", "passwd", "secret", "token", "cookie", "set_cookie"}:
+                result[key] = MASK
+            else:
+                result[key] = _redact_native_receipt(item, diagnostic=diagnostic or label in {
+                    "error", "errors", "detail", "details", "message", "reason", "diagnostics", "headers",
+                })
+        return result
+    if isinstance(value, (list, tuple)):
+        if diagnostic and len(value) == 2 and isinstance(value[0], str) and value[0].lower() == "authorization":
+            return type(value)((value[0], MASK))
+        return type(value)(_redact_native_receipt(item, diagnostic=diagnostic) for item in value)
+    return redact_text(value) if diagnostic and isinstance(value, str) else value
+
+
 def _inline_text(text: Any, limit: int) -> str:
     """Bounded, secret-redacted text for an inline tool block (best effort)."""
     value = _SECRET_TEXT.sub(lambda m: m.group(1) + "***", str(text or "")).strip()
@@ -5895,7 +5918,13 @@ class JaegerGatewayApp:
                 session_id, turn_id, rid, agent_fields,
             ):
                 return
-            logger.exception("Turn execution failed: %s", exc)
+            from jaeger_ai.core.redaction import redact_text
+            import traceback
+
+            # Provider bodies and chained exceptions can contain credentials.
+            # Sanitize once before task settlement, durable SSE and diagnostics.
+            error = redact_text(str(exc))
+            logger.error("Turn execution failed: %s", redact_text(traceback.format_exc()))
             bound = self.store.get_request(rid) or {}
             after_native = bool(bound.get("native_run_id"))
             owner_run = str(bound.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX)
@@ -5931,7 +5960,7 @@ class JaegerGatewayApp:
                     "proactive_source": "sensor",
                     "proactive_salience": _normalize_salience(options["proactive_salience"]),
                 }
-            result = {"error": str(exc), "turn_id": turn_id, "status": status, **agent_fields, **proactive_fields}
+            result = {"error": error, "turn_id": turn_id, "status": status, **agent_fields, **proactive_fields}
             if status == "completed":
                 result = {
                     "output": str(reply.get("text") or ""),
@@ -6738,9 +6767,12 @@ class JaegerGatewayApp:
             from jaeger_ai.core.runtime.native_turns import NativeTurns
             root = self._instance_root() / "run"
             result = NativeTurns(root, read_only=True).get(native_run_id, native_session)
-            return result if result is not None else {"execution_unknown": True, "error": "run_not_found"}
+            # Receipts drive reconciliation/accounting as well as UI diagnostics.
+            # Preserve operational fields and the original durable proof.
+            return _redact_native_receipt(result) if result is not None else {"execution_unknown": True, "error": "run_not_found"}
         except Exception as exc:  # noqa: BLE001 — reconciliation must not crash
-            logger.warning("native receipt lookup failed: %s", exc)
+            from jaeger_ai.core.redaction import redact_text
+            logger.warning("native receipt lookup failed: %s", redact_text(str(exc)))
             return {"execution_unknown": True, "error": type(exc).__name__}
 
     async def handle_stream_events(self, request: web.Request) -> web.StreamResponse:
