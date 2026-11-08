@@ -315,7 +315,8 @@ class GatewayTaskOwner:
         return count
 
     def admit_turn_card(self, card_payload: dict, *, execution: dict | None = None,
-                        artifacts: list[str] | None = None, source: str = 'gateway_turn') -> DurableTask:
+                        artifacts: list[str] | None = None, source: str = 'gateway_turn',
+                        resume: bool = False, agent_id: str = '') -> DurableTask:
         """Admit the Goal/TaskCard of a live turn.
 
         The turn that admits it is also its executor, so the scheduler must not
@@ -328,7 +329,11 @@ class GatewayTaskOwner:
         task = DurableTask(
             tid, 'native:jaeger', str(card_payload["goal"]),
             kind=TaskKind.LONG_RUNNING, state=TaskState.QUEUED,
-            payload={'turn_card': dict(card_payload), 'execution': dict(execution or {}), 'artifacts': list(artifacts or [])},
+            payload={'turn_card': dict(card_payload), 'execution': json.loads(json.dumps(execution or {})),
+                     'artifacts': list(artifacts or []),
+                     **({'foreground_resume_version': 1, 'original_request_id': card_payload.get('request_id')}
+                        if resume else {})},
+            agent_id=agent_id,
             notification_policy=NotificationPolicy(recipient_session_id=parent),
             provenance={'authorized': True, 'turn_owned': True, 'source': source,
                         'session_id': parent, 'request_id': card_payload.get('request_id')},
@@ -347,6 +352,8 @@ class GatewayTaskOwner:
         no caller can report verified work it cannot show.
         """
         def change(task: DurableTask) -> None:
+            if task.is_terminal or task.cancellation:
+                return
             try:
                 authoritative_transition(task, state, evidence=evidence, error=error)
             except CompletionError as exc:
@@ -360,12 +367,22 @@ class GatewayTaskOwner:
         return task
 
     def open_turn(self, *, session_id: str, request_id: str, text: str, strategy: str,
-                  owner: str, workspace: str = '') -> DurableTask:
+                  owner: str, workspace: str = '', execution: dict | None = None,
+                  agent_id: str = '') -> DurableTask:
         """One operational turn becomes one Goal/TaskCard. Replaying the request replays the card."""
         goal = Goal.from_owner(owner=owner or 'owner', objective=text.strip(), session_id=session_id)
         goal.goal_id = f'goal:{request_id}'  # derived, so replaying a request replays its card
         card = TaskCard.open(goal, strategy=strategy, request_id=request_id, task_id=f'turn:{request_id}')
-        return self.admit_turn_card(card.to_payload(), execution={'workspace': workspace})
+        row = self.gateway.store.get_request(request_id) or {}
+        # Only new, canonical, fully specified admissions can acquire a resume owner.
+        resume = (execution is not None and execution == row.get('execution')
+                  and bool(execution.get('workspace'))
+                  and not (execution.get('options') or {}).get('task_id')
+                  and not (execution.get('options') or {}).get('background')
+                  and not execution.get('is_subordinate')
+                  and (execution.get('options') or {}).get('source') in (None, '', 'user', 'client'))
+        return self.admit_turn_card(card.to_payload(),
+            execution=execution if resume else {'workspace': workspace}, resume=resume, agent_id=agent_id)
 
     def close_turn(self, task_id: str, result: dict, *, status: str, identity=None,
                    models: tuple[str, ...] = ()) -> tuple[DurableTask, Receipt]:
@@ -394,6 +411,11 @@ class GatewayTaskOwner:
                 error = str(result.get('error') or halt)
             elif result.get('error'):
                 state, error = TaskState.FAILED, str(result['error'])
+            elif halt == 'yielded' and task.payload.get('foreground_resume_version') == 1:
+                if task.payload['execution'].get('attachments') or task.payload['execution'].get('attachment_ids'):
+                    state, error = TaskState.FAILED, 'Foreground continuation cannot preserve pinned attachments; inspect retained work'
+                else:
+                    state, error = TaskState.PAUSED, 'Await the completed foreground receipt before continuation'
             elif halt:
                 # A fresh artifact can be a partial checkpoint, not completion.
                 # Only a clean worker outcome authorizes verification.
@@ -410,7 +432,8 @@ class GatewayTaskOwner:
                     evidence = {'unverified_answer': str(result.get('text') or '')[:2000]}
                 else:
                     state, error = TaskState.FAILED, str(evidence)
-            task = self.settle_turn_card(task_id, state, evidence=evidence, error=error)
+            task = self.settle_turn_card(task_id, state, evidence=evidence, error=error,
+                                         result=result.get('output') or result.get('text') or result)
         card = task.payload.get('turn_card') or {}
         receipt = Receipt(
             receipt_id=f'rcpt_{str(card.get("request_id") or task_id)[:12]}',
@@ -524,7 +547,12 @@ class GatewayTaskOwner:
             # The turn that admitted this card is its executor and delivers its own
             # receipt; the scheduler must not start or re-deliver it.
             if task.provenance.get('turn_owned'):
-                if not task.is_terminal:
+                if task.payload.get('foreground_resume_version') == 1 and not task.is_terminal:
+                    if task.cancellation:
+                        await self.cancel(task.task_id)
+                    else:
+                        self._transfer_foreground(task)
+                elif not task.is_terminal:
                     self._reconcile_turn_card(task)
                 continue
             if task.is_terminal:
@@ -554,6 +582,106 @@ class GatewayTaskOwner:
             self._active[task.task_id] = operation
             operation.add_done_callback(lambda done, tid=task.task_id: self._finished(tid, done))
 
+    def _transfer_foreground(self, task):
+        """Adopt a finished slice, never restart the request that produced it.
+
+        A crash before its canonical receipt is committed is owned by Gateway
+        recovery. A crash after that commit can replay this idempotent transfer.
+        """
+        if task.cancellation or not task.provenance.get('authorized'):
+            return
+        rid = task.payload.get('original_request_id')
+        if not rid or rid in getattr(self.gateway, '_running_tasks', {}):
+            return
+        row = self.gateway.store.get_request(rid) or {}
+        if row.get('status') in {'admitted', 'running', 'cancelling'}:
+            return
+        result = row.get('result') or {}
+        if row.get('status') in {'completed', 'failed', 'cancelled'} and (
+                row['status'] != 'completed' or result.get('error') or result.get('halt_reason') != 'yielded'):
+            self.close_turn(task.task_id, result, status=row['status'])
+            return
+        if not row:
+            self._reconcile_turn_card(task)
+            return
+        def transfer(current):
+            if (current.is_terminal or not current.provenance.get('turn_owned')
+                    or current.payload.get('foreground_resume_version') != 1):
+                return
+            if current.cancellation or not current.provenance.get('authorized'):
+                return
+            cancellations = getattr(self.gateway, '_cancellations', None)
+            if cancellations and cancellations.is_cancelled(rid):
+                current.cancellation = 'Cancelled by user'
+                authoritative_transition(current, TaskState.PAUSED, error='Cancellation requested; reconcile owned children')
+                return
+            if row.get('status') == 'execution_unknown':
+                authoritative_transition(current, TaskState.PAUSED,
+                    error='Execution outcome unknown; reconcile effects before retry')
+                return
+            if row.get('status') != 'completed' or result.get('error') or result.get('halt_reason') != 'yielded':
+                # Recovery may have settled a different outcome after close_turn.
+                if row.get('status') in {'cancelled', 'failed'}:
+                    authoritative_transition(current, TaskState.CANCELLED if row['status'] == 'cancelled'
+                                             else TaskState.FAILED, error=result.get('error') or row['status'])
+                return
+            execution = current.payload['execution']
+            reason = None
+            if execution != row.get('execution'):
+                reason = 'Foreground execution authority changed; no automatic continuation'
+            elif execution.get('attachments') or execution.get('attachment_ids'):
+                reason = 'Foreground continuation cannot preserve pinned attachments; inspect retained work'
+            elif execution.get('interaction_tier') not in {'agent', 'jaeger'}:
+                reason = 'Foreground interaction tier is unresolved; no automatic continuation'
+            elif not Path(str(execution.get('workspace') or '')).is_absolute():
+                reason = 'Foreground workspace is unresolved; no automatic continuation'
+            from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX, split_routed_model_id
+            route_provider, route_model = split_routed_model_id(str(execution.get('model') or ''))
+            provider = str(execution.get('provider') or route_provider or '').lower()
+            if not reason and (not route_model or route_model.lower() in {'default', 'jaeger', 'local', 'none'}
+                    or not provider or provider in {'local', 'cli'}):
+                reason = 'Foreground model/provider route is unresolved; no automatic continuation'
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+            native = row.get('native_run_id')
+            checkpoint = None
+            if not reason:
+                try:
+                    runs = SqliteRunStore()
+                    run = runs.get(native) if native else None
+                    checkpoint = runs.latest_checkpoint(native) if run else None
+                    if (not native or not str(row.get('native_session') or '').startswith(OWNER_RUN_SESSION_PREFIX)
+                            or not run or run.state not in {'active', 'recoverable'}
+                            or not checkpoint or not checkpoint.cursor.get('messages')):
+                        reason = 'Foreground native checkpoint is unavailable; inspect retained work without replay'
+                    elif EntityRuntime.run_has_indeterminate_effects(native):
+                        authoritative_transition(current, TaskState.PAUSED,
+                            error='Execution outcome unknown; reconcile effects before retry')
+                        return
+                except Exception:
+                    reason = 'Foreground native checkpoint cannot be read; inspect retained work without replay'
+            if reason:
+                authoritative_transition(current, TaskState.FAILED, error=reason)
+                return
+            current.payload['native_run_id'] = native
+            current.payload['attempt'] = 0
+            current.result = result.get('output') or result
+            if not any(run.run_id == rid for run in current.run_history):
+                current.run_history.append(TaskRunRecord(run_id=rid, started_at=row['created_at']))
+            current.provenance['turn_owned'] = False
+            authoritative_transition(current, TaskState.QUEUED, error=None)
+            self._checkpoint(current, row)
+        changed = False
+        def update(current):
+            nonlocal changed
+            before = json.dumps(current.to_dict(), sort_keys=True)
+            transfer(current)
+            changed = before != json.dumps(current.to_dict(), sort_keys=True)
+        updated = self.store.update_task(task.task_id, update)
+        if changed:
+            self.gateway.event_bus.publish(updated.notification_policy.recipient_session_id,
+                                           'task.updated', {'task': updated.to_dict()})
+
     def _finished(self, task_id, operation):
         self._active.pop(task_id, None)
         if not operation.cancelled() and operation.exception() is not None:
@@ -572,6 +700,11 @@ class GatewayTaskOwner:
                     'actionable': True}
         if previous.get('task_id') not in (None, task.task_id):
             raise ValueError('Task child belongs to a different saved task; no dispatch')
+        if task.payload.get('foreground_resume_version') == 1:
+            if existing and (previous.get('task_id') != task.task_id
+                    or str(existing.get('agent_id') or previous.get('agent_id') or '') != task.agent_id):
+                raise ValueError('Foreground continuation session identity differs; no dispatch')
+            metadata['route_checked'] = True
         if task.agent_id:
             bound = (existing or {}).get('agent_id') or previous.get('agent_id')
             if bound and bound != task.agent_id:
@@ -582,38 +715,158 @@ class GatewayTaskOwner:
         return self.gateway.store.ensure_session(sid, title=task.goal[:100], profile='jaeger',
             workspace=str(task.payload['execution'].get('workspace') or ''), metadata=metadata)
 
-    def _admission_guard(self, conn, task):
+    def _admission_guard(self, conn, task, *, execution=None, prompt=None):
         """Revalidate revocation/cancellation in the canonical request commit."""
         row = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task.task_id,)).fetchone()
         current = DurableTask.from_dict(json.loads(row[0])) if row else None
         if current is None or current.is_terminal or current.cancellation or not current.provenance.get('authorized'):
             raise TaskAdmissionChanged('Task authorization or cancellation changed before admission; no dispatch')
+        if current.payload.get('foreground_resume_version') == 1 and current.payload.get('execution') != task.payload.get('execution'):
+            raise TaskAdmissionChanged('Task execution authority changed before admission; no dispatch')
         if int(current.payload.get('attempt', 0)) != int(task.payload.get('attempt', 0)):
             raise TaskAdmissionChanged('Task attempt changed before admission; no dispatch')
+        if current.payload.get('foreground_resume_version') == 1:
+            original = conn.execute('SELECT status, execution_json FROM client_requests WHERE request_id=?',
+                                   (current.payload['original_request_id'],)).fetchone()
+            if (not original or original['status'] != 'completed'
+                    or json.loads(original['execution_json']) != current.payload['execution']
+                    or self.gateway._cancellations.is_cancelled(current.payload['original_request_id'])):
+                raise TaskAdmissionChanged('Original foreground authority or cancellation changed; no dispatch')
+            if execution is not None:
+                # Commit the per-attempt contract with request admission. Owner
+                # feedback may change later; the admitted inputs never do.
+                expected = json.loads(json.dumps(execution))
+                expected.pop('attachment_ids', None)
+                current.payload.setdefault('continuation_admissions', {})[
+                    f'{current.task_id}:{current.payload.get("attempt", 0)}'] = {
+                        'execution': expected, 'input_text': prompt}
+                conn.execute('UPDATE durable_tasks SET task_json=? WHERE task_id=?',
+                             (json.dumps(current.to_dict()), current.task_id))
         if not current.provenance.get('webhook_subscription_id'):
             return
         from jaeger_ai.features.webhooks.owner import execution_allowed
         if self.gateway._current_tier() == 'chat' or not execution_allowed(self.gateway, current, connection=conn):
             raise ValueError('Webhook subscription revoked or changed before admission; no dispatch')
 
+    @staticmethod
+    def _continuation_execution(task):
+        execution = json.loads(json.dumps(task.payload['execution']))
+        execution['is_subordinate'] = True
+        execution['options'] = {**(execution.get('options') or {}), 'background': True,
+                                'source': 'durable_task', 'task_id': task.task_id,
+                                'verification_error': task.error}
+        if task.payload.get('foreground_resume_version') == 1:
+            execution['attachment_ids'] = []  # never inherit new child-session inputs
+        return execution
+
+    @staticmethod
+    def _continuation_prompt(task):
+        prompt = ('Execute this authorized durable task fully. Do not queue the same work again. '
+                  'Use the real tools, preserve progress, verify the requested outcome, and return the result. '
+                  + EVIDENCE_CONTRACT + '\n\n'
+                  + task.goal)
+        if task.payload.get('artifacts'):
+            prompt += '\nRequired result artifacts: ' + json.dumps(task.payload['artifacts'])
+        if task.error:
+            prompt += '\nOwner verification requires correction: ' + str(task.error)
+        if task.result:
+            prompt += '\nPrevious checkpoint (continue from verified work):\n' + str(task.result)
+        return prompt
+
+    def _continuation_receipt_error(self, task, row):
+        """An ID collision is not this task's receipt, even when it is terminal."""
+        if not row:
+            return None
+        sid = f'task:{task.task_id}'
+        if row.get('session_id') != sid:
+            return 'Continuation receipt belongs to another session; inspect without replay'
+        if task.payload.get('foreground_resume_version') != 1:
+            return None  # Legacy tasks do not have a full frozen authority contract.
+        rid = row.get('request_id')
+        contract = task.payload.get('continuation_admissions', {}).get(rid)
+        if contract is None:
+            # Only an unstarted, otherwise exact admission can recover the tiny
+            # admission-before-binding window. A running/terminal row proves no
+            # such ownership and must not be adopted from its ID alone.
+            if (row.get('status') != 'admitted' or row.get('native_run_id')
+                    or rid != f'{task.task_id}:{task.payload.get("attempt", 0)}'):
+                return 'Continuation receipt has no retained admission contract; inspect without replay'
+            expected = self._continuation_execution(task)
+            expected.pop('attachment_ids', None)
+            contract = {'execution': expected, 'input_text': self._continuation_prompt(task)}
+        if row.get('execution') != contract['execution'] or row.get('input_text') != contract['input_text']:
+            return 'Continuation receipt differs from retained execution authority; inspect without replay'
+        native = row.get('native_run_id')
+        native_session = row.get('native_session')
+        if row.get('status') == 'admitted' and not native and not native_session:
+            return None
+        from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
+        if native != task.payload.get('native_run_id') or native_session != OWNER_RUN_SESSION_PREFIX + sid:
+            return 'Continuation receipt differs from retained native ownership; inspect without replay'
+        return None
+
+    @staticmethod
+    def _visible_task(task):
+        """Compare outcome/progress, not the timestamp of another observation."""
+        value = task.to_dict()
+        value.pop('updated_at', None)
+        value = json.loads(json.dumps(value))
+        value.get('payload', {}).get('last_progress', {}).pop('observed_at', None)
+        return value
+
+    def _retain_foreign_receipt(self, task_id, reason, *, cancelled=False):
+        before = self._visible_task(self.store.get_task(task_id))
+        def hold(current):
+            if not current.is_terminal:
+                authoritative_transition(current, TaskState.PAUSED, error=reason)
+                if cancelled:
+                    current.cancellation = 'Cancelled by user'
+        retained = self.store.update_task(task_id, hold)
+        if self._visible_task(retained) != before:
+            self.gateway.event_bus.publish(retained.notification_policy.recipient_session_id,
+                'task.updated', {'task': retained.to_dict()})
+
     async def _execute(self, task_id):
         task = self.store.get_task(task_id)
         if task is None or task.is_terminal:
             return
+        before = self._visible_task(task)
         sid = f'task:{task_id}'
         attempt = int(task.payload.get('attempt', 0))
         rid = f'{task_id}:{attempt}'
         row = self.gateway.store.get_request(rid)
+        reason = self._continuation_receipt_error(task, row)
+        if reason:
+            self._retain_foreign_receipt(task_id, reason)
+            return
         if task.cancellation and row is None:
             # This is reconciliation, not dispatch. A disabled specialist or
             # revoked subscription must not strand cancellation of old children.
             await self.cancel(task_id)
             return
-        execution = dict(task.payload['execution'])
-        execution['is_subordinate'] = True
-        execution['options'] = {**(execution.get('options') or {}), 'background': True,
-                                'source': 'durable_task', 'task_id': task_id,
-                                'verification_error': task.error}
+        if task.payload.get('foreground_resume_version') == 1:
+            original = self.gateway.store.get_request(task.payload['original_request_id']) or {}
+            if self.gateway._cancellations.is_cancelled(task.payload['original_request_id']):
+                await self.cancel(task_id)
+                return
+            if (not task.provenance.get('authorized') or task.provenance.get('turn_owned')
+                    or original.get('status') != 'completed'
+                    or original.get('execution') != task.payload['execution']):
+                return
+        if (task.payload.get('foreground_resume_version') == 1
+                and (row is None or row.get('status') in {'admitted', 'running'})
+                and rid not in self.gateway._running_tasks):
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            reason = None
+            if EntityRuntime.run_has_indeterminate_effects(task.payload['native_run_id']):
+                reason = 'Execution outcome unknown; reconcile effects before retry'
+            if reason:
+                def hold_unknown(current):
+                    if not current.is_terminal and not current.cancellation:
+                        authoritative_transition(current, TaskState.PAUSED, error=reason)
+                self.store.update_task(task_id, hold_unknown)
+                return
+        execution = self._continuation_execution(task)
         if row is None or row.get('status') in {'admitted', 'running'} and rid not in self.gateway._running_tasks:
             try:
                 if task.provenance.get('webhook_subscription_id'):
@@ -638,21 +891,16 @@ class GatewayTaskOwner:
                 self.gateway.event_bus.publish(task.notification_policy.recipient_session_id or sid,
                     'task.updated', {'task': retained.to_dict()})
                 return
-        prompt = ('Execute this authorized durable task fully. Do not queue the same work again. '
-                  'Use the real tools, preserve progress, verify the requested outcome, and return the result. '
-                  + EVIDENCE_CONTRACT + '\n\n'
-                  + task.goal)
-        if task.payload.get('artifacts'):
-            prompt += '\nRequired result artifacts: ' + json.dumps(task.payload['artifacts'])
-        if task.error:
-            prompt += '\nOwner verification requires correction: ' + str(task.error)
-        if task.result:
-            prompt += '\nPrevious checkpoint (continue from verified work):\n' + str(task.result)
+        prompt = self._continuation_prompt(task)
         row = self.gateway.store.get_request(rid)
+        reason = self._continuation_receipt_error(task, row)
+        if reason:
+            self._retain_foreign_receipt(task_id, reason)
+            return
         if row is None:
             try:
                 admitted = self.gateway.store.admit_request(sid, prompt, request_id=rid, requested=execution,
-                    admission_guard=lambda conn: self._admission_guard(conn, task))
+                    admission_guard=lambda conn: self._admission_guard(conn, task, execution=execution, prompt=prompt))
             except ValueError as exc:
                 if isinstance(exc, TaskAdmissionChanged):
                     # The current durable row owns the decision. In particular,
@@ -669,11 +917,31 @@ class GatewayTaskOwner:
                 self.gateway.event_bus.publish(task.notification_policy.recipient_session_id or sid,
                     'task.updated', {'task': held.to_dict()})
                 return
+            task = self.store.get_task(task_id)
+            reason = self._continuation_receipt_error(task, admitted)
+            if reason:
+                self._retain_foreign_receipt(task_id, reason)
+                return
             if task.payload.get('native_run_id'):
                 from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
                 self.gateway.store.bind_native(rid, native_run_id=task.payload['native_run_id'], native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}')
             self.gateway._start_admitted_turn(admitted, sid, prompt)
         elif row.get('status') in {'admitted', 'running'} and rid not in self.gateway._running_tasks:
+            if task.payload.get('foreground_resume_version') == 1:
+                # Reconcile admission-before-binding crashes against the current
+                # task grant, never against this executor's stale snapshot.
+                with self.gateway.store._immediate() as conn:
+                    try:
+                        self._admission_guard(conn, task, execution=row['execution'], prompt=row['input_text'])
+                    except TaskAdmissionChanged:
+                        return
+                # Preserve the original run even if the process died immediately
+                # after request admission and before binding it.
+                if not row.get('native_run_id'):
+                    from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
+                    row = self.gateway.store.bind_native(rid,
+                        native_run_id=task.payload['native_run_id'],
+                        native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}')
             # A persisted admission without dispatch is safe. Unknown effects are
             # recovered separately by the Gateway; never create a fresh run here.
             self.gateway._start_admitted_turn({**row, 'accepted': True}, sid, prompt)
@@ -683,6 +951,10 @@ class GatewayTaskOwner:
             if current.state == TaskState.QUEUED:
                 authoritative_transition(current, TaskState.RUNNING)
             receipt = self.gateway.store.get_request(rid) or {}
+            reason = self._continuation_receipt_error(current, receipt)
+            if reason:
+                authoritative_transition(current, TaskState.PAUSED, error=reason)
+                return
             if not any(run.run_id == rid for run in current.run_history):
                 current.run_history.append(TaskRunRecord(
                     run_id=rid, started_at=receipt.get('created_at') or time.time()))
@@ -692,6 +964,11 @@ class GatewayTaskOwner:
         if operation is not None:
             await asyncio.shield(operation)
         row = self.gateway.store.get_request(rid) or {}
+        current = self.store.get_task(task_id)
+        reason = self._continuation_receipt_error(current, row)
+        if reason:
+            self._retain_foreign_receipt(task_id, reason)
+            return
         status = row.get('status')
         result = row.get('result') or {}
         if status in {'admitted', 'running'}:
@@ -716,7 +993,16 @@ class GatewayTaskOwner:
             if row.get('native_run_id'):
                 current.payload['native_run_id'] = row['native_run_id']
             current.payload['verification'] = evidence
-            if current.cancellation and unconfirmed:
+            native_unknown = False
+            if current.payload.get('foreground_resume_version') == 1:
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                native = row.get('native_run_id') or current.payload.get('native_run_id')
+                native_unknown = bool(native) and EntityRuntime.run_has_indeterminate_effects(native)
+            if native_unknown:
+                current.payload['cancellation_children'] = children
+                authoritative_transition(current, TaskState.PAUSED,
+                    error='Execution outcome unknown; reconcile effects before retry or cancellation')
+            elif current.cancellation and unconfirmed:
                 current.payload['cancellation_children'] = children
                 authoritative_transition(current, TaskState.PAUSED,
                     error='Cancellation requested; owned child execution remains unconfirmed')
@@ -773,8 +1059,9 @@ class GatewayTaskOwner:
                 )
             self._checkpoint(current, row)
         task = self.store.update_task(task_id, settle)
-        self.gateway.event_bus.publish(task.notification_policy.recipient_session_id or sid,
-                                       'task.updated', {'task': task.to_dict()})
+        if self._visible_task(task) != before:
+            self.gateway.event_bus.publish(task.notification_policy.recipient_session_id or sid,
+                                           'task.updated', {'task': task.to_dict()})
         if task.is_terminal:
             self._settle_run(task)
             self._deliver(task)
@@ -946,13 +1233,17 @@ class GatewayTaskOwner:
         # predating run_history, rather than only signalling the latest turn.
         from jaeger_ai.core.gateway.handoff_cancellation import cancel_descendants
         roots = {receipt['request_id']: receipt} if receipt else {}
+        original = self.gateway.store.get_request(task.payload.get('original_request_id') or '')
+        if original is not None:
+            roots[original['request_id']] = original
         prefix = task.task_id + ':'
         for row in self.gateway.store.list_requests():
             rid = row['request_id']
             if (row['session_id'] == 'task:' + task.task_id and rid.startswith(prefix)
                     and rid[len(prefix):].isdigit()
                     and int(rid[len(prefix):]) <= int(task.payload.get('attempt', 0))):
-                roots[rid] = row
+                if not self._continuation_receipt_error(task, row):
+                    roots[rid] = row
         results = {}
         for root in roots.values():
             # Same qualified, bounded tree and sticky writer as foreground Stop.
@@ -964,9 +1255,27 @@ class GatewayTaskOwner:
         task = self.store.get_task(task_id)
         if task is None or task.is_terminal:
             return False
-        rid = f'{task_id}:{task.payload.get("attempt", 0)}'
+        before = self._visible_task(task)
+        rid = (task.payload['original_request_id'] if task.provenance.get('turn_owned')
+               and task.payload.get('foreground_resume_version') == 1
+               else f'{task_id}:{task.payload.get("attempt", 0)}')
         receipt = self.gateway.store.get_request(rid)
+        if not task.provenance.get('turn_owned'):
+            reason = self._continuation_receipt_error(task, receipt)
+            if reason:
+                self._retain_foreign_receipt(task_id, reason, cancelled=True)
+                retained = self.store.get_task(task_id)
+                children = await self._cancel_owned_children(retained, None)
+                self.store.update_task(task_id, lambda current:
+                    current.payload.update(cancellation_children=children) if not current.is_terminal else None)
+                return False
         in_flight = rid in self.gateway._running_tasks or (receipt or {}).get('status') in {'running', 'admitted', 'execution_unknown'}
+        if task.payload.get('foreground_resume_version') == 1:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            original = self.gateway.store.get_request(task.payload['original_request_id']) or {}
+            native = (receipt or {}).get('native_run_id') or task.payload.get('native_run_id') or original.get('native_run_id')
+            if native and EntityRuntime.run_has_indeterminate_effects(native):
+                in_flight = True
         def cancel(t):
             if t.is_terminal:
                 return
@@ -992,7 +1301,8 @@ class GatewayTaskOwner:
         for approval in self.gateway.store.list_pending_approvals():
             if (approval.get('metadata') or {}).get('task_id') == task_id:
                 self.gateway.store.resolve_approval(approval['approval_id'], approved=False, decision='deny')
-        self.gateway.event_bus.publish(task.notification_policy.recipient_session_id, 'task.updated', {'task': task.to_dict()})
+        if self._visible_task(task) != before:
+            self.gateway.event_bus.publish(task.notification_policy.recipient_session_id, 'task.updated', {'task': task.to_dict()})
         if task.is_terminal:
             self._deliver(task)
         return True

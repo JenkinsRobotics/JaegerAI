@@ -80,6 +80,46 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
                     },
                 }]}, "finish_reason": "tool_calls"}]}
             return {"choices": [{"message": {"role": "assistant", "content": "CLARIFICATION-ANSWER-RECEIVED", "tool_calls": []}, "finish_reason": "stop"}]}
+        if any('CONTRACT-FOREGROUND-RESUME' in str(m.get('content', ''))
+               for m in messages if m.get('role') == 'user'):
+            from jaeger_agent.task_port import current_task_context
+            context = current_task_context() or {}
+            background = bool((context.get('execution', {}).get('options') or {}).get('background'))
+            with (state / 'foreground-resume-calls.jsonl').open('a', encoding='utf-8') as stream:
+                stream.write(json.dumps({'request_id': context.get('request_id'),
+                                         'background': background}) + '\n')
+            tool_messages = [m for m in messages if m.get('role') == 'tool']
+            prefix = 'foreground-resume-final-' if background else 'foreground-resume-first-'
+            if background:
+                assert any(m.get('tool_call_id') == 'foreground-resume-first-2' and
+                           'FOREGROUND-PARTIAL' in str(m.get('content', ''))
+                           for m in tool_messages), 'Original native trajectory was not restored'
+                steps = [
+                    ('write_file', {'path':'workspace/foreground-report.txt', 'content':'FOREGROUND-FINAL-VERIFIED'}),
+                    ('read_file', {'path':'workspace/foreground-report.txt'}),
+                    ('work_ledger', {'action':'update', 'completed_ids':['report'], 'remaining_count':0}),
+                    ('complete_task', {'summary':'Foreground task resumed and verified',
+                        'evidence':'Read back workspace/foreground-report.txt: FOREGROUND-FINAL-VERIFIED'}),
+                ]
+            else:
+                steps = [
+                    ('work_ledger', {'action':'create', 'task_name':'Foreground report', 'total_items':1,
+                        'verify':{'kind':'paths_exist','paths':['workspace/foreground-report.txt']}}),
+                    ('write_file', {'path':'workspace/foreground-report.txt', 'content':'FOREGROUND-PARTIAL'}),
+                    ('read_file', {'path':'workspace/foreground-report.txt'}),
+                ]
+            step = len([m for m in tool_messages if str(m.get('tool_call_id') or '').startswith(prefix)])
+            if step < len(steps):
+                name, args = steps[step]
+                if name == 'complete_task':
+                    assert any(m.get('tool_call_id') == 'foreground-resume-final-1' and
+                               'FOREGROUND-FINAL-VERIFIED' in str(m.get('content', ''))
+                               for m in tool_messages), 'Final report readback failed'
+                return {'choices':[{'message':{'role':'assistant','content':None,'tool_calls':[
+                    {'id':prefix+str(step),'type':'function','function':{'name':name,'arguments':json.dumps(args)}}
+                ]},'finish_reason':'tool_calls'}]}
+            answer = 'Foreground task resumed and verified' if background else 'FOREGROUND-PARTIAL checkpoint retained; work remains.'
+            return {'choices':[{'message':{'role':'assistant','content':answer,'tool_calls':[]},'finish_reason':'stop'}]}
         if 'CONTRACT-DURABLE' in request:
             # Script only the provider boundary; ledger, file tool, Gateway,
             # approvals, checkpoints and result delivery are production code.

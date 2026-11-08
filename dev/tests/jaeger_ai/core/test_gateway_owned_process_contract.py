@@ -1477,3 +1477,84 @@ def test_scheduled_work_fires_once_and_survives_restart(gateway):
     _, session = gateway.request("/v1/sessions/cron:restart-once")
     texts = [m.get("content") for m in session.get("messages") or [] if m.get("role") == "assistant"]
     assert sum("CONTRACT-ANSWER" in (t or "") for t in texts) == 1, session
+
+
+@pytest.mark.parametrize('explicit_tools', [False, True], ids=['minimal-chat', 'restricted-tools'])
+def test_foreground_chat_yield_resumes_same_card_with_real_tools(gateway, explicit_tools):
+    """Ordinary HTTP admission, real native checkpoints/ledger, one owner transfer."""
+    workspace = gateway.root / 'instances/contract'
+    sid, rid = 'foreground-parent', 'foreground-resume-source'
+    gateway.request('/v1/sessions', {'session_id':sid, 'profile':'jaeger',
+        'workspace':str(workspace), 'metadata':{'model':'contract-model','provider':'openai'}})
+    # Normal Chat posts text/request_id and explicit empty attachment selection.
+    # Resolve the configured session
+    # choices and current tier at admission, not through privileged test fields.
+    body = {'text':'Create and verify the report for CONTRACT-FOREGROUND-RESUME',
+            'request_id':rid, 'attachment_ids':[]}
+    tools = ['work_ledger','write_file','read_file','complete_task']
+    if explicit_tools:
+        body['allowed_tools'] = tools
+    gateway.request('/v1/sessions/' + sid + '/turns', body)
+    tid = 'turn:' + rid
+    deadline = time.monotonic() + 50
+    task = None
+    while time.monotonic() < deadline:
+        for approval in gateway.request('/v1/approvals')[1]['approvals']:
+            gateway.request('/v1/approvals/' + approval['approval_id'], {'approved':True,'decision':'once'})
+        _, response = gateway.request('/v1/tasks')
+        tasks = response.get('tasks', [])
+        task = next((item for item in tasks if item['task_id']==tid), None)
+        if task and task['state'] in {'completed_verified','failed','cancelled','needs_owner','blocked'}:
+            break
+        time.sleep(0.05)
+    assert task and task['state']=='completed_verified', (task,(gateway.root/'gateway.log').read_text()[-18000:])
+    _, original = gateway.request('/v1/requests/' + rid)
+    _, continuation = gateway.request('/v1/requests/' + tid + ':0')
+    assert original['status']=='completed' and original['result']['halt_reason']=='yielded'
+    assert original['execution']['model']=='contract-model'
+    assert original['execution']['provider']=='openai'
+    assert original['execution']['workspace']==str(workspace)
+    assert original['execution']['interaction_tier'] in {'agent','jaeger'}
+    assert original['execution']['allowed_tools']==(sorted(tools) if explicit_tools else None)
+    assert original['result']['task_id']==tid
+    assert original['result']['receipt']['verification']=='unverified'
+    assert continuation['status']=='completed' and not continuation['result'].get('halt_reason')
+    assert continuation['native_run_id']==original['native_run_id']==task['payload']['native_run_id']
+    for key in ('model','provider','caller','allowed_tools','workspace','interaction_tier'):
+        assert continuation['execution'][key]==original['execution'][key], key
+    assert task['payload'].get('attempt',0)==0 and task['payload']['delivered']
+    assert [run['run_id'] for run in task['run_history']]==[rid,tid+':0']
+    completion = continuation['result']['task_completion']
+    assert completion['ok'] is True
+    digest = hashlib.sha256(b'FOREGROUND-FINAL-VERIFIED').hexdigest()
+    assert any(r.get('kind')=='file_sha256' and r.get('sha256')==digest for r in completion['verification_receipts'])
+    assert (workspace/'workspace/foreground-report.txt').read_text()=='FOREGROUND-FINAL-VERIFIED'
+    calls = [json.loads(line) for line in (gateway.root/'foreground-resume-calls.jsonl').read_text().splitlines()]
+    source_calls = [call for call in calls if not call['background']]
+    assert len(source_calls)==8  # three real tools, initial answer, four controller continuations
+    assert {call['request_id'] for call in source_calls}=={rid}
+    assert {call['request_id'] for call in calls if call['background']}=={tid+':0'}
+    import sqlite3
+    with sqlite3.connect(f'file:{gateway.root / "gateway_sessions.sqlite3"}?mode=ro',uri=True) as conn:
+        events=[(event,json.loads(data)) for event,data in conn.execute('SELECT event,data_json FROM events')]
+        saved_tasks=[json.loads(row[0]) for row in conn.execute('SELECT task_json FROM durable_tasks')]
+    assert len(saved_tasks)==1
+    # The completed ledger is the one created by the original foreground
+    # tool, under the task's stable key, not a new background/chat ledger.
+    ledgers=list((workspace/'run').glob('ledger_*.json'))
+    assert len(ledgers)==1
+    ledger=json.loads(ledgers[0].read_text())
+    assert ledger['completed'] and ledger['task_name']=='Foreground report'
+    pointer=workspace/'run'/('ledger-session-'+hashlib.sha256(('task:'+tid).encode()).hexdigest()+'.json')
+    assert json.loads(pointer.read_text())['task_id']==ledger['task_id']
+    assert len([event for event,data in events if event=='turn.checkpoint' and data.get('request_id')==rid])==4
+    assert len([event for event,data in events if event=='turn.finish' and data.get('request_id')==rid])==1
+    assert not [data for event,data in events if event=='tool.failed' and data.get('request_id') in {rid,tid+':0'}]
+    before=(gateway.root/'foreground-resume-calls.jsonl').read_text()
+    gateway.stop()
+    gateway.start()
+    time.sleep(1.2)
+    _, session=gateway.request('/v1/sessions/'+sid)
+    messages=session.get('session',session)['messages']
+    assert len([m for m in messages if m['role']=='assistant' and m['content']=='Foreground task resumed and verified'])==1
+    assert (gateway.root/'foreground-resume-calls.jsonl').read_text()==before

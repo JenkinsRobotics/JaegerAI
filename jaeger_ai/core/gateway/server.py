@@ -720,6 +720,8 @@ class _GatewayToolConfirmationProvider:
             task = owner.store.get_task(self.session_id[len("task:"):]) if owner is not None else None
             if task is None or task.is_terminal:
                 return False
+            if task.payload.get('foreground_resume_version') == 1:
+                return False  # transfer retains original authority, not background-only shortcuts
             return task.provenance.get("authorized") is True
         except Exception:  # noqa: BLE001 - unknown task state means "ask"
             return False
@@ -5187,8 +5189,8 @@ class JaegerGatewayApp:
 
         from jaeger_ai.core.runtime.work_ledger import ledger_scope, last_completion
         _options = ((execution or {}).get("options") or {})
-        # A turn-owned card runs in the chat's own session, so it must start from a
-        # fresh ledger: resuming would hand it an earlier request's completion.
+        # A card's ledger belongs to the task from its first foreground slice.
+        # Parent chat and later durable slices must never exchange ledger pointers.
         turn_owned = bool(_options.get("turn_owned"))
 
         def stop_requested() -> bool:
@@ -5198,7 +5200,8 @@ class JaegerGatewayApp:
             # neither is a stall to push the model through.
             return turn_owned and (request_id in self._owner_declined or request_id in self._owner_unanswered)
 
-        with ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned):
+        ledger_key = f"task:{_options['task_id']}" if _options.get('task_id') else session_key
+        with ledger_scope(ledger_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned):
             try:
                 result = run_continued_turn(
                     step, prompt, objective=objective or prompt,
@@ -5737,10 +5740,13 @@ class JaegerGatewayApp:
         finally:
             # Global Stop cancels this asyncio task (CancelledError skips the except
             # above). A card still open here is settled, never left running.
-            self._close_turn_card(
-                card_task_id, {"error": "the turn ended before the task was settled"},
-                "cancelled", session_id=session_id,
-            )
+            retained = self.task_owner.store.get_task(card_task_id) if card_task_id else None
+            if not (retained and retained.payload.get('foreground_resume_version') == 1
+                    and retained.state.value == 'paused'):
+                self._close_turn_card(
+                    card_task_id, {"error": "the turn ended before the task was settled"},
+                    "cancelled", session_id=session_id,
+                )
             self._owner_declined.discard(rid)
             self._owner_unanswered.discard(rid)
             self._running_tasks.pop(rid, None)
@@ -5777,7 +5783,8 @@ class JaegerGatewayApp:
         The existing ExecutiveStrategySelector judges the prepared turn; the existing
         owner ReAct is the worker, run in durable mode so it must return evidence.
         """
-        if prepared is None or execution is None or not actionable or tier == "chat" or role_s == "specialist":
+        if (prepared is None or execution is None or not actionable or tier == "chat" or role_s == "specialist"
+                or (execution.get('options') or {}).get('task_id')):
             return None, execution
         from jaeger_ai.core.entity.executive import CognitiveStrategy
 
@@ -5800,6 +5807,7 @@ class JaegerGatewayApp:
             task = self.task_owner.open_turn(
                 session_id=session_id, request_id=rid, text=request_text, strategy=strategy.value,
                 owner=str(execution.get("caller") or "owner"), workspace=workspace,
+                execution=execution, agent_id=self._session_agent_id(session) or "",
             )
         except Exception:
             logger.warning("could not open a task card for %s; running as a plain turn", rid, exc_info=True)
@@ -6142,11 +6150,34 @@ class JaegerGatewayApp:
         if actor and is_untrusted_actor(actor) and (row.get('execution') or {}).get('caller')!=actor:
             return web.json_response({'error':'Request cancellation is outside this actor scope'},status=403)
         from .handoff_cancellation import cancel_descendants, unconfirmed_ids
+        foreground = self.task_owner.store.get_task('turn:' + row['request_id'])
+        foreground_cancel = None
+        if foreground and foreground.payload.get('foreground_resume_version') == 1 and not foreground.is_terminal:
+            await self.task_owner.cancel(foreground.task_id)
+            foreground_cancel = self.task_owner.store.get_task(foreground.task_id)
         if row["status"] in {"completed", "failed", "cancelled"}:
             self._cancellations.cancel(row['request_id'])
-            children=await cancel_descendants(self,row,request)
-            return web.json_response({**row, "cancel_requested": False, "already_terminal": True,
-                'owned_handoff_cancellations':children,'unconfirmed_task_ids':unconfirmed_ids(children)})
+            children = await cancel_descendants(self, row, request)
+            foreground_fields = {}
+            if foreground_cancel is not None:
+                # The original slice remains terminal. Its transferred task and
+                # later children may still be unwinding; report both truths.
+                merged = {item['handoff_id']: item for item in children}
+                merged.update({item['handoff_id']: item for item in
+                               foreground_cancel.payload.get('cancellation_children', [])})
+                children = list(merged.values())
+                foreground_fields = {
+                    'foreground_task_id': foreground_cancel.task_id,
+                    'foreground_task_state': foreground_cancel.state.value,
+                    'continuation_request_id': (None if foreground_cancel.provenance.get('turn_owned')
+                        else f"{foreground_cancel.task_id}:{foreground_cancel.payload.get('attempt', 0)}"),
+                }
+            unconfirmed = unconfirmed_ids(children)
+            if foreground_cancel is not None and not foreground_cancel.is_terminal:
+                unconfirmed = sorted(set(unconfirmed) | {foreground_cancel.task_id})
+            return web.json_response({**row, "cancel_requested": foreground_cancel is not None,
+                "already_terminal": True, **foreground_fields,
+                'owned_handoff_cancellations': children, 'unconfirmed_task_ids': unconfirmed})
         scope = self._cancellations.cancel(row["request_id"])
         updated = self.store.mark_request_status(row["request_id"], "cancelling") or row
         native_requested = False

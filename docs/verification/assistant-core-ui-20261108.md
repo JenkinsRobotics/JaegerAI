@@ -80,8 +80,11 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 - Later [authority/streaming](assistant-core-authority-streaming-20261108.md),
   [durable outcome/recovery](assistant-core-outcome-recovery-20261108.md), and
   [foreground truth](assistant-core-foreground-truth-20261108.md) repairs strengthen
-  Chat/Work state and execution evidence. Foreground automatic resume remains
-  unimplemented; background yielded continuation is tested. Overall stays PARTIAL.
+  Chat/Work state and execution evidence. The subsequent
+  [foreground continuation](assistant-core-foreground-continuation-20261108.md)
+  repair adds versioned, fully specified new-card transfer to the existing durable
+  owner. Unresolved defaults, historical work and unsupported inputs do not silently
+  resume. Overall stays PARTIAL.
 - Source-backed capability presence does not prove native-host availability, real provider credentials, external connector authorization, output quality, or a completed autonomous workflow.
 
 ### Parallel workspace error-state repair

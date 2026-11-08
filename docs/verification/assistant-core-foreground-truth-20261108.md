@@ -5,6 +5,11 @@ preserving all earlier commits on `fix/assistant-core-acceptance-20261108`.
 No runtime-Mac changes, default-branch merge, deployment, external provider/account
 actions or additional denied GitHub write attempts.
 
+This report records the fifth increment. Its foreground-resume limitation below
+was later narrowed by the [sixth increment](assistant-core-foreground-continuation-20261108.md),
+which adds scoped transfer for supported new cards. Historical results remain
+unchanged; the later report defines current support and qualification.
+
 ## Confirmed foreground defect
 
 The fourth increment repaired durable background settlement. Its follow-on audit
