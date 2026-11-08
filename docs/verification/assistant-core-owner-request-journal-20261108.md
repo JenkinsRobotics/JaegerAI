@@ -201,3 +201,11 @@ tests are not counted. Browser reload/phone/native host, actual configured
 providers, voice/media and external accounts remain unqualified. Historical,
 unsealed, asynchronously unreturned, indeterminate-effect and unsupported paths
 remain conservative; no automatic replay is introduced.
+
+## Later chat-selection increment
+
+The separate [chat-agent selection repair](assistant-core-chat-agent-selection-20261108.md)
+now preserves the explicitly selected agent during creation and existing history
+on retries. Its scoped qualification does not imply named-lead journal recovery,
+which remains separate. The historical missing-selection finding above describes
+this thirteen-commit snapshot, not the later repair.
