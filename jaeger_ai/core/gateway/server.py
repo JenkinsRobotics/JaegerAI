@@ -3502,6 +3502,9 @@ class JaegerGatewayApp:
 
     async def handle_create_session(self, request: web.Request) -> web.Response:
         body = await request.json() if request.can_read_body else {}
+        if not isinstance(body, dict) or (body.get("metadata") is not None
+                                          and not isinstance(body["metadata"], dict)):
+            return web.json_response({"error": "Body and metadata must be JSON objects"}, status=400)
         # The Gateway owns the session namespace, but an explicitly supplied
         # id is honored: durable contracts (task replay, cross-client
         # continuation, restart recovery) address the SAME session row after
@@ -3528,6 +3531,31 @@ class JaegerGatewayApp:
                 return web.json_response({"error": error, "field": "workspace_folder"}, status=400)
             workspace = folder
             metadata = {**metadata, "workspace_folder": folder}
+        # Selection uses the same registry and caller access as the agent-home
+        # route. A session payload cannot manufacture an agent or its authority.
+        selected = None
+        for supplied in (body, metadata):
+            if "agent_id" not in supplied:
+                continue
+            agent_id = supplied["agent_id"]
+            if not isinstance(agent_id, str) or not agent_id.strip():
+                return web.json_response({"error": "agent_id must be a non-empty string"}, status=400)
+            home_route = "/v1/agents/{id}/home"
+            if (caller is None
+                    or caller_auth.required_scope("GET", home_route) not in caller.scopes
+                    or (caller.session_prefix is not None and not caller_auth.prefixed_route_allowed(
+                        "GET", home_route, caller.name))):
+                return web.json_response({"error": "Caller may not select an agent"}, status=403)
+            target = self._registry().get_agent(agent_id.strip())
+            if target is None:
+                return web.json_response({"error": "Agent not found"}, status=404)
+            if target.disabled:
+                return web.json_response({"error": "Agent is disabled"}, status=403)
+            if selected is not None and selected.id != target.id:
+                return web.json_response({"error": "Conflicting agent_id selections"}, status=400)
+            selected = target
+        if selected is not None:
+            metadata.update(agent_id=selected.id, agent_pinned=True)
         # Profile binding is enforced HERE, gateway-side. The client may name a
         # profile; the gateway validates it against the framework registry and
         # stamps it — the id no longer carries the profile, so a client cannot
@@ -3546,7 +3574,15 @@ class JaegerGatewayApp:
         if surface and "source" not in metadata:
             metadata = {**metadata, "source": surface}
 
-        existed = self.store.get_session(session_id) is not None
+        existing = self.store.get_session(session_id)
+        if existing is not None:
+            # Creation retries are not handoffs or settings updates. In
+            # particular ensure_session merges metadata, so never call it here.
+            if selected is not None:
+                current = self._registry().get_agent(self._session_agent_id(existing))
+                if current is None or current.id != selected.id:
+                    return web.json_response({"error": "Session already belongs to another agent"}, status=409)
+            return web.json_response(existing, status=201)
         session = self.store.ensure_session(
             session_id,
             title=title,
@@ -3554,9 +3590,8 @@ class JaegerGatewayApp:
             workspace=workspace,
             metadata=metadata,
         )
-        if not existed:
-            from jaeger_ai.core.gateway.session_hygiene import archive_on_create
-            session = archive_on_create(self.store, session)
+        from jaeger_ai.core.gateway.session_hygiene import archive_on_create
+        session = archive_on_create(self.store, session)
         self.event_bus.publish(session_id, "session.created", {"session": session})
         self._activate_owner_session(
             request,
