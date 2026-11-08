@@ -253,8 +253,7 @@ function transcriptRows() {
   const searchRow = rid => (state.timeline || []).find(row => row.requestId === rid && row.kind === 'search-count');
   const workRow = work => ({ ...work, key: `work:${work.requestId}`, kind: 'work',
     live: !work.finishedAt && state.busy,
-    rows: (state.timeline || []).filter(row => row.requestId === work.requestId
-      && ['reasoning', 'tool', 'progress', 'checkpoint', 'plan'].includes(row.kind)) });
+    rows: window.JaegerTimeline.partitionTurn((state.timeline || []).filter(row => row.requestId === work.requestId)).work });
   history.filter(item => item.role === 'user' || item.role === 'assistant').forEach((item, index, filtered) => {
     rows.push({
       key: `history:${item.message_id || item.id || index}:${item.role}`,

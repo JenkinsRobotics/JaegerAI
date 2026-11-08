@@ -8,19 +8,20 @@ const tool = (callId: string, toolName: string, state: "completed" | "executing"
 const turn = (parts: ChatPart[], state: ChatTurn["state"] = "pending"): ChatTurn => ({ turnId: "t1", message: "hi", parts, state });
 
 describe("chat column", () => {
-  it("folds every tool call of a finished turn into ONE steps row below the reply", () => {
+  it("groups commentary, reasoning and tools before the final answer", () => {
     const parts: ChatPart[] = [
       { kind: "thinking", text: "plan" }, tool("a", "shell"), { kind: "markdownContent", text: "Looking" }, tool("b", "read_file"), tool("c", "bash"),
       { kind: "progress", message: "Checking" }, { kind: "markdownContent", text: "done" },
     ];
     const segs = segments(parts, "complete");
-    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["bubble", "bubble", "steps"]);
-    expect("steps" in segs[2] && segs[2].steps.map((t) => t.callId)).toEqual(["a", "b", "c"]);
-    // While running: no tool rows at all, the progress line speaks for them.
-    expect(segments(parts, "pending").some((s) => "steps" in s)).toBe(false);
+    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "bubble"]);
+    expect("activity" in segs[0] && segs[0].activity.filter(p=>p.kind==="toolInvocation").map(t=>t.callId)).toEqual(["a", "b", "c"]);
+    expect(segs[1]).toEqual({bubble:[{kind:"markdownContent",text:"done"}]});
+    // The same grouping is available while streaming and after completion.
+    expect(segments(parts, "pending")).toEqual(segs);
     // A tool left running in an ended turn reads as stopped.
     const stopped = segments([tool("x", "shell", "executing")], "cancelled");
-    expect("steps" in stopped[0] && stopped[0].steps[0].state).toBe("cancelled");
+    expect(stopped[0]).toMatchObject({activity:[{state:"cancelled"}]});
   });
 
   it("lists each step as verb + target, mono for paths and commands", () => {
