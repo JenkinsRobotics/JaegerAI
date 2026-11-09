@@ -148,3 +148,96 @@ def test_spawn_uses_argv_and_env_allowlist(monkeypatch):
     assert env["ANTHROPIC_API_KEY"] == "sk-secret"
     assert "AWS_SECRET_ACCESS_KEY" not in env
     assert json.loads(raw["stdout"])["result"] == "ok"
+
+
+def test_grok_stream_delivers_before_exit_and_never_replays_final(tmp_path):
+    import sys
+    import threading
+    script = tmp_path / "provider.py"
+    script.write_text("""import json,time,sys
+print(json.dumps({'type':'stream_event','event':{'type':'content_block_delta','delta':{'type':'text_delta','text':'Hello '}}}),flush=True)
+sys.stderr.write('x'*100000);sys.stderr.flush()
+time.sleep(.15)
+print(json.dumps({'type':'stream_event','event':{'type':'content_block_delta','delta':{'type':'text_delta','text':'world'}}}),flush=True)
+print(json.dumps({'type':'result','result':'Hello world'}),flush=True)
+""")
+    adapter = CliBackendAdapter('grok', executable=sys.executable, spec=SimpleNamespace(args=(str(script),'--output-format','json'),prompt_mode='placeholder'), timeout_s=3)
+    chunks=[]
+    def delta(text):
+        chunks.append(text)
+        assert adapter._proc.poll() is None
+    raw=adapter.call({'prompt':'hello'}, threading.Event(), on_delta=delta)
+    assert chunks==['Hello ', 'world']
+    assert adapter.parse_response(raw)['content']=='Hello world'
+    assert len(raw['stderr'])==100000
+    assert adapter.supports('streaming')
+
+
+def test_stream_ignores_reasoning_final_and_nested_agent_output():
+    from jaeger_agent.adapters.cli_stream import text_delta
+    assert text_delta(b'{"type":"result","result":"final"}')==''
+    assert text_delta(b'{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"private"}}}')==''
+    assert text_delta(b'{"type":"stream_event","parent_tool_use_id":"child","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"nested"}}}')==''
+    assert text_delta(b'not json')==''
+
+
+def test_stream_timeout_stops_owned_process(tmp_path):
+    import sys, threading, pytest
+    script=tmp_path/'provider.py';script.write_text('import time; time.sleep(10)')
+    adapter=CliBackendAdapter('grok',executable=sys.executable,spec=SimpleNamespace(args=(str(script),),prompt_mode='placeholder'),timeout_s=.1)
+    with pytest.raises(TimeoutError):
+        adapter.call({},threading.Event(),on_delta=lambda _:None)
+    assert adapter._proc.poll() is not None
+
+
+def test_cli_failure_is_not_saved_as_an_assistant_answer(tmp_path):
+    import sys, threading, pytest
+    script=tmp_path/'provider.py';script.write_text('import sys;sys.stderr.write("provider failed");sys.exit(7)')
+    adapter=CliBackendAdapter('grok',executable=sys.executable,spec=SimpleNamespace(args=(str(script),),prompt_mode='placeholder'))
+    with pytest.raises(RuntimeError,match='status 7'):
+        adapter.call({},threading.Event(),on_delta=lambda _:None)
+
+
+def test_stream_filters_split_tool_envelopes_without_dropping_prose():
+    from jaeger_agent.adapters.cli_stream import VisibleTextStream
+    chunks=[];stream=VisibleTextStream(chunks.append)
+    for text in ['Checking. <to','ol_call>{"name":"get_time",','"arguments":{}}</tool_','call>Done.']:
+        stream.feed(text)
+    stream.finish()
+    assert ''.join(chunks)=='Checking. Done.'
+
+
+def test_tool_schemas_survive_cli_formatting_and_use_existing_repair():
+    from pydantic import BaseModel
+    from jaeger_agent.parsing.tool_call_repair import repair_plain_text_tool_calls
+    class Args(BaseModel):
+        path: str
+    tool=ToolDef(name='read_file',description='Read one file',args_model=Args,fn=lambda **_:None)
+    prompt=flatten_messages([Message(role='user',content='Read the file')],[tool],'')
+    assert '"required": ["path"]' in prompt
+    assert '<tool_call>' in prompt
+    calls,text=repair_plain_text_tool_calls('<tool_call>{"name":"read_file","arguments":{"path":"README.md"}}</tool_call>',allowed_tool_names={'read_file'})
+    assert calls[0]['function']['name']=='read_file'
+    assert json.loads(calls[0]['function']['arguments'])=={'path':'README.md'}
+    assert not text.strip()
+
+
+def test_repaired_cli_call_reaches_existing_dispatch_and_approval_hook():
+    import threading
+    from pydantic import BaseModel
+    from jaeger_agent.loop.jaeger_agent import JaegerAgent
+    from jaeger_agent.loop.callbacks import AgentCallbacks
+    class Args(BaseModel):
+        label: str
+    executed=[];approvals=[]
+    class Scripted(CliBackendAdapter):
+        def __init__(self):
+            super().__init__('grok', executable='/bin/true');self.round=0
+        def call(self, formatted, interrupt_event: threading.Event, **kwargs):
+            self.round+=1
+            return {'stdout':json.dumps({'result':'<tool_call>{"name":"read_fixture","arguments":{"label":"proof"}}</tool_call>' if self.round==1 else 'Done'}),'returncode':0}
+    tool=ToolDef(name='read_fixture',description='Read fixture',args_model=Args,fn=lambda label:executed.append(label) or 'value',side_effect='read')
+    agent=JaegerAgent(Scripted(),tools=[tool],callbacks=AgentCallbacks(before_tool_call=lambda name,args:approvals.append((name,args))),tool_visibility=False,turn_start_hook=False)
+    assert agent.run_turn('Read fixture')=='Done'
+    assert approvals==[('read_fixture',{'label':'proof'})]
+    assert executed==['proof']

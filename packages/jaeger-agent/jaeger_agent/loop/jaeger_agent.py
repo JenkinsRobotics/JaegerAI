@@ -17,6 +17,7 @@ constructs its own ``JaegerAgent``.
 
 from __future__ import annotations
 
+import json
 import logging
 import re as _re
 import threading
@@ -730,7 +731,13 @@ class JaegerAgent:
                         allowed_tool_names=allowed_names,
                     )
                     if repaired_calls:
-                        tool_calls = repaired_calls
+                        # The recovery parser returns OpenAI wire calls, while
+                        # dispatch consumes internal ToolCall dictionaries.
+                        tool_calls = [
+                            {"id": call["id"], "name": call["function"]["name"],
+                             "arguments": json.loads(call["function"]["arguments"])}
+                            for call in repaired_calls
+                        ]
                         final_text = scrubbed_text
                         assistant_msg = {
                             **assistant_msg,

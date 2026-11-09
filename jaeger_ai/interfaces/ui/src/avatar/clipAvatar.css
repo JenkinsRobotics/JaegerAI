@@ -2,7 +2,6 @@
 .jg-clip-avatar { position:relative; display:block; overflow:hidden; border-radius:50%; background:var(--aether-color-white,var(--jg-color-elevated)); border:2px solid var(--jg-color-border); flex-shrink:0; }
 .jg-clip-avatar img,.jg-clip-avatar video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
 .jg-clip-status { font-size:11px; line-height:1.4; color:var(--jg-color-text-secondary); white-space:nowrap; }
-.jg-stable-demo__profile-avatar:has(.jg-clip-avatar) { width:94px; height:94px; flex-basis:94px; }
 .jg-stable-demo__profile-copy .jg-clip-status { display:block; }
 .jg-pbar__avatar:has(.jg-clip-avatar) { width:94px; height:94px; }
 .jg-pbar__name .jg-clip-status { display:block; text-align:center; }

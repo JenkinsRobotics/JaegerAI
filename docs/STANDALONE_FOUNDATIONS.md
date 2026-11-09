@@ -18,8 +18,8 @@ No runtime, event bus, identity, memory or planner authority is replaced. No liv
 
 ## Reused code
 
-- `codex-ui-kit@0.1.2`: pinned in the UI lockfile; MIT and dependency notices included in `public/licenses`.
-- Steel Browser `c8aebf9462187fc5a80b587ba2086900aecab236`: Apache-2.0 source and dependencies retained in the browser bundle. `packages/jaeger-browser` documents three bounded upstream integration patches and route adaptation.
+- `codex-ui-kit@0.1.2`: pinned in the UI lockfile; MIT and dependency notices included in `public/licenses`. Its `CommandExecution`, `CommandOutput` and `ToolCallCard` render actual Gateway tool receipts. `BrowserWorkspaceChrome.tsx` is a small source adaptation of the MIT browser component, adding an address slot, shared workspace tabs and a panel-close control; provenance is recorded in its header.
+- Steel Browser `c8aebf9462187fc5a80b587ba2086900aecab236`: Apache-2.0 source and dependencies retained in the browser bundle. `packages/jaeger-browser` documents four bounded upstream integration patches and route adaptation.
 - Official Node 22.23.2 archive with verified SHA-256; Playwright Chromium revision recorded in browser manifest.
 - Native libraries copied with SHA-256 provenance and distribution notices, with Mach-O dependencies relocated inside the app.
 - Proprietary Codex/ChatGPT program code is not shipped.
@@ -48,3 +48,25 @@ Run the repository verification pipeline and focused UI, Swift, stack and browse
 For deployment, stop only the owned Jaeger stack, retain the prior app/source for rollback, install the candidate, launch its bundled CLI/services, open the native app, and compare running Gateway revision and served UI hashes to the candidate. Confirm a real provider response is persisted before calling the installed update verified.
 
 An owner-local build may include an existing provider executable with `--provider-cli grok=/absolute/path/to/grok`. The executable is copied into runtime/bin, checksummed in provider-runtimes.json and preferred on the service PATH. Credentials stay in the provider's existing account store. This does not import proprietary code into the repository or assert public redistribution rights.
+
+## Conversation and stream acceptance
+
+The 52px toolbar persists across pages. On desktop, collapsing navigation retains
+the 52px icon rail; chat and the right workspace remain mounted. Both panel edges
+resize independently. The new-chat avatar stays large inside the welcome content;
+existing conversations use a small toolbar avatar. Browser and workspace tabs share
+one row, with the address and navigation controls directly below it.
+
+Grok's CLI adapter consumes `streaming-messages-json` text deltas, drains stderr
+concurrently, bounds retained output and reports nonzero exits as errors. Final
+result records are persisted without replaying the entire answer as deltas. Full
+prompts travel through a private temporary file, not process arguments. Native
+Grok tools are denied: Jaeger's existing tool schema, repair, approval, dispatch,
+receipt and persistence owners remain authoritative. The repair-to-dispatch
+boundary converts OpenAI wire calls into the internal ToolCall shape.
+
+Verify a real tool-bearing conversation, expand its retained input/output, reload
+it, and exercise all four left/right panel combinations in the installed app.
+The browser test must set a portrait viewport before opening its stream and
+assert the real page dimensions after the first streamed frame; connection alone
+does not establish usable rendering.

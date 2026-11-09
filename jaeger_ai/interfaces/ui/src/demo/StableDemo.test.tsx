@@ -16,6 +16,9 @@ it("closes the sidebar from its own control and with Escape", async () => {
  if (shell.getAttribute('data-sidebar') !== 'true') await flush(() => toggle.click());
  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Close sidebar"]')!.click());
  expect(shell).toHaveAttribute('data-sidebar', 'false');
+ expect(document.querySelector('#jaeger-navigation')).not.toHaveAttribute('hidden');
+ expect(document.querySelector('#jaeger-navigation-context')).toHaveAttribute('hidden');
+ expect(document.querySelector('[aria-label="Open sidebar"]')).not.toBeNull();
  await flush(() => toggle.click());
  expect(shell).toHaveAttribute('data-sidebar', 'true');
  await flush(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})));
@@ -221,11 +224,11 @@ it("collapses each column independently without remounting the chat", async () =
  const chat = document.querySelector('[data-chat-session]');
  const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Toggle navigation"]')!;
  await flush(() => toggle.click());
- expect(document.querySelector<HTMLElement>('#jaeger-navigation')?.hidden).toBe(true);
+ expect(document.querySelector<HTMLElement>('#jaeger-navigation-context')?.hidden).toBe(true);
  expect(toggle.getAttribute('aria-expanded')).toBe('false');
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
  await flush(() => toggle.click());
- expect(document.querySelector<HTMLElement>('#jaeger-navigation')?.hidden).toBe(false);
+ expect(document.querySelector<HTMLElement>('#jaeger-navigation-context')?.hidden).toBe(false);
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
  expect(document.querySelector('.jg-stable-demo__profile')?.textContent).toContain('Jaeger');
 });

@@ -1,6 +1,7 @@
+import { ToolActivity, ActivityIcon } from "./ToolActivity";
 import {ConversationMinimap} from "./ConversationMinimap";
 import {AgentActivity} from "./AgentActivity";
-import {ChevronIcon, GlyphCode} from "../icons";
+import {ChevronIcon} from "../icons";
 import {partitionChatParts} from "./workGrouping";
 import {useChatAvatar} from "../avatar/useChatAvatar";
 import {displayDate, displayDayKey, displayDayDistance, useDevicePreferences} from "../settings/devicePreferences";
@@ -34,7 +35,7 @@ import { PostMessage, SummaryCard } from "./HomeEntries";
 import { ChatHome } from "./ChatHome";
 import { stageSavedMedia, addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
-import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
+import { activityPhrase, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, isSessionMissingError, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type ClarifyAnswerResult, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
 import { SessionApprovals } from "./SessionApprovals";
@@ -134,19 +135,7 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
   }
 }
 
-function ToolLine({ part }: { part: ToolPart }) {
-  const { verb, target, mono } = stepLine(part);
-  const output = part.output === undefined ? undefined : typeof part.output === "string" ? part.output : JSON.stringify(part.output,null,2);
-  return <details className={`jg-tool jg-tool--${part.state}`}>
-    <summary><span className="jg-tool__verb">{verb}</span>{" "}
-      {mono ? <code className="jg-tool__target">{target}</code> : <span className="jg-tool__target">{target}</span>}
-      <span className="jg-tool__outcome"> · {part.summary ?? part.state}</span></summary>
-    <div className="jg-tool__details"><strong>{part.toolName}</strong>
-      <pre>{output === undefined ? "No output retained for this tool call." : output.slice(0,16000)}</pre>
-      {output && output.length>16000 && <small>Output preview truncated.</small>}
-    </div>
-  </details>;
-}
+const ToolLine = ToolActivity;
 
 /** Tool steps, collapsed to one summary row ("Ran 3 commands · Read 2 files"). */
 export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; defaultOpen?: boolean }) {
@@ -220,6 +209,7 @@ export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boo
   const [open,setOpen]=useState(false);
   useEffect(()=>{if(!live)setOpen(false);},[live]);
   const tools=parts.filter((p):p is ToolPart=>p.kind==="toolInvocation");
+  const runningTool=[...tools].reverse().find(tool=>["executing","streaming","waitingForConfirmation"].includes(tool.state));
   const reasoning=parts.filter((p):p is Extract<ChatPart,{kind:"thinking"}>=>p.kind==="thinking");
   const reasoningMs=reasoning.reduce((total,part)=>total+(part.durationMs??0),0);
   const summary=tools.length ? stepsSummary(tools) : reasoning.length
@@ -227,10 +217,11 @@ export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boo
     : live ? "Working" : "Activity";
   return <div className="jg-steps jg-turn-activity" data-sender="assistant">
     <button type="button" className="jg-steps__summary" aria-label={`${open ? "Hide" : "Show"} activity${tools.length ? ": "+stepsSummary(tools) : ""}`} aria-expanded={open} onClick={()=>setOpen(!open)}>
-      <span className="jg-stream-icon" aria-hidden="true">{reasoning.length ? <WaveIcon/> : <GlyphCode/>}</span>
+      <span className="jg-stream-icon" aria-hidden="true">{reasoning.length ? <WaveIcon/> : <ActivityIcon tool={tools.at(-1)} />}</span>
       <span className="jg-steps__text">{summary}</span>
       <span className="jg-steps__toggle" aria-label={open ? "Hide activity" : "Show activity"}><ChevronIcon/></span>
     </button>
+    {!open && live && runningTool && <div className="jg-turn-activity__live"><ToolActivity part={runningTool} /></div>}
     {open && <div className="jg-turn-activity__body">{parts.map((part,i)=>
       part.kind==="progress" ? <p key={i}>{part.message}</p> :
       part.kind==="thinking" ? <section key={i} className="jg-reasoning-diagnostic" aria-label="Reasoning diagnostic"><strong>{part.durationMs === undefined ? "Reasoning" : `Reasoning · ${seconds(part.durationMs)} s`}</strong>{part.text && <p>{part.text}</p>}</section> :
@@ -975,7 +966,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         <div className="jg-chat__column">
           {filesOpen && host.sessionFiles && sessionId && <><SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)} onSelectMedia={bytesUploadEnabled()&&draftReady&&!active&&!recoveryBlocked?file=>{try{if(!sessionId||active||recoveryBlocked)return;stageSavedMedia([],sessionId,file);setFiles(current=>{const result=stageSavedMedia(current,sessionId,file);setFileNote(result.note);return result.files;});}catch(e){setFileNote(String(e));}}:undefined}/>{host.taskArtifacts&&<TaskArtifacts key={"artifacts:"+sessionId} controls={host.taskArtifacts} sessionId={sessionId}/>}</>}
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
-          {session && !session.turns.length && <ChatHome />}
+          {session && !session.turns.length && <ChatHome portrait={agents?.[0]?.avatar_url} />}
           {session && (older || olderError) && (
             <div className="jg-older" role="status">
               {loadingOlder ? "Loading earlier messages…"
