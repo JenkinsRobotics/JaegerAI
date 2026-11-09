@@ -307,6 +307,10 @@ export interface JaegerSource {
   approvalStatus?(approvalId: string): Promise<PendingApproval & { decision?: string; resolved_at?: number }>;
   sessionControl?(sessionId: string): Promise<{ latest_request?: { request_id: string; status: string } | null }>;
   readonly kind: "live" | "mock";
+  organization?: {
+    get(): Promise<import("./organization").Organization>;
+    command(body: Record<string, unknown>): Promise<import("./organization").OrganizationResult>;
+  };
   agents(): Promise<Agent[]>;
   agentsSummary(): Promise<AgentSummary[]>;
   sessions(query?: { agent_id?: string }): Promise<SessionRow[]>;

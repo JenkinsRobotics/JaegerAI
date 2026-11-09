@@ -129,3 +129,25 @@ def session_search(
         "summary": f"Found {len(sessions)} Jaeger session(s).",
         "sessions": sessions,
     }
+
+
+def session_organize(actions_json: str = "", label: str = "Jaeger suggestions") -> dict:
+    """Read organization or save a reviewable proposal, never apply it from a model."""
+    import json
+    import urllib.request
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    from jaeger_ai.core.gateway.client import gateway_base_url
+    url = gateway_base_url() + "/v1/chat-organization"
+    headers = {**client_headers("jaegerd"), "Content-Type": "application/json"}
+    body = None
+    if actions_json:
+        actions = json.loads(actions_json)
+        if not isinstance(actions, list):
+            raise ValueError("actions_json must contain a JSON array")
+        body = json.dumps({"action": "propose", "actions": actions, "label": label}).encode()
+    request = urllib.request.Request(url, data=body, headers=headers, method="POST" if body else "GET")
+    with urllib.request.urlopen(request, timeout=10) as response:
+        result = json.load(response)
+    if body:
+        result["next_step"] = "Saved for owner review in Manage > Suggestions to review. No chats changed."
+    return result

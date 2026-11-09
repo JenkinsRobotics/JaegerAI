@@ -1159,6 +1159,26 @@ def _register_builtins(client: Any) -> None:
             "boot_readiness": _pipeline.get("readiness"),
         }
 
+    @register_tool_from_function(side_effect="read", replace=True)
+    @requires_tier(PermissionTier.READ_ONLY, skill="host", operation="session_organize",
+                   summary="read chat organization or propose changes for owner review")
+    def session_organize(actions_json: str = "", label: str = "Jaeger suggestions") -> dict:
+        """Organize chats by proposing names, project groups and sidebar sections.
+        Empty actions_json returns current groups, session IDs and saved titles.
+        Use session_search to understand content before naming or grouping.
+        To propose, pass a JSON array of actions:
+        {"type":"rename","session_ids":["ID"],"title":"Name"}
+        {"type":"create_group","id":"unique-id","kind":"project" or "section","name":"Name"}
+        {"type":"move","session_ids":["ID"],"field":"project_id" or "section_id","group_id":"group-id"}
+        {"type":"rename_group","id":"group-id","name":"Name"}
+        {"type":"pin","session_ids":["ID"],"value":true}
+        {"type":"archive","session_ids":["ID"],"value":true}
+        Create groups before moves. Preserve manual titles unless asked to rename.
+        Proposals appear in Manage for preview and apply. Never claim they are applied.
+        """
+        from jaeger_ai.core.session_tools import session_organize as organize
+        return organize(actions_json=actions_json, label=label)
+
     # Product sessions belong to Gateway; replace the standalone episodic
     # search default explicitly rather than registering a second tool owner.
     @register_tool_from_function(side_effect="read", replace=True)

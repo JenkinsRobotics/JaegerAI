@@ -2,7 +2,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { ChevronRight } from "../components/Icons";
 import "./conversationSection.css";
 
-type SectionId = "pinned" | "projects" | "recents";
+type SectionId = string;
 
 /** Device-local navigation preference; conversation data remains Gateway-owned. */
 export function ConversationSection({ id, title, children }: { id: SectionId; title: string; children: ReactNode }) {
