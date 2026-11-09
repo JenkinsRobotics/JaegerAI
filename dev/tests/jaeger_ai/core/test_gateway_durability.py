@@ -20,6 +20,13 @@ def isolated_entity_runtime(tmp_path, monkeypatch):
     from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
     from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
 
+    from jaeger_ai.main import _pipeline
+
+    # Real runtime boot binds the process-wide ledger layout. Restore the
+    # previous binding at teardown too: otherwise later synthetic instances
+    # can resume this fixture's completed task ledger and skip their worker.
+    # Production bound-layout precedence is intentionally unchanged.
+    monkeypatch.setitem(_pipeline, "layout", _pipeline.get("layout"))
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.delenv("JAEGER_OWNER_REACT", raising=False)
     monkeypatch.delenv("JAEGER_RUNTIME_MODE", raising=False)

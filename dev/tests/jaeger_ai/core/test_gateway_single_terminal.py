@@ -341,9 +341,10 @@ async def test_a_stalled_agent_is_not_recorded_as_a_successful_answer(app, monke
     await app._execute_turn("s", admitted["turn_id"], "inspect the result", request_id="stalled-r1")
     [finish] = _terminal_events(app)
     assert finish.event == "turn.failed"
-    assert "stopped before completing" in finish.data["error"]
+    assert finish.data["error"] == "stalled"
     row = app.store.get_request("stalled-r1")
     assert row["status"] == "failed"
-    assert not row["result"].get("output")
+    assert row["result"]["output"] == "[halted: stalled]"
+    assert row["result"]["halt_reason"] == "stalled"
     assert runtime.finished == []
     assert calls == ["inspect the result"]
