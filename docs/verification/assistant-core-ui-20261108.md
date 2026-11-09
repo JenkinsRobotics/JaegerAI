@@ -4,8 +4,10 @@ Scope: cloud-only branch `fix/assistant-core-acceptance-20261108`, starting at
 `ff71bb769bc56e4c6d7be6d540a86be73e291e07`. No Mac runtime, deployment,
 real accounts, external messages, purchases, or provider-backed generation.
 
-Latest scoped qualification: [reconciliation ownership and outcomes](assistant-core-reconciliation-20261108.md)
-records 910 component tests in 201 files and a newly fingerprinted no-mock build.
+Historical scoped qualification: [reconciliation ownership and outcomes](assistant-core-reconciliation-20261108.md)
+records 910 component tests in 201 files and its source-matched no-mock build.
+Current source and final qualification are recorded in the background-admission
+section at the end of this document.
 The earlier measurements below retain their historical scope; every tab remains
 PARTIAL and browser/phone/native acceptance is not inferred from them.
 
@@ -33,7 +35,7 @@ workspace destinations. The other shell's tests alone do not prove the actual en
 
 | Visible destination / controls | Status | Implementation and backend connection | Audit limitations |
 | --- | --- | --- | --- |
-| Chat: start, send, stop, restore, rename, archive, delete, approvals | PARTIAL | StableDemo, ChatPane/WebHost; JaegerSource/Gateway session, send/stream, approval and task APIs | Pins/sidebar width are device-local; fork and schedule menu items are disabled. Link sharing does not grant access to another user. |
+| Chat: start, send, stop, restore, rename, archive, delete, approvals | PARTIAL | StableDemo, ChatPane/WebHost; JaegerSource/Gateway session, send/stream, approval and task APIs | At this historical snapshot, pins/sidebar width were device-local and fork/schedule menu items were disabled. The current shell has guarded late-fork navigation as described below. Link sharing does not grant access to another user. |
 | Imagine: generate, import, tags, delete, board, send to chat | PARTIAL | StudioPage; `/v1/studio/providers`, `/generate`, `/assets`, `/board`; source.agentHome/uploadAttachment/send | Generation requires configured provider. No generation or provider credentials exercised here. |
 | Library: media, documents, outputs | PARTIAL | CompanionPage; StudioPage media, source.library, source.taskArtifacts | Unsupported source capabilities show unavailable state. File ingestion/export needs separate content-level acceptance. |
 | Automations: create/edit/pause/run history | PARTIAL | AutomationsPanel; source.schedules and revision-aware mutations | No real scheduled external effects exercised. |
@@ -213,32 +215,54 @@ No unsupported control or tab is promoted to PASS by these scoped results.
 
 - Research: the [cooperative HTTP journey](assistant-core-research-journey-20261108.md)
   now covers native retrieval/ledger tools, consistency checking, exact artifact
-  download and authenticated Documents persistence. Synthetic providers, lack
-  of automatic evidence enforcement and untested interrupted Research status
-  keep acceptance PARTIAL.
+  download and authenticated Documents persistence. This historical snapshot used synthetic providers and did not qualify explicit
+  evidence enforcement or interrupted Research. Later scoped controls below do
+  qualify those contracts and retained paused state; acceptance remains PARTIAL.
 - Chat/approvals: [complete escaped requested-action display](assistant-core-approval-visibility-20261108.md)
   preserves full supplied details alongside progress previews, marks unsupported
   values unavailable and masks known credentials. Fresh production UI build and
   913 tests in 201 files pass; DOM/CSS evidence is not visual phone/browser QA.
 
 
-## Current reconciled source qualification
+## Current background-admission source qualification
 
-All tabs remain PARTIAL. The current source is documented in
-[reconciled qualification](assistant-core-reconciled-qualification-20261108.md).
-It preserves prior work and incorporates pinned upstream 315f6ea, with fresh
-944-test/205-file UI verification and production build (873 source files,
-863 manifest inputs). These are source/DOM checks, not rendered phone/browser QA.
+Overall and every tab remain **PARTIAL**. The latest
+[background-admission qualification](assistant-core-background-admission-qualification-20261108.md)
+records incorporated upstream a5f83f8 and source/test freeze ccda0c (parent
+f331e9c). All 18 selected final qualification groups have explicit zero exits;
+root package and retained companion archive provenance checks passed.
+Independent UI evidence at f919ca0 covers 956 tests in 207 files and the
+production no-mock build. Its 881 UI/shared inputs and 137 built files remain
+source-identical through the combined correction. This is reused evidence,
+not a fresh final-source UI run/build. Browser/phone paint remains unqualified.
 
-- Chat/navigation: opaque historic IDs, exact links, read/unread state and message
-  actions/reactions retain ownership and chronology across authenticated Gateway
-  and WebUI routes. Independent namespace and delayed-selection probes pass.
-- Research: new explicit contracts enforce designated report/ledger consistency
-  and exact checked-result bytes under per-task paths. Legacy tasks are labeled
-  unchecked. This does not establish factual truth, authentic retrieval or
-  interruption recovery during research.
-- Connect Apps: upstream's canonical IDE identity and registry-controlled setup
-  are included and tested with synthetic installer boundaries, not an actual
-  desktop extension installation.
-- Other tabs retain the documented scoped results and unqualified real-account,
-  native-host and optional-package limits. No live-runtime pass is inferred.
+- **Chat/navigation — PARTIAL:** exact opaque historic links, unread state and
+  settings are retained. A late fork enters Recents without stealing newer
+  navigation, including away-and-back changes. Tabbed tools and sidechat preserve
+  disclosure state; selection-specific content resets with the session.
+- **Work/Tasks — PARTIAL:** new eligible default/native client tasks freeze
+  effective authority and exact receipts. Original-input replay does not
+  duplicate approval or execution. Historical/explicit/specialist paths retain
+  prior scope. A task-before-child crash may pause instead of reconstructing identity.
+- **Research — PARTIAL:** explicit contracts bind designated report/ledger
+  consistency and displayed bytes. Two midrun Gateway-loss controls retain
+  approvals, artifacts and receipts as execution_unknown/paused through two
+  restarts. No automatic interrupted replay or background terminal journal is
+  claimed. Consistency does not prove factual truth, entailment or authentic retrieval.
+- **Library/Outputs — PARTIAL:** outputs remain reachable from the tools launcher,
+  scoped to the selected session; empty selection cannot list global artifacts
+  and late catalog responses cannot replace a newer selection.
+- **Workspace/Terminal — PARTIAL:** operation and output checks revalidate exact
+  session and active profile; producer registry keys preserve opaque identity.
+  Revoked output stops without buffered disclosure. Fake-owner/backend tests
+  do not qualify a real PTY or native terminal transport.
+- **Imagine, Automations, Feed, Agents/Characters/Memory & Skills, Work/Pipeline,
+  Backlog, Production, Calendar, YouTube, Documents, Machine, Settings and
+  Connect Apps — PARTIAL:** retain existing scoped evidence and unresolved
+  provider, account, browser, native-host and optional-package boundaries.
+  Root package archives are not IDE extension distributions. No status upgrade.
+
+The final canonical-master comparison found three later commits, 39 changed
+paths and eight candidate-overlapping paths beyond the incorporated pin. Those
+changes are excluded and untested; current-master merge compatibility is not
+claimed. See the background-admission report for the exact identities and evidence.

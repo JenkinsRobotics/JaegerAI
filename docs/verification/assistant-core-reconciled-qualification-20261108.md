@@ -1,5 +1,12 @@
 # Reconciled assistant-core qualification
 
+This report records preserved version13 at `efb2d67f2035bac0cb92eb7ebf782938f2247654` and remains historical qualification evidence. The later report retains the failed e44b31d broad gates, f331e9c failures and independently approved test-only singleton fixture correction. This older report does not itself qualify the later source.
+
+## Current background-admission qualification
+
+See [assistant-core-background-admission-qualification-20261108.md](assistant-core-background-admission-qualification-20261108.md) for the exact ccda0c source/test freeze, all 18 selected final zero-exit groups, package provenance, new default/native authority, original-fingerprint replay, current-lease returned slices and terminal/workspace scope corrections. The measurements below remain historical and are not relabeled as new results. Overall and every tab remain **PARTIAL**. Background terminal journals and automatic interrupted Research replay remain absent. The data-preserving release/rollback proposal requires fresh runtime-state comparison and separate approval. Framework evolution remains deferred.
+
+
 ## Source and scope
 
 This candidate preserves the original 27-commit isolated branch at
