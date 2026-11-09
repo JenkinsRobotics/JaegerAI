@@ -224,7 +224,7 @@ No unsupported control or tab is promoted to PASS by these scoped results.
   913 tests in 201 files pass; DOM/CSS evidence is not visual phone/browser QA.
 
 
-## Current background-admission source qualification
+## Version14 background-admission qualification (historical)
 
 Overall and every tab remain **PARTIAL**. The latest
 [background-admission qualification](assistant-core-background-admission-qualification-20261108.md)
@@ -266,3 +266,31 @@ The final canonical-master comparison found three later commits, 39 changed
 paths and eight candidate-overlapping paths beyond the incorporated pin. Those
 changes are excluded and untested; current-master merge compatibility is not
 claimed. See the background-admission report for the exact identities and evidence.
+
+
+## Current bounded terminal-recovery qualification
+
+See [background-terminal-recovery-qualification-20261109.md](background-terminal-recovery-qualification-20261109.md) for original combined source 8027764, its mapped portable export
+ace8382, bounded schema19/v4 terminal recovery and the separately attributed final
+qualification ledger. The historical measurements below do not become later-source
+passes. Overall and every tab remain **PARTIAL**. The new scope recovers exact
+verified sealed output only. Delegated trees remain seal-ineligible; unsealed
+interruptions are not automatically replayed. Canonical all-attempt graph vetoes
+also prevent ordinary background-task completion or Stop from hiding unresolved effects.
+Research consistency is not factual truth, citation entailment or authentic retrieval.
+Fresh runtime-state comparison, local-data preservation and separate approval remain
+required before release.
+
+### Current destination scope, still PARTIAL
+
+- Work/Tasks: exact sealed terminal-result recovery and canonical all-attempt
+  vetoes protect retained native roots and owned children. Cancellation is kept
+  while unresolved effects leave the task paused; Stop does not erase those effects.
+- Research: ordinary and recovered results retain independently verified bytes.
+  No automatic unsealed resumption, factual grounding or authentic retrieval pass.
+- Chat/Library and other destinations: backend proof does not establish rendered
+  browser/phone, audio, native-host, real-provider or optional-package acceptance.
+
+UI evidence is reused, not freshly rerun: 956 tests in 207 files plus type/theme/Vite/no-mock checks. The combined technical record verifies 881 source inputs and 137 dist files are identical, with source SHA256 `765e79abec237e156dc7ebf1b7623e76dad71eb24486476bfa960bbfc75a7aa0`. See `test-evidence/recovery-final-evidence-reuse-proof.json` and `test-evidence/recovery-final-ui-reuse.json`. Equality of 1,950 package inputs to ce03f21 supports companion reuse; it does not certify the new root archives.
+
+All 18 selected combined groups have explicit zero exits at the original combined source. Root package build and final provenance checks also exited 0; exact scope and reuse are recorded in the linked authoritative recovery qualification report.

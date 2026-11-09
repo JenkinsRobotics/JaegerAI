@@ -1,5 +1,19 @@
 # Assistant core baseline and release gate, 2026-11-08
 
+## Current bounded terminal-recovery qualification
+
+See [background-terminal-recovery-qualification-20261109.md](background-terminal-recovery-qualification-20261109.md) for original combined source 8027764, its mapped portable export
+ace8382, bounded schema19/v4 terminal recovery and the separately attributed final
+qualification ledger. The historical measurements below do not become later-source
+passes. Overall and every tab remain **PARTIAL**. The new scope recovers exact
+verified sealed output only. Delegated trees remain seal-ineligible; unsealed
+interruptions are not automatically replayed. Canonical all-attempt graph vetoes
+also prevent ordinary background-task completion or Stop from hiding unresolved effects.
+Research consistency is not factual truth, citation entailment or authentic retrieval.
+Fresh runtime-state comparison, local-data preservation and separate approval remain
+required before release.
+
+
 ## Current background-admission qualification
 
 See [assistant-core-background-admission-qualification-20261108.md](assistant-core-background-admission-qualification-20261108.md) for the exact ccda0c source/test freeze, all 18 selected final zero-exit groups, package provenance, new default/native authority, original-fingerprint replay, current-lease returned slices and terminal/workspace scope corrections. The measurements below remain historical and are not relabeled as new results. Overall and every tab remain **PARTIAL**. Background terminal journals and automatic interrupted Research replay remain absent. The data-preserving release/rollback proposal requires fresh runtime-state comparison and separate approval. Framework evolution remains deferred.
