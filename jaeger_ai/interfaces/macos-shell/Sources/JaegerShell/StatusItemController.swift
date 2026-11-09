@@ -174,8 +174,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    @objc private func startStack(_ sender: Any?) { runStack(.start) }
-    @objc private func stopStack(_ sender: Any?) { runStack(.stop) }
+    @objc func startStack(_ sender: Any?) { runStack(.start) }
+    @objc func stopStack(_ sender: Any?) { runStack(.stop) }
 
     /// Confirm sheet, then StackController (dev: own children; production: `jaeger stack up|down --json`).
     private func runStack(_ action: StackController.Action) {
