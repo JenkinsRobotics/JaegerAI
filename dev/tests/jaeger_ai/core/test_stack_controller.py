@@ -263,3 +263,11 @@ def test_bundled_python_is_authoritative_and_propagated(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(RuntimeError, match="Bundled"):
         stack._default_python()
+
+
+def test_bundled_provider_binary_precedes_external_installations(monkeypatch):
+    from jaeger_ai.core.runtime import stack
+    monkeypatch.setenv("JAEGER_BUNDLED_BIN", "/Applications/JaegerAI.app/Contents/Resources/runtime/bin")
+    env = stack._common_env()
+    entries = env["PATH"].split(":")
+    assert entries.index(env["JAEGER_BUNDLED_BIN"]) < entries.index(str(Path.home() / ".local/bin"))

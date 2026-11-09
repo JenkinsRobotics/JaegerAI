@@ -164,6 +164,7 @@ def _common_env() -> dict[str, str]:
     # Resolve Python and installed coding workers consistently for every client.
     path_entries = [
         str(Path(_default_python()).parent),
+        os.environ.get("JAEGER_BUNDLED_BIN", ""),
         str(Path.home() / ".local" / "bin"),
         "/opt/homebrew/bin", "/usr/local/bin",
         *os.environ.get("PATH", "").split(os.pathsep),
@@ -178,7 +179,7 @@ def _common_env() -> dict[str, str]:
         "JAEGER_INSTALL_ROOT": str(REPO_ROOT),
         "JAEGER_STATE_DIR": str(state_root),
         "JAEGER_STATE_HOME": str(state_root),
-        **{key: os.environ[key] for key in ("JAEGER_RUNTIME_PYTHON", "JAEGER_WEBUI_PYTHON", "JAEGER_BROWSER_BUNDLE", "JAEGER_WEBUI_UI_DIST", "PYTHONNOUSERSITE") if os.environ.get(key)},
+        **{key: os.environ[key] for key in ("JAEGER_BUNDLED_BIN", "JAEGER_RUNTIME_PYTHON", "JAEGER_WEBUI_PYTHON", "JAEGER_BROWSER_BUNDLE", "JAEGER_WEBUI_UI_DIST", "PYTHONNOUSERSITE") if os.environ.get(key)},
     }
 
 
