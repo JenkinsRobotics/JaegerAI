@@ -103,3 +103,59 @@ it('gates the asset picker until loaded, then appends a real library asset', asy
   expect(api.send.mock.calls[0][2].items).toHaveLength(2);
   expect(api.send.mock.calls[0][2].items[1]).toMatchObject({ kind: 'asset', asset_id: 'asset-one' });
 });
+
+it('serializes pending snapshots and coalesces intermediate edits into the latest board', async () => {
+  vi.useFakeTimers();
+  let acknowledge!: () => void;
+  api.get.mockResolvedValue({ items: [] });
+  api.send.mockImplementationOnce(() => new Promise<void>(resolve => { acknowledge = resolve; })).mockResolvedValue({});
+  await render();
+  await act(async () => button('Add note').click());
+  await act(async () => vi.advanceTimersByTimeAsync(650));
+  await act(async () => button('Add note').click());
+  await act(async () => vi.advanceTimersByTimeAsync(650));
+  await act(async () => button('Add note').click());
+  await act(async () => vi.advanceTimersByTimeAsync(650));
+  expect(api.send).toHaveBeenCalledTimes(1);
+  expect(api.send.mock.calls[0][2].items).toHaveLength(1);
+  await act(async () => acknowledge());
+  await act(async () => vi.advanceTimersByTimeAsync(650));
+  expect(api.send).toHaveBeenCalledTimes(2);
+  expect(api.send.mock.calls[1][2].items).toHaveLength(3);
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(api.send).toHaveBeenCalledTimes(2);
+});
+
+it.each(['rejected', 'response lost after commit'])('pauses queued and later saves after %s, retaining all local edits and warning', async outcome => {
+  vi.useFakeTimers();
+  let fail!: (e: Error) => void;
+  api.get.mockResolvedValue({ items: [] });
+  api.send.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
+  await render();
+  await act(async () => button('Add note').click());
+  await act(async () => vi.advanceTimersByTimeAsync(650));
+  await act(async () => button('Add note').click());
+  await act(async () => vi.advanceTimersByTimeAsync(650));
+  await act(async () => fail(new Error(outcome)));
+  await act(async () => button('Add note').click());
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  expect(api.send).toHaveBeenCalledTimes(1);
+  expect(el.querySelectorAll('textarea')).toHaveLength(3);
+  expect(el.querySelector('[role="alert"]')?.textContent).toContain('Automatic saving is paused');
+  expect(el.textContent).not.toContain('Changes save automatically.');
+});
+
+it('keeps the latest edit when acknowledgment precedes its debounce', async () => {
+  vi.useFakeTimers();
+  let acknowledge!: () => void;
+  api.get.mockResolvedValue({ items: [] });
+  api.send.mockImplementationOnce(() => new Promise<void>(resolve => { acknowledge = resolve; })).mockResolvedValue({});
+  await render();
+  await act(async () => button('Add note').click());
+  await act(async () => vi.advanceTimersByTimeAsync(650));
+  await act(async () => button('Add note').click());
+  await act(async () => acknowledge());
+  await act(async () => vi.advanceTimersByTimeAsync(650));
+  expect(api.send).toHaveBeenCalledTimes(2);
+  expect(api.send.mock.calls[1][2].items).toHaveLength(2);
+});
