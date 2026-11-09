@@ -3,8 +3,8 @@
 Owns the packaged browser dependencies, not conversations or agent execution.
 Steel Browser is an Apache-2.0 dependency pinned at
 `c8aebf9462187fc5a80b587ba2086900aecab236`. Its source and license remain in
-the produced bundle. Three bounded integration patches supply per-conversation storage, authenticate
-the internal cast connection, and guard startup on a real browser instance.
+the produced bundle. Four bounded integration patches supply per-conversation storage, authenticate
+the internal cast connection, guard startup on a real browser instance, and retain the page viewport when a viewer connects.
 The worker adapter also normalizes the upstream cast session URL.
 Node 22.23.2 is verified against its pinned SHA-256.
 Chromium is pinned by the canonical UI's Playwright lockfile. No developer

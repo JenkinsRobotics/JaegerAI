@@ -17,6 +17,7 @@ import os
 import signal
 import subprocess
 import threading
+import tempfile
 import time
 from typing import Any
 
@@ -25,6 +26,7 @@ from jaeger_agent.schemas.message_types import Message
 from jaeger_os.core.tools.tool_schema import ToolDef
 
 from .base import ProviderAdapter
+from .cli_stream import collect_stream, VisibleTextStream
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +57,15 @@ def flatten_messages(
     if system and system.strip():
         parts.append(f"System:\n{system.strip()}")
     if tools:
-        names = ", ".join(t.name for t in tools)
+        from .hermes_xml import HERMES_TOOL_INSTRUCTIONS
         parts.append(
-            "Jaeger owns tools, memory, and permissions. "
-            f"Available Jaeger tools: {names}. "
-            "Reply with the assistant turn as text; do not execute tools yourself."
+            "Jaeger owns tools, memory, and permissions. Do not execute tools yourself. "
+            "Request the tools below using the Jaeger text protocol; Jaeger will validate "
+            "arguments, obtain approvals, execute them, and return their results.\n"
+            + HERMES_TOOL_INSTRUCTIONS
+            + "\n<tools>\n"
+            + json.dumps([tool.to_openai_schema() for tool in tools], ensure_ascii=False)
+            + "\n</tools>"
         )
     for msg in messages:
         role = str(msg.get("role") or "user")
@@ -212,8 +218,36 @@ class CliBackendAdapter(ProviderAdapter):
         executable = self._executable or ""
         argv, stdin_bytes = _build_argv(spec, executable, prompt)
 
+        on_delta = kwargs.get("on_delta") if self.backend_id == "grok" else None
+        if callable(on_delta):
+            visible_stream = VisibleTextStream(on_delta)
+            on_delta = visible_stream.feed
+            # Grok emits actual token deltas in this mode; the result record still
+            # owns the final persisted response. Never re-stream that full record.
+            if "--output-format" in argv:
+                argv[argv.index("--output-format") + 1] = "streaming-messages-json"
+            else:
+                argv.extend(["--output-format", "streaming-messages-json"])
+            argv.append("--include-partial-messages")
+        else:
+            on_delta = None
+            visible_stream = None
+
         def _run() -> dict[str, Any]:
-            return self._spawn(argv, stdin_bytes, spec)
+            if self.backend_id == "grok" and "--single" in argv:
+                # Full schemas and history exceed macOS argv limits. Keep the
+                # prompt private and out of process listings; delete on exit.
+                with tempfile.TemporaryDirectory(prefix="jaeger-completion-") as folder:
+                    path = os.path.join(folder, "prompt.txt")
+                    with open(path, "w", encoding="utf-8") as handle:
+                        os.chmod(path, 0o600)
+                        handle.write(prompt)
+                    child_argv = list(argv)
+                    index = child_argv.index("--single")
+                    child_argv[index:index + 2] = ["--prompt-file", path]
+                    child_argv.extend(["--cwd", folder])
+                    return self._spawn(child_argv, stdin_bytes, spec, on_delta=on_delta)
+            return self._spawn(argv, stdin_bytes, spec, on_delta=on_delta)
 
         def _abandon() -> None:
             self._kill()
@@ -226,6 +260,8 @@ class CliBackendAdapter(ProviderAdapter):
         )
         if interrupt_event.is_set():
             raise AgentInterrupted("CLI backend was interrupted")
+        if visible_stream is not None:
+            visible_stream.finish()
         return raw
 
     def _spawn(
@@ -233,6 +269,7 @@ class CliBackendAdapter(ProviderAdapter):
         argv: list[str],
         stdin_bytes: bytes | None,
         spec: Any,
+        on_delta: Any = None,
     ) -> dict[str, Any]:
         env = self._environment(spec)
         popen_kwargs: dict[str, Any] = {
@@ -245,18 +282,28 @@ class CliBackendAdapter(ProviderAdapter):
         }
         if os.name != "nt":
             popen_kwargs["start_new_session"] = True
-        logger.debug("cli backend spawn: %s", argv[:6])
+        logger.debug("cli backend spawn: %s", self.backend_id)
         self._proc = subprocess.Popen(**popen_kwargs)
         try:
-            stdout, stderr = self._proc.communicate(
-                input=stdin_bytes, timeout=self.timeout_s,
-            )
+            if on_delta is not None:
+                stdout, stderr = collect_stream(self._proc, stdin_bytes, self.timeout_s, on_delta)
+            else:
+                stdout, stderr = self._proc.communicate(
+                    input=stdin_bytes, timeout=self.timeout_s,
+                )
         except subprocess.TimeoutExpired:
             self._kill()
-            stdout, stderr = self._proc.communicate()
+            if on_delta is None:
+                self._proc.communicate()
             raise TimeoutError(
                 f"CLI backend {self.backend_id!r} timed out after {self.timeout_s:.0f}s"
             ) from None
+        except BaseException:
+            self._kill()
+            raise
+        if self._proc.returncode:
+            raise RuntimeError(f"CLI backend {self.backend_id!r} exited with status {self._proc.returncode}: "
+                               + stderr.decode("utf-8", errors="replace")[-2000:])
         return {
             "stdout": stdout.decode("utf-8", errors="replace"),
             "stderr": stderr.decode("utf-8", errors="replace"),
@@ -304,7 +351,7 @@ class CliBackendAdapter(ProviderAdapter):
         return Message(role="assistant", content=text, finish_reason="stop")
 
     def supports(self, feature: str) -> bool:
-        return False
+        return self.backend_id == "grok" and feature == "streaming"
 
     def health_check(self) -> dict[str, Any]:
         started = time.perf_counter()

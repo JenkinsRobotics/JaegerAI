@@ -77,13 +77,19 @@ def main():
         original = cast.read_text()
         if original.count(before) != 1:
             raise SystemExit("Steel private cast connection patch no longer applies")
-        cast.write_text(original.replace(before, before + '\n        headers: process.env.JAEGER_BROWSER_TOKEN ? { Authorization: `Bearer ${process.env.JAEGER_BROWSER_TOKEN}` } : {},'))
+        cast.write_text(original.replace(before, before + '\n        defaultViewport: null,\n        headers: process.env.JAEGER_BROWSER_TOKEN ? { Authorization: `Bearer ${process.env.JAEGER_BROWSER_TOKEN}` } : {},'))
         browser = steel / "api/src/plugins/browser.ts"
         before = '    await cdpService.launch();'
         original = browser.read_text()
         if original.count(before) != 1:
             raise SystemExit("Steel duplicate launch patch no longer applies")
         browser.write_text(original.replace(before, '    if (!cdpService.getBrowserInstance()) await cdpService.launch();'))
+        # Viewing must never resize the page owned by the conversation worker.
+        screencast = steel / "api/src/plugins/browser-socket/page-screencast.ts"
+        original = screencast.read_text()
+        start = original.index("    const { width, height, isMobile } = this.viewport;")
+        end = original.index('    client.on("Page.screencastFrame"', start)
+        screencast.write_text(original[:start] + original[end:])
         run("npm", "run", "build", "--workspace", "api", cwd=steel, env=env)
         ui = repo / "jaeger_ai/interfaces/ui"
         # The canonical UI lockfile pins Playwright and its Chromium revision.
@@ -97,7 +103,7 @@ def main():
         if not (bundle / chrome).is_file():
             raise SystemExit("Unexpected Chromium archive layout")
         shutil.copy2(Path(__file__).with_name("worker.mjs"), bundle / "worker.mjs")
-        manifest = {"steel_commit": STEEL, "steel_patches": ["conversation-file-storage", "authenticated-cast", "single-launch"], "node_version": NODE, "node_archive_sha256": NODE_SHA,
+        manifest = {"steel_commit": STEEL, "steel_patches": ["conversation-file-storage", "authenticated-cast", "single-launch", "retain-page-viewport"], "node_version": NODE, "node_archive_sha256": NODE_SHA,
                     "chromium": browser_spec, "node": "node/bin/node", "chrome": chrome}
         (bundle / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
         run(str(bundle / "node/bin/node"), "--check", str(bundle / "worker.mjs"))

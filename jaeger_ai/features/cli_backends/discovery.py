@@ -69,7 +69,12 @@ KNOWN_BACKENDS: tuple[BackendSpec, ...] = (
         # value after --single. Stdin is not the published interface.
         args=(
             "--single", "{prompt}", "--output-format", "json",
-            "--permission-mode", "dontAsk",
+            "--permission-mode", "dontAsk", "--tools", "", "--deny", "*",
+            "--disable-web-search", "--no-subagents",
+            "--system-prompt-override", "You are Jaeger's model completion backend. "
+            "Follow the supplied system and conversation context. Never use native Grok "
+            "tools or search for tools. Request supplied Jaeger tools only through the "
+            "<tool_call> text protocol. Jaeger executes them and supplies their results.",
         ),
         prompt_mode="placeholder",
         credential_env=("XAI_API_KEY",),

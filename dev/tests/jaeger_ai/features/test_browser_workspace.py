@@ -78,11 +78,14 @@ async def test_real_gateway_browser_keeps_selected_page_and_profiles_isolated(tm
         html = await viewer.text()
         assert viewer.status == 200
         assert 'location.host' in html and '/v1/sessions/browser-one/browser/cast' in html
+        await act("browser-one", action="viewport", width=389, height=545)
         async with client.ws_connect(f"/v1/sessions/browser-one/browser/cast?pageId={first['active']}&format=binary", headers=headers) as ws:
             for _ in range(10):
                 message = await ws.receive(timeout=10)
                 if message.type == WSMsgType.BINARY:
                     assert len(message.data) > 100
+                    actual = (await act("browser-one", action="snapshot"))["viewport"]
+                    assert (actual["width"], actual["height"]) == (389, 545)
                     break
             else:
                 pytest.fail("No rendered browser frame")

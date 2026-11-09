@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { BrowserWorkspacePanel, type BrowserWorkspaceAction } from 'codex-ui-kit';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { BrowserWorkspaceChrome, type BrowserWorkspaceAction } from './BrowserWorkspaceChrome';
 import 'codex-ui-kit/styles.css';
 import type { JaegerSource } from '../api/source';
 import { sendJson } from '../unified/webui';
@@ -8,7 +8,7 @@ import './browser.css';
 type BrowserState = { active: string; pages: { id: string; title: string; url: string }[]; image_data?: string };
 
 /** A viewer of the Gateway's browser, never an iframe of the destination website. */
-export function BrowserWorkspace({ sessionId, source }: { sessionId: string; source: JaegerSource }) {
+export function BrowserWorkspace({ sessionId, source, workspaceTabs, onClosePanel }: { sessionId: string; source: JaegerSource; workspaceTabs?: ReactNode; onClosePanel?: () => void }) {
   const [state, setState] = useState<BrowserState>();
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -67,17 +67,18 @@ export function BrowserWorkspace({ sessionId, source }: { sessionId: string; sou
       }
     }
   };
-  if (!state) return <div className="jg-browser-start"><h2>Browser</h2><p>Open a browser that you and Jaeger can use together in this conversation.</p>{error && <p role="alert">{error}</p>}<button disabled={!sessionId || source.kind !== 'live' || busy} onClick={() => void act('status')}>{busy ? 'Starting browser…' : 'Open browser'}</button></div>;
+  const start = <div className="jg-browser-start"><h2>Browser</h2><p>Open a browser that you and Jaeger can use together in this conversation.</p>{error && <p role="alert">{error}</p>}<button disabled={!sessionId || source.kind !== 'live' || busy} onClick={() => void act('status')}>{busy ? 'Starting browser…' : 'Open browser'}</button></div>;
   return <div className="jg-browser" data-expanded={expanded}>
-    <BrowserWorkspacePanel tabs={state.pages.map(p => ({ id: p.id, title: p.title || 'New tab', active: p.id === state.active }))} disabled={busy}
-      onAction={action => void onAction(action)} onSelectTab={p => void act('select', { page_id: p.id })} onCloseTab={p => void act('close', { page_id: p.id })}>
-      <form className="jg-browser-address" onSubmit={event => { event.preventDefault(); const url = /^[a-z][a-z\d+.-]*:/i.test(address) ? address : `https://${address}`; void act('navigate', { url }); }}>
+    <BrowserWorkspaceChrome leadingTabs={workspaceTabs} onClosePanel={onClosePanel} tabs={(state?.pages ?? []).map(p => ({ id: p.id, title: p.title || 'New tab', active: p.id === state?.active }))} disabled={busy}
+      onAction={action => void onAction(action)} onSelectTab={p => void act('select', { page_id: p.id })} onCloseTab={p => void act('close', { page_id: p.id })}
+      addressBar={<form className="jg-browser-address" onSubmit={event => { event.preventDefault(); const url = /^[a-z][a-z\d+.-]*:/i.test(address) ? address : `https://${address}`; void act('navigate', { url }); }}>
         <input aria-label="Browser address" placeholder="Enter a website address" value={address} onChange={event => setAddress(event.target.value)} spellCheck={false} /><button disabled={busy || !address.trim()}>Go</button>
-      </form>
+      </form>}>
+      {!state && start}
       {error && <p className="jg-browser-notice" role="alert">{error}<button onClick={() => void act('status')}>Reconnect</button></p>}
       {details && <div className="jg-browser-notice"><button onClick={() => setDetails('')}>Close details</button><pre>{details}</pre></div>}
       {active && <iframe ref={frame} className="jg-browser-viewer" title="Shared browser page" src={`${base}/viewer?pageId=${encodeURIComponent(active.id)}`} />}
       <footer><span>{busy ? 'Working…' : 'Shared with Jaeger'}</span><button disabled={busy} onClick={async () => { const result = await act('stop'); if (result) setState(undefined); }}>Stop browser</button></footer>
-    </BrowserWorkspacePanel>
+    </BrowserWorkspaceChrome>
   </div>;
 }

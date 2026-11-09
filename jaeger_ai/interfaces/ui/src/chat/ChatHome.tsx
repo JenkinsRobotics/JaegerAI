@@ -3,6 +3,7 @@
  * composer below. Styled entirely from tokens so Glass, Arc, Linear and Dia each restyle it. */
 import type { ReactNode } from "react";
 import { navigate } from "../shell/router";
+import { JaegerAvatar } from "../avatar/JaegerAvatar";
 import { JaegerMark } from "../brand/JaegerMark";
 import { AppsIcon, SearchIcon, StarIcon, TasksIcon } from "../icons";
 
@@ -18,9 +19,10 @@ export const HOME_CHIPS: readonly HomeChip[] = [
   { id: "search", label: "Search or Jump", icon: <SearchIcon />, run: () => dispatchEvent(new Event("jaeger:palette")) },
 ];
 
-export function ChatHome({ chips = HOME_CHIPS }: { chips?: readonly HomeChip[] }) {
+export function ChatHome({ chips = HOME_CHIPS, portrait }: { chips?: readonly HomeChip[]; portrait?: string }) {
   return (
     <div className="jg-chat-home" data-testid="chat-home">
+      <div className="jg-chat-home__avatar"><JaegerAvatar portraitOverride={portrait} state="idle" /></div>
       <JaegerMark className="jg-chat-home__mark" />
       <p className="jg-chat-home__title">What should we work on?</p>
       <div className="jg-chat-home__chips" role="list" aria-label="Quick actions">

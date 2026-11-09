@@ -15,15 +15,23 @@ import { sendJson } from '../unified/webui';
 export type WorkView = 'browser' | 'tools' | 'changes' | 'files' | 'sources' | 'subagents' | 'outputs' | 'page' | 'automations' | 'sidechat' | 'terminal';
 const titles: Record<WorkView, string> = { browser: 'Browser', tools: 'New tab', changes: 'Changes', files: 'Files', sources: 'Sources', subagents: 'Subagents', outputs: 'Outputs', page: 'Pages', automations: 'Scheduled tasks', sidechat: 'Side chat', terminal: 'Terminal' };
 
-export function ConversationWorkPanel({ source, sessionId, agents, recent, open, view, onView, onClose, onConversation }: {
-  source: JaegerSource; sessionId: string; agents: Agent[]; recent: SessionRow[]; open: boolean; view: WorkView; onView(view: WorkView): void; onClose(): void; onConversation(id: string): void;
+export function ConversationWorkPanel({ source, sessionId, agents, recent, open, view, onView, onClose, onConversation, onResize }: {
+  source: JaegerSource; sessionId: string; agents: Agent[]; recent: SessionRow[]; open: boolean; view: WorkView; onView(view: WorkView): void; onClose(): void; onConversation(id: string): void; onResize?(width: number): void;
 }) {
   const [tabs, setTabs] = useState<WorkView[]>(['tools']);
   useEffect(() => { setTabs(rows => rows.includes(view) ? rows : [...rows, view]); }, [view]);
   const openTab = (next: WorkView) => { setTabs(rows => rows.includes(next) ? rows : [...rows, next]); onView(next); };
   const closeTab = (tab: WorkView) => { const next = tabs.filter(row => row !== tab); setTabs(next); if (view === tab) onView(next.at(-1) || 'tools'); };
   return <aside id="jaeger-work-panel" hidden={!open} className="jg-stable-demo__inspector jg-conversation-work" aria-label="Tools workspace">
-    <header className="jg-conversation-work__tabbar"><div role="tablist" aria-label="Workspace tabs">{tabs.map(tab => <span key={tab}><button id={`work-tab-${tab}`} type="button" role="tab" aria-controls={`work-view-${tab}`} aria-selected={view === tab} onClick={() => onView(tab)}>{titles[tab]}</button>{tab !== 'tools' && <button type="button" aria-label={`Close ${titles[tab]} tab`} onClick={() => closeTab(tab)}><X size={13} /></button>}</span>)}</div><button type="button" aria-label="New tool tab" onClick={() => openTab('tools')}><Plus size={18} /></button><button type="button" aria-label="Close work panel" onClick={onClose}><X size={18} /></button></header>
+    <div className="jg-conversation-work__resize" role="separator" aria-label="Resize tools workspace" aria-orientation="vertical" tabIndex={0}
+      onPointerDown={event => {
+        if (event.button !== 0 || !onResize) return;
+        event.preventDefault(); event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) onResize?.(event.currentTarget.parentElement!.getBoundingClientRect().right - event.clientX); }}
+      onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+      onKeyDown={event => { if (['ArrowLeft','ArrowRight'].includes(event.key)) { event.preventDefault(); onResize?.(event.currentTarget.parentElement!.clientWidth + (event.key === 'ArrowLeft' ? 24 : -24)); } }} />
+    <header hidden={view === "browser"} className="jg-conversation-work__tabbar"><div role="tablist" aria-label="Workspace tabs">{tabs.map(tab => <span key={tab}><button id={`work-tab-${tab}`} type="button" role="tab" aria-controls={`work-view-${tab}`} aria-selected={view === tab} onClick={() => onView(tab)}>{titles[tab]}</button>{tab !== 'tools' && <button type="button" aria-label={`Close ${titles[tab]} tab`} onClick={() => closeTab(tab)}><X size={13} /></button>}</span>)}</div><button type="button" aria-label="New tool tab" onClick={() => openTab('tools')}><Plus size={18} /></button><button type="button" aria-label="Close work panel" onClick={onClose}><X size={18} /></button></header>
     {tabs.map(tab => <section key={tab} id={`work-view-${tab}`} role="tabpanel" aria-labelledby={`work-tab-${tab}`} hidden={view !== tab} className={`jg-conversation-work__content jg-conversation-work__content--${tab}`}>
       {tab === 'tools' && <><h2>Tools</h2><div className="jg-conversation-work__launcher">{([
         ['browser', 'Browser', Globe], ['changes', 'Changes', FileText], ['terminal', 'Terminal', Terminal], ['files', 'Files', FolderOpen], ['sidechat', 'Side chat', MessageSquare], ['page', 'New page', FileText],
@@ -35,7 +43,11 @@ export function ConversationWorkPanel({ source, sessionId, agents, recent, open,
       {tab === 'page' && (source.library ? <LibraryPanel controls={source.library} initialNew /> : <p>Pages are unavailable on this Gateway.</p>)}
       {tab === 'automations' && (source.schedules ? <AutomationsPanel controls={source.schedules} initialNew /> : <p>Scheduled tasks are unavailable on this Gateway.</p>)}
       {tab === 'sidechat' && <SideChat source={source} agents={agents} parentSession={sessionId} />}
-      {tab === 'browser' && <BrowserWorkspace key={sessionId} sessionId={sessionId} source={source} />}
+      {tab === 'browser' && <BrowserWorkspace key={sessionId} sessionId={sessionId} source={source} onClosePanel={onClose}
+        workspaceTabs={tabs.filter(id => id !== 'browser').map(id => <div key={id} className="codex-ui-browser-workspace__tab-shell">
+          <button type="button" className="codex-ui-browser-workspace__tab" role="tab" aria-selected={false} onClick={() => onView(id)}>{id === "tools" ? "Tools" : titles[id]}</button>
+          {id !== 'tools' && <button type="button" className="codex-ui-browser-workspace__tab-close" aria-label={`Close ${titles[id]} tab`} onClick={() => closeTab(id)}><X size={13}/></button>}
+        </div>)} />}
       {tab === 'terminal' && <SessionTerminal key={sessionId} sessionId={sessionId} live={source.kind === 'live'} />}
     </section>)}
   </aside>;
