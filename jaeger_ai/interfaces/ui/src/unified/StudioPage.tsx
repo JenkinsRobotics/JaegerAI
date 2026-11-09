@@ -53,7 +53,7 @@ export function StudioPage({ source, agents, onNavigate, initialSection = "creat
       {err && <p className="jg-u-error" role="alert">Studio storage unavailable: {err}</p>}
       {tab === "create" && <Generate onMade={async () => { await load(); }} assets={assets} />}
       {tab === "library" && <Library assets={assets} reload={load} source={source} agents={agents} onNavigate={onNavigate} />}
-      {tab === "board" && <Board assets={assets ?? []} />}
+      {tab === "board" && <Board assets={assets ?? []} source={source} />}
     </div>
   );
 }
@@ -187,19 +187,58 @@ function AssetSheet({ asset, onClose, reload, source, agents, onNavigate }: { as
   );
 }
 
-export function Board({ assets }: { assets: Asset[] }) {
+// A successful HTTP response is not enough to authorize whole-board replacement.
+function boardItems(value: unknown): BoardItem[] {
+  const items = value && typeof value === "object" && "items" in value ? value.items : undefined;
+  if (!Array.isArray(items) || items.length > 300) throw new Error("Invalid board data; editing is disabled.");
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (!item || typeof item !== "object" || typeof item.id !== "string" || ids.has(item.id)
+      || (item.kind !== "note" && item.kind !== "asset")
+      || ![item.x, item.y, item.w, item.h].every((n) => typeof n === "number" && Number.isFinite(n) && n >= -5000 && n <= 20000)
+      || (item.text !== undefined && typeof item.text !== "string")
+      || (item.color !== undefined && typeof item.color !== "string")
+      || (item.asset_id !== undefined && typeof item.asset_id !== "string")) {
+      throw new Error("Invalid board data; editing is disabled.");
+    }
+    ids.add(item.id);
+  }
+  return items;
+}
+
+export function Board({ assets, source }: { assets: Asset[]; source?: JaegerSource }) {
   const toast = useToast();
-  const [items, setItems] = useState<BoardItem[] | null>(null);
+  const [loaded, setLoaded] = useState<{ source: JaegerSource | undefined; items: BoardItem[] }>();
+  const items = loaded?.source === source ? loaded?.items ?? null : null;
   const [picking, setPicking] = useState(false);
   const [err, setErr] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
   const dirty = useRef(false);
-  useEffect(() => { getJson<{ items: BoardItem[] }>("/v1/studio/board").then((b) => setItems(b.items), (e: Error) => setErr(e.message)); }, []);
+  const revision = useRef(0);
+  const lifetime = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    setLoaded(undefined); setErr(undefined); setPicking(false); dirty.current = false;
+    getJson<unknown>("/v1/studio/board", controller.signal).then((value) => {
+      if (!controller.signal.aborted) setLoaded({ source, items: boardItems(value) });
+    }).catch((e: Error) => { if (!controller.signal.aborted) setErr(e.message); });
+    return () => controller.abort();
+  }, [source, attempt]);
   useEffect(() => {
     if (!items || !dirty.current) return;
-    const t = setTimeout(() => { sendJson("PUT", "/v1/studio/board", { items }).then(() => { dirty.current = false; }, (e: Error) => toast(`Board not saved: ${e.message}`, "error")); }, 600);
+    const controller = lifetime.current;
+    const version = revision.current;
+    const t = setTimeout(() => { sendJson("PUT", "/v1/studio/board", { items }).then(() => {
+      if (!controller?.signal.aborted && version === revision.current) dirty.current = false;
+    }, (e: Error) => { if (!controller?.signal.aborted) toast(`Board not saved: ${e.message}`, "error"); }); }, 600);
     return () => clearTimeout(t);
   }, [items, toast]);
-  const change = (fn: (xs: BoardItem[]) => BoardItem[]) => { dirty.current = true; setItems((xs) => fn(xs ?? [])); };
+  const change = (fn: (xs: BoardItem[]) => BoardItem[]) => {
+    if (!items) return;
+    dirty.current = true; revision.current++;
+    setLoaded((current) => current && current.source === source ? { source, items: fn(current.items) } : current);
+  };
   const add = (it: Omit<BoardItem, "id" | "x" | "y">) => change((xs) => [...xs, { ...it, id: crypto.randomUUID().slice(0, 12), x: 24 + (xs.length % 6) * 28, y: 24 + (xs.length % 6) * 28 }]);
   const drag = (id: string, mode: "move" | "size") => (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("textarea,button")) return;
@@ -223,12 +262,12 @@ export function Board({ assets }: { assets: Asset[] }) {
   return (
     <>
       <div className="jg-ui-toolbar jg-mb-4">
-        <button type="button" className="jg-u-btn" onClick={() => add({ kind: "note", text: "", color: "yellow", w: 200, h: 140 })}>Add note</button>
-        <button type="button" className="jg-u-btn" disabled={!assets.length} onClick={() => setPicking(true)}>Add asset</button>
-        <span className="jg-u-note">Drag to move, drag the corner to resize, arrow keys nudge. Saved automatically.</span>
+        <button type="button" className="jg-u-btn" disabled={!items} onClick={() => add({ kind: "note", text: "", color: "yellow", w: 200, h: 140 })}>Add note</button>
+        <button type="button" className="jg-u-btn" disabled={!items || !assets.length} onClick={() => setPicking(true)}>Add asset</button>
+        <span className="jg-u-note">{items ? "Drag to move, drag the corner to resize, arrow keys nudge. Changes save automatically." : "Editing is disabled until the board loads."}</span>
       </div>
-      {err && <p className="jg-u-error" role="alert">{err}</p>}
-      {!items ? <SkeletonRows /> : (
+      {err && <div role="alert"><p className="jg-u-error">Board unavailable: {err}</p><button type="button" className="jg-u-btn" onClick={() => setAttempt((n) => n + 1)}>Retry loading board</button></div>}
+      {!items ? !err && <><p role="status">Loading board…</p><SkeletonRows /></> : (
         <div className="jg-board-canvas" aria-label="Board">
           {!items.length && <Empty title="Empty board">Add notes and assets to arrange ideas.</Empty>}
           {items.map((i) => {

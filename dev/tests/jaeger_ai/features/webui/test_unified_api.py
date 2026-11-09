@@ -164,3 +164,56 @@ def test_consolidated_tabs_and_retired_paths_are_spa_routes():
               "/characters", "/tasks/gallery", "/compare", "/workspace", "/integrations"):
         assert is_page_route(p), p
     assert not is_page_route("/work/app.js")
+
+
+@pytest.mark.parametrize("raw", ["not json", "null", "[]", '{"items": null}'])
+def test_board_corrupt_read_fails_closed(api, tmp_path, raw):
+    path = tmp_path / "studio" / "board.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(raw)
+    with pytest.raises(api.ApiError) as exc:
+        api.read_board()
+    assert exc.value.status == 503
+    assert path.read_text() == raw
+
+
+def test_board_missing_empty_and_persisted_reopen(api):
+    assert api.read_board() == {"items": []}
+    saved = api.write_board({"items": [{"id": "existing", "kind": "note", "text": "Keep me", "x": 1, "y": 2, "w": 200, "h": 140}]})
+    assert api.read_board() == saved
+
+
+def test_board_unreadable_fails_closed(api, monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise PermissionError("unreadable")
+    monkeypatch.setattr(pathlib.Path, "read_text", unavailable)
+    with pytest.raises(api.ApiError) as exc:
+        api.read_board()
+    assert exc.value.status == 503
+
+
+@pytest.mark.parametrize("raw", ['{"items": [null]}', '{"items": [{"id": "n", "kind": "note", "x": "bad"}]}', 'broken'])
+def test_board_read_failure_does_not_partially_delete_asset(api, tmp_path, raw):
+    asset = api.add_asset(PNG, "image/png", "keep", "imported")
+    board = tmp_path / "studio/board.json"
+    board.write_text(raw)
+    with pytest.raises(api.ApiError) as exc:
+        api.delete_asset(asset["id"])
+    assert exc.value.status == 503
+    assert api.get_asset(asset["id"]) == asset
+    assert (tmp_path / "studio/assets" / asset["file"]).read_bytes() == PNG
+    assert board.read_text() == raw
+
+
+def test_board_corruption_route_is_unavailable_not_success(api, tmp_path):
+    from urllib.parse import urlparse
+    path = tmp_path / "studio/board.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("corrupted")
+    responses = []
+    def respond(handler, body, status=200):
+        responses.append((status, body))
+    assert api.route(object(), urlparse("/v1/studio/board"), "GET", lambda _: {}, respond)
+    assert responses[0][0] == 503
+    assert "error" in responses[0][1]
+    assert path.read_text() == "corrupted"

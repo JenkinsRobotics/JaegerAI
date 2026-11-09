@@ -139,14 +139,16 @@ def update_asset(aid: str, body: dict) -> dict:
 
 def delete_asset(aid: str) -> dict:
     a = get_asset(aid)
+    # Preflight the board before any asset mutation: a read failure must leave
+    # both the index and image intact, not report failure after deleting them.
+    board = read_board()
+    board["items"] = [i for i in board["items"] if i.get("asset_id") != aid]
     with _lock:
         _save_assets([x for x in list_assets() if x["id"] != aid])
     try:
         (_studio() / "assets" / a["file"]).unlink()
     except OSError:
         pass
-    board = read_board()
-    board["items"] = [i for i in board["items"] if i.get("asset_id") != aid]
     write_board(board)
     return {"deleted": aid}
 
@@ -154,11 +156,22 @@ def delete_asset(aid: str) -> dict:
 # ── Studio: board ────────────────────────────────────────────────────
 
 def read_board() -> dict:
-    b = _read_json(_studio() / "board.json", {"items": []})
-    return b if isinstance(b, dict) and isinstance(b.get("items"), list) else {"items": []}
+    # Only a genuinely missing board is empty. A failed read must not authorize
+    # the client to overwrite existing work with a new empty snapshot.
+    try:
+        b = json.loads((_studio() / "board.json").read_text("utf-8"))
+    except FileNotFoundError:
+        return {"items": []}
+    except (OSError, ValueError) as exc:
+        raise ApiError(503, "Board storage unavailable; existing board was not changed") from exc
+    try:
+        _validated_board_items(b)
+    except ApiError as exc:
+        raise ApiError(503, "Invalid board data; existing board was not changed") from exc
+    return b
 
 
-def write_board(body) -> dict:
+def _validated_board_items(body) -> list[dict]:
     if not isinstance(body, dict) or not isinstance(body.get("items"), list) or len(body["items"]) > 300:
         raise ApiError(400, "board must be {items: [...]} with at most 300 items")
     items = []
@@ -175,7 +188,11 @@ def write_board(body) -> dict:
             item["text"] = str(i.get("text", ""))[:4000]
             item["color"] = str(i.get("color", "yellow"))[:16]
         items.append(item)
-    out = {"items": items, "updated_at": time.time()}
+    return items
+
+
+def write_board(body) -> dict:
+    out = {"items": _validated_board_items(body), "updated_at": time.time()}
     _write_json(_studio() / "board.json", out)
     return out
 
