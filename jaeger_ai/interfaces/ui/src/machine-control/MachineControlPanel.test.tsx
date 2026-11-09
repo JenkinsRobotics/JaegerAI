@@ -49,7 +49,7 @@ it('renders Machine Control panel with host and OS permission telemetry', async 
 
   try {
     await act(async () => root.render(<MachineControlPanel source={source} />))
-    expect(el.textContent).toContain('This Mac: hardware, permissions')
+    expect(el.textContent).toContain('Gateway host observations, permissions')
     expect(el.textContent).toContain('host-unit-01')
     expect(el.textContent).toContain('1337')
     expect(el.textContent).toContain('Native Shell PID')
