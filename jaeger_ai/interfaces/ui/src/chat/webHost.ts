@@ -30,6 +30,7 @@ function holdApprovedTools(source: PersistedPart[], parts: ChatPart[]) {
 
 function persistedToPart(p: PersistedPart, agentName: (id: string) => string): ChatPart | null {
   switch (p.type) {
+    case "steer": return {kind:"userGuidance",text:p.text,steeringId:p.steering_id};
     case "plan":
     case "progress":
     case "checkpoint":
@@ -214,7 +215,7 @@ export class WebHost implements ChatHost {
       try {
         const prior = readIntent(request.sessionId);
         if (prior) throw new Error(`Request ${prior.requestId} needs reconciliation before another turn`);
-        intent = { version: 1, sessionId: request.sessionId, requestId, text: request.message, draftBody: request.draftBody, quoteKey: request.quoteKey, attachmentIds: [], draftFileIds: request.draftFileIds ?? [], phase: "preparing" };
+        intent = { version: 1, ...(request.fastLane ? {fastLane:true} : {}), sessionId: request.sessionId, requestId, text: request.message, draftBody: request.draftBody, quoteKey: request.quoteKey, attachmentIds: [], draftFileIds: request.draftFileIds ?? [], phase: "preparing" };
         saveIntent(intent);
       } catch (error) {
         onPart({ kind: "error", message: `Not sent: ${message(error)}` });
@@ -234,7 +235,7 @@ export class WebHost implements ChatHost {
       }
       let receipt;
       try {
-        receipt = await this.source.send(request.sessionId, request.message, requestId, attachmentIds);
+        receipt = request.fastLane ? await this.source.send(request.sessionId, request.message, requestId, attachmentIds, {fast_lane:true}) : await this.source.send(request.sessionId, request.message, requestId, attachmentIds);
       } catch (error) {
         // A lost HTTP reply says nothing about admission. Query the same ID,
         // never call send again. A 404 can race admission and remains uncertain.

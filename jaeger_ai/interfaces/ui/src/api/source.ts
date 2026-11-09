@@ -102,7 +102,8 @@ export interface QueuedRequest extends RequestSnapshot { input_text: string; que
 export interface SessionQueue {
   list(sessionId: string): Promise<{ session_id: string; items: QueuedRequest[] }>;
   enqueue(sessionId: string, text: string, requestId: string): Promise<{ session_id: string; request_id: string; status: string }>;
-  steer?(sessionId: string, requestId: string, text: string): Promise<{ session_id: string; request_id: string; steered: boolean }>;
+  steer?(sessionId: string, requestId: string, text: string, steeringId?: string): Promise<{ session_id: string; request_id: string; steered: boolean; steering_id?: string }>;
+  steeringStatus?(sessionId: string, requestId: string, steeringId: string): Promise<{ session_id: string; request_id: string; steered: boolean; steering_id: string; text: string }>;
   update(sessionId: string, requestId: string, body: { text?: string; status?: "queued" | "paused"; expected_updated_at: number }): Promise<unknown>;
   reorder(sessionId: string, order: string[]): Promise<unknown>;
   status(sessionId: string, requestId: string): Promise<RequestSnapshot>;
@@ -336,7 +337,7 @@ export interface JaegerSource {
   handoffExchange(handoffId: string): Promise<HandoffExchange>;
   /** POST /v1/sessions/{id}/turns. `start_event_id` is the durable cursor of
    * this turn's turn.start (stream from start_event_id - 1). */
-  send(sessionId: string, text: string, requestId: string, attachmentIds?: string[]): Promise<TurnReceipt>;
+  send(sessionId: string, text: string, requestId: string, attachmentIds?: string[], options?: {fast_lane?:boolean}): Promise<TurnReceipt>;
   /** POST /v1/sessions/{id}/attachments: register a workspace file (the gateway sizes and hashes it). */
   addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }): Promise<{ attachment_id: string }>;
   /** PROVISIONAL (bytes upload, gateway-side staging): the same endpoint with the file's bytes instead

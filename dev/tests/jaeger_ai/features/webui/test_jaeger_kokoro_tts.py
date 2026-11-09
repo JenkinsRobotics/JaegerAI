@@ -61,3 +61,23 @@ def test_startup_warm_can_be_turned_off(agents, monkeypatch):
 
 def test_webui_main_starts_the_warm_up():
     assert "warm_kokoro_in_background()" in (WEBUI / "server.py").read_text()
+
+
+def test_browser_voice_routes_respond_once_and_use_canonical_decoder(agents, monkeypatch):
+    import json
+    from urllib.parse import urlparse
+    from unittest.mock import Mock
+    from jaeger_ai.features.voice import web_speech
+    helpers=types.ModuleType('api.helpers')
+    helpers.j=Mock()
+    helpers.read_body=Mock(side_effect=AssertionError('the parsed body must be reused'))
+    monkeypatch.setitem(sys.modules,'api.helpers',helpers)
+    monkeypatch.setattr(web_speech,'capability',lambda:{'transcription':True,'speech':True})
+    handler=types.SimpleNamespace(headers={},_json_body_bytes=json.dumps({'audio_base64':'YXVkaW8=','mime':'audio/wav'}).encode())
+    assert agents.route(handler,urlparse('/api/jaeger/voice/capability'),'GET') is True
+    assert helpers.j.call_args.args[1]=={'transcription':True,'speech':True}
+    decode=Mock(return_value='Hello from the microphone')
+    monkeypatch.setattr(web_speech,'transcribe_recording',decode)
+    assert agents.route(handler,urlparse('/api/jaeger/transcribe'),'POST') is True
+    decode.assert_called_once_with('YXVkaW8=','audio/wav')
+    assert helpers.j.call_args.args[1]=={'transcript':'Hello from the microphone'}

@@ -51,6 +51,8 @@ class TestGatewayLiveSteering:
 
         assert response.status == 200
         payload = json.loads(response.text)
+        steering_id = payload.pop('steering_id')
+        assert isinstance(steering_id, str) and steering_id
         assert payload == {
             "session_id": "session",
             "request_id": "steer-1",
@@ -62,6 +64,7 @@ class TestGatewayLiveSteering:
         assert len(steering) == 1
         assert steering[0].data == {
             "request_id": "steer-1", "text": "use metric units", "queued": True,
+            "steering_id": steering_id,
         }
 
     def test_text_only_or_unbound_request_returns_honest_409(self, tmp_path):
@@ -107,3 +110,35 @@ class TestGatewayLiveSteering:
             session_id="other", request_id="steer-1", body={"text": "wrong session"},
         )))
         assert response.status == 404
+
+    def test_retry_reads_original_receipt_without_injecting_twice(self, tmp_path):
+        app = self._app(tmp_path)
+        agent = _FakeAgent()
+        app._active_agents['steer-1'] = agent
+        request = _Request(session_id='session', request_id='steer-1', body={'text':'same words','steering_id':'guidance-1'})
+        first = asyncio.run(app.handle_steer_request(request))
+        second = asyncio.run(app.handle_steer_request(request))
+        assert first.status == second.status == 200
+        assert agent.seen == ['same words']
+        assert json.loads(second.text)['steering_id'] == 'guidance-1'
+        conflict = asyncio.run(app.handle_steer_request(_Request(session_id='session',request_id='steer-1',body={'text':'different','steering_id':'guidance-1'})))
+        assert conflict.status == 409
+        assert agent.seen == ['same words']
+
+    def test_steering_survives_completion_in_ordered_response_parts(self, tmp_path):
+        app = self._app(tmp_path)
+        app._active_agents['steer-1'] = _FakeAgent()
+        app.event_bus.publish('session','turn.delta',{'request_id':'steer-1','delta':'Before','content_type':'commentary'})
+        asyncio.run(app.handle_steer_request(_Request(session_id='session',request_id='steer-1',body={'text':'Use blue','steering_id':'guidance-2'})))
+        app.store.complete_request('steer-1',status='completed',result={'output':'After'},assistant_text='After')
+        messages = app.store.list_messages('session')['messages']
+        parts = next(message['parts'] for message in messages if message['role']=='assistant')
+        assert [part['type'] for part in parts] == ['text','steer','text']
+        assert parts[1] == {'type':'steer','text':'Use blue','steering_id':'guidance-2'}
+        app.store = GatewaySessionStore(tmp_path / 'gateway.sqlite3')
+        request = _Request(session_id='session',request_id='steer-1',body={})
+        request.method = 'GET'
+        request.query = {'steering_id':'guidance-2'}
+        response = asyncio.run(app.handle_steer_request(request))
+        assert response.status == 200
+        assert json.loads(response.text)['text'] == 'Use blue'

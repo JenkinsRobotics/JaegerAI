@@ -83,6 +83,7 @@ export interface SessionRow {
 
 /** One persisted response part (core/gateway/turn_parts.py). */
 export type PersistedPart =
+  | {type:"steer";text:string;steering_id:string}
   | {type:"progress"|"checkpoint"|"sources"|"search_count"|"follow_ups";[key:string]:unknown}
   | {type:"model_identity";actual_model:string|null;scope:string}
   | { type: "model_context"; outline: unknown }

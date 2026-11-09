@@ -12,7 +12,7 @@ it('keeps commentary and separate tool groups in chronological order after repla
  for(const state of ['pending','complete'] as const){
   const rows=segments(parts,state);
   expect(rows.map(r=>'bubble'in r?'text':'activity'in r?'tools':'card'in r?'card':'marker')).toEqual(['text','tools','text','tools','card','text']);
-  expect(rows.flatMap(r=>'bubble'in r?r.bubble:'activity'in r?r.activity:'card'in r?[r.card]:'diagnostic'in r?r.diagnostic:[r.marker])).toEqual(parts);
+  expect(rows.flatMap(r=>'bubble'in r?r.bubble:'activity'in r?r.activity:'card'in r?[r.card]:'diagnostic'in r?r.diagnostic:['guidance' in r?r.guidance:r.marker])).toEqual(parts);
  }
 });
 it('reconciles live provisional text into commentary and one explicit final result',()=>{
@@ -71,4 +71,13 @@ it('agent chip uses real handoff events and does not claim replies are finished 
  expect(screen.getByText('1 agent')).toBeTruthy();
  expect(screen.getByText('Reviewer')).toBeTruthy();
  expect(screen.queryByText('Finished')).toBeNull();
+});
+it('renders repeated steering messages in order and deduplicates by steering identity',()=>{
+ let parts:ChatPart[]=[{kind:'markdownContent',text:'Working',role:'commentary'}];
+ for(const steeringId of ['one','one','two']){
+  const mapped=mapEvent({event:'turn.steer',payload:{text:'Repeat',steering_id:steeringId}})!;
+  parts=mapped.parts.reduce(applyPart,parts);
+ }
+ parts=applyPart(parts,{kind:'markdownContent',text:'Done',role:'final'});
+ const rows=segments(parts,'complete');expect(rows.map(row=>'guidance' in row?row.guidance.steeringId:'assistant')).toEqual(['assistant','one','two','assistant']);
 });

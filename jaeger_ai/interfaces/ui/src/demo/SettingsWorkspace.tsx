@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Settings, FolderInput, User, Sun, Mic, Terminal, Sparkles, Bot, Command, TrendingUp, BarChart, Shield, Compass, Clock, Image, Puzzle, Globe, Workflow, Link, Github, Code, FolderOpen, MessageSquare, ChevronLeft, Search } from "../components/Icons";
+import { AudioSettingsPanel } from "../settings/AudioSettingsPanel";
 import "./settingsWorkspace.css";
 
 const groups = [
@@ -9,7 +10,7 @@ const groups = [
   { title: "Archived", items: [["Archived chats", MessageSquare]] },
 ] as const;
 
-/** Draft settings navigation: no simulated controls or changes to account/runtime settings. */
+/** Settings navigation. Implemented sections mount their canonical controls. */
 export function SettingsWorkspace({ onClose }: { onClose: () => void }) {
   const [selected, setSelected] = useState<string>("General");
   const [query, setQuery] = useState("");
@@ -34,6 +35,6 @@ export function SettingsWorkspace({ onClose }: { onClose: () => void }) {
       </nav>
       <a href="/settings/appearance"><FolderOpen size={18} />Existing Jaeger settings</a>
     </aside>
-    <main aria-labelledby="jaeger-settings-title"><header><h1 id="jaeger-settings-title">{selected}</h1><span>Draft</span></header><p>Settings for this section will be added here.</p></main>
+    <main aria-labelledby="jaeger-settings-title"><header><h1 id="jaeger-settings-title">{selected}</h1>{selected!=="Voice"&&<span>Draft</span>}</header>{selected==="Voice"?<AudioSettingsPanel/>:<p>Settings for this section will be added here.</p>}</main>
   </div>;
 }
