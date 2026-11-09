@@ -1,4 +1,4 @@
-# Destination coverage — selected qualification complete
+# Destination coverage for the save order increment
 
 PASS applies only to an exact named gate and source, never a tab from code presence or a worker's success message. PARTIAL means incomplete acceptance. FAILED identifies an executed invariant failure. BLOCKED identifies a boundary that could not execute. PENDING is not a pass. Counts across suites overlap and must not be summed as unique tests.
 
@@ -7,7 +7,7 @@ PASS applies only to an exact named gate and source, never a tab from code prese
 | Chat | PARTIAL | Historical durable admission, identity, ownership, queue, cancellation, receipts and recovery controls; pinned halt/steering/approval integration final selected gates passed. No live model or native bridge acceptance. |
 | Imagine / Studio Generate | PARTIAL | Provider availability and synthetic API/component controls only; configured generation/output quality unverified. |
 | Imagine / Studio Library | PARTIAL | Synthetic asset lifecycle and MIME/path checks; real content integrity, fresh-process reopen, provider and external-send acceptance incomplete. |
-| Imagine / Studio Idea board | PARTIAL; historical failures repaired in bounded scope | Preserved d87 probe:2 failed/2 passed; b129 unchanged. Accepted standalone 1ffea34 gates initial loading/failure mutations and fails closed on unreadable board. Included in reviewed 731; fresh integrated full UI/build and selected backend gates passed. Unchanged old evaluator 18 pass/1 expected characterization failure, exit 1, remains mixed. Multiple writers/save order/navigation drafts/asset atomicity unresolved. |
+| Imagine / Studio Idea board | PARTIAL; historical failures repaired in bounded scope | Preserved d87 probe:2 failed/2 passed; b129 unchanged. Accepted standalone 1ffea34 gates initial loading/failure mutations and fails closed on unreadable board. Included in reviewed 731; fresh integrated full UI/build and selected backend gates passed. Unchanged old evaluator 18 pass/1 expected characterization failure, exit 1, remains mixed. New f544 mounted-owner serialization/failure latch independently passed 29 controls; automatic writes pause after rejection/unknown outcome. Multiple owners/clients, safe retry, navigation drafts and asset atomicity remain unresolved. This does not establish backend concurrent-write ordering or disk durability. |
 | Library / Media / Documents / Outputs | PARTIAL | Source-backed collections and artifact read controls; imported artifact integrity and real end-to-end content acceptance incomplete. Studio limitations apply to reused Media surface. |
 | Automations | PARTIAL | Schedule/revision and durable controls; actual scheduled external effects unverified. |
 | Feed | PARTIAL | Notification/read-state and activity transport controls, not proof of autonomous reasoning. |
@@ -31,3 +31,5 @@ The latest b129 shared UI build and bounded1061-test/217-file suite passed, as d
 Shared rendered browser/phone acceptance: BLOCKED or not run, not component PASS. Native Mac runtime and production rollout: not performed. Evolution: deferred.
 
 For exact fresh 731 and inherited b129 evidence, retained failures and current boundaries, see PINNED_STUDIO_QUALIFICATION.md. Distribution validation passed; no tab is fully accepted.
+
+For f544, fresh production UI build and full UI suite (1079 tests in 218 files) passed. Repository verify (142 Python checks and 294 IDE tests), unchanged 29-case Studio controls, root package rebuild and ten-archive checks passed, exit 0. Independent exact ZIP review remains pending. Prior 731 and b129 gates are unchanged-domain reuse, not fresh f544 execution. See SAVE_ORDER_QUALIFICATION.md.
