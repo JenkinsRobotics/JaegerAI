@@ -7,7 +7,7 @@ Every destination remains PARTIAL. All listed destination acceptance remains inc
 | Chat | PARTIAL |  Historical durable admission, identity, ownership, queue, cancellation, receipts and recovery controls; pinned halt/steering/approval integration historical selected gates passed. No live model or native bridge acceptance. |
 | Imagine / Studio Generate | PARTIAL |  Provider availability and synthetic API/component controls only; configured generation/output quality unverified. |
 | Imagine / Studio Library | PARTIAL |  Synthetic asset lifecycle and MIME/path checks; real content integrity, fresh-process reopen, provider and external-send acceptance incomplete. |
-| Imagine / Studio Idea board | PARTIAL | Independent exact-freeze normal producer74/oracle3/mountedUI27 and typecheck passed; direct producer/disk subprocess and cooperative process controls are bounded evidence. New required-revision CAS and persistent conflict pause address cooperative stale writes. Browser/native transport, cross-file asset crash atomicity, merge, safe retry and durable navigation drafts remain unverified. |
+| Imagine / Studio Idea board | PARTIAL | Independent exact-freeze normal producer 74 / oracle 3 / mounted UI 27 and typecheck passed; direct producer/disk subprocess and cooperative process controls are bounded evidence. New required-revision CAS and persistent conflict pause address cooperative stale writes. Browser/native transport, cross-file asset crash atomicity, merge, safe retry and durable navigation drafts remain unverified. |
 | Library / Media / Documents / Outputs | PARTIAL |  Source-backed collections and artifact read controls; imported artifact integrity and real end-to-end content acceptance incomplete. Studio limitations apply to reused Media surface. |
 | Automations | PARTIAL |  Schedule/revision and durable controls; actual scheduled external effects unverified. |
 | Feed | PARTIAL |  Notification/read-state and activity transport controls, not proof of autonomous reasoning. |
@@ -30,7 +30,7 @@ Rendered browser/phone, native bridge/audio, real providers and deployed runtime
 
 ## Fresh exact-source gate map
 
-All references below resolve under test-evidence/qualified; qualification.json and COMMANDS.md give selectors, counts and exits. These are fresh2925bcc runs, not historical transfers.
+All references below resolve under test-evidence/qualified; qualification.json and COMMANDS.md give selectors, counts and exits. These are fresh 2925bcc runs, not historical transfers.
 
 - Chat: final-http/process/steering-process/durable/background/lifecycle/terminal/provider/approval/order1/order2/verify and full UI. Native/provider acceptance remains incomplete.
 - Studio Generate/Library/Idea board and reused Media: controls-python/oracle/ui, final-ui/build, final-production and final-research. Provider generation and real browser transport are not proven.
