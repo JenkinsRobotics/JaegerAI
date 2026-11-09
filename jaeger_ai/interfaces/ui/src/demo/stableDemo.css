@@ -163,7 +163,6 @@
 @media (max-width: 650px) { .jg-stable-demo__appearance { margin-left: auto; } }
 
 /* Independent columns keep the conversation mounted when either panel closes. */
-.jg-stable-demo[data-sidebar=false] { grid-template-columns: minmax(0,1fr); }
 .jg-stable-demo__tabs button { display: flex; align-items: center; justify-content: center; gap: 6px; }
 /* Match the IDE extension's message and code typography (media/view.css). */
 .jg-stable-demo .jg-chat__band { display: none; }

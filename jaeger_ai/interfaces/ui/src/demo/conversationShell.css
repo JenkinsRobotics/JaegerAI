@@ -61,7 +61,7 @@ html[data-jaeger-host=macos] .jg-stable-demo__header { padding-left:max(12px,var
  .jg-stable-demo[data-inspector=true] .jg-stable-demo__context { display:none; }
 }
 @media(max-width:820px), (max-height:520px) and (max-width:1000px) {
- .jg-stable-demo, .jg-stable-demo[data-inspector=true] { grid-template-columns:minmax(0,1fr); padding-bottom:env(safe-area-inset-bottom,0px); }
+ .jg-stable-demo, .jg-stable-demo[data-inspector=true], .jg-stable-demo[data-sidebar=false] { grid-template-columns:minmax(0,1fr); grid-template-rows:52px minmax(0,1fr); padding-bottom:env(safe-area-inset-bottom,0px); }
  .jg-stable-demo[data-keyboard=true] { padding-bottom:0; }
  .jg-stable-demo__main { grid-column:1; }
  .jg-stable-demo__sidebar { position:fixed; z-index:80; top:52px; bottom:0; left:0; width:min(340px,calc(100vw - 40px)); }
