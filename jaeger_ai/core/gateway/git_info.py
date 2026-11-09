@@ -14,6 +14,12 @@ def git_commit(path: str) -> str:
     repository" must not reach gateway.log on every health poll, so stderr is
     discarded and the answer is cached per path.
     """
+    for parent in (Path(path), *Path(path).parents):
+        revision = parent / "build-revision"
+        if revision.is_file():
+            value = revision.read_text().strip()
+            if len(value) == 40 and all(c in "0123456789abcdef" for c in value):
+                return value
     try:
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"],

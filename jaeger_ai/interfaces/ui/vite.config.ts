@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
   if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(target)) {
     throw new Error(`JAEGER_WEBUI_URL must be a loopback http origin, got ${target}`);
   }
-  const proxy = { "/v1": { target, changeOrigin: false }, "/api": { target, changeOrigin: false } };
+  const proxy = { "/v1": { target, changeOrigin: false, ws: true }, "/api": { target, changeOrigin: false } };
   return {
     base: "/",
     plugins: [react()],

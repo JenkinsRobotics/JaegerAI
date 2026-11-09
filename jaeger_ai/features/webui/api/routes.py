@@ -11661,6 +11661,9 @@ def _proxy_jaeger_gateway(handler, method: str, path: str, body: bytes | None = 
 
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
+    from api.jaeger_browser import route as browser_route
+    if browser_route(handler, parsed, "GET"):
+        return True
     from api.character_scenes import route as character_scene_route
     if character_scene_route(handler, parsed):
         return True
@@ -13746,6 +13749,9 @@ def _resolve_new_session_workspace(body, visible_prev_session_id):
 
 def handle_post(handler, parsed) -> bool:
     """Handle all POST routes. Returns True if handled, False for 404."""
+    from api.jaeger_browser import route as browser_route
+    if browser_route(handler, parsed, "POST"):
+        return True
     if parsed.path.startswith("/api/crons/"):
         from api.native_panel_context import check_profile
         if not check_profile(handler):

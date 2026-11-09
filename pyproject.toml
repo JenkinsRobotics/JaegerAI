@@ -32,6 +32,7 @@
 
 [tool.uv.workspace]
 members = ["packages/*"]
+exclude = ["packages/jaeger-browser"]
 
 [tool.uv.sources]
 jaeger-agent = { workspace = true }

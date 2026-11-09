@@ -11,6 +11,10 @@ final class ReuseTests: XCTestCase {
         XCTAssertNil(LauncherResolver.resolve(env: ["JAEGER_VENV": "/v"], plistLauncher: "/missing/jaeger", bundlePath: bundle, home: home, isExecutable: { $0 == "/v/bin/jaeger" }))
     }
 
+    func testBundledLauncherMovesWithTheApplication() {
+        XCTAssertEqual(LauncherResolver.candidates(env: [:], plistLauncher: "@bundle/Contents/Resources/runtime/bin/jaeger", bundlePath: "/Applications/JaegerAI.app", home: home), ["/Applications/JaegerAI.app/Contents/Resources/runtime/bin/jaeger"])
+    }
+
     func testLauncherRequiresCanonicalExecutable() {
         XCTAssertNil(LauncherResolver.resolve(env: [:], plistLauncher: nil, bundlePath: bundle, home: home, isExecutable: { _ in false }))
         XCTAssertNil(LauncherResolver.resolve(env: [:], plistLauncher: nil, bundlePath: bundle, home: home, isExecutable: { $0 == "/Users/t/.jaeger/venv/bin/jaeger" }))

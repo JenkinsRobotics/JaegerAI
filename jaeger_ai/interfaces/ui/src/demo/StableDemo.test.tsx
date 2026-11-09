@@ -278,23 +278,7 @@ it("keeps disclosures usable if browser storage refuses writes", async () => {
  } finally {storage.mockRestore();}
 });
 
-it("opens searchable draft settings and returns to the same chat", async () => {
- localStorage.setItem(DEMO_SESSION_KEY, 'saved');
- const source = new MockSource();
- vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
- await mount(source);
- const chat = document.querySelector('[data-chat-session]');
- await flush(() => { const settings = [...document.querySelectorAll('button')].find(button => button.textContent === 'Settings')!; settings.focus(); settings.click(); });
- expect(document.querySelector('#jaeger-settings-title')?.textContent).toBe('General');
- const nav = document.querySelector('[aria-label="Settings categories"]')!;
- expect(nav.querySelectorAll('button')).toHaveLength(23);
- await flush(() => [...nav.querySelectorAll('button')].find(button => button.textContent === 'Worktrees')!.click());
- expect(document.querySelector('#jaeger-settings-title')?.textContent).toBe('Worktrees');
- await flush(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})));
- expect(document.querySelector('[aria-label="Settings navigation"]')).toBeNull();
- expect(document.querySelector('[data-chat-session]')).toBe(chat);
- expect(document.activeElement?.textContent).toBe('Settings');
-});
+
 
 it("organizes sessions into pinned, projects, and recents and permanently deletes a selected session", async () => {
  const source = new MockSource();
@@ -383,4 +367,16 @@ it('forks saved history through the existing Gateway route only on explicit sele
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({title:'Original (fork)'});
   expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','forked');
  } finally {vi.unstubAllGlobals();}
+});
+
+it('keeps the same chat mounted and the toolbar available while settings change the center page', async () => {
+ await mount();
+ const chat = document.querySelector('[data-chat-session]');
+ const toolbar = document.querySelector('[aria-label="Conversation toolbar"]');
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Settings"]')!.click());
+ expect(location.pathname).toBe('/settings/appearance');
+ expect(document.querySelector('[aria-label="Conversation toolbar"]')).toBe(toolbar);
+ expect(document.querySelector('[data-chat-session]')).toBe(chat);
+ expect(document.querySelector('[data-workspace-embedded]')).toBeTruthy();
+ expect(document.querySelector('.jg-stable-demo')).not.toHaveAttribute('hidden');
 });
