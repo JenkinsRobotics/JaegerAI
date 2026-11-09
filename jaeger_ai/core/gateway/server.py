@@ -6829,7 +6829,7 @@ class JaegerGatewayApp:
         row = self.store.get_request(request_id)
         if row is None or row.get("session_id") != session_id:
             return web.json_response({"error": "Request not found"}, status=404)
-        admission = self.store.steering_admission(session_id, request_id, steering_id)
+        admission = self.store.steering_admission(session_id, request_id, steering_id, text=text)
         if admission and not admission['request_matches']:
             return web.json_response({'error': 'Steering identity belongs to a different request admission'}, status=409)
         if steering_id:
@@ -6839,7 +6839,7 @@ class JaegerGatewayApp:
                     return web.json_response({'error': 'Steering identity already used for different text'}, status=409)
                 return web.json_response({**original, 'session_id': session_id, 'steered': True})
         if admission:
-            if not reading and admission['text'] != text:
+            if not reading and not admission['text_matches']:
                 return web.json_response({'error': 'Steering identity already used for different text'}, status=409)
             return web.json_response({'error': 'Steering delivery is unconfirmed; do not replay' if admission['state'] == 'delivery_unknown' else 'Agent did not accept steering',
                                       'state': admission['state'], 'steered': False,

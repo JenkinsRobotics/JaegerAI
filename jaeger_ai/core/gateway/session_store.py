@@ -601,7 +601,7 @@ class GatewaySessionStore:
             # erase effect deduplication when an identifier is later reused.
             conn.execute("CREATE TABLE IF NOT EXISTS steering_admissions ("
                          "session_id TEXT NOT NULL, request_id TEXT NOT NULL, steering_id TEXT NOT NULL, "
-                         "text TEXT NOT NULL, identity_json TEXT NOT NULL, state TEXT NOT NULL, "
+                         "text_digest TEXT NOT NULL, identity_digest TEXT NOT NULL, state TEXT NOT NULL, "
                          "producer_token TEXT NOT NULL, authority_json TEXT NOT NULL, "
                          "created_at REAL NOT NULL, PRIMARY KEY(session_id,request_id,steering_id))")
             current = 20
@@ -2409,34 +2409,34 @@ class GatewaySessionStore:
                 or not isinstance(text, str) or not text.strip() or len(text) > 64000):
             raise ValueError('Invalid steering identity or text')
         with self._immediate() as conn:
-            prior = conn.execute('SELECT text FROM steering_admissions WHERE session_id=? AND request_id=? AND steering_id=?',
+            prior = conn.execute('SELECT text_digest FROM steering_admissions WHERE session_id=? AND request_id=? AND steering_id=?',
                                  (session_id, request_id, steering_id)).fetchone()
             legacy = conn.execute("SELECT data_json FROM activity_history WHERE session_id=? AND event='turn.steer' "
                                   "AND json_extract(data_json,'$.request_id')=? AND json_extract(data_json,'$.steering_id')=? ORDER BY event_id LIMIT 1",
                                   (session_id, request_id, steering_id)).fetchone()
             if prior or legacy:
-                previous = prior['text'] if prior else json.loads(legacy['data_json']).get('text')
-                if previous != text:
+                previous = prior['text_digest'] if prior else input_fingerprint(json.loads(legacy['data_json']).get('text'))
+                if previous != input_fingerprint(text):
                     raise RequestConflict('Steering identity already used for different text')
                 return None
             row = self._steering_authority(conn, session_id, request_id, lease, source_file)
             token = uuid.uuid4().hex
             conn.execute('INSERT INTO steering_admissions VALUES (?,?,?,?,?,?,?,?,?)',
-                         (session_id, request_id, steering_id, text, encoded(identity(row)), 'reserved',
+                         (session_id, request_id, steering_id, input_fingerprint(text), input_fingerprint(encoded(identity(row))), 'reserved',
                           token, encoded({'lease': lease, 'source_file': source_file}), time.time()))
             return token
 
-    def steering_admission(self, session_id: str, request_id: str, steering_id: str) -> dict[str, Any] | None:
+    def steering_admission(self, session_id: str, request_id: str, steering_id: str, *, text: str | None = None) -> dict[str, Any] | None:
         with self._get_conn() as conn:
-            row = conn.execute('SELECT text,state,identity_json FROM steering_admissions WHERE session_id=? AND request_id=? AND steering_id=?',
+            row = conn.execute('SELECT text_digest,state,identity_digest FROM steering_admissions WHERE session_id=? AND request_id=? AND steering_id=?',
                                (session_id, request_id, steering_id)).fetchone()
         if row is None:
             return None
         from .owner_receipts import identity, encoded
         with self._get_conn() as conn:
             request = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id,)).fetchone()
-        return {'text': row['text'], 'state': 'delivery_unknown' if row['state'] == 'reserved' else row['state'],
-                'request_matches': request is not None and row['identity_json'] == encoded(identity(request))}
+        return {'text_matches': text is not None and row['text_digest'] == input_fingerprint(text), 'state': 'delivery_unknown' if row['state'] == 'reserved' else row['state'],
+                'request_matches': request is not None and row['identity_digest'] == input_fingerprint(encoded(identity(request)))}
 
     def deliver_steering(self, session_id: str, request_id: str, steering_id: str,
                          text: str, deliver: Callable[[], bool], *, producer_token: str, lease: dict[str, Any] | None,
@@ -2453,8 +2453,8 @@ class GatewaySessionStore:
                                      (session_id, request_id, steering_id)).fetchone()
             if (not admission or not producer_token or admission['producer_token'] != producer_token
                     or admission['authority_json'] != encoded({'lease': lease, 'source_file': source_file})
-                    or admission['identity_json'] != encoded(identity(row))
-                    or admission['text'] != text or admission['state'] != 'reserved'):
+                    or admission['identity_digest'] != input_fingerprint(encoded(identity(row)))
+                    or admission['text_digest'] != input_fingerprint(text) or admission['state'] != 'reserved'):
                 raise StateConflict('Steering admission changed')
             conn.execute("UPDATE steering_admissions SET state='delivery_unknown' WHERE session_id=? AND request_id=? AND steering_id=?",
                          (session_id, request_id, steering_id))
@@ -2462,7 +2462,7 @@ class GatewaySessionStore:
         # A crash in either gap remains unknown and cannot dispatch again.
         with self._immediate() as conn:
             row = self._steering_authority(conn, session_id, request_id, lease, source_file)
-            if admission['identity_json'] != encoded(identity(row)):
+            if admission['identity_digest'] != input_fingerprint(encoded(identity(row))):
                 raise StateConflict('Steering request identity changed')
             accepted = bool(deliver())
             if not accepted:

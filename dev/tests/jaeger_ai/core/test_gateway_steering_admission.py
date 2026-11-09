@@ -263,3 +263,21 @@ def test_racing_same_payload_retains_uncertain_client_intent(app, monkeypatch):
     assert response.status == 503
     assert json.loads(response.text)['state'] == 'delivery_unknown'
     assert app._active_agents['r'].seen == []
+
+
+def test_retained_tombstone_contains_no_request_or_guidance_plaintext(app):
+    secret_guidance = 'private follow-up guidance'
+    app.store.reserve_steering('s', 'r', 'fixed', secret_guidance, **authority())
+    assert app.store.delete_session('s')
+    with app.store._get_conn() as conn:
+        tombstone = dict(conn.execute('SELECT * FROM steering_admissions').fetchone())
+    assert 'text' not in tombstone and 'identity_json' not in tombstone
+    assert len(tombstone['text_digest']) == len(tombstone['identity_digest']) == 64
+    retained = json.dumps(tombstone)
+    assert secret_guidance not in retained
+    assert 'input_text' not in retained and 'execution_json' not in retained
+    assert 'work' not in tombstone.values()
+    app.store.admit_request('s', 'replacement work', request_id='r')
+    assert app.store.reserve_steering('s', 'r', 'fixed', secret_guidance, **authority()) is None
+    with pytest.raises(RequestConflict):
+        app.store.reserve_steering('s', 'r', 'fixed', 'changed guidance', **authority())
