@@ -160,12 +160,15 @@ export function isSessionMissingError(error: unknown): boolean {
 
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
+  // Both parts of a delayed approval request share the same stale-call guard.
+  // Missing legacy request IDs must not rewind a receipt; known different IDs
+  // describe separate requests even when a producer reuses the call ID.
+  const hasTerminalReceipt=(callId:string,requestId?:string)=>parts.some(p=>p.kind==="toolInvocation" && p.callId===callId &&
+    !(p.requestId && requestId && p.requestId!==requestId) && p.executionReceipt!==false &&
+    !["streaming","waitingForConfirmation","executing"].includes(p.state));
+  if(part.kind==="confirmation" && !part.decision && part.toolCallId && hasTerminalReceipt(part.toolCallId,part.requestId))return parts;
   if(part.kind==="toolInvocation" && part.state==="waitingForConfirmation" && part.approvalId){
-    // A delayed permission request cannot erase an observed execution receipt.
-    // Known different request IDs are separate calls even if the call ID is reused.
-    if(parts.some(p=>p.kind==="toolInvocation" && p.callId===part.callId &&
-      !(p.requestId && part.requestId && p.requestId!==part.requestId) && p.executionReceipt!==false &&
-      !["streaming","waitingForConfirmation","executing"].includes(p.state)))return parts;
+    if(hasTerminalReceipt(part.callId,part.requestId))return parts;
     const card=parts.find(p=>p.kind==="confirmation" && p.callId===part.approvalId);
     if(card)return parts; // Replay cannot reopen a resolved or superseded wait.
   }
