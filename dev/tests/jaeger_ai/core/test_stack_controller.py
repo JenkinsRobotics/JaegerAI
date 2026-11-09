@@ -244,3 +244,22 @@ def test_gateway_lease_shutdown_exits_zero(monkeypatch):
 
     monkeypatch.setattr(gateway_server, "run_gateway_forever", leave)
     assert gateway_server.main(["--port", "0"]) == 0
+
+
+def test_bundled_python_is_authoritative_and_propagated(tmp_path, monkeypatch):
+    from jaeger_ai.core.runtime import stack
+    python = tmp_path / "runtime" / "python" / "bin" / "python3"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
+    monkeypatch.setenv("JAEGER_RUNTIME_PYTHON", str(python))
+    monkeypatch.setenv("JAEGER_WEBUI_PYTHON", str(python))
+    monkeypatch.setenv("JAEGER_BROWSER_BUNDLE", str(tmp_path / "browser"))
+    assert stack._default_python() == str(python)
+    env = stack._common_env()
+    assert env["JAEGER_WEBUI_PYTHON"] == str(python)
+    assert env["JAEGER_BROWSER_BUNDLE"] == str(tmp_path / "browser")
+    python.unlink()
+    import pytest
+    with pytest.raises(RuntimeError, match="Bundled"):
+        stack._default_python()

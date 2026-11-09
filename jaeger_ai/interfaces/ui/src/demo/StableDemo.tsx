@@ -20,7 +20,6 @@ import { ConversationWorkPanel, type WorkView } from "./ConversationWorkPanel";
 import { sendJson } from "../unified/webui";
 import { Plus, MessageSquare, FolderOpen, CheckCircle, Settings, PanelLeft, Bot, Workflow, Search, Image, Compass, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2, PanelRight } from "../components/Icons";
 import "./stableDemo.css";
-import { SettingsWorkspace } from "./SettingsWorkspace";
 import { navigate, pathOf, useRoute, SUBTABS, type PageId } from "../shell/router";
 import { AppWindow } from "../windows/AppWindow";
 import { clampWidth, SIDEBAR } from "../shell/sidebarSizing";
@@ -51,8 +50,7 @@ function ConversationRow({ row, active, pinned, selecting, selected, onOpen, onS
 }
 /** Recovery surface: existing chat renderer and Gateway-owned task runner, no parallel backend. */
 export function StableDemo({ source }: { source: JaegerSource }) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const setSettingsOpen = (open: boolean) => navigate(open ? "/settings/appearance" : "/chat");
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof matchMedia === "function" ? !matchMedia(COMPACT_SHELL_QUERY).matches : true);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -97,6 +95,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const invalidLinkedSession = linkedSession !== null && !validConversationId(linkedSession);
   const [panelOpen, setPanelOpen] = useState(false);
   const [workView, setWorkView] = useState<WorkView | null>(null);
+
   const [forkBusy, setForkBusy] = useState(false);
   const [recent, setRecent] = useState<SessionRow[]>([]);
   const [historyError, setHistoryError] = useState("");
@@ -263,6 +262,17 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     setHeaderPopup(value => value === popup ? null : popup);
     setMenuPage("main"); setRenameOpen(false);
   };
+  useEffect(() => {
+    if (!session || source.kind !== "live") return;
+    const controller = new AbortController();
+    const since = Date.now() / 1000;
+    void source.stream(session, undefined, event => {
+      if (event.event === 'browser.action' && (!event.created_at || event.created_at >= since)) {
+        setWorkView('browser'); setPanelOpen(true);
+      }
+    }, controller.signal).catch(() => { /* The chat transport owns connection notices. */ });
+    return () => controller.abort();
+  }, [source, session]);
   const openWork = (view: WorkView) => { setWorkView(view); setPanelOpen(true); setHeaderPopup(null); };
   const forkSession = async (side: boolean) => {
     if (!session || forkBusy) return;
@@ -375,10 +385,10 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     return groups;
   }, new Map<string, SessionRow[]>())];
   const recentRows = unpinnedRows.filter(row => !row.workspace);
-  const workspacePage = route.page !== "chat" && route.page !== "settings";
+  const workspacePage = route.page !== "chat";
   const routeTitle: Record<PageId, string> = { library: "Library", automations: "Automations", feed: "Feed", home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Imagine", models: "Models", machine: "Machine", settings: "Settings" };
   const activeSection = route.page === "work" && route.sub === "tasks" ? "tasks" : route.page === "models" ? "studio" : route.page === "home" ? "chat" : route.page;
-  return <ToastProvider><div hidden={settingsOpen}><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={panelOpen} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+  return <ToastProvider><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={panelOpen} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__rail">
         <button type="button" aria-label="Close sidebar" title="Close sidebar" aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(false)}><PanelLeft size={20} /></button>
@@ -496,5 +506,5 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         <div><button type="button" disabled={deleting} onClick={() => setDeleteConfirm(null)}>Cancel</button><button className="jg-stable-demo__delete-confirm" type="button" disabled={deleting} onClick={() => void deleteSessions()}>{deleting ? "Deleting…" : "Delete permanently"}</button></div>
       </div>
     </div>}
-  </div></div>{settingsOpen && <SettingsWorkspace onClose={closeSettings} />}</ToastProvider>;
+  </div></ToastProvider>;
 }

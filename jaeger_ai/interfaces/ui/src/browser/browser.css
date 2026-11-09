@@ -1,0 +1,17 @@
+.jg-browser { height: 100%; min-height: 0; --codex-ui-background: var(--jg-color-pane); --codex-ui-text: var(--jg-color-text); --codex-ui-text-secondary: var(--jg-color-text-secondary); --codex-ui-border-subtle: var(--jg-color-border); --codex-ui-background-button-secondary: var(--jg-color-active); --codex-ui-background-button-secondary-hover: var(--jg-color-elevated); --codex-ui-focus: var(--jg-color-accent); }
+.jg-browser[data-expanded=true] { position: fixed; inset: 12px; z-index: 100; border: 1px solid var(--jg-color-border); border-radius: 14px; overflow: hidden; }
+.jg-browser .codex-ui-browser-workspace__content { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.jg-browser-address { display: flex; gap: 8px; padding: 8px; border-bottom: 1px solid var(--jg-color-border); }
+.jg-browser-address input { width: 0; flex: 1; min-width: 0; background: var(--jg-color-elevated); color: var(--jg-color-text); border: 1px solid var(--jg-color-border); border-radius: 8px; padding: 8px; font: inherit; }
+.jg-browser-viewer { display: block; width: 100%; flex: 1; min-height: 160px; border: 0; background: var(--jg-color-pane); }
+.jg-browser footer { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; font-size: 12px; border-top: 1px solid var(--jg-color-border); }
+.jg-browser-notice { padding: 8px; margin: 0; font-size: 13px; max-height: 180px; overflow: auto; }
+.jg-browser-notice pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.jg-browser-start { padding: 20px; }
+.jg-conversation-work__content--browser { padding: 0; overflow: hidden; }
+/* Keep generic workspace button spacing from shrinking the donor's SVG controls. */
+.jg-stable-demo .jg-conversation-work__content--browser { padding: 0; }
+.jg-stable-demo .jg-browser .codex-ui-browser-workspace__action,
+.jg-stable-demo .jg-browser .codex-ui-browser-workspace__tab-close { min-height: 28px; height: 28px; min-width: 28px; width: 28px; padding: 4px; border: 0; }
+.jg-stable-demo .jg-browser .codex-ui-browser-workspace__tab { min-height: 28px; padding: 0; border: 0; }
+.jg-browser .codex-ui-browser-workspace__glyph { flex-shrink: 0; width: 18px; height: 18px; }

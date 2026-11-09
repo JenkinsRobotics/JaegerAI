@@ -1,0 +1,26 @@
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, expect, it, vi } from 'vitest';
+import { BrowserWorkspace } from './BrowserWorkspace';
+import { MockSource } from '../api/mock';
+import { sendJson } from '../unified/webui';
+vi.mock('../unified/webui', () => ({sendJson:vi.fn()}));
+(globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
+let root:Root;
+afterEach(async()=>{await act(async()=>root?.unmount());document.body.innerHTML='';vi.restoreAllMocks();vi.unstubAllGlobals();vi.clearAllMocks();});
+const state={active:'same-tab',pages:[{id:'same-tab',title:'Shared page',url:'https://example.com'}]};
+it('queues navigation behind a pending poll and keeps the viewer on the same tab',async()=>{
+ vi.stubGlobal('ResizeObserver',class {observe(){} disconnect(){}});
+ const intervals: (()=>void)[]=[];vi.spyOn(window,'setInterval').mockImplementation((fn:any)=>{intervals.push(fn);return 1 as unknown as ReturnType<typeof window.setInterval>;});vi.spyOn(window,'clearInterval').mockImplementation(()=>{});
+ const request=vi.mocked(sendJson);let resolvePoll:(value:typeof state)=>void=()=>{};
+ request.mockResolvedValueOnce(state).mockImplementationOnce(()=>new Promise(r=>{resolvePoll=r;})).mockResolvedValue(state);
+ const source=new MockSource();Object.defineProperty(source,'kind',{value:'live'});
+ const el=document.createElement('div');document.body.append(el);root=createRoot(el);
+ await act(async()=>root.render(<BrowserWorkspace sessionId="owner" source={source}/>));
+ const frame=el.querySelector('iframe');expect(frame?.src).toContain('/v1/sessions/owner/browser/viewer?pageId=same-tab');
+ await act(async()=>intervals[0]());
+ await act(async()=>el.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+ expect(request).toHaveBeenCalledTimes(2);
+ await act(async()=>resolvePoll(state));
+ expect(request).toHaveBeenCalledTimes(3);expect(request.mock.calls[2][2]).toEqual({action:'navigate',url:'https://example.com'});expect(el.querySelector('iframe')).toBe(frame);
+});

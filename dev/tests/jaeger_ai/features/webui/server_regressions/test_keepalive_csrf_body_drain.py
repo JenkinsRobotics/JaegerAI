@@ -147,3 +147,39 @@ def test_mixed_csrf_mutations_on_persistent_connection(monkeypatch, rounds):
         server.server_close()
         thread.join(2)
     assert malformed == 0
+
+
+def test_browser_proxy_preserves_next_request_on_real_webui_handler(monkeypatch):
+    from http.server import BaseHTTPRequestHandler
+    import api.routes as routes
+    from jaeger_ai.core.gateway import caller_auth
+    class Upstream(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+        def do_POST(self):
+            assert self.headers['Authorization'] == 'Bearer browser-test'
+            body = self.rfile.read(int(self.headers['Content-Length']))
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *args):
+            pass
+    upstream = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+    upstream.daemon_threads = True
+    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+    upstream_thread.start()
+    monkeypatch.setattr(routes, '_jaeger_gateway_bases', lambda: [f'http://127.0.0.1:{upstream.server_port}'])
+    monkeypatch.setattr(caller_auth, 'client_headers', lambda _: {'Authorization': 'Bearer browser-test'})
+    server, thread = _start_handler_server(monkeypatch)
+    try:
+        conn = http.client.HTTPConnection(*server.server_address, timeout=5)
+        host = f'127.0.0.1:{server.server_port}'
+        for action in ('status', 'navigate', 'snapshot'):
+            status, data = _post(conn, '/v1/sessions/proof/browser/action', {'action': action}, host=host)
+            assert status == 200, data
+            assert json.loads(data)['action'] == action
+        conn.close()
+    finally:
+        server.shutdown(); server.server_close(); thread.join(2)
+        upstream.shutdown(); upstream.server_close(); upstream_thread.join(2)

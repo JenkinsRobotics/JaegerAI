@@ -189,7 +189,7 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
 
   // Selecting an agent opens its one home chat. An explicit session (a handoff's worker side) opens as is.
   useEffect(() => {
-    if (!selectedAgentId || !initialReady) return;
+    if (view !== "chat" || !selectedAgentId || !initialReady) return;
     let live = true;
     setSessionError(undefined);
     (explicitSessionId ? Promise.resolve(explicitSessionId) : home.home(selectedAgentId)).then(
@@ -198,7 +198,7 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
     );
     store.seeAgent(selectedAgentId);
     return () => { live = false; };
-  }, [selectedAgentId, explicitSessionId, home, store.seeAgent, sessionAttempt, initialReady]);
+  }, [view, selectedAgentId, explicitSessionId, home, store.seeAgent, sessionAttempt, initialReady]);
 
   useEffect(() => {
     const reconnect = () => { if (sessionError) setSessionAttempt(n => n + 1); };

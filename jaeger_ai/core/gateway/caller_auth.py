@@ -139,6 +139,7 @@ TURN_ROUTES = frozenset({
     ("POST", "/v1/agent-messages"),
     ("POST", "/v1/agent-goals"),
     ("POST", "/v1/agent-goals/{goal_id}/cancel"),
+    ("POST", "/v1/sessions/{id}/browser/action"),
     ("POST", "/v1/sessions"),
     ("PATCH", "/v1/sessions/{id}"),
     ("POST", "/v1/sessions/{id}/turns"),
@@ -180,6 +181,7 @@ DELEGATE_ROUTES = frozenset({("POST", "/v1/agents/{id}/handoff")})
 PREFIXED_READ_ROUTES = frozenset({
     "/v1/agent-messages", "/v1/agent-threads/{thread}",
     "/v1/agent-goals/{goal_id}",
+    "/v1/sessions/{id}/browser/viewer", "/v1/sessions/{id}/browser/cast",
     "/v1/sessions/{id}", "/v1/sessions/{id}/stream", "/v1/sessions/{id}/events",
     "/v1/sessions/{id}/requests/{request_id}", "/v1/sessions/{id}/requests/{request_id}/steer", "/v1/sessions/{id}/queue",
     "/v1/sessions/{id}/attachments", "/v1/sessions/{id}/activity", "/v1/stop",
@@ -239,6 +241,8 @@ def required_scope(method: str, route: str | None) -> str | None:
         for prefix in PUBLIC_ROUTE_PREFIXES:
             if route.startswith(prefix):
                 return None
+    if method == "GET" and route == "/v1/sessions/{id}/browser/cast":
+        return "turn"
     if method in {"GET", "HEAD", "OPTIONS"}:
         return "read"
     key = (method, route or "")

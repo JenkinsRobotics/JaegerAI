@@ -10,6 +10,9 @@ public enum LauncherResolver {
         // Development bundles pin their source wrapper. A missing pin must fail,
         // never select an older installed CLI or a nearby scratch checkout.
         if let configured = plistLauncher, !configured.isEmpty {
+            if configured.hasPrefix("@bundle/") {
+                return [(bundlePath as NSString).appendingPathComponent(String(configured.dropFirst(8)))]
+            }
             return [configured.hasPrefix("~/") ? (home as NSString).appendingPathComponent(String(configured.dropFirst(2))) : configured]
         }
         let repo = env["JAEGER_REPO"].flatMap { $0.isEmpty ? nil : $0 } ?? (home as NSString).appendingPathComponent("GitHub/JaegerAI")

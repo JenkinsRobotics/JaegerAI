@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { JaegerSource } from '../api/source';
 import type { Agent, Handoff, SessionRow } from '../api/types';
-import { Bot, FileText, FolderOpen, MessageSquare, Plus, Terminal, X } from '../components/Icons';
+import { BrowserWorkspace } from '../browser/BrowserWorkspace';
+import { Globe, Bot, FileText, FolderOpen, MessageSquare, Plus, Terminal, X } from '../components/Icons';
 import { ChatPane } from '../chat/ChatPane';
 import { WebHost } from '../chat/webHost';
 import { SessionFiles } from '../chat/SessionFiles';
@@ -11,8 +12,8 @@ import { AutomationsPanel } from '../automations/AutomationsPanel';
 import { WorkspaceBrowser } from '../unified/WorkspaceBrowser';
 import { sendJson } from '../unified/webui';
 
-export type WorkView = 'tools' | 'changes' | 'files' | 'sources' | 'subagents' | 'outputs' | 'page' | 'automations' | 'sidechat' | 'terminal';
-const titles: Record<WorkView, string> = { tools: 'New tab', changes: 'Changes', files: 'Files', sources: 'Sources', subagents: 'Subagents', outputs: 'Outputs', page: 'Pages', automations: 'Scheduled tasks', sidechat: 'Side chat', terminal: 'Terminal' };
+export type WorkView = 'browser' | 'tools' | 'changes' | 'files' | 'sources' | 'subagents' | 'outputs' | 'page' | 'automations' | 'sidechat' | 'terminal';
+const titles: Record<WorkView, string> = { browser: 'Browser', tools: 'New tab', changes: 'Changes', files: 'Files', sources: 'Sources', subagents: 'Subagents', outputs: 'Outputs', page: 'Pages', automations: 'Scheduled tasks', sidechat: 'Side chat', terminal: 'Terminal' };
 
 export function ConversationWorkPanel({ source, sessionId, agents, recent, open, view, onView, onClose, onConversation }: {
   source: JaegerSource; sessionId: string; agents: Agent[]; recent: SessionRow[]; open: boolean; view: WorkView; onView(view: WorkView): void; onClose(): void; onConversation(id: string): void;
@@ -25,7 +26,7 @@ export function ConversationWorkPanel({ source, sessionId, agents, recent, open,
     <header className="jg-conversation-work__tabbar"><div role="tablist" aria-label="Workspace tabs">{tabs.map(tab => <span key={tab}><button id={`work-tab-${tab}`} type="button" role="tab" aria-controls={`work-view-${tab}`} aria-selected={view === tab} onClick={() => onView(tab)}>{titles[tab]}</button>{tab !== 'tools' && <button type="button" aria-label={`Close ${titles[tab]} tab`} onClick={() => closeTab(tab)}><X size={13} /></button>}</span>)}</div><button type="button" aria-label="New tool tab" onClick={() => openTab('tools')}><Plus size={18} /></button><button type="button" aria-label="Close work panel" onClick={onClose}><X size={18} /></button></header>
     {tabs.map(tab => <section key={tab} id={`work-view-${tab}`} role="tabpanel" aria-labelledby={`work-tab-${tab}`} hidden={view !== tab} className={`jg-conversation-work__content jg-conversation-work__content--${tab}`}>
       {tab === 'tools' && <><h2>Tools</h2><div className="jg-conversation-work__launcher">{([
-        ['changes', 'Changes', FileText], ['terminal', 'Terminal', Terminal], ['files', 'Files', FolderOpen], ['sidechat', 'Side chat', MessageSquare], ['page', 'New page', FileText],
+        ['browser', 'Browser', Globe], ['changes', 'Changes', FileText], ['terminal', 'Terminal', Terminal], ['files', 'Files', FolderOpen], ['sidechat', 'Side chat', MessageSquare], ['page', 'New page', FileText],
       ] as const).map(([id, label, Icon]) => <button type="button" key={id} onClick={() => openTab(id)}><Icon size={19} />{label}</button>)}</div><h2>Suggested</h2><div className="jg-conversation-work__suggested">{recent.filter(row => !row.archived && row.session_id !== sessionId).slice(0, 4).map(row => <button type="button" key={row.session_id} onClick={() => onConversation(row.session_id)}><span><MessageSquare size={22} /></span><strong>{row.title || 'Untitled conversation'}</strong></button>)}{!recent.some(row => row.session_id !== sessionId) && <p>Your other conversations will appear here.</p>}</div></>}
       {(tab === 'files' || tab === 'changes') && (sessionId ? <WorkspaceBrowser source={source} params={new URLSearchParams({ session: sessionId, view: tab })} /> : <p>Start a conversation to browse its workspace and Git changes.</p>)}
       {tab === 'outputs' && (source.taskArtifacts ? <TaskArtifacts controls={source.taskArtifacts} sessionId={sessionId || undefined} /> : <p>Artifacts are unavailable on this Gateway.</p>)}
@@ -34,6 +35,7 @@ export function ConversationWorkPanel({ source, sessionId, agents, recent, open,
       {tab === 'page' && (source.library ? <LibraryPanel controls={source.library} initialNew /> : <p>Pages are unavailable on this Gateway.</p>)}
       {tab === 'automations' && (source.schedules ? <AutomationsPanel controls={source.schedules} initialNew /> : <p>Scheduled tasks are unavailable on this Gateway.</p>)}
       {tab === 'sidechat' && <SideChat source={source} agents={agents} parentSession={sessionId} />}
+      {tab === 'browser' && <BrowserWorkspace key={sessionId} sessionId={sessionId} source={source} />}
       {tab === 'terminal' && <SessionTerminal key={sessionId} sessionId={sessionId} live={source.kind === 'live'} />}
     </section>)}
   </aside>;

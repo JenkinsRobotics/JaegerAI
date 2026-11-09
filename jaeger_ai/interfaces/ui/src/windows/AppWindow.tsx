@@ -157,6 +157,26 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
   const appView = active === 'settings' ? 'settings' : 'chat'
   const chatOpen = windows.some((w) => w.id === 'chat')
 
+  const appContent = (<Suspense fallback={<PageFallback />}><App source={source} settingsDestinations={{
+              models: <MovedSections active={settingsTab === 'models' ? settingsSegment : undefined} sections={[
+                { id: 'library', title: 'Library', body: <ModelsPage /> },
+                { id: 'compare', title: 'Compare', body: <ComparePage /> },
+                { id: 'usage', title: 'Usage', body: <UsagePage /> },
+              ]} />,
+              integrations: <MovedSections active={settingsTab === 'integrations' ? settingsSegment : undefined} sections={[
+                { id: 'hermes', title: 'Hermes', body: <EnginePanel engine="hermes" /> },
+                { id: 'openclaw', title: 'OpenClaw', body: <EnginePanel engine="openclaw" /> },
+                { id: 'sharepoint', title: 'SharePoint', body: <SharePointPanel source={source} /> },
+              ]} />,
+              checkpoints: <CheckpointsView source={source} params={paramsOf('settings')} />,
+              widgets: <WorkspacePage source={source} />,
+            }} view={appView} settingsTab={settingsTab} settingsSegment={settingsSegment} onSettingsTab={(t) => navigate(t ? `/settings/${t}` : '/settings', { replace: !!t && !!settingsTab })}
+              onNavigate={go} requestedAgent={active === 'chat' ? route.params.get('agent') : null} onOpenPalette={() => setPaletteOpen(true)} /></Suspense>);
+
+  if (embedded && active === 'settings') {
+    return <div className="app-window__embedded" data-page="settings">{appContent}</div>;
+  }
+
   if (embedded && active !== 'chat' && active !== 'settings') {
     return <ToastProvider><div className="app-window__embedded" data-page={active} aria-label={WINDOW_DEFINITIONS[active].title}>
       <Suspense fallback={<PageFallback />}>{render(active)}</Suspense>
@@ -173,21 +193,7 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
         {chatOpen && (
           <div className={`app-window__page app-window__page--chat${active === 'chat' || active === 'settings' ? ' app-window__page--active' : ''}`}
             hidden={active !== 'chat' && active !== 'settings'} aria-label={active === 'settings' ? 'Settings' : 'Chat'}>
-            <Suspense fallback={<PageFallback />}><App source={source} settingsDestinations={{
-              models: <MovedSections active={settingsTab === 'models' ? settingsSegment : undefined} sections={[
-                { id: 'library', title: 'Library', body: <ModelsPage /> },
-                { id: 'compare', title: 'Compare', body: <ComparePage /> },
-                { id: 'usage', title: 'Usage', body: <UsagePage /> },
-              ]} />,
-              integrations: <MovedSections active={settingsTab === 'integrations' ? settingsSegment : undefined} sections={[
-                { id: 'hermes', title: 'Hermes', body: <EnginePanel engine="hermes" /> },
-                { id: 'openclaw', title: 'OpenClaw', body: <EnginePanel engine="openclaw" /> },
-                { id: 'sharepoint', title: 'SharePoint', body: <SharePointPanel source={source} /> },
-              ]} />,
-              checkpoints: <CheckpointsView source={source} params={paramsOf('settings')} />,
-              widgets: <WorkspacePage source={source} />,
-            }} view={appView} settingsTab={settingsTab} settingsSegment={settingsSegment} onSettingsTab={(t) => navigate(t ? `/settings/${t}` : '/settings', { replace: !!t && !!settingsTab })}
-              onNavigate={go} requestedAgent={active === 'chat' ? route.params.get('agent') : null} onOpenPalette={() => setPaletteOpen(true)} /></Suspense>
+            {appContent}
           </div>
         )}
         {visibleWindows.filter((w) => w.id !== 'chat' && w.id !== 'settings').map((w) => (

@@ -1546,6 +1546,8 @@ class JaegerGatewayApp:
         register_web_search(self)
         from jaeger_ai.features.oss_stack.routes import register as register_oss_stack
         register_oss_stack(self)
+        from jaeger_ai.features.browser.routes import register as register_browser
+        self.browser_runtime = register_browser(self)
         from jaeger_ai.features.backlog.routes import register as register_backlog
         register_backlog(self)
         from jaeger_ai.features.engines.catalog import register as register_engine_catalog

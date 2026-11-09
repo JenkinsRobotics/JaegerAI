@@ -45,21 +45,9 @@ REPO_ROOT = install_root()
 
 
 def _current_git_commit() -> str:
-    """Return HEAD commit hash or 'unknown'."""
-    try:
-        res = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        if res.returncode == 0:
-            return res.stdout.strip()
-    except Exception:
-        pass
-    return "unknown"
+    """Source revision from a checkout or a sealed standalone source snapshot."""
+    from jaeger_ai.core.gateway.git_info import git_commit
+    return git_commit(str(REPO_ROOT))
 
 
 def _launchd_dir() -> Path:
@@ -75,6 +63,11 @@ def _logs_dir() -> Path:
 
 
 def _default_python() -> str:
+    bundled = os.environ.get("JAEGER_RUNTIME_PYTHON", "")
+    if bundled:
+        if not Path(bundled).is_file() or not os.access(bundled, os.X_OK):
+            raise RuntimeError("Bundled Jaeger Python is unavailable")
+        return bundled
     venv_py = operator_state_root() / "venv" / "bin" / "python"
     if venv_py.exists():
         return str(venv_py)
@@ -185,6 +178,7 @@ def _common_env() -> dict[str, str]:
         "JAEGER_INSTALL_ROOT": str(REPO_ROOT),
         "JAEGER_STATE_DIR": str(state_root),
         "JAEGER_STATE_HOME": str(state_root),
+        **{key: os.environ[key] for key in ("JAEGER_RUNTIME_PYTHON", "JAEGER_WEBUI_PYTHON", "JAEGER_BROWSER_BUNDLE", "JAEGER_WEBUI_UI_DIST", "PYTHONNOUSERSITE") if os.environ.get(key)},
     }
 
 

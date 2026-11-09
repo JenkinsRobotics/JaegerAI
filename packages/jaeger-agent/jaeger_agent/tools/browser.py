@@ -347,6 +347,14 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
     for the live web — searching visually, playing a video, filling a
     form."""
     act = (action or "").strip().lower()
+    from jaeger_agent.task_port import current_task_context
+    context = current_task_context()
+    if context is not None:
+        if is_interrupted() and act not in ("close", "quit", "shutdown"):
+            return {"ok": False, "interrupted": True, "error": "browser action interrupted by user"}
+        from .browser_shared import shared_browser
+        return shared_browser(context, act, {"url": url, "element": element, "text": text,
+            "direction": direction, "key": key, "path": path, **kwargs})
     if act in ("close", "quit", "shutdown"):
         return _session.call("_stop", {})
     # A Playwright action runs to completion on its worker thread and
@@ -375,8 +383,8 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
 def _t_browser(action: str, url: str = "", element: int = 0,
                text: str = "", direction: str = "down",
                key: str = "Enter", path: str = "", **kwargs: Any) -> dict:
-    """Drive the agent's OWN automation browser (a separate chromium,
-    NOT the user's Safari/Chrome) — only for when YOU must read or
+    """Drive the conversation's shared browser (visible in Jaeger's right panel,
+    separate from the user's Safari/Chrome) — only for when YOU must read or
     interact with page content (scrape, fill a form, click through a
     flow). "Open <site>" / "open <site> in <browser>" for the USER is
     NEVER this tool — that's one open_on_host call (app="Safari" etc.),
