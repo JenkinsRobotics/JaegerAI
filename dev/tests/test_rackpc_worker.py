@@ -24,7 +24,7 @@ def test_runs_once_and_posts_result(tmp_path, monkeypatch):
     msgs = [task("h1"), task("h2", kind="status"), task("h3", **{"from": "rackpc"}), task("h4", to="ares")]
     posted = _setup(tmp_path, monkeypatch, msgs)
     ran = []
-    monkeypatch.setattr(w, "run_job", lambda m: ran.append(m["id"]) or {"status": "done", "body": "PONG", "elapsed_s": 1})
+    monkeypatch.setattr(w, "run_job", lambda m: ran.append(m["id"]) or {"status": "done", "outcome": "done", "body": "PONG", "elapsed_s": 1})
     assert w.tick(w.State(tmp_path / "state.json")) == 1 and ran == ["h1"]
     tool, args = posted[0]
     assert tool == "send_message" and args["to"] == "grokbot" and args["reply_to"] == "h1"

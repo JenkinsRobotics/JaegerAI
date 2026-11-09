@@ -175,6 +175,8 @@ def status_from_message(kind: str, status_line: str = "") -> str | None:
     if kind == "status":
         return "needs_ok" if any(w in s for w in ("needs ok", "needs_ok", "approval", "blocked")) else "in_progress"
     if kind in ("result", "answer"):
+        if s in ("timeout", "cancelled", "execution_unknown"):
+            return "needs_ok"
         if any(w in s for w in ("fail", "error", "blocked", "needs ok", "needs_ok", "approval", "partial")):
             return "needs_ok"
         return "needs_ok" if s.startswith("needs") else "done"
