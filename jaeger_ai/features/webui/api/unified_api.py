@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import json
 import math
 import os
@@ -138,48 +139,73 @@ def update_asset(aid: str, body: dict) -> dict:
 
 
 def delete_asset(aid: str) -> dict:
-    a = get_asset(aid)
-    # Preflight the board before any asset mutation: a read failure must leave
-    # both the index and image intact, not report failure after deleting them.
-    board = read_board()
-    board["items"] = [i for i in board["items"] if i.get("asset_id") != aid]
-    with _lock:
-        _save_assets([x for x in list_assets() if x["id"] != aid])
-    try:
-        (_studio() / "assets" / a["file"]).unlink()
-    except OSError:
-        pass
-    write_board(board)
+    # Board validation and mutation share the exact lock used by full saves.
+    # Commit its reference removal before destructive asset side effects.
+    # This is NOT a crash-atomic transaction across board, index and asset bytes.
+    path = (_studio() / "board.json").resolve()
+    with _board_lock(path):
+        board = _read_board_unlocked(path)
+        with _lock:
+            a = get_asset(aid)
+            items = [i for i in board["items"] if i.get("asset_id") != aid]
+            _commit_board_unlocked(path, items, board["revision"])
+            _save_assets([x for x in list_assets() if x["id"] != aid])
+            try:
+                (_studio() / "assets" / a["file"]).unlink()
+            except OSError:
+                pass
     return {"deleted": aid}
 
 
 # ── Studio: board ────────────────────────────────────────────────────
 
-def read_board() -> dict:
-    # Only a genuinely missing board is empty. A failed read must not authorize
-    # the client to overwrite existing work with a new empty snapshot.
+@contextlib.contextmanager
+def _board_lock(path: Path):
+    from jaeger_ai.core.instance.atomic_files import _file_write_lock
+    # Canonical target-local identity, independent of operator_state_root's
+    # different environment precedence. Symlink aliases resolve to one lock.
     try:
-        b = json.loads((_studio() / "board.json").read_text("utf-8"))
-    except FileNotFoundError:
-        return {"items": []}
+        with _file_write_lock(path, lock_root=path.parent / ".board-write-locks"):
+            yield
     except (OSError, ValueError) as exc:
+        raise ApiError(503, "Board storage unavailable; save outcome may be uncertain") from exc
+
+
+def _read_board_unlocked(path: Path) -> dict:
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return {"items": [], "revision": "missing"}
+    except OSError as exc:
         raise ApiError(503, "Board storage unavailable; existing board was not changed") from exc
     try:
-        _validated_board_items(b)
-    except ApiError as exc:
+        board = json.loads(raw)
+        _validated_board_items(board)
+    except (ValueError, ApiError) as exc:
         raise ApiError(503, "Invalid board data; existing board was not changed") from exc
-    return b
+    return {**board, "revision": hashlib.sha256(raw).hexdigest()}
+
+
+def read_board() -> dict:
+    path = (_studio() / "board.json").resolve()
+    with _board_lock(path):
+        return _read_board_unlocked(path)
 
 
 def _validated_board_items(body) -> list[dict]:
     if not isinstance(body, dict) or not isinstance(body.get("items"), list) or len(body["items"]) > 300:
         raise ApiError(400, "board must be {items: [...]} with at most 300 items")
     items = []
+    seen = set()
     for i in body["items"]:
         if not isinstance(i, dict) or i.get("kind") not in ("asset", "note") or not isinstance(i.get("id"), str):
             raise ApiError(400, "each item needs id and kind asset|note")
+        item_id = i["id"][:64]
+        if not item_id or item_id in seen:
+            raise ApiError(400, "Board item IDs must be nonempty and unique after normalization")
+        seen.add(item_id)
         geo = {k: i.get(k) for k in ("x", "y", "w", "h")}
-        if not all(isinstance(v, (int, float)) and -5000 <= v <= 20000 for v in geo.values()):
+        if not all(type(v) in (int, float) and -5000 <= v <= 20000 for v in geo.values()):
             raise ApiError(400, "x, y, w, h must be numbers")
         item = {"id": i["id"][:64], "kind": i["kind"], **{k: round(v) for k, v in geo.items()}}
         if i["kind"] == "asset":
@@ -191,10 +217,28 @@ def _validated_board_items(body) -> list[dict]:
     return items
 
 
+def _commit_board_unlocked(path: Path, items: list[dict], revision: str) -> dict:
+    from jaeger_ai.core.instance.atomic_files import _write_unlocked
+    # A fresh nonsecret generation prevents ABA, even under a frozen clock.
+    out = {"items": items, "updated_at": time.time(), "generation": uuid.uuid4().hex}
+    payload = json.dumps(out, indent=2) + "\n"
+    _write_unlocked(path, payload, expected_revision=revision)
+    return {**out, "revision": hashlib.sha256(payload.encode("utf-8")).hexdigest()}
+
+
 def write_board(body) -> dict:
-    out = {"items": _validated_board_items(body), "updated_at": time.time()}
-    _write_json(_studio() / "board.json", out)
-    return out
+    items = _validated_board_items(body)
+    if "expected_revision" not in body:
+        raise ApiError(428, "Board precondition required; upgrade the client and reload before saving")
+    revision = body["expected_revision"]
+    if not isinstance(revision, str) or not re.fullmatch(r"missing|[0-9a-f]{64}", revision):
+        raise ApiError(400, "Invalid Board expected_revision; reload before saving")
+    path = (_studio() / "board.json").resolve()
+    with _board_lock(path):
+        current = _read_board_unlocked(path)
+        if current["revision"] != revision:
+            raise ApiError(409, "Board changed elsewhere; local edits were not saved. Keep your draft and reconcile before saving")
+        return _commit_board_unlocked(path, items, revision)
 
 
 # ── Studio: image providers ──────────────────────────────────────────

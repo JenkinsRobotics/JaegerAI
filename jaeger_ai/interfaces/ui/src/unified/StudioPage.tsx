@@ -206,6 +206,37 @@ function boardItems(value: unknown): BoardItem[] {
   return items;
 }
 
+function boardRevision(value: unknown): string {
+  const revision = value && typeof value === "object" && "revision" in value ? value.revision : undefined;
+  if (typeof revision !== "string" || !/^(missing|[a-f0-9]{64})$/.test(revision)) {
+    throw new Error("Invalid board data: missing or invalid revision; reload with a compatible server.");
+  }
+  return revision;
+}
+
+// Match the producer's documented normalization, including Python's ties-to-even.
+function normalizedBoard(items: BoardItem[]): BoardItem[] {
+  const round = (n: number) => n % 1 === 0.5 || n % 1 === -0.5 ? 2 * Math.round(n / 2) : Math.round(n);
+  const truncate = (s: string, length: number) => Array.from(s).slice(0, length).join("");
+  return items.map(i => ({ id: truncate(i.id, 64), kind: i.kind,
+    x: round(i.x), y: round(i.y), w: round(i.w), h: round(i.h),
+    ...(i.kind === "asset" ? { asset_id: truncate(i.asset_id ?? "", 64) }
+      : { text: truncate(i.text ?? "", 4000), color: truncate(i.color ?? "yellow", 16) }) }));
+}
+
+function acknowledgedBoard(value: unknown, submitted: BoardItem[], base: string) {
+  const items = boardItems(value), revision = boardRevision(value);
+  const timestamp = value && typeof value === "object" && "updated_at" in value ? value.updated_at : undefined;
+  const expected = normalizedBoard(submitted);
+  if (revision === "missing" || revision === base || typeof timestamp !== "number" || !Number.isFinite(timestamp)
+    || items.length !== expected.length || items.some((item, n) => {
+      const wanted = expected[n];
+      return Object.keys(item).length !== Object.keys(wanted).length
+        || Object.entries(wanted).some(([key, v]) => (item as unknown as Record<string, unknown>)[key] !== v);
+    })) throw new Error("Unrecognized save acknowledgment; saved state could not be verified");
+  return { items, revision };
+}
+
 export function Board({ assets, source }: { assets: Asset[]; source?: JaegerSource }) {
   const toast = useToast();
   const [loaded, setLoaded] = useState<{ source: JaegerSource | undefined; items: BoardItem[] }>();
@@ -214,6 +245,7 @@ export function Board({ assets, source }: { assets: Asset[]; source?: JaegerSour
   const [err, setErr] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const dirty = useRef(false);
+  const base = useRef<string | undefined>(undefined);
   const revision = useRef(0);
   const saving = useRef(false);
   const saveBlocked = useRef(false);
@@ -224,9 +256,12 @@ export function Board({ assets, source }: { assets: Asset[]; source?: JaegerSour
     const controller = new AbortController();
     lifetime.current = controller;
     setLoaded(undefined); setErr(undefined); setPicking(false); dirty.current = false;
-    saving.current = false; saveBlocked.current = false; setSaveError(undefined);
+    saving.current = false; saveBlocked.current = false; base.current = undefined; setSaveError(undefined);
     getJson<unknown>("/v1/studio/board", controller.signal).then((value) => {
-      if (!controller.signal.aborted) setLoaded({ source, items: boardItems(value) });
+      if (!controller.signal.aborted) {
+        const items = boardItems(value), revision = boardRevision(value);
+        base.current = revision; setLoaded({ source, items });
+      }
     }).catch((e: Error) => { if (!controller.signal.aborted) setErr(e.message); });
     return () => controller.abort();
   }, [source, attempt]);
@@ -239,12 +274,17 @@ export function Board({ assets, source }: { assets: Asset[]; source?: JaegerSour
       // Whole-board PUTs must not overlap: an older snapshot can commit last.
       // New edits remain dirty and are coalesced after this write acknowledges.
       saving.current = true;
-      sendJson("PUT", "/v1/studio/board", { items }).then(() => {
+      sendJson<unknown>("PUT", "/v1/studio/board", { items, expected_revision: base.current }).then((value) => {
         if (controller.signal.aborted) return;
+        const acknowledged = acknowledgedBoard(value, items, base.current!);
+        base.current = acknowledged.revision;
         saving.current = false;
-        if (version === revision.current) dirty.current = false;
+        if (version === revision.current) {
+          dirty.current = false;
+          setLoaded({ source, items: acknowledged.items });
+        }
         setSaveSettled((n) => n + 1);
-      }, (e: Error) => {
+      }).catch((e: Error) => {
         if (controller.signal.aborted) return;
         saving.current = false;
         // A failed response may still have committed. Do not replay this or

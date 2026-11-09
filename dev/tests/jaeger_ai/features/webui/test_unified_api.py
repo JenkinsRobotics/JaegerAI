@@ -25,7 +25,7 @@ def test_asset_lifecycle(api, tmp_path):
     a = api.add_asset(PNG, "image/png", "dot", "imported", tags=[" x ", "x", "y"])
     assert a["tags"] == ["x", "y"] and (tmp_path / "studio/assets" / a["file"]).read_bytes() == PNG
     assert api.update_asset(a["id"], {"tags": ["z"], "name": "renamed"})["name"] == "renamed"
-    api.write_board({"items": [{"id": "b1", "kind": "asset", "asset_id": a["id"], "x": 1, "y": 2, "w": 100, "h": 80}, {"id": "n1", "kind": "note", "text": "hi", "x": 0, "y": 0, "w": 10, "h": 10}]})
+    api.write_board({"expected_revision": api.read_board()["revision"], "items": [{"id": "b1", "kind": "asset", "asset_id": a["id"], "x": 1, "y": 2, "w": 100, "h": 80}, {"id": "n1", "kind": "note", "text": "hi", "x": 0, "y": 0, "w": 10, "h": 10}]})
     api.delete_asset(a["id"])
     assert api.list_assets() == [] and [i["id"] for i in api.read_board()["items"]] == ["n1"]
 
@@ -178,15 +178,15 @@ def test_board_corrupt_read_fails_closed(api, tmp_path, raw):
 
 
 def test_board_missing_empty_and_persisted_reopen(api):
-    assert api.read_board() == {"items": []}
-    saved = api.write_board({"items": [{"id": "existing", "kind": "note", "text": "Keep me", "x": 1, "y": 2, "w": 200, "h": 140}]})
+    assert api.read_board() == {"items": [], "revision": "missing"}
+    saved = api.write_board({"expected_revision": api.read_board()["revision"], "items": [{"id": "existing", "kind": "note", "text": "Keep me", "x": 1, "y": 2, "w": 200, "h": 140}]})
     assert api.read_board() == saved
 
 
 def test_board_unreadable_fails_closed(api, monkeypatch):
     def unavailable(*args, **kwargs):
         raise PermissionError("unreadable")
-    monkeypatch.setattr(pathlib.Path, "read_text", unavailable)
+    monkeypatch.setattr(pathlib.Path, "read_bytes", unavailable)
     with pytest.raises(api.ApiError) as exc:
         api.read_board()
     assert exc.value.status == 503
