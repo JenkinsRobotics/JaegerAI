@@ -1,6 +1,7 @@
 """Shared atomic document IO; existing schema/config owners retain authority.
 
-Stable locks resolve through operator_state_root, never into a source tree.
+Stable locks default to operator_state_root; storage owners may explicitly
+select a canonical target-local lock root, never a source-tree runtime path.
 No application/runtime initialization, credential lookup or access expansion.
 """
 from pathlib import Path
@@ -34,18 +35,26 @@ def _write_unlocked(path: Path, payload: str, *, expected_revision: str | None =
     finally:temporary.unlink(missing_ok=True)
 
 
-def _file_write_lock(path: Path):
-    """Stable shared write lock, outside source trees; no config authority."""
+def _file_write_lock(path: Path, *, lock_root: Path | None = None):
+    """Stable cooperative lock; explicit roots must derive from the canonical target.
+
+    Default consumers retain operator_state_root semantics. A storage owner whose
+    root resolver differs may supply a target-local root, shared by ALL writers.
+    """
     import fcntl
     import hashlib
     import os
     import stat
     from contextlib import contextmanager
 
-    from jaeger_ai.core.instance.instance import operator_state_root
     @contextmanager
     def acquire():
-        root=operator_state_root()/'run'/'schema-write-locks';root.mkdir(parents=True,exist_ok=True)
+        if lock_root is None:
+            from jaeger_ai.core.instance.instance import operator_state_root
+            root=operator_state_root()/'run'/'schema-write-locks'
+        else:
+            root=lock_root.resolve()
+        root.mkdir(parents=True,exist_ok=True)
         key=hashlib.sha256(str(path.resolve()).encode()).hexdigest()
         descriptor=os.open(root/(key+'.lock'),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
         with os.fdopen(descriptor,'r+') as handle:
