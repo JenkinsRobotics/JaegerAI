@@ -40,7 +40,8 @@ for (const corruption of ['malformed', 'partial-eof', 'partial-proxy-error'] as 
       });
       expect(result.state).toBe('complete');
       expect(parts.filter(part => part.kind === 'confirmation')).toEqual([
-        { kind: 'confirmation', callId: 'a', title: 'Run owned_tool?', message: 'Approve owned tool?' },
+        // The replayed frame carries request r, but no tool-call identity.
+        { kind: 'confirmation', callId: 'a', requestId: 'r', toolCallId: undefined, title: 'Run owned_tool?', message: 'Approve owned tool?' },
       ]);
       expect(cursors).toHaveLength(2);
       expect(cursors[1]).toBeLessThan(2);
