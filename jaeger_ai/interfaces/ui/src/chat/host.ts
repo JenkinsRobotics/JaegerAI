@@ -25,7 +25,8 @@ export type ChatPart =
   | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny" }
   | { kind: "progress"; message: string }
   | { kind: "error"; message: string }
-  | { kind: "warning"; message: string }
+  /** `noticeId`: a status notice that a later notice with the same id replaces in place (e.g. Stop). */
+  | { kind: "warning"; message: string; noticeId?: string }
   /** PROPOSED addition (not yet in the frozen IDE Chat contract): an answered
    * question widget. Renders the question plus its options with the chosen
    * one highlighted. */
@@ -160,6 +161,14 @@ export function isSessionMissingError(error: unknown): boolean {
 
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
+  // An empty text delta carries nothing to show; appending it would open an empty answer bubble, and an
+  // empty authoritative final would erase streamed text. (Mirrors VS Code's chat model, which only
+  // merges content into the last markdown part.)
+  if (part.kind === "markdownContent" && part.text === "") return parts;
+  if (part.kind === "warning" && part.noticeId) {
+    const index = parts.findIndex(p => p.kind === "warning" && p.noticeId === part.noticeId);
+    if (index >= 0) return parts.map((p, i) => i === index ? part : p);
+  }
   if (part.kind === "userGuidance") return parts.some(row => row.kind === "userGuidance" && row.steeringId === part.steeringId) ? parts : [...parts, part];
   if (part.kind === "knowledgeContext") { const index = parts.findIndex(p => p.kind === "knowledgeContext"); return index < 0 ? [...parts, part] : parts.map((p, i) => i === index ? part : p); }
   if (part.kind === "handoff") {
@@ -170,7 +179,20 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
     const index=parts.findIndex(p=>p.kind===part.kind);
     if(index>=0)return parts.map((p,i)=>i===index?part:p);
   }
-  if (part.kind === "markdownContent" && part.role === "final") {
+  if (part.kind === "markdownContent" && part.role === "final" && part.itemId === "final") {
+    // The terminal answer (turn.finish / request outcome) is authoritative for the whole answer: it
+    // supersedes every streamed provisional AND final item, so the answer is never shown twice.
+    // Commentary (text before a tool round) is a separate, earlier message and stays.
+    const answer = parts.map((p, i) => p.kind === "markdownContent" && (p.role ?? "provisional") !== "commentary" ? i : -1).filter(i => i >= 0);
+    if (answer.length) {
+      const [first, ...rest] = answer;
+      return parts.map((p, i) => i === first ? part : p).filter((_, i) => !rest.includes(i));
+    }
+  }
+  const tail = parts[parts.length - 1];
+  // A streamed final item continues by appending (below); only a new final item replaces earlier text.
+  const continuesFinal = part.kind === "markdownContent" && tail?.kind === "markdownContent" && tail.role === "final" && (tail.itemId ?? "") === (part.itemId ?? "");
+  if (part.kind === "markdownContent" && part.role === "final" && !continuesFinal) {
     const provisional = parts.map((p, i) => p.kind === "markdownContent" && (p.role ?? "provisional") === "provisional" ? i : -1).filter(i => i >= 0);
     if (provisional.length) {
       const [first, ...rest] = provisional;

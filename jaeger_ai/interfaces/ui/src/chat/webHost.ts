@@ -92,6 +92,15 @@ export function messagesToTurns(messages: SessionMessage[] = [], agentName: (id:
 
 const message = (error: unknown) => String((error as Error)?.message ?? error);
 
+/** One Stop status line per turn: requested → settled. */
+const STOP_NOTICE = "stop";
+const STOP_OUTCOME: Partial<Record<TurnState, string>> = {
+  cancelled: "Stopped. The Gateway confirmed this request was cancelled.",
+  complete: "Stop arrived after the reply finished; the full reply is shown.",
+  failed: "Stop requested; the request ended with an error.",
+  unknown: "Stop requested, but the final outcome is unknown. Nothing was resent.",
+};
+
 export class WebHost implements ChatHost {
   readonly kind: HostKind = "web";
   capabilities: HostCapabilities = { voice: false };
@@ -193,6 +202,8 @@ export class WebHost implements ChatHost {
     let observing = true;
     let cancelRequested = false;
     let admittedRequestId = requestId;
+    /** Owned background work the Stop receipt could not confirm; stays visible after the turn settles. */
+    let unconfirmedOwned: string[] = [];
     const requestCancel = () => {
       onPart({ kind: "progress", message: "Stopping… Waiting for Gateway confirmation." });
       void this.source.cancel(request.sessionId, admittedRequestId).then(receipt=>{
@@ -202,10 +213,12 @@ export class WebHost implements ChatHost {
         if(!observing){if(children.length)onPart({kind:'warning',message:`Parent observation ended; Stop remains unconfirmed for owned work: ${children.join(', ')}. Check background work.`});return;}
         if(receipt.cancel_requested&&receipt.cancellation_confirmed===false||children.length){
           const ids=[...new Set([...(receipt.cancel_requested&&receipt.cancellation_confirmed===false?[admittedRequestId]:[]),...children])];
-          onPart({kind:'warning',message:`Stop request acknowledged; outcome is not yet confirmed for ${ids.join(', ')}. Still observing the original request.`});
+          const others=ids.filter(id=>id!==admittedRequestId);
+          unconfirmedOwned=others;
+          onPart({kind:'warning',noticeId:STOP_NOTICE,message:`Stop requested; waiting for the Gateway to confirm it stopped${others.length?` (background work still unconfirmed: ${others.join(', ')})`:''}.`});
         }
       }).catch((error: unknown) => {
-        if(observing)onPart({ kind: "warning", message: `Stop was not confirmed: ${message(error)}. Still observing this request.` });
+        if(observing)onPart({ kind: "warning", noticeId: STOP_NOTICE, message: `Stop was not confirmed: ${message(error)}. Still observing this request.` });
       });
     };
     const done = (async (): Promise<{ state: TurnState }> => {
@@ -278,6 +291,9 @@ export class WebHost implements ChatHost {
         backoffMs: this.backoffMs,
       });
       if (outcome.state !== "unknown") settleIntent(request.sessionId, requestId);
+      // Resolve the Stop notice with the settled outcome, so a stale "waiting to confirm" never outlives the turn.
+      if (cancelRequested) onPart({ kind: "warning", noticeId: STOP_NOTICE, message: (STOP_OUTCOME[outcome.state] ?? STOP_OUTCOME.unknown!)
+        + (unconfirmedOwned.length ? ` Background work still unconfirmed: ${unconfirmedOwned.join(', ')}.` : "") });
       return outcome;
     })().finally(()=>{observing=false;});
     return {
