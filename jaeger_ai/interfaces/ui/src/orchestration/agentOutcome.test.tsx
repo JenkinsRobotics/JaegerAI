@@ -21,7 +21,7 @@ describe("peer execution outcome and independent result check", () => {
   for (const event of [...fixtures, ...captured]) it(`renders reported ${event.payload.status || "unknown"}`, async () => {
     const row = eventRow(event as GatewayEvent, id => id)!;
     const handoff = handoffForId(event.payload.handoff_id, [], [row])!;
-    const adapter: OrchestrationAdapter = { gaps: derivedGaps, snapshot: async () => ({ agents: [], summaries: [], handoffs: [], tasks: [] }), exchange: async () => ({ handoff_id: handoff.id, to_agent_id: "ares", worker_session_id: null, summary: "Peer report body" }) };
+    const adapter: OrchestrationAdapter = { gaps: derivedGaps, snapshot: async () => ({ agents: [], summaries: [], handoffs: [], tasks: [] }), exchange: async () => ({ handoff_id: handoff.id, to_agent_id: "ares", worker_session_id: "", summary: "Peer report body" }) };
     render(<><ActivityFeed rows={[row]} names={id => id} stream="live" onOpenHandoff={() => {}} onNavigate={() => {}} /><HandoffInspector handoff={handoff} tasks={[]} adapter={adapter} names={id => id} onNavigate={() => {}} onClose={() => {}} /></>);
     await screen.findByText("Peer report body");
     expect(row.check?.state).toBe("pending");
