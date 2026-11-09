@@ -51,3 +51,27 @@ def test_reconcile_dry_run_and_repair(tmp_path):
     applied = reconcile(store, gateway, apply=True)
     assert len(applied["changed"]) == 2
     assert reconcile(store, gateway, apply=True)["changed"] == []
+
+
+def test_unsuccessful_peer_results_cannot_finish_backlog(tmp_path):
+    from jaeger_ai.features.backlog.store import record_hub_message
+    store = BacklogStore(tmp_path / "peer-backlog.sqlite3")
+    for status in ("failed", "error", "timeout", "cancelled", "execution_unknown"):
+        task = record_hub_message(store, "grokbot", {
+            "id": status, "thread": status, "kind": "task", "to": "ares", "title": "Work"})
+        result = {"kind": "result", "thread": status, "reply_to": status,
+                  "status_line": status, "title": "Success in arbitrary prose"}
+        assert record_hub_message(store, "mcp", result) is None
+        assert store.get(task["id"])["status"] == "in_progress"
+        changed = record_hub_message(store, "ares", result)
+        assert changed["status"] == "needs_ok" and changed["handoff_result"] == "failed"
+        assert record_hub_message(store, "ares", result) == changed
+
+
+def test_legacy_success_status_forms_and_unknown_answers():
+    from jaeger_ai.features.backlog.store import status_from_message
+    for kind in ("result", "answer"):
+        for status in ("", "done", "completed", "finished", "done, 3 commits"):
+            assert status_from_message(kind, status) == "done"
+        for status in ("unsupported", "pending", "completed_unverified", "execution-unknown", "done-ish"):
+            assert status_from_message(kind, status) == "needs_ok"

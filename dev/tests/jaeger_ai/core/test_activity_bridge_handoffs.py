@@ -119,3 +119,110 @@ async def test_grokbot_reads_activity_read_only(hub):
     assert caller_auth.prefixed_route_allowed("GET", "/v1/activity", "grokbot")
     assert not caller_auth.prefixed_route_allowed("GET", "/v1/activity")
     assert not caller_auth.prefixed_route_allowed("POST", "/v1/activity", "grokbot")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["done", "failed", "timeout", "error"])
+async def test_ares_execution_outcome_reaches_activity(hub, tmp_path, monkeypatch, outcome):
+    """Actual job/tick/MCP/HTTP/store/activity chain; only execution is synthetic."""
+    from types import SimpleNamespace
+    from jaeger_ai.features.agent_bridge import ares_worker as worker
+    client, gateway, tools = hub
+    await tools["grokbot"]["handoff_task"](
+        to="ares", task="synthetic task", thread="outcome-thread", id="outcome-task")
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(worker, "WORKSPACE", tmp_path / "work")
+    monkeypatch.setattr(worker, "WORKER_DIR", tmp_path / "work" / ".worker")
+    monkeypatch.setattr(worker, "_token", lambda: "synthetic-unused-token")
+    monkeypatch.setattr(worker, "device_ok", lambda: [])
+    executions = []
+
+    def execute(cmd, **kwargs):
+        executions.append(cmd)
+        if outcome == "timeout":
+            raise worker.subprocess.TimeoutExpired(cmd, 1)
+        if outcome == "error":
+            raise OSError("synthetic execution error")
+        return SimpleNamespace(returncode=0 if outcome == "done" else 1)
+
+    def call(tool, args):
+        return asyncio.run_coroutine_threadsafe(tools["ares"][tool](**args), loop).result(10)
+
+    monkeypatch.setattr(worker.subprocess, "run", execute)
+    monkeypatch.setattr(worker, "call", call)
+    state = worker.State(tmp_path / "worker-state.json")
+    assert await asyncio.to_thread(worker.tick, state) == 1
+    assert await asyncio.to_thread(worker.tick, worker.State(state.path)) == 0
+    assert len(executions) == 1  # unsuccessful reports never re-run execution
+    events = [i for i in await _activity(client) if i["kind"] == "handoff.result"]
+    assert len(events) == 1
+    data = events[0]["data"]
+    assert data["status"] == outcome
+    assert data["caller"] == {"caller_id": "ares", "caller_kind": "mcp"}
+    assert data["handoff_id"] == "outcome-task" and data["recipient"] == "grokbot"
+    assert "check" not in data and "verified" not in data
+    mirrored = gateway.backlog_store.by_handoff("outcome-task", "outcome-thread")
+    assert mirrored["status"] == ("done" if outcome == "done" else "needs_ok")
+    assert mirrored["handoff_result"] == ("done" if outcome == "done" else "failed")
+    # Optional cross-language trace uses the actual bridge payload, outside source.
+    import os
+    from pathlib import Path
+    if dest := os.environ.get("JAEGER_AGENT_OUTCOME_EVENTS"):
+        with Path(dest).open("a") as stream:
+            stream.write(json.dumps({"event": "handoff.result", "payload": data}) + "\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "timeout", "error", "cancelled", "execution_unknown"])
+async def test_late_peer_report_cannot_reopen_owner_cancellation(hub, status):
+    client, gateway, tools = hub
+    store = gateway.store
+    store.ensure_session("owner-cancelled")
+    store.admit_request("owner-cancelled", "synthetic cancelled work", request_id="owner-request",
+                        requested={"caller": "owner:webui", "attachment_ids": []})
+    store.complete_request("owner-request", status="cancelled", result={"reason": "owner cancellation"})
+    cancelled = store.save_handoff({"id": "cancelled-task", "request_id": "owner-request",
+        "from_agent_id": "native:jaeger", "to_agent_id": "native:builder", "session_id": "owner-cancelled",
+        "task": "synthetic cancelled work", "status": "cancelled", "result": {},
+        "metadata": {"caller_actor": "owner:webui"}})
+    requests = store.list_requests()
+    await tools["grokbot"]["handoff_task"](to="ares", task="synthetic peer work", thread="late-thread", id="cancelled-task")
+    mirrored = gateway.backlog_store.by_handoff("cancelled-task", "late-thread")
+    # Backlog has no cancellation state; its existing owner terminal state is done.
+    gateway.backlog_store.update(mirrored["id"], status="done")
+    await tools["ares"]["post_result"](to="grokbot", thread="late-thread", body="late peer report",
+                                       reply_to="cancelled-task", status=status)
+    assert store.get_handoff("cancelled-task") == cancelled
+    assert store.list_requests() == requests  # no retry admission or status mutation
+    assert gateway.backlog_store.get(mirrored["id"])["status"] == "done"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["unsupported", "unknown", "timed_out", " ", "done-ish", "completed_unverified", "pending", "execution-unknown"])
+async def test_unknown_status_result_backlog_is_unresolved(hub, status):
+    client, gateway, tools = hub
+    await tools["grokbot"]["handoff_task"](to="ares", task="synthetic", thread="unknown-thread", id="unknown-task")
+    before = gateway.store.list_requests()
+    await tools["ares"]["send_message"](id="unknown-result", to="grokbot", thread="unknown-thread",
+        kind="result", title="Successful prose is not a status", body="Done successfully",
+        reply_to="unknown-task", status_line=status)
+    mirrored = gateway.backlog_store.by_handoff("unknown-task", "unknown-thread")
+    assert mirrored["status"] == "needs_ok" and mirrored["handoff_result"] == "failed"
+    assert gateway.store.list_requests() == before
+    assert gateway.store.get_handoff("unknown-task") is None
+    data = next(i["data"] for i in await _activity(client) if i["kind"] == "handoff.result")
+    assert data["status"] == status and "check" not in data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [None, 42, [], {}])
+async def test_malformed_generic_result_status_cannot_finish_backlog(hub, status):
+    client, gateway, tools = hub
+    await tools["grokbot"]["handoff_task"](to="ares", task="synthetic", thread="malformed-thread", id="malformed-task")
+    response = await client.post("/v1/agent-messages", headers=caller_auth.client_headers("ares"), json={
+        "id": "malformed-result", "to": "grokbot", "thread": "malformed-thread", "kind": "result",
+        "title": "Result", "body": "Done", "reply_to": "malformed-task", "status_line": status})
+    assert response.status == 400
+    assert gateway.backlog_store.by_handoff("malformed-task", "malformed-thread")["status"] == "in_progress"
+    assert not [i for i in await _activity(client) if i["kind"] == "handoff.result"]
+    assert gateway.store.list_requests() == []

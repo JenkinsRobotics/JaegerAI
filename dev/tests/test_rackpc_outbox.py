@@ -9,7 +9,7 @@ def task():
 
 def test_failed_post_retries_next_tick_once(tmp_path, monkeypatch):
     monkeypatch.setattr(w, "WORKDIR", tmp_path)
-    monkeypatch.setattr(w, "run_job", lambda m: {"status": "done", "body": "PONG", "elapsed_s": 1})
+    monkeypatch.setattr(w, "run_job", lambda m: {"status": "done", "outcome": "done", "body": "PONG", "elapsed_s": 1})
     posted = []
     attempts = []
 

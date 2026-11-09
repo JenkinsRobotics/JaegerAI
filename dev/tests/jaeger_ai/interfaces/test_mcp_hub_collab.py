@@ -165,3 +165,18 @@ def test_whoami_reports_caller_and_grants(monkeypatch, tmp_path):
     assert out["caller"] == "codex" and out["session_prefix"] == "codex:"
     assert out["workspace_roots"] == [str(tmp_path)]
     assert "approve" not in out["scopes"]
+
+
+@pytest.mark.parametrize("status", ["done", "failed", "timeout", "error", "cancelled", "execution_unknown"])
+def test_reported_execution_status_is_explicit(status):
+    tools, client = _register()
+    _run(tools["post_result"], to="ares", thread="t", body="arbitrary successful prose", status=status)
+    assert client.calls[-1][2]["status_line"] == status
+
+
+@pytest.mark.parametrize("status", ["", "completed", "unknown", "DONE", "failed (exit 1)", None, 0, [], {}])
+def test_invalid_reported_execution_status_never_posts(status):
+    tools, client = _register()
+    with pytest.raises((ValueError, TypeError)):
+        _run(tools["post_result"], to="ares", thread="t", body="done", status=status)
+    assert client.calls == []

@@ -16,7 +16,11 @@ priority (`P0`/`P1`/`P2`), worker, handoff id/thread, last note, timestamps.
 Assign sends a real hub `task` message to the worker (from the calling surface,
 or `jaegerd` when a worker assigns itself) and links it. The worker's `status`
 /`result`/`question` replies on that thread move the task (result → done;
-failure/blocked/needs-ok words → needs_ok). Only the worker named on the task
+failure/blocked/needs-ok words → needs_ok). Explicit result statuses are only
+successful for `done`, `completed`, `finished`, and the legacy `done, <note>`
+form. Omitted/empty status retains historical result → done compatibility.
+Other explicit result/answer statuses, including unknown and pending, map to
+`needs_ok` for unresolved-result intervention, not approval or retry. Only the worker named on the task
 can move it. Only owner surfaces may approve a `needs_ok` task or import.
 Muse can't read the hub inbox, so assigning to Muse also appends a notice to its
 file-bridge `inbox.md`; Muse replies are not linked automatically.

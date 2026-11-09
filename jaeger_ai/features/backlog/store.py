@@ -175,9 +175,16 @@ def status_from_message(kind: str, status_line: str = "") -> str | None:
     if kind == "status":
         return "needs_ok" if any(w in s for w in ("needs ok", "needs_ok", "approval", "blocked")) else "in_progress"
     if kind in ("result", "answer"):
+        if s in ("timeout", "cancelled", "execution_unknown"):
+            return "needs_ok"
         if any(w in s for w in ("fail", "error", "blocked", "needs ok", "needs_ok", "approval", "partial")):
             return "needs_ok"
-        return "needs_ok" if s.startswith("needs") else "done"
+        # Empty is the historical omitted-status report. Preserve the documented
+        # legacy "done, <note>" form, but never treat arbitrary explicit text as
+        # successful execution. This is only a peer report, not verification.
+        if not s or s in ("done", "completed", "finished") or s.startswith("done,"):
+            return "done"
+        return "needs_ok"
     if kind == "question":
         return "needs_ok"
     return None

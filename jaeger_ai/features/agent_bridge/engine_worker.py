@@ -190,9 +190,11 @@ def run_job(engine: str, message: dict) -> dict:
         proc = subprocess.run(command(engine, prompt, jobdir), cwd=jobdir, env=env,
                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
         body = final_text(engine, proc.stdout)[-MAX_RESULT:]
-        status = "done" if proc.returncode == 0 and body else f"failed (exit {proc.returncode})"
+        outcome = "done" if proc.returncode == 0 and body else "failed"
+        status = "done" if outcome == "done" else f"failed (exit {proc.returncode})"
     except subprocess.TimeoutExpired:
         body, status = "", f"timed out after {timeout}s"
+        outcome = "timeout"
     body = body or f"{engine} run {status}; no final message."
     (jobdir / "result.md").write_text(body, encoding="utf-8")
     refs = [str(jobdir / "result.md")]
@@ -201,7 +203,7 @@ def run_job(engine: str, message: dict) -> dict:
             candidate = Path(line.partition(":")[2].strip())
             if candidate.is_relative_to(jobdir):
                 refs.append(str(candidate))
-    return {"status": status, "body": body, "refs": refs[:20], "elapsed_s": round(time.time() - started, 1)}
+    return {"status": status, "outcome": outcome, "body": body, "refs": refs[:20], "elapsed_s": round(time.time() - started, 1)}
 
 
 def tick(engine: str, state: dict, state_path: Path) -> int:
@@ -216,11 +218,11 @@ def tick(engine: str, state: dict, state_path: Path) -> int:
         try:
             result = run_job(engine, message)
         except Exception as exc:
-            result = {"status": "error", "body": f"{engine} worker error: {type(exc).__name__}: {str(exc)[:200]}", "refs": []}
+            result = {"status": "error", "outcome": "error", "body": f"{engine} worker error: {type(exc).__name__}: {str(exc)[:200]}", "refs": []}
         args = {"id": f"{engine}-result-" + hashlib.sha256(task_id.encode()).hexdigest(),
                 "to": message["from"], "thread": message["thread"], "kind": "result",
                 "title": f"{engine.title()} result: {result['status']}", "body": result["body"],
-                "refs": result["refs"], "status_line": "done", "reply_to": task_id}
+                "refs": result["refs"], "status_line": result.get("outcome", "execution_unknown"), "reply_to": task_id}
         atomic_json(outbox_path(engine, task_id), args)
         state["done"] = (state["done"] + [task_id])[-2000:]
         atomic_json(state_path, state)
