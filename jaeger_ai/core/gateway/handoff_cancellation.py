@@ -11,10 +11,59 @@ TERMINAL={'completed','failed','cancelled','denied','rejected'}
 MAX_DESCENDANTS=sum(HARD_MAX_FANOUT**depth for depth in range(1,HARD_MAX_DEPTH+1))
 
 
+
+def _native_outcome_unsettled(gateway, child):
+    """A returned resident slice is not proof that its native work settled.
+
+    This is a read-only veto, not permission to settle, resume or replay a run.
+    Retain earlier enrolled roots and native descendants even when the latest
+    Gateway receipt says completed. Legacy nonresident receipts stay unchanged.
+    """
+    if not str(child.get('native_session') or '').startswith('owner:'):
+        return False
+    try:
+        operation = gateway._running_tasks.get(child['request_id'])
+        if operation is not None and not operation.done():
+            return True
+        from jaeger_agent.cognition.lifecycle import TERMINAL as NATIVE_TERMINAL
+        from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger, SqliteRunStore
+        root = child.get('native_run_id')
+        if not root:
+            return True
+        owned = {root}
+        with gateway.store._get_conn() as conn:
+            for table in ('owner_request_journal', 'background_native_enrollments'):
+                row = conn.execute('SELECT native_runs_json FROM ' + table + ' WHERE request_id=?',
+                                   (child['request_id'],)).fetchone()
+                if row:
+                    enrolled = json.loads(row[0])
+                    if not isinstance(enrolled, list) or root not in enrolled:
+                        return True
+                    owned.update(enrolled)
+        store = SqliteRunStore()
+        native = {run.id: run for run in store.list()}
+        while True:
+            added = {run.id for run in native.values()
+                     if run.parent_run_id in owned or run.root_run_id in owned} - owned
+            if not added:
+                break
+            owned.update(added)
+        if any(ident not in native or native[ident].state not in NATIVE_TERMINAL
+               or store.latest_checkpoint(ident) is None for ident in owned):
+            return True
+        return any(effect.run_id in owned and effect.status == 'pending'
+                   for effect in SqliteEffectLedger().list())
+    except Exception:
+        # Missing/corrupt evidence cannot justify a cancellation confirmation.
+        return True
+
+
 def status(gateway,record):
     _,rid,child,bound=child_receipt(gateway,record)
     if child is not None and not bound:
         return {'handoff_id':record['id'],'outcome':'blocked','cancellation_confirmed':False,'reason':'Child ownership is not qualified; no foreign scope signalled'}
+    if child is not None and child['status'] in {'completed','failed','cancelled'} and _native_outcome_unsettled(gateway, child):
+        return {'handoff_id':record['id'],'child_request_id':rid,'child_status':child['status'],'outcome':'unknown','cancellation_confirmed':False,'confirmation_scope':'native_child_unconfirmed','reason':'Child native work or effects remain unsettled; inspect without replay'}
     if child is not None and child['status'] in {'completed','failed','cancelled'}:
         return {'handoff_id':record['id'],'child_request_id':rid,'child_status':child['status'],'outcome':'terminal','cancellation_confirmed':child['status']=='cancelled','confirmation_scope':'canonical_child_request'}
     if child is not None:
