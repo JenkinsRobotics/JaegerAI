@@ -25,6 +25,11 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
   const [snapshot, setSnapshot] = useState<ComputerSnapshot>()
   const [native, setNative] = useState<NativeStatus>()
   const [policy, setPolicy] = useState<PolicySources>()
+  const [attempt, setAttempt] = useState(0)
+  const [inventoryState, setInventoryState] = useState<'loading' | 'unavailable' | 'error' | 'ready'>('loading')
+  const [policyState, setPolicyState] = useState<'loading' | 'unavailable' | 'error' | 'ready'>('loading')
+  const [inventoryError, setInventoryError] = useState<string>()
+  const [policyError, setPolicyError] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [error, setError] = useState<string>()
@@ -34,16 +39,52 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
 
   const isNativeAvailable = Boolean(nativeBridge())
 
-  const refreshInventory = async () => {
-    if (!source?.computers) return
-    try {
-      setError(undefined)
-      const data = await source.computers()
+  useEffect(() => {
+    let live = true
+    setSnapshot(undefined)
+    setPolicy(undefined)
+    setInventoryError(undefined)
+    setPolicyError(undefined)
+    setInventoryState(source?.computers ? 'loading' : 'unavailable')
+    setPolicyState(source?.policySources ? 'loading' : 'unavailable')
+    if (source?.computers) void Promise.resolve().then(() => source.computers!()).then(data => {
+      if (!live) return
+      if (data?.scope !== 'gateway_process_only' || !Array.isArray(data.computers) ||
+          !Array.isArray(data.limits) || !data.limits.every(limit => typeof limit === 'string') ||
+          !data.computers.every(c => c && typeof c.id === 'string' && typeof c.state === 'string' &&
+            typeof c.os === 'string' && typeof c.architecture === 'string' && Number.isSafeInteger(c.process_id) &&
+            typeof c.screen_view === 'string' && typeof c.input_authorization === 'string')) {
+        throw new Error('Unqualified computer inventory response')
+      }
       setSnapshot(data)
-    } catch (e) {
-      setError(String(e))
-    }
-  }
+      setInventoryState('ready')
+    }).catch(e => {
+      if (live) { setInventoryError(String(e)); setInventoryState('error') }
+    })
+    if (source?.policySources) void Promise.resolve().then(() => source.policySources!()).then(data => {
+      if (!live) return
+      if (data?.scope !== 'bound_instance_policy_sources' || data.action_authorized !== false ||
+          data.mutation_supported !== false || data.hook_execution_performed !== false ||
+          !['observed', 'runtime_not_bound'].includes(data.state) ||
+          (data.commissioning_state !== undefined && typeof data.commissioning_state !== 'string') ||
+          (data.persistent_skill_grants !== undefined && (!data.persistent_skill_grants ||
+            typeof data.persistent_skill_grants.state !== 'string' ||
+            (data.persistent_skill_grants.count !== null && !Number.isSafeInteger(data.persistent_skill_grants.count)))) ||
+          !Array.isArray(data.sources) ||
+          !data.sources.every(s => s && typeof s.id === 'string' && typeof s.source === 'string' &&
+            ['string', 'boolean', 'number'].includes(typeof s.value)) ||
+          !Array.isArray(data.limits) || !data.limits.every(limit => typeof limit === 'string')) {
+        throw new Error('Unqualified policy-source response')
+      }
+      setPolicy(data)
+      setPolicyState('ready')
+    }).catch(e => {
+      if (live) { setPolicyError(String(e)); setPolicyState('error') }
+    })
+    return () => { live = false }
+  }, [source, attempt])
+
+  useEffect(() => () => { generation.current++ }, [])
 
   const readNative = async () => {
     if (locked.current) return
@@ -88,12 +129,6 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
   }
 
   useEffect(() => {
-    if (source?.computers) {
-      void refreshInventory()
-    }
-    if (source?.policySources) {
-      void source.policySources().then((p) => setPolicy(p)).catch(() => {})
-    }
     if (isNativeAvailable) {
       void readNative()
     }
@@ -102,12 +137,14 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
   return (
     <div className="machine-control-page jg-u-page">
       <PageHeader title="Machine"
-        subtitle="This Mac: hardware, permissions, agent apps, logs and safety rules."
+        subtitle="Gateway host observations, permissions, agent apps, logs and safety rules."
         actions={<>
-          <Badge tone={native && native.screen_os_permission !== 'granted' ? 'warn' : 'ok'}>{native && native.screen_os_permission !== 'granted' ? 'Online · permissions needed' : 'Online'}</Badge>
-          <button type="button" className="jg-u-btn" disabled={busy} onClick={() => { void refreshInventory(); if (isNativeAvailable) void readNative() }}>Refresh</button>
+          <Badge tone="warn">{inventoryState === 'loading' ? 'Loading inventory' : inventoryState === 'ready' ? (snapshot?.computers.length ? 'Gateway inventory observed' : 'No hosts reported') : 'Inventory unavailable'}</Badge>
+          <button type="button" className="jg-u-btn" disabled={busy} onClick={() => { setAttempt(value => value + 1); if (isNativeAvailable) void readNative() }}>Refresh</button>
         </>} />
       {notice && <div className="machine-control-notice" role="status">{notice}</div>}
+      {inventoryError && <div className="machine-control-error" role="alert">Inventory unavailable: {inventoryError}</div>}
+      {policyError && <div className="machine-control-error" role="alert">Safety policy unavailable: {policyError}</div>}
       {error && <div className="machine-control-error" role="alert">{error}</div>}
 
       <SubTabs label="Machine sections" active={activeSubTab} onPick={(t) => setActiveSubTab(t as typeof activeSubTab)}
@@ -162,11 +199,10 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
 
             <div className="machine-control-card">
               <div className="machine-control-card__header">
-                <h3>Gateway Execution Host</h3>
-                <span className="badge badge-info">127.0.0.1:33418</span>
+                <h3>Gateway Host Inventory</h3>
               </div>
               <p className="machine-control-card__desc">
-                Current runtime hardware host running the gateway control plane and tool executors.
+                Gateway process observations only. Serving proves transport, not verified agent or tool execution.
               </p>
               {snapshot?.computers && snapshot.computers.length > 0 ? (
                 snapshot.computers.map((c) => (
@@ -178,6 +214,10 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
                     <div className="machine-control-stat-row">
                       <span className="label">Operating System / Arch:</span>
                       <span className="value">{c.os} ({c.architecture})</span>
+                    </div>
+                    <div className="machine-control-stat-row">
+                      <span className="label">Reported Gateway State:</span>
+                      <span className="value">{c.state} (transport observation only)</span>
                     </div>
                     <div className="machine-control-stat-row">
                       <span className="label">Process ID:</span>
@@ -194,17 +234,9 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
                   </div>
                 ))
               ) : (
-                <div className="machine-control-stat-list">
-                  <div className="machine-control-stat-row">
-                    <span className="label">Architecture:</span>
-                    <span className="value">Apple Silicon / Darwin</span>
-                  </div>
-                  <div className="machine-control-stat-row">
-                    <span className="label">Gateway Status:</span>
-                    <span className="value granted">Online (Local Daemon)</span>
-                  </div>
-                </div>
+                <p className="machine-control-empty">{inventoryState === 'loading' ? 'Loading gateway inventory…' : inventoryState === 'ready' ? 'No hosts reported by gateway inventory.' : 'Gateway inventory unavailable. Hardware and runtime status are unknown.'}</p>
               )}
+              {snapshot?.limits.map((limit, index) => <p key={index} className="machine-control-card__desc">{limit}</p>)}
             </div>
           </div>
         )}
@@ -250,16 +282,17 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
                 </div>
                 <div className="policy-stat">
                   <span className="policy-stat-label">Commissioning:</span>
-                  <span className="policy-stat-val">{policy.commissioning_state ?? 'Standard'}</span>
+                  <span className="policy-stat-val">{policy.commissioning_state ?? 'Unknown'}</span>
                 </div>
                 <div className="policy-stat">
                   <span className="policy-stat-label">Persistent Skill Grants:</span>
                   <span className="policy-stat-val">
-                    {policy.persistent_skill_grants?.state ?? 'Enforced'} ({policy.persistent_skill_grants?.count ?? 0})
+                    {policy.persistent_skill_grants?.state ?? 'Unknown'} ({policy.persistent_skill_grants?.count ?? 'unknown count'})
                   </span>
                 </div>
                 <div className="policy-list">
                   <h4>Admitted Sources:</h4>
+                  {policy.sources.length === 0 && <p>No policy sources reported. This does not establish authorization.</p>}
                   <ul>
                     {policy.sources.map((s) => (
                       <li key={s.id}>
@@ -268,9 +301,11 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
                     ))}
                   </ul>
                 </div>
+                {policy.limits.map((limit, index) => <p key={index}>{limit}</p>)}
+                <p>Read-only policy observation. No action is authorized by this status.</p>
               </div>
             ) : (
-              <p className="machine-control-empty">No active policy restrictions detected or mock provider running.</p>
+              <p className="machine-control-empty">{policyState === 'loading' ? 'Loading safety policy…' : 'Safety policy unavailable. Restrictions and authorization are unknown.'}</p>
             )}
           </div>
         )}
