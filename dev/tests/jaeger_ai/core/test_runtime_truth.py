@@ -81,6 +81,24 @@ def test_webui_catalog_shape():
     assert cat.get("source") == "jaeger.runtime.truth"
 
 
+def test_provider_model_inventory_reports_context_length(monkeypatch):
+    """Every probed Ollama model row carries a positive context_length estimate
+    so the composer can render a context badge without an extra network probe."""
+    from jaeger_ai.core.models import discovery
+    from jaeger_ai.core.runtime.truth import provider_model_inventory, webui_model_catalog
+    monkeypatch.setattr(discovery, "discover_ollama", lambda *a, **k: {"online": True, "models": [
+        {"name": "glm-5.3-flash:cloud", "capabilities": ["completion"], "remote_host": "https://ollama.com"},
+        {"name": "qwen3:8b", "capabilities": ["completion"]},
+    ]})
+    monkeypatch.setattr(discovery, "discover_lmstudio", lambda *a, **k: {"online": False, "models": []})
+    inv = provider_model_inventory()
+    ollama = next(p for p in inv["providers"] if p["id"] == "ollama")
+    by_id = {m["id"]: m for m in ollama["models"]}
+    assert isinstance(by_id["glm-5.3-flash:cloud"]["context_length"], int)
+    assert by_id["glm-5.3-flash:cloud"]["context_length"] > 0
+    assert by_id["qwen3:8b"]["context_length"] == 131_072
+
+
 def test_composer_has_no_hardcoded_orphan_models():
     html = "\n".join(p.read_text() for p in Path("jaeger_ai/interfaces/ui/src/chat").glob("*.tsx") if not p.name.endswith(".test.tsx"))
     assert "openai/gpt-4o" not in html

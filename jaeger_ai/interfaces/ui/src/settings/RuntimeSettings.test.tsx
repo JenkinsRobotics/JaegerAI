@@ -1,5 +1,26 @@
-import { act } from "react";import { createRoot } from "react-dom/client";import { expect,it,vi } from "vitest";import {RuntimeSettings,runtimeChoices} from './RuntimeSettings';
+import { act } from "react";import { createRoot } from "react-dom/client";import { expect,it,vi } from "vitest";import {RuntimeSettings,runtimeChoices,contextBadge} from './RuntimeSettings';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+it('formats context windows as compact badges',()=>{
+ expect(contextBadge(1_048_576)).toBe('1M');expect(contextBadge(262_144)).toBe('262K');expect(contextBadge(200_000)).toBe('200K');expect(contextBadge(8192)).toBe('8K');expect(contextBadge(undefined)).toBe('');expect(contextBadge(null)).toBe('');expect(contextBadge(0)).toBe('');
+});
+it('shows the selected model context badge on the trigger only when the inventory reports it',async()=>{
+ const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
+ const settings={inventory:async()=>({providers:[{id:'owned',display_name:'Owned',reachable:true,configured:true,models:[{id:'big:cloud',context_length:1048576},{id:'small',context_length:8192}]}]}),read:async()=>({session_id:'owned-badge',model:'big:cloud',provider:'owned'}),save:vi.fn()};
+ try{
+  await act(async()=>root.render(<RuntimeSettings settings={settings} sessionId="owned-badge"/>));
+  const trigger=el.querySelector('.jg-runtime-trigger')!;
+  expect(trigger.querySelector('.jg-runtime-context')?.textContent).toBe('1M');
+  expect(trigger.getAttribute('title')).toContain('owned · big:cloud');
+ }finally{await act(async()=>root.unmount());el.remove();}
+});
+it('hides the badge when the inventory has no context length for the current model',async()=>{
+ const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
+ const settings={inventory:async()=>({providers:[{id:'owned',display_name:'Owned',reachable:true,configured:true,models:[{id:'mystery'}]}]}),read:async()=>({session_id:'owned-nobadge',model:'mystery',provider:'owned'}),save:vi.fn()};
+ try{
+  await act(async()=>root.render(<RuntimeSettings settings={settings} sessionId="owned-nobadge"/>));
+  expect(el.querySelector('.jg-runtime-trigger .jg-runtime-context')).toBeNull();
+ }finally{await act(async()=>root.unmount());el.remove();}
+});
 it('separates live Ollama server models into cloud and local provider groups',()=>{
  const choices=runtimeChoices({providers:[{id:'ollama',display_name:'Ollama',reachable:true,configured:true,models:[
   {id:'glm-5.3-flash:cloud',available:true,remote_host:'https://ollama.com',capabilities:['completion','tools']},

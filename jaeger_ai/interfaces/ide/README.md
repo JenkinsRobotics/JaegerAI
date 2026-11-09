@@ -1,8 +1,8 @@
 # Jaeger for VS Code — Controller Extension
 
-**The IDE extension is a controller, not a chat UI.**
+**The IDE extension is a controller and Gateway-backed native chat participant.**
 
-The Apple-Native Web UI is the ONE chat. This extension sends context, provides quick actions, and shows agent status.
+In Jaeger Desktop, `Jaeger: Open Chat` opens VS Code's native Chat workbench, where Jaeger is the default participant and native model provider. The duplicate Jaeger conversation webview is hidden there. In other IDE hosts, the same extension keeps its companion conversation panel. In every host, the Jaeger Gateway owns sessions, execution, approvals, and persistence.
 
 ---
 
@@ -10,8 +10,8 @@ The Apple-Native Web UI is the ONE chat. This extension sends context, provides 
 
 ```
 ┌─────────────────────────────────────────┐
-│     ONE Chat UI (Apple-Native Web)      │  ← The conversation happens HERE
-│     127.0.0.1:8790/?ui=apple            │
+│ Native Chat, IDE panel, or remote WebUI │  ← The conversation happens HERE
+│ Jaeger Desktop / VS Code / :8790        │
 └─────────────────────────────────────────┘
                    ▲
                    │ (Gateway :33418 — SSE/WebSocket)
@@ -44,11 +44,13 @@ Shows what Jaeger is doing:
 
 **Click the status bar to open the chat.**
 
-### 2. Sidebar Panel
+### 2. Agent Status View
 - Agent status orb (animated)
 - Current task
 - Quick action buttons (Explain, Fix, Test, Review)
 - "Open Full Chat" button
+
+Jaeger Desktop keeps this thin status view but uses the built-in Chat view for conversations. Other IDE hosts also receive the extension's conversation panel.
 
 ### 3. Code Actions (Right-Click)
 Select code → Right-click → **Ask Jaeger**:
@@ -81,8 +83,8 @@ Type `// TODO:` and get a ghost text suggestion to ask Jaeger to implement it.
 
 ## What This Extension Does NOT Do
 
-- ❌ No chat UI (the web UI is the chat)
-- ❌ No conversation history (Gateway owns it)
+- ❌ No competing chat backend (the host renders chat; the Gateway owns it)
+- ❌ No client-owned session authority (Gateway owns durable conversation state)
 - ❌ No model calls (Gateway + Ollama Cloud handle that)
 - ❌ No file editing UI (agent does that via tools)
 
@@ -104,7 +106,7 @@ Or install the `.vsix` from releases.
 jaeger gateway daemon  # Runs on 127.0.0.1:33418
 ```
 
-### 3. Start the WebUI (for chat)
+### 3. Start the WebUI (optional remote companion)
 ```bash
 ./scripts/run-jaeger-webui.sh  # Runs on 127.0.0.1:8790
 ```
@@ -159,7 +161,7 @@ jaeger gateway daemon  # Runs on 127.0.0.1:33418
 | `jaeger.gatewayUrl` | Gateway endpoint | `http://127.0.0.1:33418` |
 | `jaeger.webuiUrl` | Chat UI endpoint | Derived from gatewayUrl |
 | `jaeger.showStatusBar` | Show status bar item | `true` |
-| `jaeger.openChatInBrowser` | Open chat externally | `false` |
+| `jaeger.openChatInBrowser` | Open chat externally in non-Jaeger IDE hosts | `false` |
 | `jaeger.autoStartGateway` | Start Gateway automatically | `false` |
 | `jaeger.model` | Default model | Gateway default |
 
@@ -194,7 +196,7 @@ ide/
 ├── extension.js      # Main entry — registers commands, providers
 ├── controller.js     # JaegerController — the brain of the extension
 ├── gateway.js        # HTTP client for Jaeger Gateway
-├── conversation.js   # Legacy (to be removed)
+├── conversation.js   # Shared Gateway session controller for companion hosts
 ├── commands.js       # Slash command helpers
 ├── package.json      # Extension manifest
 └── media/            # Icons, webview assets

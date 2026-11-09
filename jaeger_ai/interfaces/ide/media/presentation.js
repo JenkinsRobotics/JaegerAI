@@ -162,6 +162,16 @@ function parseProviderModel(value) {
   return { provider: s.slice(0, sep), model: s.slice(sep + 2) };
 }
 
+// A CLI-backed active model is Gateway routing state, not an API-provider
+// override. Sending `provider: cli, model: grok` back through model resolution
+// can reinterpret the model name as the xAI API family. Preserve the native
+// picker choice while letting the Gateway keep its authoritative active route.
+function admissionModelOverride(value) {
+  const selected = typeof value === 'string' ? parseProviderModel(value) : (value || {});
+  if (selected.provider === 'cli') return { provider: '', model: '' };
+  return { provider: String(selected.provider || ''), model: String(selected.model || '') };
+}
+
 // Which provider/model rows a picker should offer, from the Gateway's
 // authoritative /v1/runtime/models shape — never a hardcoded list. A model
 // is offered only when it is both available and the provider itself is
@@ -268,7 +278,7 @@ function filterChats(sessions, query) {
 
 const exportsObject = {
   modelLabel, toolName, activityTitle, activitySummary, activityIcon, groupWorkRows, diffLines, groupActivity, failureCount, statusLabel,
-  groupTurns, selectableModels, providerModelValue, parseProviderModel, filterChats,
+  groupTurns, selectableModels, providerModelValue, parseProviderModel, admissionModelOverride, filterChats,
   groupSelectableModels, modelSelectionLabel, modelSelectionAvailable,
 };
 if (typeof module !== 'undefined') module.exports = exportsObject;

@@ -37,7 +37,7 @@ const covered = (file, patterns) => file === 'package.json' || patterns.some(p =
 
 test('the shipped require graph reaches the chat panel and conversation.js', () => {
   const graph = requireGraph();
-  for (const file of ['extension.js', 'chat-panel.js', 'conversation.js', 'native-turn.js', 'controller.js', 'copilot-bridge.js', 'gateway.js']) {
+  for (const file of ['extension.js', 'chat-panel.js', 'conversation.js', 'native-turn.js', 'language-model-provider.js', 'controller.js', 'gateway.js']) {
     assert.ok(graph.includes(file), `${file} not reachable from ${manifest.main}: ${graph}`);
   }
 });

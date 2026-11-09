@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { RuntimeAutonomy } from "../api/source";
-import { Check, Shield, ToolShield } from "../components/Icons";
+import { AlertCircle, Check, ChevronDown, Shield, ToolShield, Zap } from "../components/Icons";
 import { useExclusivePopup } from "../popups/coordinator";
 import type { ChatHost } from "./host";
 
 type AutonomyHost = Pick<ChatHost, "runtimeAutonomy" | "setRuntimeAutonomy">;
 
-const modes: Array<{ id: RuntimeAutonomy; label: string; description: string }> = [
-  { id: "ask", label: "Ask for approval", description: "Ask before outward, hardware, and destructive actions." },
-  { id: "scoped", label: "Approve for me", description: "Use saved scope and ask when a new risky action appears." },
-  { id: "auto", label: "Full access", description: "Run permitted tools automatically. Hardline blocks still require you." },
+const modes: Array<{ id: RuntimeAutonomy; label: string; description: string; icon: typeof Shield }> = [
+  { id: "ask", label: "Ask for approval", description: "Ask before outward, hardware, and destructive actions.", icon: Shield },
+  { id: "scoped", label: "Approve for me", description: "Use saved scope and ask when a new risky action appears.", icon: ToolShield },
+  { id: "auto", label: "Full access", description: "Run permitted tools automatically. Hardline blocks still require you.", icon: Zap },
 ];
 
 const fallback = modes[0];
@@ -69,8 +69,8 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
       <button
         ref={trigger}
         type="button"
-        className="jg-composer__policy"
-        aria-label={`Approval mode: ${active.label}`}
+        className="jg-composer__policy jg-autonomy__trigger"
+        aria-label={`Permissions: ${active.label}`}
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={!available}
@@ -79,6 +79,7 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
       >
         <ToolShield size={20} />
         <span className="jg-composer__policy-label">{active.label}</span>
+        <ChevronDown size={14} className="jg-composer__chevron" />
       </button>
       {open && (
         <div className="jg-autonomy-menu" role="menu" aria-label="Tool approval mode">
@@ -93,12 +94,17 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
               disabled={Boolean(saving) || !current}
               onClick={() => void select(mode.id)}
             >
-              <Shield size={18} />
+              <mode.icon size={18} />
               <span><strong>{mode.label}</strong><small>{mode.description}</small></span>
               {saving === mode.id ? <span className="jg-autonomy-saving" aria-label="Saving" /> : current === mode.id ? <Check size={18} /> : null}
             </button>
           ))}
           {error && <p className="jg-autonomy-error" role="alert">{error} <button type="button" disabled={reading} onClick={() => void refresh()}>Retry</button></p>}
+          <footer className="jg-autonomy-menu__footer">
+            <button type="button" className="jg-autonomy-menu__learn" onClick={() => setOpen(false)}>
+              <AlertCircle size={14} /> Learn more about permissions
+            </button>
+          </footer>
         </div>
       )}
     </div>

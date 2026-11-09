@@ -123,6 +123,7 @@ const vscodeMock = {
     dispose() { this.fn?.(); }
   },
   env: {
+    appName: 'Visual Studio Code',
     openExternal: mock.fn(),
   },
 };
@@ -387,6 +388,16 @@ describe('JaegerController', () => {
   });
 
   describe('openChat', () => {
+    test('uses the native chat workbench in Jaeger Desktop', async () => {
+      vscodeMock.env.appName = 'Jaeger Desktop';
+      vscodeMock.commands.executeCommand = mock.fn(async () => {});
+      await controller.openChat();
+      assert.deepEqual(vscodeMock.commands.executeCommand.mock.calls[0].arguments, [
+        'workbench.action.chat.open',
+      ]);
+      vscodeMock.env.appName = 'Visual Studio Code';
+    });
+
     test('tries Simple Browser first', async () => {
       vscodeMock.commands.executeCommand = mock.fn(async () => {});
       await controller.openChat();

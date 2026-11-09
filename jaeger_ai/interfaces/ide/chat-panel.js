@@ -9,7 +9,7 @@ const os = require('node:os');
 const { Gateway, normalizeGatewayUrl = url => url } = require('./gateway');
 const { Conversation } = require('./conversation');
 const { observeNativeTurn, renderNativeOutcome, renderNativeSources, nativeFollowups } = require('./native-turn');
-const { parseProviderModel, selectableModels, providerModelValue, modelSelectionAvailable } = require('./media/presentation');
+const { admissionModelOverride, parseProviderModel, selectableModels, providerModelValue, modelSelectionAvailable } = require('./media/presentation');
 const commands = require('./commands');
 const execFileAsync = util.promisify(execFile);
 
@@ -1105,11 +1105,12 @@ function activate(context, opts = {}) {
     }
   };
   context.subscriptions.push(
-    ...(typeof vscode.window?.registerWebviewViewProvider === 'function' ? [
+    ...(!opts.nativeOnly && typeof vscode.window?.registerWebviewViewProvider === 'function' ? [
       vscode.window.registerWebviewViewProvider('jaeger.conversation', provider, { webviewOptions: { retainContextWhenHidden: true } })
     ] : []),
     registerCommand('jaeger.open', async () => {
       if (typeof vscode.commands?.executeCommand === 'function') {
+        if (opts.nativeOnly) return vscode.commands.executeCommand('workbench.action.chat.open');
         try {
           return await vscode.commands.executeCommand('jaeger.conversation.focus');
         } catch {
@@ -1118,6 +1119,10 @@ function activate(context, opts = {}) {
       }
     }),
     registerCommand('jaeger.newConversation', () => report(async () => {
+      if (opts.nativeOnly) {
+        await vscode.commands.executeCommand('workbench.action.chat.newChat');
+        return;
+      }
       await vscode.commands.executeCommand('jaeger.conversation.focus');
       postToView({ showHistory: false });
       if (controller) await controller.newSession('New conversation', selectedWorkspace);
@@ -1126,6 +1131,10 @@ function activate(context, opts = {}) {
     registerCommand('jaeger.showHistory', () => report(async () => { postToView({ showHistory: true }); if (controller) await controller.refresh(null); })),
     registerCommand('jaeger.openSession', sessionId => report(async () => {
       if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new Error('Invalid conversation identifier.');
+      if (opts.nativeOnly) {
+        await vscode.commands.executeCommand('workbench.action.chat.open');
+        return;
+      }
       requestedSession = sessionId;
       await vscode.commands.executeCommand('jaeger.conversation.focus');
       if (viewReady && controller) {
@@ -1313,7 +1322,10 @@ function activate(context, opts = {}) {
           const workspace = contextRoot();
           const editorCommand = editorCommandPrompts[request.command];
           const ide = request.command && !editorCommand ? null : ideContext(workspace);
-          const model = parseProviderModel(configuredModel());
+          const nativeModel = request.model?.vendor === 'jaeger' && request.model?.id !== 'jaeger-gateway'
+            ? parseProviderModel(request.model.id)
+            : { provider: '', model: '' };
+          const model = admissionModelOverride(nativeModel.model ? nativeModel : parseProviderModel(configuredModel()));
           const storedToken = await getStoredCallerToken();
           if (storedToken) currentCallerToken = storedToken;
           const gw = controller?.gateway || gatewayClient();
@@ -1390,13 +1402,25 @@ function activate(context, opts = {}) {
           admittedRequest = true;
           if (cancelRequested || token?.isCancellationRequested) requestCancel();
           stream.progress(cancelRequested ? 'Cancellation requested · Checking Gateway outcome...' : 'Jaeger is working...');
-          const openConversation = () => stream.button?.({ command: 'jaeger.openSession', title: 'Open Jaeger conversation', arguments: [sessionId] });
+          const openConversation = () => {
+            if (!opts.nativeOnly) stream.button?.({ command: 'jaeger.openSession', title: 'Open Jaeger conversation', arguments: [sessionId] });
+          };
           const outcome = await observeNativeTurn({
             gateway: gw, sessionId, requestId, admitted, signal: requestAbort.signal,
             stream, ideHandler: (kind, args) => ideCall(kind, args, workspace),
-            onApproval: () => {
-              stream.progress('Waiting for your approval in the Jaeger conversation panel');
-              openConversation();
+            onApproval: async approval => {
+              if (!opts.nativeOnly) {
+                stream.progress('Waiting for your approval in the Jaeger conversation panel');
+                openConversation();
+                return;
+              }
+              const approvalId = String(approval?.approval_id || approval?.id || '');
+              if (!approvalId) throw new Error('Jaeger requested approval without an approval identifier.');
+              const prompt = String(approval?.prompt || approval?.description || approval?.kind || 'Jaeger wants to perform a protected action.');
+              stream.progress('Waiting for your approval...');
+              const choice = await vscode.window.showWarningMessage(prompt, { modal: true, detail: 'The Jaeger Gateway remains the authority for this decision.' }, 'Allow', 'Deny');
+              await gw.approve(approvalId, choice === 'Allow');
+              stream.progress(choice === 'Allow' ? 'Approved · Jaeger is working...' : 'Denied · Jaeger is updating the result...');
             },
           });
           renderNativeOutcome(stream, outcome, cancelRequested);

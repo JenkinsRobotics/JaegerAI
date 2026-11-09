@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RuntimeTier, RuntimeTierSnapshot } from '../api/source';
-import { Check, Zap } from '../components/Icons';
+import { Check, ChevronDown, Zap } from '../components/Icons';
 import { useExclusivePopup } from '../popups/coordinator';
 import type { ChatHost } from './host';
 
@@ -49,7 +49,7 @@ export function RunModeControl({host, disabled = false}: {host: ModeHost; disabl
   };
   return <div className="jg-runmode">
     <button ref={trigger} type="button" className="jg-composer__policy jg-runmode__trigger" aria-label={`Run mode: ${snapshot ? label(snapshot.tier) : 'unavailable'}`} aria-haspopup="menu" aria-expanded={open} disabled={disabled || saving} title={disabled ? 'Run mode can change after this turn' : 'Choose Chat, Agent, or Jaeger mode'} onClick={() => {setOpen(value=>!value); if (!open) void refresh();}}>
-      <Zap size={20}/><span className="jg-composer__policy-label">{snapshot ? label(snapshot.tier) : 'Run mode'}</span>
+      <Zap size={20}/><span className="jg-composer__policy-label">{snapshot ? label(snapshot.tier) : 'Run mode'}</span><ChevronDown size={14} className="jg-composer__chevron"/>
     </button>
     {open && <div className="jg-autonomy-menu jg-runmode-menu" role="menu" aria-label="Run mode">
       <header>How should Jaeger work?</header>
