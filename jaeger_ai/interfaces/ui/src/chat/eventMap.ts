@@ -19,6 +19,7 @@ const str = (value: unknown): string => (typeof value === "string" ? value : val
 export function mapEvent(event: GatewayEvent, agentName: (id: string) => string = (id) => id): MappedEvent | null {
   const p: Payload = (event.payload && typeof event.payload === "object" ? event.payload : event) as Payload;
   switch (event.event) {
+    case "turn.steer": return {parts:[{kind:"userGuidance",text:str(p.text),steeringId:str(p.steering_id ?? event.event_id)}]};
     case "turn.model": return {parts:[{kind:"modelIdentity",actualModel:p.scope==="provider_reported"&&typeof p.actual_model==="string"?p.actual_model:null,scope:p.scope==="provider_reported"?"provider_reported":"unknown"}]};
     case "turn.context": return {parts: [{kind: "modelContext", outline: modelContext(p.outline)}]};
     case "agent.knowledge": {
@@ -70,6 +71,12 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       if (p.call_id) parts.push({ kind: "toolInvocation", callId: str(p.call_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "waitingForConfirmation" });
       parts.push({ kind: "confirmation", callId: str(p.approval_id ?? p.id ?? p.call_id), title: str(p.title ?? (p.tool ? `Run ${str(p.tool)}?` : "Approval needed")), message: str(p.prompt ?? p.summary ?? p.message) });
       return { parts };
+    }
+    case "approval.resolved": {
+      const id=str(p.approval_id ?? p.id);
+      const decision=typeof p.approved==='boolean' ? (p.approved?'approve':'deny') :
+        ['deny','cancelled','expired'].includes(str(p.decision)) ? 'deny' : ['once','session','always','allow','yes'].includes(str(p.decision)) ? 'approve' : undefined;
+      return id && decision ? {parts:[{kind:'confirmation',callId:id,title:'',message:'',decision}]} : null;
     }
     case "clarify.request": {
       const choices = Array.isArray(p.choices) ? p.choices.map(str).filter(Boolean) : [];

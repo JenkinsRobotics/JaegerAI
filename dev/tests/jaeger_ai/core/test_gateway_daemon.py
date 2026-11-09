@@ -1062,3 +1062,38 @@ async def test_ollama_images_require_admitted_attachments(monkeypatch, tmp_path)
     await app._ollama_chat(f'file: {private}', model='owned-model', history=history,
         attachments=[{'safe_path': str(admitted), 'mime_type': 'image/png'}])
     assert captured[-1]['messages'][-1]['images'] == [base64.b64encode(b'admitted-image').decode()]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("complete", [True, False])
+async def test_voice_model_lane_streams_text_before_completion_and_requires_a_terminal_chunk(monkeypatch, tmp_path, complete):
+    seen = []
+    captured = {}
+    class Response:
+        status = 200
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        @property
+        def content(self):
+            async def lines():
+                yield b'{"model":"owned-model","message":{"content":"Hello"},"done":false}\n'
+                assert seen == ["Hello"]
+                if complete:
+                    yield b'{"model":"owned-model","message":{"content":" there"},"done":true,"eval_count":2}\n'
+            return lines()
+    class Session:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def post(self, url, *, json, headers=None):
+            captured.update(json)
+            return Response()
+    monkeypatch.setattr("jaeger_ai.core.gateway.server.ClientSession", Session)
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "voice-stream.sqlite3"))
+    if complete:
+        assert await app._ollama_chat("Hello", model="owned-model", on_delta=seen.append) == "Hello there"
+        assert seen == ["Hello", " there"]
+    else:
+        with pytest.raises(RuntimeError, match="before confirming completion"):
+            await app._ollama_chat("Hello", model="owned-model", on_delta=seen.append)
+    assert captured["stream"] is True

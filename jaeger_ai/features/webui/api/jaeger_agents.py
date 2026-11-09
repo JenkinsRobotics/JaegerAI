@@ -361,6 +361,32 @@ def route(handler, parsed, method: str) -> bool:
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/notifications{qs}")
 
+    if method == "GET" and path == "/api/jaeger/voice/capability":
+        from jaeger_ai.features.voice.web_speech import capability
+        from api.helpers import j
+        j(handler, capability())
+        return True
+    if method == "POST" and path == "/api/jaeger/transcribe":
+        from jaeger_ai.features.voice.web_speech import transcribe_recording, MAX_AUDIO_BYTES
+        from api.helpers import j, read_body
+        if int(handler.headers.get('Content-Length', '0') or 0) > MAX_AUDIO_BYTES * 4 // 3 + 4096:
+            j(handler, {'error': 'Recording too large'}, status=413)
+            return True
+        try:
+            raw = getattr(handler, '_json_body_bytes', None)
+            body = json.loads(raw) if raw is not None else read_body(handler)
+            if not isinstance(body, dict):
+                raise ValueError('Audio body must be an object')
+            transcript = transcribe_recording(body.get('audio_base64'), str(body.get('mime') or ''))
+            j(handler, {'transcript': transcript})
+            return True
+        except ValueError as exc:
+            j(handler, {'error': str(exc)}, status=400)
+            return True
+        except Exception as exc:
+            j(handler, {'error': 'Transcription unavailable: ' + type(exc).__name__}, status=503)
+            return True
+
     # Jaeger's local voice for the companion (Kokoro, offline).
     if method == "GET" and path == "/api/jaeger/frameworks":
         qs = f"?{parsed.query}" if parsed.query else ""

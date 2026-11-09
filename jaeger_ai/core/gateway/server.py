@@ -1779,6 +1779,7 @@ class JaegerGatewayApp:
         self.app.router.add_delete("/v1/sessions/{id}/queue/{request_id}", self.handle_delete_queue)
         self.app.router.add_post("/v1/sessions/{id}/cancel", self.handle_cancel_turn)
         self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/steer", self.handle_steer_request)
+        self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}/steer", self.handle_steer_request)
         self.app.router.add_post("/v1/sessions/{id}/reconcile", self.handle_reconcile)
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}", self.handle_get_request)
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}/changes", self.handle_file_changes)
@@ -4906,6 +4907,7 @@ class JaegerGatewayApp:
         context_references: tuple[Any, ...] = (),
         on_model_identity: Callable[[str | None], None] | None = None,
         timing: Any = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         target_model = model or DEFAULT_OLLAMA_MODEL
@@ -4973,7 +4975,7 @@ class JaegerGatewayApp:
                 },
                 *messages,
             ],
-            "stream": False,
+            "stream": on_delta is not None,
         }
         # Ollama Cloud models (":cloud" suffix, e.g. kimi-k2.7-code:cloud)
         # require Authorization: Bearer <key>. This call never attached one,
@@ -5021,12 +5023,34 @@ class JaegerGatewayApp:
             async with session.post(
                 f"{LOCKED_OLLAMA_URL}/api/chat", json=payload, headers=ollama_headers
             ) as resp:
-                body = await resp.text()
                 if resp.status >= 400:
-                    raise RuntimeError(
-                        f"Ollama chat HTTP {resp.status}: {body[:500]}"
-                    )
-                data = json.loads(body)
+                    body = await resp.text()
+                    raise RuntimeError(f"Ollama chat HTTP {resp.status}: {body[:500]}")
+                if on_delta is None:
+                    body = await resp.text()
+                    data = json.loads(body)
+                else:
+                    pieces: list[str] = []
+                    data = {}
+                    finished = False
+                    async for line in resp.content:
+                        if not line.strip():
+                            continue
+                        chunk = json.loads(line)
+                        if chunk.get("error"):
+                            raise RuntimeError(f"Ollama stream failed: {str(chunk['error'])[:500]}")
+                        data.update(chunk)
+                        piece = str((chunk.get("message") or {}).get("content") or "")
+                        if piece:
+                            pieces.append(piece)
+                            on_delta(piece)
+                        if chunk.get("done") is True:
+                            finished = True
+                            break
+                    if not finished:
+                        raise RuntimeError("Ollama stream ended before confirming completion")
+                    data["message"] = {"content": "".join(pieces)}
+                    body = json.dumps(data)
         if timing is not None:
             try:
                 timing.model_done({
@@ -5415,7 +5439,7 @@ class JaegerGatewayApp:
                 **out,
                 "text": out.get("text") or "",
                 "halt_reason": out.get("halt_reason"),
-                "status": "completed",
+                "status": out.get("status") or ("failed" if out.get("error") else "completed"),
                 "tools_used": list(self._request_tools.get(request_id, [])[before:]),
             }
 
@@ -5468,6 +5492,15 @@ class JaegerGatewayApp:
                         result = {**result, **fix, "text": fix.get("text") or result.get("text")}
                 if timing is not None and "tool calls in a single turn" in str(result.get("halt_reason") or ""):
                     timing.halt_reason = result["halt_reason"]
+                halt = str(result.get("halt_reason") or "")
+                from jaeger_ai.core.runtime.continuation import is_loop_breaker
+                if not result.get("error") and is_loop_breaker(halt) and halt not in {"needs_owner", "blocked", "yielded"}:
+                    # A backstop is an incomplete run, even if the inner loop
+                    # returned display text. Never record it as a final answer.
+                    result = {**result, "status": "failed", "error": (
+                        f"Jaeger stopped before completing this request ({halt}). "
+                        "Completed tool actions remain recorded; review activity before retrying."
+                    )}
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
@@ -5825,6 +5858,8 @@ class JaegerGatewayApp:
                 backend = LOCKED_OLLAMA_URL
                 model = self._lane_model(request_text, active_model)
                 current = self.store.get_session(session_id) or {}
+                callbacks, finish_stream = self._turn_stream_callbacks(session_id, rid)
+                stream_options = {"on_delta": callbacks.stream_delta} if fast_lane else {}
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._ollama_chat(
                         prompt,
@@ -5836,10 +5871,14 @@ class JaegerGatewayApp:
                         context_references=context_references,
                         on_model_identity=observed_model,
                         timing=timing,
+                        **stream_options,
                     ),
                     loop,
                 )
-                return {"text": chat_fut.result(), "status": "completed"}
+                try:
+                    return {"text": chat_fut.result(), "status": "completed"}
+                finally:
+                    finish_stream()
 
             from jaeger_ai.core.entity.runtime import EntityRuntime
             runtime = EntityRuntime.get_singleton()
@@ -5900,7 +5939,7 @@ class JaegerGatewayApp:
                 # The worker must know how the owner will check its result.
                 from jaeger_ai.core.tasks.owner import TURN_CARD_GUIDANCE
                 prompt = f"{TURN_CARD_GUIDANCE}\n\n" + prompt
-            if tier == "chat":
+            if tier == "chat" or self._voice_direct_lane(runtime, prepared, fast_lane=fast_lane):
                 model_only = True
             else:
                 model_only = (text_only and not actionable) or (
@@ -6132,6 +6171,24 @@ class JaegerGatewayApp:
             self._running_tasks.pop(rid, None)
             self._cancellations.release(rid)
             self._turn_timings.pop(rid, None)
+
+    @staticmethod
+    def _voice_direct_lane(runtime: Any, prepared: Any, *, fast_lane: bool) -> bool:
+        """Honor the executive's conversational voice decision at execution.
+
+        Reuse the existing model-only lane; work requests retain the full owner
+        loop and tool authority. An unavailable decision never changes lanes.
+        """
+        if not fast_lane or prepared is None:
+            return False
+        from jaeger_ai.core.entity.executive import CognitiveStrategy
+
+        try:
+            decision = runtime.executive_selector.select_strategy(prepared.event, runtime.current_state)
+            return decision.strategy == CognitiveStrategy.DIRECT_RESPONSE
+        except Exception:
+            logger.warning("voice strategy unavailable; retaining owner execution", exc_info=True)
+            return False
 
     @staticmethod
     def _lane_model(request_text: str, requested: str | None) -> str:
@@ -6757,18 +6814,29 @@ class JaegerGatewayApp:
         """
         session_id = request.match_info["id"]
         request_id = request.match_info["request_id"]
-        body = await request.json() if request.can_read_body else {}
+        reading = getattr(request, 'method', 'POST') == 'GET'
+        body = dict(request.query) if reading else await request.json() if request.can_read_body else {}
         text = str(body.get("text") or "").strip()
-        if not text:
-            return web.json_response({"error": "Steering text is required"}, status=400)
+        steering_id = str(body.get("steering_id") or "").strip()
+        if not reading and not steering_id:
+            steering_id = uuid.uuid4().hex
+        if len(steering_id) > 128 or len(text) > 64000:
+            return web.json_response({"error": "Steering message is too large"}, status=400)
         row = self.store.get_request(request_id)
         if row is None or row.get("session_id") != session_id:
             return web.json_response({"error": "Request not found"}, status=404)
+        if steering_id:
+            original = self.store.steering_record(session_id, request_id, steering_id)
+            if original:
+                if not reading and original.get('text') != text:
+                    return web.json_response({'error': 'Steering identity already used for different text'}, status=409)
+                return web.json_response({**original, 'session_id': session_id, 'steered': True})
+        if reading:
+            return web.json_response({'error': 'Steering receipt not found'}, status=404)
+        if not text:
+            return web.json_response({"error": "Steering text is required"}, status=400)
         if row.get("status") in {"completed", "failed", "cancelled", "execution_unknown"}:
-            return web.json_response(
-                {"error": "Request is already terminal", "request_id": request_id},
-                status=409,
-            )
+            return web.json_response({"error": "Request is already terminal", "request_id": request_id}, status=409)
         agent = self._active_agents.get(request_id)
         if agent is None:
             return web.json_response(
@@ -6789,12 +6857,12 @@ class JaegerGatewayApp:
             "request_id": request_id,
             "text": text,
             "queued": True,
+            **({"steering_id": steering_id} if steering_id else {}),
         })
         return web.json_response({
-            "session_id": session_id,
-            "request_id": request_id,
-            "steered": True,
-            "queued": True,
+            "session_id": session_id, "request_id": request_id,
+            "steered": True, "queued": True,
+            **({"steering_id": steering_id} if steering_id else {}),
         })
 
     async def handle_reconcile(self, request: web.Request) -> web.Response:
@@ -7654,6 +7722,7 @@ class JaegerGatewayApp:
         row_origin = ((resolved or {}).get("metadata") or {}).get("origin")
         if resolved is not None:
             payload["session_id"] = resolved.get("session_id")
+            payload["request_id"] = resolved.get("request_id")
         if row_origin:
             payload["origin"] = row_origin
         for key, value in (extra or {}).items():

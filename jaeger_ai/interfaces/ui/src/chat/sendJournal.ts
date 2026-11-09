@@ -3,7 +3,7 @@
  * full store fails before dispatch; unknown entries are never deleted/replayed.
  */
 export interface SendIntent {
-  version: 1; deviceDraft?: boolean; sessionId: string; requestId: string; text: string;
+  version: 1; fastLane?: boolean; deviceDraft?: boolean; sessionId: string; requestId: string; text: string;
   draftBody?: string; quoteKey?: string;
   attachmentIds: string[]; draftFileIds?: string[]; phase: "preparing" | "submitting" | "accepted" | "unknown";
 }

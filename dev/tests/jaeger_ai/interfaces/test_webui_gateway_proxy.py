@@ -482,3 +482,11 @@ def test_message_read_state_proxy_preserves_method_and_body(overlay, monkeypatch
     monkeypatch.setattr(overlay, '_proxy', lambda handler, verb, path, payload=None: calls.append((verb, path, payload)) or True)
     assert _route(overlay, '/v1/sessions/owned/read-state', method)
     assert calls == [(method, '/v1/sessions/owned/read-state', body if method == 'POST' else None)]
+
+@pytest.mark.parametrize('method,path', [
+    ('POST','/v1/sessions/s/requests/r/steer'),
+    ('GET','/v1/sessions/s/requests/r/steer?steering_id=guidance-1'),
+])
+def test_live_steering_and_receipt_reconciliation_use_gateway_proxy(overlay, method, path):
+    assert _route(overlay,path,method)
+    assert overlay._calls == [(method,path)]
