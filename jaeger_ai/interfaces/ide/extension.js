@@ -28,7 +28,7 @@ const {
   JaegerInlineCompletionsProvider,
   JaegerSidebarProvider,
 } = require('./controller');
-const { activateBridge } = require('./copilot-bridge');
+const { registerJaegerLanguageModelProvider } = require('./language-model-provider');
 const chatPanel = require('./chat-panel');
 
 // Commands the controller below registers itself. The chat panel owns the rest:
@@ -47,13 +47,22 @@ let controller = null;
 /** @type {vscode.OutputChannel} */
 let output;
 
+function isJaegerDesktop() {
+  return /^(?:Jaeger(?: Desktop)?|VS Code Chat)$/i.test(String(vscode.env?.appName || '').trim());
+}
+
 function activate(context) {
   output = vscode.window.createOutputChannel('Jaeger');
   context.subscriptions.push(output);
   output.appendLine('[jaeger] Extension activating (Controller mode)...');
+  const nativeChat = isJaegerDesktop();
+  void vscode.commands.executeCommand('setContext', 'jaeger.nativeChat', nativeChat);
 
   // Create gateway client
   const gateway = createGatewayClient();
+
+  // Make the Gateway a first-class native model for Jaeger Desktop's built-in chat.
+  registerJaegerLanguageModelProvider(vscode, context, gateway, output);
 
   // Create controller
   controller = new JaegerController(context, gateway);
@@ -215,7 +224,7 @@ function activate(context) {
 
   // The in-IDE chat: the conversation panel (media/index.html + view.js on
   // conversation.js) and the streaming @jaeger participant (native-turn.js).
-  chatPanel.activate(context, { skip: CONTROLLER_OWNED, output });
+  chatPanel.activate(context, { skip: CONTROLLER_OWNED, output, nativeOnly: nativeChat });
 
   // ─────────────────────────────────────────────────────────
   // Status bar click → open chat
@@ -223,31 +232,13 @@ function activate(context) {
 
   // Already handled by controller's status bar item
 
-  // Copilot bridge: Jaeger on this Mac can use VS Code's Copilot models (no API keys).
-  // The bridge publishes ~/.jaeger/run/vscode-bridge.json for the operator's
-  // Jaeger. Only an installed (Production) extension may do that: a dev host or
-  // test run would overwrite the real file. JAEGER_COPILOT_BRIDGE=off also opts out.
-  const bridgeOff = copilotBridgeBlocked(context);
-  if (bridgeOff) output.appendLine(`[jaeger] Copilot bridge off: ${bridgeOff}`);
-  else activateBridge(vscode, context, (line) => output.appendLine(line));
-
   output.appendLine('[jaeger] Extension activated successfully.');
-  output.appendLine('[jaeger] Chat UI: Open with Cmd+Shift+J or click status bar.');
+  output.appendLine(`[jaeger] Chat UI: ${nativeChat ? 'VS Code native Chat' : 'Jaeger conversation panel'}.`);
 
   return {
     controller,
     getGateway: () => gateway,
   };
-}
-
-function copilotBridgeBlocked(context, env = process.env) {
-  if (String(env.JAEGER_COPILOT_BRIDGE || '').toLowerCase() === 'off') return 'JAEGER_COPILOT_BRIDGE=off';
-  const production = vscode.ExtensionMode ? vscode.ExtensionMode.Production : 1;
-  if (context?.extensionMode !== production) {
-    const names = { 2: 'Development', 3: 'Test' };
-    return `extension mode ${names[context?.extensionMode] || String(context?.extensionMode)} (bridge runs only when installed)`;
-  }
-  return '';
 }
 
 function deactivate() {
@@ -285,4 +276,4 @@ try { contract = require('./contract.json'); } catch (_) {}
 // Exports
 // ─────────────────────────────────────────────────────────────
 
-module.exports = { activate, deactivate, copilotBridgeBlocked };
+module.exports = { activate, deactivate };

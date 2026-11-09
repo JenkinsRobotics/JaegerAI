@@ -519,7 +519,7 @@ details.reasoning .content {
   height: 100%;
 }
 
-/* Footer & Unified Composer Card (Copilot / Claude Style) */
+/* Footer & unified Jaeger composer card. */
 footer {
   flex: 0 0 auto; position: relative; padding: 8px 12px 8px; background: var(--vscode-sideBar-background, #181818);
 }
@@ -1383,7 +1383,7 @@ body:not(.has-conversation) .app-header { display: none; }
 /* Original Codicon artwork; see the CC BY 4.0 attribution in notices. */
 .codicon-asset { display: inline-block; flex: 0 0 16px; width: 16px; height: 16px; background-color: currentColor; mask: var(--codicon-image) center / contain no-repeat; }
 .icon-agent { --codicon-image: url('./codicons/agent.svg'); }
-.icon-copilot { --codicon-image: url('./codicons/copilot.svg'); }
+.icon-jaeger { --codicon-image: url('./jaeger.svg'); }
 .icon-vm { --codicon-image: url('./codicons/vm.svg'); }
 .icon-shield { --codicon-image: url('./codicons/shield.svg'); }
 .icon-send { --codicon-image: url('./codicons/send.svg'); }

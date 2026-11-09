@@ -39,7 +39,7 @@ async function observeNativeTurn({ gateway, sessionId, requestId, admitted, sign
               if (live) { stream.markdown(delta); text += delta; }
               else if (looksLikeAnswer(segment)) { live = true; stream.markdown(segment); text = segment; }
             }
-          } else if (event.event === 'approval.request') onApproval?.(data);
+          } else if (event.event === 'approval.request') await onApproval?.(data);
           else if (event.event === 'approval.resolved') stream.progress('Approval resolved · Jaeger is working...');
           else if (event.event === 'turn.progress') stream.progress(String(data.text || 'Jaeger is working...'));
           else if (event.event === 'tool.started') {
@@ -115,7 +115,7 @@ function nativeFollowups(result) {
 
 function renderNativeOutcome(stream, { receipt, text, held = '' }, cancelled) {
   if (!receipt || !terminal.has(receipt.status)) {
-    stream.markdown(`\n\n**${cancelled ? 'Cancellation requested' : 'Connection interrupted'}:** the Gateway has not confirmed the outcome. Open this conversation in Jaeger to check its status; do not resend the task automatically.`);
+    stream.markdown(`\n\n**${cancelled ? 'Cancellation requested' : 'Connection interrupted'}:** the Gateway has not confirmed the outcome. Check the Gateway session status before resending the task.`);
     return;
   }
   if (receipt.status !== 'completed') {

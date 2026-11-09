@@ -34,6 +34,10 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+function isJaegerDesktop() {
+  return /^(?:Jaeger(?: Desktop)?|VS Code Chat)$/i.test(String(vscode.env?.appName || '').trim());
+}
+
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
@@ -504,6 +508,15 @@ class JaegerController {
    * Tries: 1) VS Code Simple Browser, 2) External browser
    */
   async openChat() {
+    // The Jaeger Code OSS shell already owns a mature native chat surface. Keep
+    // the Gateway-backed @jaeger participant inside that surface instead of
+    // opening the WebUI in an editor tab. Other IDE hosts remain thin
+    // controllers for the shared Mac/Web chat.
+    if (isJaegerDesktop()) {
+      await vscode.commands.executeCommand('workbench.action.chat.open');
+      return;
+    }
+
     const config = vscode.workspace.getConfiguration('jaeger');
     const gatewayUrl = normalizeGatewayUrl(config.get('gatewayUrl') || 'http://127.0.0.1:33418');
     const webuiUrl = config.get('webuiUrl') || gatewayUrl.replace(':33418', ':8790'); // WebUI proxy port

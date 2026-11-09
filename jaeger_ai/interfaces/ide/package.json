@@ -1,8 +1,8 @@
 {
   "name": "jaeger-ide",
   "displayName": "Jaeger",
-  "description": "Controller for your Jaeger AI agent. Quick actions, code context, and status \u2014 the chat lives in the Apple-Native UI.",
-  "version": "0.3.0",
+  "description": "The built-in Jaeger Desktop agent and thin IDE controller for the Jaeger Gateway.",
+  "version": "0.4.1",
   "publisher": "jenkins-robotics",
   "icon": "media/jaeger.png",
   "engines": {
@@ -14,6 +14,10 @@
   ],
   "extensionKind": [
     "ui"
+  ],
+  "enabledApiProposals": [
+    "chatProvider",
+    "defaultChatParticipant"
   ],
   "main": "./extension.js",
   "files": [
@@ -28,11 +32,12 @@
     "VERIFICATION.md",
     "THIRD_PARTY_NOTICES.md",
     "native-turn.js",
+    "language-model-provider.js",
     "build.json",
-    "copilot-bridge.js",
     "chat-panel.js"
   ],
   "activationEvents": [
+	"*",
     "onView:jaeger.controller",
     "onView:jaeger.conversation",
     "onStartupFinished"
@@ -43,6 +48,13 @@
     }
   },
   "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "jaeger",
+        "displayName": "Jaeger Gateway",
+        "icon": "media/jaeger.svg"
+      }
+    ],
     "commands": [
       {
         "command": "jaeger.openChat",
@@ -110,16 +122,6 @@
       {
         "command": "jaeger.selectModel",
         "title": "Jaeger: Select Model"
-      },
-      {
-        "command": "jaeger.copilotBridge.allow",
-        "title": "Allow Copilot for Jaeger",
-        "category": "Jaeger"
-      },
-      {
-        "command": "jaeger.copilotBridge.toggle",
-        "title": "Turn Copilot bridge on/off",
-        "category": "Jaeger"
       }
     ],
     "viewsContainers": {
@@ -143,7 +145,8 @@
         {
           "type": "webview",
           "id": "jaeger.conversation",
-          "name": "Chat"
+          "name": "Chat",
+          "when": "!jaeger.nativeChat"
         }
       ]
     },
@@ -227,8 +230,7 @@
       ],
       "commandPalette": [
         {
-          "command": "jaeger.openChat",
-          "when": "editorTextFocus || workspaceFolderCount >= 1"
+          "command": "jaeger.openChat"
         },
         {
           "command": "jaeger.explainCode",
@@ -307,8 +309,7 @@
       {
         "command": "jaeger.openChat",
         "key": "ctrl+shift+j",
-        "mac": "cmd+shift+j",
-        "when": "editorTextFocus"
+        "mac": "cmd+shift+j"
       },
       {
         "command": "jaeger.ask",
@@ -366,11 +367,6 @@
           "scope": "window",
           "description": "Default model for new turns (\"provider::model\")."
         },
-        "jaeger.copilotBridge.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Let Jaeger on this Mac use your VS Code Copilot models over a private loopback bridge (127.0.0.1, new token each VS Code start, ~/.jaeger/run/vscode-bridge.json). No API keys."
-        },
         "jaeger.testCommand": {
           "type": "string",
           "default": "",
@@ -386,6 +382,12 @@
         "fullName": "Jaeger AI",
         "description": "Streams answers from your Jaeger agent in the IDE.",
         "icon": "media/jaeger.svg",
+        "isDefault": true,
+        "modes": [
+          "agent",
+          "ask",
+          "edit"
+        ],
         "commands": [
           {
             "name": "verify",

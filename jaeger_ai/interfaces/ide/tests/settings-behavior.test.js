@@ -13,8 +13,9 @@ function activateWith(settings) {
     languages: { registerCodeActionsProvider: () => ({ dispose() {} }), registerInlineCompletionItemProvider: () => ({ dispose() {} }) },
     CodeActionKind: { QuickFix: {}, Refactor: {}, RefactorRewrite: {}, RefactorExtract: {} },
     chat: { createChatParticipant: () => ({ dispose() {} }) },
+    env: { appName: 'Visual Studio Code' },
     Uri: { joinPath: () => ({}) },
-    commands: { registerCommand: (name, fn) => { commands.set(name, fn); return { dispose() {} }; } },
+    commands: { registerCommand: (name, fn) => { commands.set(name, fn); return { dispose() {} }; }, executeCommand: async () => {} },
   };
   class Gateway {
     constructor(url, options) { this.url = url; this.options = options; }
@@ -28,7 +29,6 @@ function activateWith(settings) {
       if (request === 'vscode') return vscode;
       if (request === './gateway') return { Gateway, GatewayError: Error, callerToken: () => 'fallback-token' };
       if (request === './controller') return { JaegerController: Controller, JaegerCodeActionProvider: class {}, JaegerInlineCompletionsProvider: class {}, JaegerSidebarProvider: class {} };
-      if (request === './copilot-bridge') return { activateBridge() {} };
       if (request === './chat-panel') return { activate() {} };
     }
     return original.call(this, request, parent, isMain);

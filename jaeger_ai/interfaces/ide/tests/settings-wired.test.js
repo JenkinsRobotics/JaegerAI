@@ -17,7 +17,7 @@ function fixture(settings = {}) {
     },
     window: { createStatusBarItem: () => item },
     commands: { executeCommand: async (...args) => { events.push(['simple', ...args]); } },
-    env: { openExternal: async uri => { events.push(['external', uri.value]); } },
+    env: { appName: settings.appName || 'Visual Studio Code', openExternal: async uri => { events.push(['external', uri.value]); } },
     Uri: { parse: value => ({ value }) },
     ViewColumn: { Beside: 2 }, StatusBarAlignment: { Left: 1 },
     ThemeColor: class {}, Disposable: class { constructor(fn) { this.dispose = fn; } },
@@ -53,6 +53,28 @@ test('openChatInBrowser opens externally without Simple Browser', async () => {
   assert.deepEqual(f.events, [['external', 'http://127.0.0.1:8790/?ui=apple']]);
 });
 
+test('Jaeger Desktop opens the native chat workbench', async () => {
+  const f = fixture({ appName: 'Jaeger Desktop' });
+  await f.controller.openChat();
+  assert.deepEqual(f.events, [[
+    'simple',
+    'workbench.action.chat.open',
+  ]]);
+});
+
+test('Open Chat stays available without an editor or workspace', () => {
+  const pkg = require('../package.json');
+  const palette = pkg.contributes.menus.commandPalette.find(
+    entry => entry.command === 'jaeger.openChat'
+  );
+  const keybinding = pkg.contributes.keybindings.find(
+    entry => entry.command === 'jaeger.openChat'
+  );
+
+  assert.equal(palette.when, undefined);
+  assert.equal(keybinding.when, undefined);
+});
+
 test('model setting reaches the Gateway turn body', async () => {
   const f = fixture({ model: 'ollama::test-model' });
   f.controller.openChat = async () => {};
@@ -77,23 +99,4 @@ test('webuiUrl overrides derived chat URL for normal and session chat', async ()
   ]);
   await f.controller.openChatSession('agent-native:jaeger');
   assert.equal(f.events.at(-1)[1], 'http://127.0.0.1:9999/base/chat?session=agent-native%3Ajaeger');
-});
-
-test('copilotBridge.enabled starts and stops bridge on configuration change', () => {
-  const { activateBridge } = require('../copilot-bridge');
-  let enabled = true, onChange;
-  const calls = [];
-  const vscode = {
-    lm: { selectChatModels() {} },
-    workspace: {
-      getConfiguration: () => ({ get: () => enabled }),
-      onDidChangeConfiguration: fn => { onChange = fn; return { dispose() {} }; },
-    },
-    commands: { registerCommand: () => ({ dispose() {} }) },
-  };
-  const context = { subscriptions: [] };
-  activateBridge(vscode, context, () => {}, () => ({ start: () => { calls.push('start'); return Promise.resolve(); }, stop: () => calls.push('stop') }));
-  enabled = false; onChange({ affectsConfiguration: key => key === 'jaeger.copilotBridge' });
-  enabled = true; onChange({ affectsConfiguration: key => key === 'jaeger.copilotBridge' });
-  assert.deepEqual(calls, ['start', 'stop', 'start']);
 });

@@ -524,6 +524,7 @@ def canonical_runtime_inventory(
         tool_use = "tools" in ollama_caps or "REACT" in certified_roles
         is_cloud = bool(m.get("remote_host")) or name.endswith(":cloud") or name.endswith("-cloud")
 
+        from jaeger_ai.core.models.ollama_context import estimate_model_context_length
         model_entry = {
             "id": f"@ollama-cloud:{name}" if is_cloud else f"@ollama-local:{name}",
             "name": name,
@@ -534,6 +535,7 @@ def canonical_runtime_inventory(
             "failed_roles": failed_roles,
             "multimodal": multimodal,
             "tool_use": tool_use,
+            "context_length": estimate_model_context_length(name),
         }
 
         if is_cloud:

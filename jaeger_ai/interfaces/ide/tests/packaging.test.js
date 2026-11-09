@@ -7,7 +7,7 @@ const test = require('node:test');
 const root = path.join(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const packager = fs.readFileSync(path.join(root, 'package_extension.py'), 'utf8');
-const hostModules = ['extension.js', 'conversation.js', 'gateway.js', 'commands.js', 'native-turn.js', 'controller.js', 'copilot-bridge.js', 'chat-panel.js'];
+const hostModules = ['extension.js', 'conversation.js', 'gateway.js', 'commands.js', 'native-turn.js', 'language-model-provider.js', 'controller.js', 'chat-panel.js'];
 
 // A local require that is missing from the shipped file list only fails once the
 // extension is installed (activation throws), so it is checked here.

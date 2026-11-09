@@ -15,6 +15,8 @@ const registeredCommands = new Map();
 const chatParticipants = new Map();
 let chooseItem = items => items[0];
 let catalog = { providers: [] };
+let approvalChoice = 'Allow';
+const approvalPrompts = [];
 const mockVscode = {
   ConfigurationTarget: { Global: 1 },
   StatusBarAlignment: { Left: 1, Right: 2 },
@@ -50,7 +52,7 @@ const mockVscode = {
     showQuickPick: async items => chooseItem(items),
     showInformationMessage: () => {},
     showErrorMessage: () => {},
-    showWarningMessage: () => {},
+    showWarningMessage: async (...args) => { approvalPrompts.push(args); return approvalChoice; },
     registerWebviewViewProvider: () => ({ dispose: () => {} }),
     onDidChangeActiveTextEditor: () => ({ dispose: () => {} }),
     activeTextEditor: undefined,
@@ -114,12 +116,9 @@ class GatewayStub {
   async receipt() { return { status: 'running' }; }
   async *events() {}
   async cancel() { return {}; }
+  async approve(id, approved) { this.approved = { id, approved }; return { approval_id: id, approved }; }
 }
 class GatewayErrorStub extends Error {}
-// Guard: the real Copilot bridge writes ~/.jaeger/run/vscode-bridge.json once a
-// vscode.lm API is present; a unit test must never touch operator state.
-const bridgePath = require.resolve('../copilot-bridge');
-require.cache[bridgePath] = { id: bridgePath, filename: bridgePath, loaded: true, exports: { activateBridge() {} } };
 const gwPath = require.resolve('../gateway');
 require.cache[gwPath] = { id: gwPath, filename: gwPath, loaded: true,
   exports: { Gateway: GatewayStub, GatewayError: GatewayErrorStub, localEndpoint: u => u, decodeSSE: async function* () {} } };
@@ -153,6 +152,8 @@ function wireExtension(options = {}) {
     ...['openai', 'anthropic'].map(id => ({ id, reachable: true, models: [{ id: 'gpt-4', available: true }] })),
   ] };
   chooseItem = items => items[0];
+  approvalChoice = 'Allow';
+  approvalPrompts.length = 0;
   const posted = [];
   let msgHandler, disposeHandler, messageDisposed = false;
   const mockView = {
@@ -174,7 +175,7 @@ function wireExtension(options = {}) {
     return { dispose: () => {} };
   };
   // Re-activate to pick up the updated mock
-  activate(context);
+  activate(context, { nativeOnly: Boolean(options.nativeOnly) });
   const send = msg => msgHandler && msgHandler(msg);
   return { send, posted, gateway: stubGateway, dispose: () => disposeHandler?.(), messageDisposed: () => messageDisposed };
 }
@@ -225,6 +226,68 @@ test('native chat participant uses one Gateway-owned session across turns', asyn
   assert.equal(second.metadata.jaegerSessionId, sessionId);
   // Short lead-in text is held until confirmed, so each turn shows the answer once.
   assert.deepEqual(responses, ['Jaeger answer', 'Jaeger answer']);
+});
+
+test('native chat participant sends the model selected in the VS Code picker', async () => {
+  const previousModel = jaegerModelSetting;
+  jaegerModelSetting = 'openai::configured-model';
+  try {
+    const wired = wireExtension();
+    wired.send({ type: 'ready' });
+    await waitFor(() => wired.gateway.instance !== undefined);
+    const handler = chatParticipants.get('jaeger.chatParticipant');
+    const gateway = wired.gateway.instance;
+    gateway.create = async body => ({ session_id: body.session_id });
+    gateway.send = async (sessionId, body) => {
+      gateway.sent = { sessionId, ...body };
+      return { start_event_id: 1, status: 'completed' };
+    };
+    gateway.receipt = async () => ({ status: 'completed', result: { output: 'Selected model answer' } });
+
+    const responses = [];
+    await handler(
+      { prompt: 'Use the selected model', model: { vendor: 'jaeger', id: 'ollama-cloud::chosen-model' } },
+      { history: [] },
+      { markdown: text => responses.push(text), progress() {} },
+      { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) },
+    );
+
+    assert.equal(gateway.sent.provider, 'ollama-cloud');
+    assert.equal(gateway.sent.model, 'chosen-model');
+    assert.deepEqual(responses, ['Selected model answer']);
+  } finally {
+    jaegerModelSetting = previousModel;
+  }
+});
+
+test('native chat participant leaves the active CLI picker choice to Gateway routing', async () => {
+  const previousModel = jaegerModelSetting;
+  jaegerModelSetting = 'openai::configured-model';
+  try {
+    const wired = wireExtension();
+    wired.send({ type: 'ready' });
+    await waitFor(() => wired.gateway.instance !== undefined);
+    const handler = chatParticipants.get('jaeger.chatParticipant');
+    const gateway = wired.gateway.instance;
+    gateway.create = async body => ({ session_id: body.session_id });
+    gateway.send = async (sessionId, body) => {
+      gateway.sent = { sessionId, ...body };
+      return { start_event_id: 1, status: 'completed' };
+    };
+    gateway.receipt = async () => ({ status: 'completed', result: { output: 'CLI answer' } });
+
+    await handler(
+      { prompt: 'Use the active CLI runtime', model: { vendor: 'jaeger', id: 'cli::grok' } },
+      { history: [] },
+      { markdown() {}, progress() {} },
+      { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) },
+    );
+
+    assert.equal('provider' in gateway.sent, false);
+    assert.equal('model' in gateway.sent, false);
+  } finally {
+    jaegerModelSetting = previousModel;
+  }
 });
 
 test('native chat answers editor requests once through the shared panel bridge', async () => {
@@ -530,6 +593,35 @@ test('native chat approval action opens the owning existing conversation', async
   gateway.session = async id => { opened.push(id); return { session_id: id, status: 'idle', messages: [] }; };
   await registeredCommands.get(buttons[0].command)(...buttons[0].arguments);
   assert.ok(opened.includes(result.metadata.jaegerSessionId), JSON.stringify(wired.posted.filter(x => x.error)));
+});
+
+test('Jaeger Desktop resolves approvals through a native VS Code modal', async () => {
+  const originals = Object.fromEntries(['create', 'send', 'events', 'receipt'].map(key => [key, GatewayStub.prototype[key]]));
+  try {
+    wireExtension({ nativeOnly: true });
+    GatewayStub.prototype.create = async function (body) { return { session_id: body.session_id }; };
+    GatewayStub.prototype.send = async function (sid, body) { this.sent = { sid, ...body }; return { status: 'running', start_event_id: 1 }; };
+    GatewayStub.prototype.events = async function* () {
+      yield { event_id: 1, event: 'approval.request', data: { request_id: this.sent.request_id, approval_id: 'approval-native', prompt: 'Allow protected write?' } };
+      yield { event_id: 2, event: 'turn.finish', data: { request_id: this.sent.request_id } };
+    };
+    GatewayStub.prototype.receipt = async () => ({ status: 'completed', result: { output: 'Done' } });
+    const buttons = [], progress = [];
+    await chatParticipants.get('jaeger.chatParticipant')({ prompt: 'Inspect' }, { history: [] },
+      { markdown() {}, progress: text => progress.push(text), button: button => buttons.push(button) },
+      { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) });
+    const gateway = stubGateway.instance;
+    assert.equal(approvalPrompts[0][0], 'Allow protected write?');
+    assert.deepEqual(gateway.approved, { id: 'approval-native', approved: true });
+    assert.equal(buttons.length, 0);
+    assert.match(progress.join('\n'), /Waiting for your approval/);
+    assert.match(progress.join('\n'), /Approved/);
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete GatewayStub.prototype[key];
+      else GatewayStub.prototype[key] = value;
+    }
+  }
 });
 
 test('native chat cancellation during admission is sent once after acceptance and remains unconfirmed', async () => {

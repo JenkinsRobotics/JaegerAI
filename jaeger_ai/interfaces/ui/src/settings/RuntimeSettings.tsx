@@ -3,7 +3,15 @@ import type { ModelInventory, ModelSettings, ModelChoiceSnapshot, ModelChoiceInt
 import { useExclusivePopup } from "../popups/coordinator";
 import { Bot, Gauge, ChevronDown, Search, X } from "../components/Icons";
 
-type RuntimeChoice = { id: string; model: string; provider: string; providerLabel: string; group: string; groupLabel: string; certified?: boolean };
+type RuntimeChoice = { id: string; model: string; provider: string; providerLabel: string; group: string; groupLabel: string; certified?: boolean; contextLength?: number | null };
+
+/** Short human form of a context window: 1M / 262K / 128K. */
+export const contextBadge = (value?: number | null) => {
+  if (!value || value <= 0) return "";
+  if (value >= 1_000_000) return `${(Math.round(value / 100_000) / 10).toString().replace(/\.0$/, "")}M`;
+  if (value >= 1000) return `${Math.round(value / 1000)}K`;
+  return value.toLocaleString("en-US");
+};
 
 const isCloudModel = (id: string, remoteHost?: string | null) => Boolean(remoteHost) || id.endsWith(":cloud") || id.endsWith("-cloud");
 export function runtimeChoices(inventory?: ModelInventory): RuntimeChoice[] {
@@ -20,6 +28,7 @@ export function runtimeChoices(inventory?: ModelInventory): RuntimeChoice[] {
         group: ollama ? cloud ? "ollama-cloud" : "ollama-local" : provider.id,
         groupLabel: ollama ? cloud ? "Ollama Cloud" : "Ollama Local" : provider.display_name,
         certified: model.usable_for_react,
+        contextLength: model.context_length,
       };
     })) ?? [];
 }
@@ -74,6 +83,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
   const filteredChoices = choices.filter(model => (providerGroup === "all" || model.group === providerGroup) && (!query.trim() || `${model.model} ${model.providerLabel} ${model.groupLabel}`.toLowerCase().includes(query.trim().toLowerCase())));
   const currentChoice = base ? choice(base) : "";
   const currentLabel = currentChoice ? currentChoice.replace(/^@/, "").replace(":", " · ") : inventory?.active?.model || "Default model";
+  const currentContext = currentChoice ? runtimeChoices(inventory).find(model => model.id === currentChoice)?.contextLength : undefined;
   const finish=async(receipt:ModelChoiceReceipt,intent:ModelChoiceIntent,owner:number)=>{
     if(owner!==generation.current)return;
     if(receipt.operation_id!==intent.operation_id||receipt.domain!=='model_choice'||receipt.session_id!==sessionId||typeof receipt.ok!=='boolean')throw Error('Model receipt identity/scope mismatch; pending journal retained');
@@ -117,7 +127,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
     finally{locked.current=false;setBusy(false);}
   };
   const select = (value: string) => { proposalRef.current={owner:sessionId,value};setSelected(value);if(base?.atomic_model_operations)try{localStorage.setItem(draftKey,value);}catch{setError("Model proposal could not be saved on this device; draft retained in memory");} };
-  return <div className="jg-runtime-picker"><button ref={trigger} type="button" className="jg-runtime-trigger" aria-label="Choose conversation model" title={`Configured model: ${currentLabel}. Provider execution is verified separately.`} aria-expanded={open} disabled={disabled} onClick={() => { setQuery(""); setOpen(value => !value); }}><Gauge size={20} /><span>{currentLabel}</span><ChevronDown size={14} /></button>
+  return <div className="jg-runtime-picker"><button ref={trigger} type="button" className="jg-runtime-trigger" aria-label="Choose conversation model" title={`Configured model: ${currentLabel}. Provider execution is verified separately.`} aria-expanded={open} disabled={disabled} onClick={() => { setQuery(""); setOpen(value => !value); }}><Gauge size={20} /><span>{currentLabel}</span>{currentContext ? <span className="jg-runtime-context" title={`Context window: ${currentContext.toLocaleString("en-US")} tokens`}>{contextBadge(currentContext)}</span> : null}<ChevronDown size={14} /></button>
     {open && <section className="jg-runtime-menu" role="dialog" aria-label="Gateway models and settings" data-jg-popup>
       <header><strong>Model for this conversation</strong><button type="button" aria-label="Close model picker" onClick={() => setOpen(false)}><X size={16} /></button></header>
       {loaded && <div className="jg-runtime-tabs" role="tablist" aria-label="Model providers">

@@ -109,7 +109,7 @@ def main() -> None:
         parser.error("output-root must be outside the repository")
     output.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix="jaeger-ide-", dir=output))
-    for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js", "native-turn.js", "copilot-bridge.js", "controller.js", "chat-panel.js",
+    for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js", "native-turn.js", "language-model-provider.js", "controller.js", "chat-panel.js",
                  "README.md", "VERIFICATION.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(source / name, stage / name)
     # Editors and patch tools may leave rejected/backup files beside live

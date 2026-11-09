@@ -160,6 +160,7 @@ def provider_model_inventory(instance_root: Path | None = None) -> dict[str, Any
     providers: list[dict[str, Any]] = []
 
     def _models(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from jaeger_ai.core.models.ollama_context import estimate_model_context_length
         out = []
         for row in rows:
             name = str(row.get("name") or row.get("id") or "").strip()
@@ -174,6 +175,8 @@ def provider_model_inventory(instance_root: Path | None = None) -> dict[str, Any
                 "certifications": certs,
                 "capabilities": list(row.get("capabilities") or []),
                 "remote_host": row.get("remote_host"),
+                # Name-family estimate; no network probe on the inventory path.
+                "context_length": estimate_model_context_length(name),
             })
         return out
 
@@ -243,6 +246,7 @@ def webui_model_catalog(instance_root: Path | None = None) -> dict[str, Any]:
                 "label": name,
                 "certifications": m.get("certifications") or {},
                 "usable_for_react": m.get("usable_for_react"),
+                "context_length": m.get("context_length"),
             })
         if models:
             groups.append({

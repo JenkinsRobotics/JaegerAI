@@ -338,6 +338,9 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-autonomy-menu .is-full-access strong, .jg-autonomy-menu .is-full-access > svg:first-child { color: var(--aether-color-error); }
 .jg-autonomy-saving { width: 14px; height: 14px; margin: 2px; border: 2px solid var(--jg-color-border); border-top-color: var(--jg-color-accent); border-radius: 50%; animation: jg-spin .75s linear infinite; }
 .jg-autonomy-error { margin: 6px 10px 2px; color: var(--aether-color-error); font-size: 12px; }
+.jg-autonomy-menu__footer { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--jg-color-border); }
+.jg-autonomy-menu__learn { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--jg-color-border); border-radius: 10px; background: var(--jg-color-inset); color: var(--jg-color-text-secondary); font-size: 12px; cursor: pointer; }
+.jg-autonomy-menu__learn:hover { background: var(--jg-color-hover); color: var(--jg-color-text); }
 .jg-busy-mode { height: 36px; padding: 0 12px; border: 1px solid var(--jg-color-border); border-radius: 999px; background: transparent; color: var(--jg-color-text-secondary); font: inherit; font-size: var(--jg-font-small); cursor: pointer; }
 .jg-busy-mode:hover { background: var(--jg-color-hover); color: var(--jg-color-text); }
 .jg-busy-mode:disabled { opacity: .45; cursor: default; }
@@ -382,12 +385,13 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
   .jg-composer__input { min-height: 52px; max-height: clamp(52px,calc(var(--jg-viewport-height,100dvh) * .28),200px); }
   .jg-composer__policy-label { display: none; }
   .jg-composer__policy { width: 36px; justify-content: center; padding: 0; }
+  .jg-composer__chevron { display: none; }
   .jg-composer__bar { gap: 6px; }
   .jg-autonomy, .jg-runmode, .jg-runtime-picker { position: static; }
   .jg-autonomy-menu, .jg-runtime-menu { left: 16px; right: 16px; width: auto; bottom: calc(var(--jg-composer-h,124px) + 20px); max-height: max(100px,calc(var(--jg-viewport-height,100dvh) - var(--jg-composer-h,124px) - 88px)); overflow-y: auto; }
   .jg-runtime-picker { flex: none; max-width: none; }
-  .jg-composer__bar .jg-runtime-trigger { width: 40px; max-width: 40px; height: 40px; padding: 0; justify-content: center; }
-  .jg-composer__bar .jg-runtime-trigger > span, .jg-composer__bar .jg-runtime-trigger > svg:last-child { display: none; }
+  .jg-composer__bar .jg-runtime-trigger { width: 40px; max-width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; box-shadow: none; background: transparent; }
+  .jg-composer__bar .jg-runtime-trigger > span, .jg-composer__bar .jg-runtime-trigger > .jg-runtime-context, .jg-composer__bar .jg-runtime-trigger > svg:last-child { display: none; }
   /* One-line follow-up at rest; focus or a preserved draft exposes the toolbar. */
   .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])) {
     display: grid; grid-template-columns: 40px minmax(0,1fr) auto auto; align-items: center;
