@@ -21,8 +21,8 @@ export type ChatPart =
   | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { kind: "markdownContent"; text: string; role?: AssistantContentRole; itemId?: string }
   | { kind: "thinking"; text: string; durationMs?: number }
-  | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string }
-  | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny" }
+  | { kind: "toolInvocation"; callId: string; approvalId?: string; requestId?: string; executionReceipt?: boolean; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string }
+  | { kind: "confirmation"; callId: string; requestId?: string; toolCallId?: string; title: string; message: string; decision?: "approve" | "deny" }
   | { kind: "progress"; message: string }
   | { kind: "error"; message: string }
   | { kind: "warning"; message: string }
@@ -160,6 +160,27 @@ export function isSessionMissingError(error: unknown): boolean {
 
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
+  // Both parts of a delayed approval request share the same stale-call guard.
+  // Missing legacy request IDs must not rewind a receipt; known different IDs
+  // describe separate requests even when a producer reuses the call ID.
+  const hasTerminalReceipt=(callId:string,requestId?:string)=>parts.some(p=>p.kind==="toolInvocation" && p.callId===callId &&
+    !(p.requestId && requestId && p.requestId!==requestId) && p.executionReceipt!==false &&
+    !["streaming","waitingForConfirmation","executing"].includes(p.state));
+  if(part.kind==="confirmation" && !part.decision && part.toolCallId && hasTerminalReceipt(part.toolCallId,part.requestId))return parts;
+  if(part.kind==="toolInvocation" && part.state==="waitingForConfirmation" && part.approvalId){
+    if(hasTerminalReceipt(part.callId,part.requestId))return parts;
+    const card=parts.find(p=>p.kind==="confirmation" && p.callId===part.approvalId);
+    if(card)return parts; // Replay cannot reopen a resolved or superseded wait.
+  }
+  if(part.kind==="confirmation" && !part.decision && parts.some(p=>p.kind==="confirmation" && p.callId===part.callId))return parts;
+  // Approval receipts close permission waits, not tool execution. Correlate using
+  // the original card, since the producer need not repeat the tool call ID.
+  if(part.kind==="confirmation" && part.decision && !part.title){
+    const card=parts.find((p):p is Extract<ChatPart,{kind:"confirmation"}>=>p.kind==="confirmation" && p.callId===part.callId);
+    if(!card || card.decision || (part.requestId && card.requestId && card.requestId!==part.requestId) || (part.toolCallId && card.toolCallId!==part.toolCallId))return parts;
+    parts=parts.map(p=>p.kind==="toolInvocation" && p.state==="waitingForConfirmation" && p.callId===card.toolCallId && p.approvalId===card.callId && p.requestId===card.requestId
+      ? {...p,state:part.decision==="deny"?"denied":"unknown",summary:part.decision==="deny"?"Permission denied or closed; tool not executed by this approval.":"Permission granted; execution not yet reported."}:p);
+  }
   if (part.kind === "userGuidance") return parts.some(row => row.kind === "userGuidance" && row.steeringId === part.steeringId) ? parts : [...parts, part];
   if (part.kind === "knowledgeContext") { const index = parts.findIndex(p => p.kind === "knowledgeContext"); return index < 0 ? [...parts, part] : parts.map((p, i) => i === index ? part : p); }
   if (part.kind === "handoff") {
@@ -191,7 +212,8 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
     return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];
   }
   if (part.kind === "toolInvocation" || part.kind === "confirmation" || part.kind === "question") {
-    const index = parts.findIndex((p) => p.kind === part.kind && p.callId === part.callId);
+    const index = parts.findIndex((p) => p.kind === part.kind && p.callId === part.callId &&
+      !(p.kind === "toolInvocation" && part.kind === "toolInvocation" && p.requestId && part.requestId && p.requestId !== part.requestId));
     if (index >= 0) return parts.map((p, i) => {
       if (i !== index) return p;
       // Resolution events carry only status; preserve the original card content.
