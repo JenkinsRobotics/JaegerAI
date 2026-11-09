@@ -64,14 +64,14 @@ def test_failed_receipt_is_unknown_across_reopen_and_retry(app, monkeypatch):
     assert app.store.steering_record('s', 'r', 'fixed') is None
     app.store = GatewaySessionStore(app.store.path)
     second = post(app)
-    assert second.status == 409
+    assert second.status == 503
     assert json.loads(second.text)['state'] == 'delivery_unknown'
     assert app._active_agents['r'].seen == ['once']
     assert post(app, text='changed').status == 409
     request = Request()
     request.method = 'GET'
     request.query = {'steering_id': 'fixed'}
-    assert asyncio.run(app.handle_steer_request(request)).status == 409
+    assert asyncio.run(app.handle_steer_request(request)).status == 503
 
 
 def test_failed_reservation_never_delivers(app, monkeypatch):
@@ -93,7 +93,7 @@ def test_agent_exception_never_replays(app, after):
     response = post(app)
     assert response.status == 503
     assert 'private provider' not in response.text
-    assert post(app).status == 409
+    assert post(app).status == 503
     assert len(agent.seen) == int(after)
 
 
@@ -103,14 +103,14 @@ def test_interruption_leaves_unknown(app):
     app._active_agents['r'].steer = interrupt
     with pytest.raises(KeyboardInterrupt):
         post(app)
-    assert post(app).status == 409
+    assert post(app).status == 503
     assert app.store.steering_admission('s', 'r', 'fixed')['state'] == 'delivery_unknown'
 
 
 def test_reserved_before_crash_does_not_replay(app):
     assert app.store.reserve_steering('s', 'r', 'fixed', 'once', **authority())
     app.store = GatewaySessionStore(app.store.path)
-    assert post(app).status == 409
+    assert post(app).status == 503
     assert app._active_agents['r'].seen == []
 
 
@@ -251,3 +251,15 @@ def test_completed_receipt_is_not_attributed_to_recreated_request(app):
     app.store.mark_request_status('r', 'running')
     assert post(app).status == 409
     assert app._active_agents['r'].seen == ['once']
+
+
+def test_racing_same_payload_retains_uncertain_client_intent(app, monkeypatch):
+    reserve = app.store.reserve_steering
+    def race(session, request, steering, text, **kwargs):
+        reserve(session, request, steering, text, **kwargs)
+        return reserve(session, request, steering, text, **kwargs)
+    monkeypatch.setattr(app.store, 'reserve_steering', race)
+    response = post(app)
+    assert response.status == 503
+    assert json.loads(response.text)['state'] == 'delivery_unknown'
+    assert app._active_agents['r'].seen == []
