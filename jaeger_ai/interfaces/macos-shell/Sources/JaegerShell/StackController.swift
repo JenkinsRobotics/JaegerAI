@@ -99,8 +99,16 @@ final class StackController {
     func start(done: @escaping BridgeDone) {
         if let dev { return startDev(dev, done: done) }
         if mode == .dev { return done(nil, "dev_stack_unavailable: \(devError?.message ?? "?")") }
+        guard !headless else { return done(nil, "production_stack_disabled_in_verify") }
+        guard !busy else { return done(nil, "busy") }
+        // The Gateway checks the lease during startup. Waiting for its health
+        // before renewing an expired heartbeat creates a restart deadlock.
+        let alreadyOwned = lease?.isRunning == true
+        if leasePolicy.isEnabled, let error = acquireLease("stack starting") {
+            return done(nil, error)
+        }
         runProduction(StackCLI.upArguments) { [weak self] result, error in
-            if error == nil { self?.acquireLease("stack up") }
+            if error != nil && !alreadyOwned { self?.retireLease("stack start failed") }
             done(result, error)
         }
     }
