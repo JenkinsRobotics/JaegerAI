@@ -45,9 +45,9 @@ from urllib.request import Request, urlopen
 #: this — it is long-lived by design and must not be cut off mid-turn.
 UNARY_TIMEOUT = 8
 
-#: How long the SSE proxy waits for the first byte from the gateway. After
-#: that the stream is pumped until either side closes.
-STREAM_CONNECT_TIMEOUT = 10
+#: Socket timeout for connecting and reading the stream. Leave room beyond
+#: the Gateway's ten-second heartbeat so normal quiet periods do not disconnect.
+STREAM_CONNECT_TIMEOUT = 30
 
 
 def gateway_base() -> str:
@@ -171,24 +171,20 @@ def _proxy_stream(handler, session_id: str, query: str, *, upstream_path: str | 
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
     handler.send_header("Cache-Control", "no-cache")
-    handler.send_header("Connection", "keep-alive")
+    # Without chunked encoding this is a close-delimited HTTP/1.1 body.
+    # Never return its socket to the browser pool after an upstream EOF/error.
+    handler.close_connection = True
+    handler.send_header("Connection", "close")
     handler.send_header("X-Accel-Buffering", "no")  # defeat proxy buffering
     handler.end_headers()
 
     try:
         while True:
-            chunk = upstream.read(1)
+            # read1 returns available bytes rather than waiting for a full block.
+            # One-byte writes made durable replay needlessly expensive.
+            chunk = upstream.read1(65536)
             if not chunk:
                 break
-            # Read whatever else is buffered without blocking on more.
-            pending = getattr(upstream, "fp", None)
-            if pending is not None:
-                try:
-                    extra = upstream.read(len(getattr(pending, "_rbuf", b"")) or 0)
-                    if extra:
-                        chunk += extra
-                except Exception:  # noqa: BLE001 — best-effort batching only
-                    pass
             handler.wfile.write(chunk)
             handler.wfile.flush()
     except (BrokenPipeError, ConnectionResetError):

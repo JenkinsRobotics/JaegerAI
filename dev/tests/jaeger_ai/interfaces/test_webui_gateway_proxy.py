@@ -490,3 +490,41 @@ def test_message_read_state_proxy_preserves_method_and_body(overlay, monkeypatch
 def test_live_steering_and_receipt_reconciliation_use_gateway_proxy(overlay, method, path):
     assert _route(overlay,path,method)
     assert overlay._calls == [(method,path)]
+
+
+def test_sse_eof_closes_http11_response_without_waiting_for_next_request(monkeypatch):
+    """A real client must observe EOF, not keep waiting on an unframed live socket."""
+    import http.client
+    import io
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    mod = _load()
+    payload = b'id: 7\nevent: turn.done\ndata: {"ok":true}\n\n'
+    upstream = io.BytesIO(payload)
+    monkeypatch.setattr(mod, 'urlopen', lambda *a, **kw: upstream)
+    monkeypatch.setattr(mod, '_add_caller_auth', lambda request: None)
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+        def do_GET(self):
+            mod._proxy_stream(self, 'owned-test', '')
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = http.client.HTTPConnection(*server.server_address, timeout=1)
+    try:
+        client.request('GET', '/stream')
+        response = client.getresponse()
+        assert response.status == 200
+        assert response.read() == payload
+        assert response.will_close
+        assert upstream.closed
+    finally:
+        client.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
