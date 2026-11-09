@@ -21,7 +21,7 @@ export type ChatPart =
   | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { kind: "markdownContent"; text: string; role?: AssistantContentRole; itemId?: string }
   | { kind: "thinking"; text: string; durationMs?: number }
-  | { kind: "toolInvocation"; callId: string; approvalId?: string; requestId?: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string }
+  | { kind: "toolInvocation"; callId: string; approvalId?: string; requestId?: string; executionReceipt?: boolean; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string }
   | { kind: "confirmation"; callId: string; requestId?: string; toolCallId?: string; title: string; message: string; decision?: "approve" | "deny" }
   | { kind: "progress"; message: string }
   | { kind: "error"; message: string }
@@ -161,6 +161,11 @@ export function isSessionMissingError(error: unknown): boolean {
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
   if(part.kind==="toolInvocation" && part.state==="waitingForConfirmation" && part.approvalId){
+    // A delayed permission request cannot erase an observed execution receipt.
+    // Known different request IDs are separate calls even if the call ID is reused.
+    if(parts.some(p=>p.kind==="toolInvocation" && p.callId===part.callId &&
+      !(p.requestId && part.requestId && p.requestId!==part.requestId) && p.executionReceipt!==false &&
+      !["streaming","waitingForConfirmation","executing"].includes(p.state)))return parts;
     const card=parts.find(p=>p.kind==="confirmation" && p.callId===part.approvalId);
     if(card)return parts; // Replay cannot reopen a resolved or superseded wait.
   }
@@ -204,7 +209,8 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
     return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];
   }
   if (part.kind === "toolInvocation" || part.kind === "confirmation" || part.kind === "question") {
-    const index = parts.findIndex((p) => p.kind === part.kind && p.callId === part.callId);
+    const index = parts.findIndex((p) => p.kind === part.kind && p.callId === part.callId &&
+      !(p.kind === "toolInvocation" && part.kind === "toolInvocation" && p.requestId && part.requestId && p.requestId !== part.requestId));
     if (index >= 0) return parts.map((p, i) => {
       if (i !== index) return p;
       // Resolution events carry only status; preserve the original card content.

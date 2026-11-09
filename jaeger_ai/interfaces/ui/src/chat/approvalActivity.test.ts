@@ -42,3 +42,28 @@ it('accepts approval ID alias and retains request correlation',()=>{
  const parts=events({...request(),approval_id:undefined,id:'a'},resolve(false,{id:'a',approval_id:undefined,request_id:'r'}));
  expect(parts[0]).toMatchObject({state:'denied',requestId:'r'});
 });
+it.each(['completed','failed','cancelled','unknown','denied','unsupported','rejected'])('does not rewind observed %s receipt on delayed approval request',state=>{
+ const terminal={event:state==='completed'?'tool.done':'tool.failed',call_id:'c',tool:'run_command',outcome:state,request_id:'r'};
+ expect(events(terminal,request())[0]).toMatchObject({state,requestId:'r'});
+ expect(events({...terminal,request_id:undefined},request())[0]).toMatchObject({state});
+});
+it('keeps a newer request sharing a call ID separate from an earlier terminal receipt',()=>{
+ const terminal={event:'tool.done',call_id:'c',request_id:'old',tool:'run_command'};
+ const parts=events(terminal,request(),resolve(false,{request_id:'r'}));
+ expect(parts[0]).toMatchObject({state:'completed',requestId:'old'});
+ expect(parts.find(p=>p.kind==='toolInvocation'&&p.requestId==='r')).toMatchObject({state:'denied'});
+});
+it('permission grant without execution does not suppress a new approval',()=>{
+ expect(events(request(),resolve(true),request('b'))[0]).toMatchObject({state:'waitingForConfirmation',approvalId:'b'});
+});
+it('a granted permission wait following tool start is still not a terminal execution receipt',()=>{
+ expect(events({event:'tool.started',call_id:'c',request_id:'r'},request(),resolve(true),request('b'))[0]).toMatchObject({state:'waitingForConfirmation',approvalId:'b'});
+});
+
+it('preserves persisted terminal tool receipts without a live receipt marker',()=>{
+ for(const state of ['completed','failed','cancelled','unknown'] as const){
+ let parts:ChatPart[]=[{kind:'toolInvocation',callId:'c',toolName:'run_command',input:null,state}];
+ for(const part of mapEvent({event:'approval.request',payload:request()})!.parts)parts=applyPart(parts,part);
+ expect(parts[0]).toMatchObject({state});
+ }
+});
