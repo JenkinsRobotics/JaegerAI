@@ -25,7 +25,7 @@ from jaeger_ai.core.gateway import handoff_outputs as _handoff_outputs
 from jaeger_ai.core.sqlite_connection import ClosingConnection
 
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
@@ -594,6 +594,17 @@ class GatewaySessionStore:
             from jaeger_ai.core.tasks.background_receipts import migrate_native_enrollment
             migrate_native_enrollment(conn)
             current = 19
+        if current < 20:
+            # Separate admission from the success event: a missing receipt must
+            # never authorize replay of an effect that may already have happened.
+            # No cascading FK: supported session deletion/request cleanup cannot
+            # erase effect deduplication when an identifier is later reused.
+            conn.execute("CREATE TABLE IF NOT EXISTS steering_admissions ("
+                         "session_id TEXT NOT NULL, request_id TEXT NOT NULL, steering_id TEXT NOT NULL, "
+                         "text TEXT NOT NULL, identity_json TEXT NOT NULL, state TEXT NOT NULL, "
+                         "producer_token TEXT NOT NULL, authority_json TEXT NOT NULL, "
+                         "created_at REAL NOT NULL, PRIMARY KEY(session_id,request_id,steering_id))")
+            current = 20
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -2368,6 +2379,96 @@ class GatewaySessionStore:
                 del event["data_json"]
             return {"events": events, "has_more": len(rows) > limit,
                     "next_cursor": events[-1]["event_id"] if events else after}
+
+    def _steering_authority(self, conn: sqlite3.Connection, session_id: str,
+                            request_id: str, lease: dict[str, Any] | None,
+                            source_file: str) -> sqlite3.Row:
+        from .owner_receipts import check_agent_identity
+        row = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id,)).fetchone()
+        if (row is None or row['session_id'] != session_id
+                or row['status'] not in {'admitted', 'running', 'awaiting_approval'} or row['owner_pid'] != os.getpid()):
+            raise StateConflict('Request is not locally active')
+        current = conn.execute('SELECT * FROM process_lease WHERE id=1').fetchone()
+        if current is not None or lease is not None:
+            if (not current or not lease or current['owner_pid'] != os.getpid()
+                    or any(current[key] != lease.get(key) for key in ('owner_pid', 'started_at'))
+                    or current['source_file'] != source_file):
+                raise StateConflict('Gateway ownership changed')
+        check_agent_identity(conn, row)
+        return row
+
+    def reserve_steering(self, session_id: str, request_id: str, steering_id: str,
+                         text: str, *, lease: dict[str, Any] | None, source_file: str) -> str | None:
+        """Commit an at-most-once admission BEFORE invoking live guidance.
+
+        Unknown is deliberate, including death before invocation. Never infer
+        permission to replay from the absence of the subsequent success event.
+        """
+        from .owner_receipts import identity, encoded
+        if (not isinstance(steering_id, str) or not steering_id.strip() or len(steering_id) > 128
+                or not isinstance(text, str) or not text.strip() or len(text) > 64000):
+            raise ValueError('Invalid steering identity or text')
+        with self._immediate() as conn:
+            prior = conn.execute('SELECT text FROM steering_admissions WHERE session_id=? AND request_id=? AND steering_id=?',
+                                 (session_id, request_id, steering_id)).fetchone()
+            legacy = conn.execute("SELECT data_json FROM activity_history WHERE session_id=? AND event='turn.steer' "
+                                  "AND json_extract(data_json,'$.request_id')=? AND json_extract(data_json,'$.steering_id')=? ORDER BY event_id LIMIT 1",
+                                  (session_id, request_id, steering_id)).fetchone()
+            if prior or legacy:
+                previous = prior['text'] if prior else json.loads(legacy['data_json']).get('text')
+                if previous != text:
+                    raise RequestConflict('Steering identity already used for different text')
+                return None
+            row = self._steering_authority(conn, session_id, request_id, lease, source_file)
+            token = uuid.uuid4().hex
+            conn.execute('INSERT INTO steering_admissions VALUES (?,?,?,?,?,?,?,?,?)',
+                         (session_id, request_id, steering_id, text, encoded(identity(row)), 'reserved',
+                          token, encoded({'lease': lease, 'source_file': source_file}), time.time()))
+            return token
+
+    def steering_admission(self, session_id: str, request_id: str, steering_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute('SELECT text,state,identity_json FROM steering_admissions WHERE session_id=? AND request_id=? AND steering_id=?',
+                               (session_id, request_id, steering_id)).fetchone()
+        if row is None:
+            return None
+        from .owner_receipts import identity, encoded
+        with self._get_conn() as conn:
+            request = conn.execute('SELECT * FROM client_requests WHERE request_id=?', (request_id,)).fetchone()
+        return {'text': row['text'], 'state': 'delivery_unknown' if row['state'] == 'reserved' else row['state'],
+                'request_matches': request is not None and row['identity_json'] == encoded(identity(request))}
+
+    def deliver_steering(self, session_id: str, request_id: str, steering_id: str,
+                         text: str, deliver: Callable[[], bool], *, producer_token: str, lease: dict[str, Any] | None,
+                         source_file: str) -> bool:
+        """Fence cancellation/ownership changes during the synchronous injection.
+
+        Only the caller that just reserved may enter here. The reservation is
+        already committed; rollback/interruption here leaves durable uncertainty.
+        """
+        from .owner_receipts import identity, encoded
+        with self._immediate() as conn:
+            row = self._steering_authority(conn, session_id, request_id, lease, source_file)
+            admission = conn.execute('SELECT * FROM steering_admissions WHERE session_id=? AND request_id=? AND steering_id=?',
+                                     (session_id, request_id, steering_id)).fetchone()
+            if (not admission or not producer_token or admission['producer_token'] != producer_token
+                    or admission['authority_json'] != encoded({'lease': lease, 'source_file': source_file})
+                    or admission['identity_json'] != encoded(identity(row))
+                    or admission['text'] != text or admission['state'] != 'reserved'):
+                raise StateConflict('Steering admission changed')
+            conn.execute("UPDATE steering_admissions SET state='delivery_unknown' WHERE session_id=? AND request_id=? AND steering_id=?",
+                         (session_id, request_id, steering_id))
+        # Persist the single-use dispatch claim before calling external code.
+        # A crash in either gap remains unknown and cannot dispatch again.
+        with self._immediate() as conn:
+            row = self._steering_authority(conn, session_id, request_id, lease, source_file)
+            if admission['identity_json'] != encoded(identity(row)):
+                raise StateConflict('Steering request identity changed')
+            accepted = bool(deliver())
+            if not accepted:
+                conn.execute("UPDATE steering_admissions SET state='rejected' WHERE session_id=? AND request_id=? AND steering_id=?",
+                             (session_id, request_id, steering_id))
+            return accepted
 
     def steering_record(self, session_id: str, request_id: str, steering_id: str) -> dict[str, Any] | None:
         """Read the original steering receipt from durable activity, even after event retention."""
