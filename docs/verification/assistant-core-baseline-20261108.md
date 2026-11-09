@@ -1,5 +1,10 @@
 # Assistant core baseline and release gate, 2026-11-08
 
+## Current background-admission qualification
+
+See [assistant-core-background-admission-qualification-20261108.md](assistant-core-background-admission-qualification-20261108.md) for the exact ccda0c source/test freeze, all 18 selected final zero-exit groups, package provenance, new default/native authority, original-fingerprint replay, current-lease returned slices and terminal/workspace scope corrections. The measurements below remain historical and are not relabeled as new results. Overall and every tab remain **PARTIAL**. Background terminal journals and automatic interrupted Research replay remain absent. The data-preserving release/rollback proposal requires fresh runtime-state comparison and separate approval. Framework evolution remains deferred.
+
+
 ## Scope and revision
 
 This is an isolated implementation pass, not a declaration that the entire app
