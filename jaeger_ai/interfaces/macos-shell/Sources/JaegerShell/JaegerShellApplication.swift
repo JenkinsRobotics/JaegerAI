@@ -120,8 +120,8 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             }
             return
         }
-        installMainMenu()
         statusController = StatusItemController(app: self)
+        installMainMenu()
         registerHotkey()
         if verifyMode {
             _ = makeWindow()  // created, never shown, nothing loaded
@@ -547,6 +547,11 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         let main = NSMenu()
         let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
+        let startItem = appMenu.addItem(withTitle: "Start Jaeger…", action: #selector(StatusItemController.startStack(_:)), keyEquivalent: "")
+        startItem.target = statusController
+        let stopItem = appMenu.addItem(withTitle: "Stop Jaeger…", action: #selector(StatusItemController.stopStack(_:)), keyEquivalent: "")
+        stopItem.target = statusController
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Jaeger Shell", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         let editItem = NSMenuItem(); main.addItem(editItem)
