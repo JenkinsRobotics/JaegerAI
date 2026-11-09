@@ -10,6 +10,8 @@ Schema 20 adds `steering_admissions` without modifying historical requests,
 activity, queues, approvals, cancellation, or owner/background journals.
 Legacy `turn.steer` activity remains the success receipt and is still readable.
 Admission tombstones intentionally survive supported request/session cleanup.
+They retain SHA-256 payload and request-identity digests, not the steering
+plaintext, original request input or execution metadata.
 Deleting a session and reusing its request/steering IDs cannot erase uncertain
 delivery or grant a new producer permission to replay it.
 
