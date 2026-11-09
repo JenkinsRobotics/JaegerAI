@@ -136,6 +136,7 @@ PUBLIC_ROUTE_PREFIXES = frozenset({
 
 #: Non-GET routes an outside caller's turn needs (canonical aiohttp paths).
 TURN_ROUTES = frozenset({
+    ("POST", "/v1/chat-organization"),
     ("POST", "/v1/agent-messages"),
     ("POST", "/v1/agent-goals"),
     ("POST", "/v1/agent-goals/{goal_id}/cancel"),

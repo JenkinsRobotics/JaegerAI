@@ -86,7 +86,7 @@ def _proxy(handler, method: str, path: str, body: bytes | None = None) -> bool:
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
-        with urlopen(req, timeout=UNARY_TIMEOUT) as resp:
+        with urlopen(req, timeout=110 if path == "/v1/chat-organization" and method == "POST" else UNARY_TIMEOUT) as resp:
             payload = resp.read()
             try:
                 parsed = json.loads(payload.decode("utf-8") or "null")
@@ -234,6 +234,7 @@ GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
         ({"GET"}, rf"^/v1/approvals/{_ID}/events$"),
         ({"POST"}, r"^/v1/approvals/(?:batch|requests)$"),
         ({"POST"}, rf"^/v1/approvals/{_ID}/(?:decide|viewed)$"),
+        ({"GET", "POST"}, r"^/v1/chat-organization$"),
         ({"GET", "PATCH"}, r"^/v1/notifications$"),
         ({"GET"}, r"^/v1/push/(?:queue|subscriptions|vapid-public-key)$"),
         ({"POST"}, r"^/v1/push/(?:subscriptions|test|job-events)$"),

@@ -726,6 +726,7 @@ class GatewaySessionStore:
                     "message_count": r["message_count"],
                     "metadata": meta,
                     "unread": _message_read_state(meta)["unread"],
+                    "archived": bool(meta.get("archived")),
                     "agent_id": _session_agent(r["session_id"], meta),
                     # Sidebar row without N follow-up reads (Agents View).
                     "last_message_preview": _list_preview(r["last_content"]),
@@ -823,6 +824,7 @@ class GatewaySessionStore:
                 "status": row["status"],
                 "metadata": meta,
                 "unread": _message_read_state(meta)["unread"],
+                    "archived": bool(meta.get("archived")),
                 "agent_id": _session_agent(row["session_id"], meta),
                 "messages": [
                     {
@@ -968,6 +970,12 @@ class GatewaySessionStore:
             )
             if cursor.rowcount == 0:
                 return None
+            row=conn.execute("SELECT metadata_json FROM sessions WHERE session_id=?",(session_id,)).fetchone()
+            meta=json.loads(row[0] or '{}')
+            meta.setdefault('chat_organization', {})['manual_title']=True
+            conn.execute("UPDATE sessions SET metadata_json=? WHERE session_id=?",(json.dumps(meta),session_id))
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='chat_organization'").fetchone():
+                conn.execute("UPDATE chat_organization SET revision=revision+1 WHERE id=1")
         return self.get_session(session_id)
 
     def set_session_archived(self, session_id: str, archived: bool) -> dict[str, Any] | None:
@@ -989,6 +997,8 @@ class GatewaySessionStore:
                 "UPDATE sessions SET metadata_json = ? WHERE session_id = ?",
                 (json.dumps(metadata), session_id),
             )
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='chat_organization'").fetchone():
+                conn.execute("UPDATE chat_organization SET revision=revision+1 WHERE id=1")
         return self.get_session(session_id)
 
 

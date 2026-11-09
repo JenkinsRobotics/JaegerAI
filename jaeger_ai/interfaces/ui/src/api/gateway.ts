@@ -46,6 +46,10 @@ export function normalizeFrame(frame: SSEFrame): GatewayEvent {
 }
 
 export class GatewayClient implements JaegerSource {
+  readonly organization = {
+    get: () => this.json<import("./organization").Organization>("/v1/chat-organization"),
+    command: (body: Record<string, unknown>) => this.json<import("./organization").OrganizationResult>("/v1/chat-organization", body),
+  };
   connectionInfo = async () => {
     const health = await this.json<{host?:string;commit?:string;service?:string}>('/api/jaeger/gateway/health');
     const remote = await this.json<{webui_origin?:string}>('/api/remote/connection-info').catch(() => ({}));
@@ -215,7 +219,7 @@ export class GatewayClient implements JaegerSource {
     const onAbort=()=>controller.abort();
     if(signal?.aborted)controller.abort();else signal?.addEventListener("abort",onAbort,{once:true});
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, TIMEOUT_MS);
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, path === "/v1/chat-organization" && body !== undefined ? 115000 : TIMEOUT_MS);
     try {
       const response = await fetch(`${this.base}${path}`, {
         method: method ?? (body === undefined ? "GET" : "POST"),
