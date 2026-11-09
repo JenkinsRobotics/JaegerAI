@@ -1,5 +1,21 @@
 # Background terminal recovery boundary
 
+This report is the historical implementation/pre-freeze chronology. Later isolated a12b26b results and original combined qualification are recorded in the authoritative report linked below. Earlier schema/proof versions and held outcomes are not current recovery eligibility.
+
+## Current bounded terminal-recovery qualification
+
+See [background-terminal-recovery-qualification-20261109.md](background-terminal-recovery-qualification-20261109.md) for original combined source 8027764, its mapped portable export
+ace8382, bounded schema19/v4 terminal recovery and the separately attributed final
+qualification ledger. The historical measurements below do not become later-source
+passes. Overall and every tab remain **PARTIAL**. The new scope recovers exact
+verified sealed output only. Delegated trees remain seal-ineligible; unsealed
+interruptions are not automatically replayed. Canonical all-attempt graph vetoes
+also prevent ordinary background-task completion or Stop from hiding unresolved effects.
+Research consistency is not factual truth, citation entailment or authentic retrieval.
+Fresh runtime-state comparison, local-data preservation and separate approval remain
+required before release.
+
+
 Base: `ccda0c799445ab1480817eb0f7bac99e1c2f6704` (tree
 `0f37ec3c2564028b65f7d0668fca470cdf8d4cb9`). Local isolated implementation only.
 No Mac runtime, upstream fetch, GitHub write, deployment, installation, browser,

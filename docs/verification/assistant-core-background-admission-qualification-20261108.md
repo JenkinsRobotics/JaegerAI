@@ -1,5 +1,21 @@
 # Background admission and recovery qualification
 
+This is historical version14 admission qualification. Its absence-of-journal statements describe ccda0c, not the later bounded recovery implementation. Preserve its failures, counts and source hashes as history.
+
+## Current bounded terminal-recovery qualification
+
+See [background-terminal-recovery-qualification-20261109.md](background-terminal-recovery-qualification-20261109.md) for original combined source 8027764, its mapped portable export
+ace8382, bounded schema19/v4 terminal recovery and the separately attributed final
+qualification ledger. The historical measurements below do not become later-source
+passes. Overall and every tab remain **PARTIAL**. The new scope recovers exact
+verified sealed output only. Delegated trees remain seal-ineligible; unsealed
+interruptions are not automatically replayed. Canonical all-attempt graph vetoes
+also prevent ordinary background-task completion or Stop from hiding unresolved effects.
+Research consistency is not factual truth, citation entailment or authentic retrieval.
+Fresh runtime-state comparison, local-data preservation and separate approval remain
+required before release.
+
+
 ## Review status and exact source
 
 **Overall product and every tab remain PARTIAL.** All 18 selected final qualification groups have explicit zero exits at the frozen source/test revision. Package structural and exact-byte checks also passed. These scoped results do not establish blanket product acceptance or deployment approval.
