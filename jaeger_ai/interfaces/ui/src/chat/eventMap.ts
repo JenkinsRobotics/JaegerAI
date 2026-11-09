@@ -16,6 +16,8 @@ export interface MappedEvent {
 type Payload = Record<string, unknown>;
 const str = (value: unknown): string => (typeof value === "string" ? value : value == null ? "" : String(value));
 
+const identity = (value: unknown): string | undefined => typeof value === "string" && value.trim() ? value : undefined;
+
 export function mapEvent(event: GatewayEvent, agentName: (id: string) => string = (id) => id): MappedEvent | null {
   const p: Payload = (event.payload && typeof event.payload === "object" ? event.payload : event) as Payload;
   switch (event.event) {
@@ -67,16 +69,21 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
         ],
       };
     case "approval.request": {
+      if([p.approval_id,p.id,p.call_id,p.request_id ?? event.request_id].some(value=>value!=null&&!identity(value)))return null;
+      const id=identity(p.approval_id ?? p.id ?? p.call_id);
+      if(!id)return null;
+      const callId=identity(p.call_id),requestId=identity(p.request_id ?? event.request_id);
       const parts: ChatPart[] = [];
-      if (p.call_id) parts.push({ kind: "toolInvocation", callId: str(p.call_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "waitingForConfirmation" });
-      parts.push({ kind: "confirmation", callId: str(p.approval_id ?? p.id ?? p.call_id), title: str(p.title ?? (p.tool ? `Run ${str(p.tool)}?` : "Approval needed")), message: str(p.prompt ?? p.summary ?? p.message) });
-      return { parts };
+      if(callId)parts.push({kind:"toolInvocation",callId,approvalId:id,requestId,toolName:str(p.tool),input:p.input??p.args??null,state:"waitingForConfirmation"});
+      parts.push({kind:"confirmation",callId:id,requestId,toolCallId:callId,title:str(p.title ?? (p.tool ? `Run ${str(p.tool)}?` : "Approval needed")),message:str(p.prompt ?? p.summary ?? p.message)});
+      return {parts};
     }
     case "approval.resolved": {
-      const id=str(p.approval_id ?? p.id);
+      if([p.approval_id,p.id,p.call_id,p.request_id ?? event.request_id].some(value=>value!=null&&!identity(value)))return null;
+      const id=identity(p.approval_id ?? p.id);
       const decision=typeof p.approved==='boolean' ? (p.approved?'approve':'deny') :
         ['deny','cancelled','expired'].includes(str(p.decision)) ? 'deny' : ['once','session','always','allow','yes'].includes(str(p.decision)) ? 'approve' : undefined;
-      return id && decision ? {parts:[{kind:'confirmation',callId:id,title:'',message:'',decision}]} : null;
+      return id && decision ? {parts:[{kind:'confirmation',callId:id,requestId:identity(p.request_id ?? event.request_id),toolCallId:identity(p.call_id),title:'',message:'',decision}]} : null;
     }
     case "clarify.request": {
       const choices = Array.isArray(p.choices) ? p.choices.map(str).filter(Boolean) : [];
