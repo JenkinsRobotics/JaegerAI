@@ -6,6 +6,7 @@ import { WebHost } from "./webHost";
 import type { JaegerSource } from "../api/source";
 import type { ChatHost, StartTurnRequest } from "./host";
 import { MinimalChat } from "./MinimalChat";
+import { queuePrefix } from "./SessionQueue";
 import { GatewayError } from "../api/gateway";
 import * as draftStore from "./drafts";
 
@@ -236,6 +237,55 @@ describe("composer while Jaeger is working", () => {
     } finally {
       await act(async () => root.unmount());
       el.remove();
+    }
+  });
+  it("preserves an unconfirmed 503 steering intent and never offers a duplicate send", async () => {
+    const el = document.createElement("div");
+    document.body.append(el);
+    const root = createRoot(el);
+    let started: StartTurnRequest | undefined;
+    const host = {
+      capabilities: { voice: false },
+      startTurn: vi.fn((request: StartTurnRequest) => { started = request; request.onAccepted?.(); return { cancel() {}, done: new Promise(() => {}) }; }),
+      respondToConfirmation: vi.fn(), copy: vi.fn(), openExternal: vi.fn(),
+      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [] })) },
+      sessionQueue: {
+        list: vi.fn(async (id: string) => ({ session_id: id, items: [] })),
+        steer: vi.fn(async () => { throw new GatewayError("steering admission unconfirmed", 503); }),
+        enqueue: vi.fn(), update: vi.fn(), reorder: vi.fn(), status: vi.fn(),
+      },
+    } as unknown as ChatHost;
+    const type = async (value: string) => {
+      const field = el.querySelector<HTMLTextAreaElement>('.jg-composer__input')!;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      await act(async () => { setter.call(field, value); field.dispatchEvent(new Event("input", { bubbles: true })); });
+    };
+    try {
+      await act(async () => { root.render(<MinimalChat host={host} sessionId="steer-503" />); });
+      await type("Begin the task");
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click(); });
+      expect(started).toBeTruthy();
+      await type("Keep this instruction");
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!.click(); });
+      expect(el.querySelector<HTMLTextAreaElement>('.jg-composer__input')!.value).toBe("Keep this instruction");
+      expect(el.querySelector('.jg-composer__notice')?.textContent).toContain("Message not confirmed");
+      expect(el.querySelector('.jg-composer__notice')?.textContent).not.toContain("use Queue next");
+      const key=queuePrefix('steer-503')+'.steer-intent';
+      const saved=localStorage.getItem(key)!;
+      const intent=JSON.parse(saved);
+      expect(intent).toMatchObject({text:'Keep this instruction',requestId:started!.turnId});
+      expect(host.sessionQueue!.steer).toHaveBeenCalledWith('steer-503',intent.requestId,intent.text,intent.steeringId);
+      const send=el.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!;
+      const queue=el.querySelector<HTMLButtonElement>('button[aria-label="Queue next message"]')!;
+      expect(send.disabled).toBe(true);expect(queue.disabled).toBe(true);
+      await act(async()=>{send.click();queue.click();});
+      expect(host.sessionQueue!.steer).toHaveBeenCalledTimes(1);expect(host.sessionQueue!.enqueue).not.toHaveBeenCalled();
+      expect(localStorage.getItem(key)).toBe(saved);
+      expect(el.querySelector('[aria-label="Message sent to the active turn"]')).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      el.remove();
+      localStorage.removeItem(queuePrefix('steer-503')+'.steer-intent');
     }
   });
 });
