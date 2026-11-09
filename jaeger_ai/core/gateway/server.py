@@ -5492,15 +5492,10 @@ class JaegerGatewayApp:
                         result = {**result, **fix, "text": fix.get("text") or result.get("text")}
                 if timing is not None and "tool calls in a single turn" in str(result.get("halt_reason") or ""):
                     timing.halt_reason = result["halt_reason"]
-                halt = str(result.get("halt_reason") or "")
-                from jaeger_ai.core.runtime.continuation import is_loop_breaker
-                if not result.get("error") and is_loop_breaker(halt) and halt not in {"needs_owner", "blocked", "yielded"}:
-                    # A backstop is an incomplete run, even if the inner loop
-                    # returned display text. Never record it as a final answer.
-                    result = {**result, "status": "failed", "error": (
-                        f"Jaeger stopped before completing this request ({halt}). "
-                        "Completed tool actions remain recorded; review activity before retrying."
-                    )}
+                # Returned controller halts are classified by _execute_scoped_turn,
+                # after settled-run checks, and sealed as failed owner receipts.
+                # Turning a known halt into an exception here would discard its
+                # diagnostic output and bypass the durable outcome journal.
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
