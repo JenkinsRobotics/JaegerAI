@@ -14,7 +14,7 @@ def test_worker_outbox_retry_and_gate(tmp_path, monkeypatch):
     runs, sent = [], []
     monkeypatch.setattr(w, "pending", lambda engine, state: [task(engine)] if "handoff-1" not in state["done"] else [])
     monkeypatch.setattr(w, "run_job", lambda engine, m: runs.append(m["id"]) or
-                        {"status": "done", "body": "ok", "refs": []})
+                        {"status": "done", "outcome": "done", "body": "ok", "refs": []})
     monkeypatch.setattr(w, "device_ok", lambda: ["busy"])
     monkeypatch.setattr(w, "call", lambda *args: sent.append(args) or {})
     assert w.tick("hermes", state, state_path) == 0 and not runs

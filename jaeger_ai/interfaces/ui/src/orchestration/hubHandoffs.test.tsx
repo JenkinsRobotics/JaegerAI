@@ -26,9 +26,9 @@ describe("hub handoff.sent / handoff.result", () => {
     const r = activityItemRow(item("handoff.result"), names)!;
     expect(r).toMatchObject({ key: "handoff.finished:h-ga", kind: "handoff.finished", agentId: "ares", action: "finished: Built", output: { kind: "file", label: "result.md", copy: true } });
     const f = activityItemRow(item("handoff.result", { status: "failed", title: "Broke" }), names)!;
-    expect(f).toMatchObject({ key: "handoff.failed:h-ga", kind: "handoff.failed", needsYou: true, check: { state: "failed" } });
+    expect(f).toMatchObject({ key: "handoff.failed:h-ga", kind: "handoff.failed", needsYou: true, check: { state: "pending" } });
     expect(activityItemRow(item("handoff.result", { status: "error" }), names)?.kind).toBe("handoff.failed");
-    expect(activityItemRow(item("handoff.result", { status: "partial" }), names)).toMatchObject({ kind: "handoff.finished", statusPill: { text: "partial" } });
+    expect(activityItemRow(item("handoff.result", { status: "partial" }), names)).toMatchObject({ kind: "handoff.failed", statusPill: { text: "partial" } });
   });
 
   it("dedupes with agent.handoff rows for the same handoff_id", () => {

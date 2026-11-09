@@ -1,6 +1,7 @@
 """MCP adapter: token identity is relayed to the Gateway on every call."""
 
 from urllib.parse import quote, urlencode
+from typing import Literal
 
 from mcp.server.fastmcp import Context
 
@@ -244,13 +245,20 @@ def register(mcp, client_for_context):
         artifacts: list[str] | None = None,
         reply_to: str | None = None,
         ctx: Context | None = None,
+        status: Literal["done", "failed", "timeout", "error", "cancelled", "execution_unknown"] = "done",
     ) -> dict:
-        """Post a result (and artifact paths/URLs in ``artifacts``) back on a thread."""
+        """Post a peer-reported execution outcome, not verified completion.
+
+        Omitted status preserves legacy successful reports. Never infer it from
+        result prose. Cancellation/unknown outcomes do not authorize a retry.
+        """
+        if status not in ("done", "failed", "timeout", "error", "cancelled", "execution_unknown"):
+            raise ValueError("Invalid reported execution status")
         return call(
             ctx, "POST", "/v1/agent-messages",
             {"id": _new_id("result"), "thread": thread, "to": to, "kind": "result",
              "title": title[:200], "body": body, "refs": artifacts or [],
-             "status_line": "done",
+             "status_line": status,
              **({"reply_to": reply_to} if reply_to else {})},
         )
 

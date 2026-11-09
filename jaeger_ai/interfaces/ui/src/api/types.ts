@@ -143,6 +143,8 @@ export interface Task {
 
 export interface HandoffCommandReceipt {scope:"handoff_request"|"handoff_reply";resource_id:string;request_id:string;outcome:"saved"|"rejected"|"unknown";command?:Record<string,unknown>|null;handoff:Handoff|null;error?:string|null}
 export interface Handoff {
+  /** Local hub projection: a peer report is not an independent result check. */
+  reported_outcome?: boolean;
   request_id?:string;
   metadata?:{requested_model?:string|null;model_choice?:{model:string;provider:string}|null;reply_to_handoff_id?:string|null;background?:boolean;timeout_seconds?:number;[key:string]:unknown};
   id: string;

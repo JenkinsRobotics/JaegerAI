@@ -68,6 +68,7 @@ export function checkFor(h: Handoff, tasks: Task[]): HandoffCheck {
       note: recorded.note ?? undefined, evidence: parseEvidence(recorded.evidence_ref),
     };
   }
+  if (h.reported_outcome) return { state: "pending", source: "derived" };
   const status = String(h.status ?? "");
   if (HANDOFF_FAILED.has(status)) return { state: "failed", source: "derived", evidence: handoffLink(h) };
   const task = taskForHandoff(h, tasks);
@@ -205,7 +206,7 @@ export function eventRow(e: GatewayEvent, names: Names): ActivityRow | null {
   }
 }
 
-const HUB_FAILED = new Set([...HANDOFF_FAILED, "error", "blocked"]);
+const HUB_FAILED = new Set([...HANDOFF_FAILED, "error", "blocked", "timeout"]);
 
 /** Hub (Gateway & WebUI) handoff.sent / handoff.result → the same keys as
  * agent.handoff rows (`handoff.started:<id>`, `handoff.finished|failed:<id>`)
@@ -221,10 +222,10 @@ function hubHandoffRow(kind: string, p: Record<string, unknown>, at: number, nam
   const artifact_refs = paths.map((ref): ArtifactRef => (/^https?:\/\//i.test(ref) ? { kind: "url", ref } : { kind: "file", ref }));
   const sent = kind === "handoff.sent";
   const raw = str(p.status);
-  const status = sent ? "started" : HUB_FAILED.has(raw) ? (HANDOFF_FAILED.has(raw) ? raw : "failed") : "completed";
+  const status = sent ? "started" : HUB_FAILED.has(raw) ? (HANDOFF_FAILED.has(raw) ? raw : "failed") : HANDOFF_DONE.has(raw) ? "completed" : "execution_unknown";
   const h: Handoff = sent
     ? { id, from_agent_id: by, to_agent_id: recipient, task: title, status: "running", created_at: at, updated_at: at }
-    : { id, from_agent_id: recipient, to_agent_id: by, status, result: { summary: title, artifact_refs } as Handoff["result"], created_at: at, updated_at: at };
+    : { id, reported_outcome: true, from_agent_id: recipient, to_agent_id: by, status, result: { summary: title, artifact_refs } as Handoff["result"], created_at: at, updated_at: at };
   const rows = handoffRows({ ...h, status }, [], names);
   const row = sent ? rows.find((r) => r.kind === "handoff.started") : rows.find((r) => r.kind !== "handoff.started");
   if (!row) return null;

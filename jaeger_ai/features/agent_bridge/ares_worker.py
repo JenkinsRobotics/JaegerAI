@@ -203,14 +203,17 @@ def run_job(m: dict) -> dict:
     env[HUB_TOKEN_ENV] = _token()
     t0 = time.time()
     status = "done"
+    outcome = "done"
     try:
         with open(jobdir / "codex.log", "w") as logf:
             proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=logf, stderr=subprocess.STDOUT,
                                   env=env, timeout=TIMEOUT_S, cwd=WORKSPACE)
         if proc.returncode != 0:
             status = f"failed (exit {proc.returncode})"
+            outcome = "failed"
     except subprocess.TimeoutExpired:
         status = f"timed out after {TIMEOUT_S}s"
+        outcome = "timeout"
     body = last.read_text()[:MAX_RESULT_CHARS] if last.exists() else ""
     if not body:
         body = f"ARES run {status}; no final message. See {jobdir / 'codex.log'}."
@@ -218,7 +221,7 @@ def run_job(m: dict) -> dict:
     for line in body.splitlines():
         if line.strip().startswith("ARTIFACT:"):
             artifacts.append(line.split(":", 1)[1].strip())
-    return {"status": status, "body": body, "artifacts": artifacts[:20], "elapsed_s": round(time.time() - t0, 1)}
+    return {"status": status, "outcome": outcome, "body": body, "artifacts": artifacts[:20], "elapsed_s": round(time.time() - t0, 1)}
 
 
 def tick(state: State) -> int:
@@ -234,10 +237,11 @@ def tick(state: State) -> int:
         try:
             out = run_job(m)
         except Exception as exc:  # noqa: BLE001
-            out = {"status": f"error: {exc}", "body": f"ARES worker error: {exc}", "artifacts": [], "elapsed_s": 0}
+            out = {"status": f"error: {exc}", "outcome": "error", "body": f"ARES worker error: {exc}", "artifacts": [], "elapsed_s": 0}
         title = "ARES result" if out["status"] == "done" else f"ARES result: {out['status']}"
         call("post_result", {"to": m["from"], "thread": m["thread"], "title": title, "body": out["body"],
-                              "artifacts": out["artifacts"], "reply_to": m["id"]})
+                              "artifacts": out["artifacts"], "reply_to": m["id"],
+                              "status": out.get("outcome", "execution_unknown")})
         _log("finish", id=m["id"], status=out["status"], elapsed_s=out["elapsed_s"])
         n += 1
     state.save()
