@@ -1,5 +1,30 @@
 # Machine inventory and Safety read truth
 
+## Current combined qualification, 2026-11-09
+
+Read [Foreground Stop and Machine observation qualification](foreground-machine-qualification-20261109.md)
+for the current combined handoff. The final documentation-only commit and tree are
+identified by the handoff root README and `artifact-integrity.json`.
+
+Foreground backend gates ran at a286; current Machine/UI/build/verification ran at
+cfb. Exact non-UI source equality supports transfer, not a fresh cfb backend run.
+The earlier process 17-pass/1-failure readiness result, isolated 1-pass diagnostic
+and controlled 18-pass rerun all remain distinct, with cause unresolved. Current
+bounded-worker UI is 973 tests/208 files, including all nine navigation controls;
+earlier unrestricted 970-pass/3-failure and serial 973-pass attempts remain distinct.
+Original802 broad 18-group and older UI956 results are historical only.
+
+The foreground repair prevents false terminal cancellation reports; it does not
+stop arbitrary native descendants. The Machine repair makes inventory/Safety
+observations and refresh truthful; it does not qualify native permissions or
+provider execution. All tabs remain **PARTIAL**. No installation, deployment,
+remote PR/CI, rendered browser/phone, audio or real-provider acceptance is implied.
+
+The remainder preserves the earlier report's chronology and source scope. Any
+“current” or “final” claims below refer to that report's own historical snapshot,
+not this combined handoff. Earlier foreground/Machine defect descriptions are
+superseded only for the exact repaired scope in the linked report.
+
 The Machine overview reports the existing `gateway_process_only` inventory.
 It does not infer execution readiness, local platform, hardware or a daemon
 from a failed, pending, unsupported or empty read. Observed host state and
