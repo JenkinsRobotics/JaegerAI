@@ -143,22 +143,25 @@ def run_job(m: dict) -> dict:
     task = (m.get("body") or m.get("title") or "")[:MAX_TASK_BYTES]
     t0 = time.time()
     if task.strip().lower() == "capabilities":
-        return {"status": "done", "body": json.dumps(capabilities(), indent=1), "elapsed_s": 0.0, "model": None}
+        return {"status": "done", "outcome": "done", "body": json.dumps(capabilities(), indent=1), "elapsed_s": 0.0, "model": None}
     model, prompt = parse_task(task)
     try:
         d = _ollama("/api/chat", {"model": model, "stream": False, "think": False,
                                   "messages": [{"role": "system", "content": SYSTEM},
                                                {"role": "user", "content": prompt}]}, timeout=TIMEOUT_S)
         body = (d.get("message") or {}).get("content", "").strip()[:MAX_RESULT_CHARS]
+        outcome = "done" if body else "failed"
         status = "done" if body else "failed (empty reply)"
         tps = round(d.get("eval_count", 0) / max(d.get("eval_duration", 1) / 1e9, 1e-9), 1)
     except TimeoutError:
         body, status, tps = "", f"timed out after {TIMEOUT_S}s", 0
+        outcome = "timeout"
     except Exception as exc:  # noqa: BLE001
         body, status, tps = "", f"error: {_error_text(exc)}", 0
+        outcome = "error"
     elapsed = round(time.time() - t0, 1)
     body = (body or f"rackpc run {status}") + f"\n\n— rackpc · {model} · {tps} tok/s · {elapsed}s"
-    return {"status": status, "body": body, "elapsed_s": elapsed, "model": model}
+    return {"status": status, "outcome": outcome, "body": body, "elapsed_s": elapsed, "model": model}
 
 
 def pending(state: State) -> list[dict]:
@@ -220,12 +223,12 @@ def tick(state: State) -> int:
             out = run_job(m)
         except Exception as exc:  # noqa: BLE001
             detail = _error_text(exc)
-            out = {"status": f"error: {detail}", "body": f"rackpc worker error: {detail}", "elapsed_s": 0}
+            out = {"status": f"error: {detail}", "outcome": "error", "body": f"rackpc worker error: {detail}", "elapsed_s": 0}
         title = "Rack PC result" if out["status"] == "done" else f"Rack PC result: {out['status']}"
         task_id = m["id"]
         args = {"id": "rackpc-result-" + hashlib.sha256(task_id.encode("utf-8")).hexdigest(),
                 "to": m["from"], "thread": m["thread"], "kind": "result", "title": title,
-                "body": out["body"], "refs": [], "status_line": "done", "reply_to": task_id}
+                "body": out["body"], "refs": [], "status_line": out.get("outcome", "execution_unknown"), "reply_to": task_id}
         _queue(task_id, args)
         state.data["done"].append(task_id)
         state.data["done"] = state.data["done"][-2000:]

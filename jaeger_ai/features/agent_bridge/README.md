@@ -43,6 +43,40 @@ be random. Cursor pagination accepts nonnegative `after` and limit 1–100.
 There are no group deliveries or unread markers. Messages are inert data;
 storing a `task` message never admits tool execution.
 
+## Reported execution outcomes
+
+`post_result` accepts `status`: `done`, `failed`, `timeout`, `error`,
+`cancelled`, or `execution_unknown`. Omitting it retains the legacy `done`
+report; explicitly malformed or unsupported values are rejected before posting.
+The value is carried unchanged in the existing message `status_line` and
+`handoff.result` activity status. Result prose is never parsed for an outcome.
+ARES and the Hermes/OpenClaw worker supply a separate structured outcome
+from process exit, timeout, or worker exception. The Rack PC worker preserves
+empty-reply failure, timeout, and provider/worker errors in the same protocol. Missing structured worker outcome is `execution_unknown`.
+A timeout does not certify cancellation of external work; an error reports a
+worker error, not proof of external side effects or their absence. No new
+execution retry or cancellation is introduced, and the durable at-most-once
+worker marker remains unchanged.
+
+Hub Activity and its inspector show unsuccessful reports as unsuccessful,
+unknown/unrecognized hub statuses as unknown, and keep the independent result
+check pending. An authoritative Gateway check still takes precedence. These
+reports do not grant approvals, verify artifacts, or change caller/thread
+ownership. Backlog mirrors unsuccessful reports to `needs_ok` for unresolved-result
+intervention, never automatic resume, retry, or approval. Existing terminal
+backlog `done` and canonical owner cancellation remain unchanged;
+the existing successful-report mirror remains compatible.
+
+Regression coverage: `dev/tests/test_ares_worker.py`, `dev/tests/test_peer_worker_outcomes.py`,
+`dev/tests/jaeger_ai/core/test_activity_bridge_handoffs.py`,
+`dev/tests/jaeger_ai/interfaces/test_mcp_hub_collab.py`,
+`dev/tests/jaeger_ai/features/test_backlog_reconcile.py`, and
+`jaeger_ai/interfaces/ui/src/orchestration/agentOutcome.test.tsx`.
+The worker/bridge tests use synthetic process execution with authenticated
+loopback test transport. Setting `JAEGER_AGENT_OUTCOME_EVENTS` to a fresh
+external JSONL path captures actual bridge events; the UI test can replay that
+same path. This is not live provider, native-shell, or installed-runtime proof.
+
 ## Muse confinement
 
 Muse's authenticated Gateway access is limited to hub messages, roster and

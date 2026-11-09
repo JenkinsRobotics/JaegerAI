@@ -27,11 +27,12 @@ def test_runs_once_and_posts_result(tmp_path, monkeypatch):
     monkeypatch.setattr(w, "device_ok", lambda: [])
     ran = []
     monkeypatch.setattr(w, "run_job", lambda m: ran.append(m["id"]) or
-                        {"status": "done", "body": "ok", "artifacts": ["/a"], "elapsed_s": 1})
+                        {"status": "done", "outcome": "done", "body": "ok", "artifacts": ["/a"], "elapsed_s": 1})
     st = w.State(tmp_path / ".worker" / "state.json")
     assert w.tick(st) == 1 and ran == ["h1"]
     tool, args = posted[0]
     assert tool == "post_result" and args["to"] == "grokbot" and args["thread"] == "t1"
+    assert args["status"] == "done"
     assert args["reply_to"] == "h1" and args["artifacts"] == ["/a"]
     assert w.tick(w.State(tmp_path / ".worker" / "state.json")) == 0  # never twice
 
@@ -60,6 +61,7 @@ def test_strips_api_keys_and_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(w.subprocess, "run", fake_run)
     out = w.run_job(task("h9"))
     assert "OPENAI_API_KEY" not in seen["env"] and seen["timeout"] == w.TIMEOUT_S
+    assert out["outcome"] == "timeout"
     assert "timed out" in out["status"] and "--sandbox" in seen["cmd"]
 
 
@@ -129,3 +131,14 @@ def test_main_loop_survives_hub_down_then_up(tmp_path, monkeypatch):
     assert sleeps == [15, 30, 60, 15]
     log = (tmp_path / ".worker" / "worker.jsonl").read_text()
     assert '"hub_recovered"' in log
+
+
+def test_missing_structured_outcome_is_unknown_not_parsed(tmp_path, monkeypatch):
+    posted = _setup(tmp_path, monkeypatch, [task("unstructured")])
+    monkeypatch.setattr(w, "device_ok", lambda: [])
+    monkeypatch.setattr(w, "run_job", lambda m: {
+        "status": "done", "body": "completed successfully", "artifacts": [], "elapsed_s": 0})
+    state = w.State(tmp_path / "state.json")
+    assert w.tick(state) == 1
+    assert posted[0][1]["status"] == "execution_unknown"
+    assert w.tick(w.State(state.path)) == 0
