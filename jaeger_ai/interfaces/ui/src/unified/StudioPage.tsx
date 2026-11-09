@@ -215,25 +215,47 @@ export function Board({ assets, source }: { assets: Asset[]; source?: JaegerSour
   const [attempt, setAttempt] = useState(0);
   const dirty = useRef(false);
   const revision = useRef(0);
+  const saving = useRef(false);
+  const saveBlocked = useRef(false);
+  const [saveError, setSaveError] = useState<string>();
+  const [saveSettled, setSaveSettled] = useState(0);
   const lifetime = useRef<AbortController | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     lifetime.current = controller;
     setLoaded(undefined); setErr(undefined); setPicking(false); dirty.current = false;
+    saving.current = false; saveBlocked.current = false; setSaveError(undefined);
     getJson<unknown>("/v1/studio/board", controller.signal).then((value) => {
       if (!controller.signal.aborted) setLoaded({ source, items: boardItems(value) });
     }).catch((e: Error) => { if (!controller.signal.aborted) setErr(e.message); });
     return () => controller.abort();
   }, [source, attempt]);
   useEffect(() => {
-    if (!items || !dirty.current) return;
+    if (!items || !dirty.current || saving.current || saveBlocked.current) return;
     const controller = lifetime.current;
     const version = revision.current;
-    const t = setTimeout(() => { sendJson("PUT", "/v1/studio/board", { items }).then(() => {
-      if (!controller?.signal.aborted && version === revision.current) dirty.current = false;
-    }, (e: Error) => { if (!controller?.signal.aborted) toast(`Board not saved: ${e.message}`, "error"); }); }, 600);
+    const t = setTimeout(() => {
+      if (!controller || controller.signal.aborted || saving.current || saveBlocked.current) return;
+      // Whole-board PUTs must not overlap: an older snapshot can commit last.
+      // New edits remain dirty and are coalesced after this write acknowledges.
+      saving.current = true;
+      sendJson("PUT", "/v1/studio/board", { items }).then(() => {
+        if (controller.signal.aborted) return;
+        saving.current = false;
+        if (version === revision.current) dirty.current = false;
+        setSaveSettled((n) => n + 1);
+      }, (e: Error) => {
+        if (controller.signal.aborted) return;
+        saving.current = false;
+        // A failed response may still have committed. Do not replay this or
+        // subsequent snapshots automatically after an uncertain outcome.
+        saveBlocked.current = true;
+        setSaveError(e.message);
+        toast(`Board not saved: ${e.message}`, "error");
+      });
+    }, 600);
     return () => clearTimeout(t);
-  }, [items, toast]);
+  }, [items, toast, saveSettled]);
   const change = (fn: (xs: BoardItem[]) => BoardItem[]) => {
     if (!items) return;
     dirty.current = true; revision.current++;
@@ -264,8 +286,9 @@ export function Board({ assets, source }: { assets: Asset[]; source?: JaegerSour
       <div className="jg-ui-toolbar jg-mb-4">
         <button type="button" className="jg-u-btn" disabled={!items} onClick={() => add({ kind: "note", text: "", color: "yellow", w: 200, h: 140 })}>Add note</button>
         <button type="button" className="jg-u-btn" disabled={!items || !assets.length} onClick={() => setPicking(true)}>Add asset</button>
-        <span className="jg-u-note">{items ? "Drag to move, drag the corner to resize, arrow keys nudge. Changes save automatically." : "Editing is disabled until the board loads."}</span>
+        <span className="jg-u-note">{items ? saveError !== undefined ? "Automatic saving is paused." : "Drag to move, drag the corner to resize, arrow keys nudge. Changes save automatically." : "Editing is disabled until the board loads."}</span>
       </div>
+      {saveError !== undefined && <div role="alert" className="jg-u-error">Board not saved: {saveError}. The save outcome may be unknown. Automatic saving is paused; newer edits stay only in this view. Keep this board open and copy any unsaved notes before leaving.</div>}
       {err && <div role="alert"><p className="jg-u-error">Board unavailable: {err}</p><button type="button" className="jg-u-btn" onClick={() => setAttempt((n) => n + 1)}>Retry loading board</button></div>}
       {!items ? !err && <><p role="status">Loading board…</p><SkeletonRows /></> : (
         <div className="jg-board-canvas" aria-label="Board">
