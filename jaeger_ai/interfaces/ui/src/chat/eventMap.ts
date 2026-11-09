@@ -56,15 +56,15 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
     case "turn.progress":
       return { parts: [{ kind: "progress", message: str(p.message ?? p.text ?? p.summary) }] };
     case "tool.started":
-      return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "executing" }] };
+      return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), ...(identity(p.request_id ?? event.request_id) ? {requestId: identity(p.request_id ?? event.request_id)} : {}), executionReceipt: true, toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "executing" }] };
     case "tool.done":
     case "tool.completed":
-      return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "completed", output: p.output ?? p.result, summary: str(p.summary ?? p.text) || undefined }] };
+      return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), ...(identity(p.request_id ?? event.request_id) ? {requestId: identity(p.request_id ?? event.request_id)} : {}), executionReceipt: true, toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "completed", output: p.output ?? p.result, summary: str(p.summary ?? p.text) || undefined }] };
     case "tool.error":
     case "tool.failed":
       return {
         parts: [
-          { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: (["denied", "rejected", "unsupported", "unknown", "cancelled"].includes(str(p.outcome)) ? str(p.outcome) : "failed") as ToolInvocationState, output: p.error, summary: str(p.summary ?? p.text) || undefined },
+          { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), ...(identity(p.request_id ?? event.request_id) ? {requestId: identity(p.request_id ?? event.request_id)} : {}), executionReceipt: true, toolName: str(p.tool), input: p.input ?? p.args ?? null, state: (["denied", "rejected", "unsupported", "unknown", "cancelled"].includes(str(p.outcome)) ? str(p.outcome) : "failed") as ToolInvocationState, output: p.error, summary: str(p.summary ?? p.text) || undefined },
           { kind: "error", message: str(p.error ?? p.message ?? "Tool failed") },
         ],
       };
@@ -74,7 +74,7 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       if(!id)return null;
       const callId=identity(p.call_id),requestId=identity(p.request_id ?? event.request_id);
       const parts: ChatPart[] = [];
-      if(callId)parts.push({kind:"toolInvocation",callId,approvalId:id,requestId,toolName:str(p.tool),input:p.input??p.args??null,state:"waitingForConfirmation"});
+      if(callId)parts.push({kind:"toolInvocation",callId,approvalId:id,requestId,executionReceipt:false,toolName:str(p.tool),input:p.input??p.args??null,state:"waitingForConfirmation"});
       parts.push({kind:"confirmation",callId:id,requestId,toolCallId:callId,title:str(p.title ?? (p.tool ? `Run ${str(p.tool)}?` : "Approval needed")),message:str(p.prompt ?? p.summary ?? p.message)});
       return {parts};
     }

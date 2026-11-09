@@ -49,3 +49,11 @@ it('ignores completion after unmount and releases the source',async()=>{
  const pending=deferred<Awaited<ReturnType<VoiceIO['capability']>>>();const adapter={...io(),capability:()=>pending.promise,release:vi.fn()};
  const view=render(<AudioSettingsPanel io={adapter}/>);view.unmount();await act(async()=>pending.resolve({transcription:true,speech:true}));expect(view.container.textContent).toBe('');expect(adapter.release).toHaveBeenCalledOnce();
 });
+it.each([null,{}, {transcription:'false',speech:'false'}, {transcription:true}, {transcription:true,speech:true,reason:{}}])('rejects malformed capability data %j',async(value)=>{
+ saveAudioPreferences({inputId:'saved',outputId:''});render(<AudioSettingsPanel io={{...io(),capability:async()=>value as Awaited<ReturnType<VoiceIO['capability']>>}}/>);await act(async()=>{});
+ expect(screen.getByRole('alert').textContent).toBe('Invalid speech capability response.');expect(screen.queryByText('Speech services available')).toBeNull();expect(readAudioPreferences().inputId).toBe('saved');
+});
+it.each([null,{}, {microphones:null,speakers:[]}, {microphones:[],speakers:{}}, {microphones:[null],speakers:[]}, {microphones:[{deviceId:7,label:'mic'}],speakers:[]}, {microphones:[],speakers:[{deviceId:'s',label:{}}]}])('rejects malformed device data without crashing %j',async(value)=>{
+ render(<AudioSettingsPanel io={{...io(),devices:async()=>value as unknown as Awaited<ReturnType<VoiceIO['devices']>>}}/>);await act(async()=>{});
+ expect(screen.getByRole('alert').textContent).toBe('Invalid audio device response.');expect(screen.queryByText('Speech services available')).toBeNull();expect(screen.getByRole('combobox',{name:'Voice microphone'})).toBeTruthy();
+});

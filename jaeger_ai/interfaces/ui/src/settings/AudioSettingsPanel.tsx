@@ -3,6 +3,17 @@ import { createVoiceIO } from '../chat/voiceIO';
 import type { SpeechCapability, SpeechDevices, VoiceIO } from '../chat/webSpeech';
 import { useAudioPreferences } from './audioPreferences';
 import './audioSettings.css';
+// TypeScript interfaces do not validate bridge/HTTP data at runtime.
+function validCapability(value: unknown): value is SpeechCapability {
+ if(!value || typeof value!=='object')return false;
+ const row=value as SpeechCapability;
+ return typeof row.transcription==='boolean' && typeof row.speech==='boolean' && (row.reason===undefined || typeof row.reason==='string');
+}
+function validDevices(value: unknown): value is SpeechDevices {
+ if(!value || typeof value!=='object')return false;
+ const row=value as SpeechDevices;
+ return [row.microphones,row.speakers].every(rows=>Array.isArray(rows) && rows.every(device=>device && typeof device==='object' && typeof device.deviceId==='string' && typeof device.label==='string'));
+}
 /** Live platform capabilities, with the same selection used by the chat session. */
 export function AudioSettingsPanel({io:supplied}:{io?:VoiceIO}){
  const io=useMemo(()=>supplied??createVoiceIO(),[supplied]);
@@ -15,6 +26,8 @@ export function AudioSettingsPanel({io:supplied}:{io?:VoiceIO}){
   try{
    const [capability,found]=await Promise.all([io.capability(),io.devices()]);
    if(current!==generation.current)return;
+   if(!validCapability(capability))throw Error('Invalid speech capability response.');
+   if(!validDevices(found))throw Error('Invalid audio device response.');
    setCaps(capability);setDevices(found);setStatus('ready');
   }catch(e){if(current===generation.current){setStatus('error');setError(String((e as Error).message||e));}}
  },[io]);
