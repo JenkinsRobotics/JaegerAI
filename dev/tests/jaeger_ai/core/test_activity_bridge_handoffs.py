@@ -195,3 +195,34 @@ async def test_late_peer_report_cannot_reopen_owner_cancellation(hub, status):
     assert store.get_handoff("cancelled-task") == cancelled
     assert store.list_requests() == requests  # no retry admission or status mutation
     assert gateway.backlog_store.get(mirrored["id"])["status"] == "done"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["unsupported", "unknown", "timed_out", " ", "done-ish", "completed_unverified", "pending", "execution-unknown"])
+async def test_unknown_status_result_backlog_is_unresolved(hub, status):
+    client, gateway, tools = hub
+    await tools["grokbot"]["handoff_task"](to="ares", task="synthetic", thread="unknown-thread", id="unknown-task")
+    before = gateway.store.list_requests()
+    await tools["ares"]["send_message"](id="unknown-result", to="grokbot", thread="unknown-thread",
+        kind="result", title="Successful prose is not a status", body="Done successfully",
+        reply_to="unknown-task", status_line=status)
+    mirrored = gateway.backlog_store.by_handoff("unknown-task", "unknown-thread")
+    assert mirrored["status"] == "needs_ok" and mirrored["handoff_result"] == "failed"
+    assert gateway.store.list_requests() == before
+    assert gateway.store.get_handoff("unknown-task") is None
+    data = next(i["data"] for i in await _activity(client) if i["kind"] == "handoff.result")
+    assert data["status"] == status and "check" not in data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [None, 42, [], {}])
+async def test_malformed_generic_result_status_cannot_finish_backlog(hub, status):
+    client, gateway, tools = hub
+    await tools["grokbot"]["handoff_task"](to="ares", task="synthetic", thread="malformed-thread", id="malformed-task")
+    response = await client.post("/v1/agent-messages", headers=caller_auth.client_headers("ares"), json={
+        "id": "malformed-result", "to": "grokbot", "thread": "malformed-thread", "kind": "result",
+        "title": "Result", "body": "Done", "reply_to": "malformed-task", "status_line": status})
+    assert response.status == 400
+    assert gateway.backlog_store.by_handoff("malformed-task", "malformed-thread")["status"] == "in_progress"
+    assert not [i for i in await _activity(client) if i["kind"] == "handoff.result"]
+    assert gateway.store.list_requests() == []

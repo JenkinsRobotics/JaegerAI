@@ -142,3 +142,15 @@ def test_missing_structured_outcome_is_unknown_not_parsed(tmp_path, monkeypatch)
     assert w.tick(state) == 1
     assert posted[0][1]["status"] == "execution_unknown"
     assert w.tick(w.State(state.path)) == 0
+
+
+def test_zero_exit_without_final_message_reports_process_only(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(w, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(w, "_token", lambda: "synthetic-unused-token")
+    monkeypatch.setattr(w.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0))
+    out = w.run_job(task("no-final"))
+    assert out["outcome"] == "done"
+    assert "no final message" in out["body"]
+    assert not (tmp_path / "jobs" / "no-final" / "result.md").exists()
+    assert "verified" not in out and "check" not in out

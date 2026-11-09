@@ -66,3 +66,12 @@ def test_unsuccessful_peer_results_cannot_finish_backlog(tmp_path):
         changed = record_hub_message(store, "ares", result)
         assert changed["status"] == "needs_ok" and changed["handoff_result"] == "failed"
         assert record_hub_message(store, "ares", result) == changed
+
+
+def test_legacy_success_status_forms_and_unknown_answers():
+    from jaeger_ai.features.backlog.store import status_from_message
+    for kind in ("result", "answer"):
+        for status in ("", "done", "completed", "finished", "done, 3 commits"):
+            assert status_from_message(kind, status) == "done"
+        for status in ("unsupported", "pending", "completed_unverified", "execution-unknown", "done-ish"):
+            assert status_from_message(kind, status) == "needs_ok"

@@ -56,7 +56,9 @@ empty-reply failure, timeout, and provider/worker errors in the same protocol. M
 A timeout does not certify cancellation of external work; an error reports a
 worker error, not proof of external side effects or their absence. No new
 execution retry or cancellation is introduced, and the durable at-most-once
-worker marker remains unchanged.
+worker marker remains unchanged. For ARES, `done` means the process exited
+zero; absence of its final-message file is reported in the body and is not
+invented proof of either failure or independently verified task completion.
 
 Hub Activity and its inspector show unsuccessful reports as unsuccessful,
 unknown/unrecognized hub statuses as unknown, and keep the independent result
@@ -65,7 +67,10 @@ reports do not grant approvals, verify artifacts, or change caller/thread
 ownership. Backlog mirrors unsuccessful reports to `needs_ok` for unresolved-result
 intervention, never automatic resume, retry, or approval. Existing terminal
 backlog `done` and canonical owner cancellation remain unchanged;
-the existing successful-report mirror remains compatible.
+the existing successful-report mirror remains compatible. The generic
+`send_message` route still permits free-form status text, but unsupported
+explicit result/answer statuses cannot finish backlog work. Empty legacy
+status and documented successful status forms retain compatibility.
 
 Regression coverage: `dev/tests/test_ares_worker.py`, `dev/tests/test_peer_worker_outcomes.py`,
 `dev/tests/jaeger_ai/core/test_activity_bridge_handoffs.py`,
