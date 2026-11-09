@@ -1,3 +1,5 @@
+> Current pinned integration qualification: [PINNED_STUDIO_QUALIFICATION.md](PINNED_STUDIO_QUALIFICATION.md). This report below is preserved historical evidence for its own named sources; its older current/final labels do not describe the new handoff. Overall product remains PARTIAL.
+
 # Machine inventory and Safety read truth
 
 ## Current combined qualification, 2026-11-09

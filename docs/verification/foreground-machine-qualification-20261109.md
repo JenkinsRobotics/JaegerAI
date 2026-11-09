@@ -1,3 +1,5 @@
+> Current pinned integration qualification: [PINNED_STUDIO_QUALIFICATION.md](PINNED_STUDIO_QUALIFICATION.md). This report below is preserved historical evidence for its own named sources; its older current/final labels do not describe the new handoff. Overall product remains PARTIAL.
+
 # Foreground Stop and Machine observation qualification
 
 **Overall product and every tab remain PARTIAL.** This is the current combined

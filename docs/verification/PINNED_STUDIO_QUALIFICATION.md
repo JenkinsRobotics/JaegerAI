@@ -1,6 +1,6 @@
 # Pinned master and Studio safety qualification
 
-Overall product and every tab remain **PARTIAL**. Selected qualification passed; portable packaging is not yet final. This is review source and evidence, not an installed release. No default merge, remote publication, Mac runtime change or deployment occurred.
+Overall product and every tab remain **PARTIAL**. Selected qualification and distribution payload checks passed; final portable archive integrity is recorded separately. This is review source and evidence, not an installed release. No default merge, remote publication, Mac runtime change or deployment occurred.
 
 ## Exact implementation and history
 
@@ -59,6 +59,15 @@ No feature parity, live provider/account, native microphone/speaker, rendered br
 
 ## Package and handoff status
 
-Source/input proof passed: 5,580 tracked bytes/modes/symlink entries, unchanged companion package tree and 1,950 inputs plus eight existing archive hashes. New root distributions and their archive proof remain owned by packaging; this report does not claim a completed ZIP or finalized package validation. The first archive checker found an absent packaged agent_bridge README; its failure must be retained separately from any subsequent correction and qualified result.
+Source/input proof passed: 5,580 tracked bytes/modes/symlink entries, unchanged companion package tree and 1,950 inputs plus eight existing archive hashes. Root wheel and sdist were rebuilt from 731 and exact production UI. All ten distributions passed archive path/duplicate/payload checks and wheel RECORD checks. Both root archives match all 138 fresh UI files and changed runtime inputs. Eight companions are reused, not freshly rebuilt.
 
-Technical evidence selection records original/derivative digests and development-path replacement. No raw internal reports, coordination notes, HOME/runtime state, databases, credentials, native addresses or private user data are selected. Original evidence is untouched. Specific exclusion checks are not universal secret detection. Final history/all-object proof, fresh baseline-only bundle import, exact member manifest, archive CRC and independent package review remain prerequisites for delivery.
+- Root wheel SHA256: `8d94951a36c83a86fbb57f007c97e2ede0fdc3b4a369bdcb040fa645d144c07f`.
+- Root sdist SHA256: `d2310014952466ec6370e06613663591c6d9b41dc053cd1c94a3f92bd86eb221`.
+
+The original checker failed (exit 1) because it required three source-only feature READMEs as runtime payload. Original checker SHA256 is `86e0ac3037663c465f0931d4fa867ea37e860d814a98860922160e171885263f`; original failure log SHA256 is `02a93a1af851de4f537f25769d359edafc26e7f058aebf444122bacb5a0d6407`. The corrected checker SHA256 is `cbc43812177260e697942fa2ff10629ba6f6040aa5dfa9dc86676cfa226928eb`, and its run exited 0. The only excluded paths are agent_bridge/README.md, backlog/README.md and voice/README.md under jaeger_ai/features; their absence is explicitly asserted while every runtime/UI/RECORD assertion remains. The existing packaging policy omits these in old and new archives. Independent bounded source inspection found no executable consumers and approved the exact checker change; it did not independently rerun the full checker or install packages. All three README files remain available in the source handoff. The IDE controller is also explicitly outside root distribution payload. No package rebuild/configuration change was needed for the proof correction.
+
+These are distribution provenance checks, not installation acceptance. The ZIP supplies source and review evidence, not the large distribution binaries or an installer. Both original and corrected checker receipts are retained.
+
+Technical evidence selection records original/derivative digests and development-path replacement. No raw internal reports, coordination notes, HOME/runtime state, databases, credentials, native addresses or private user data are selected. Original evidence is untouched. Specific exclusion checks are not universal secret detection. The handoff root identifies history/all-object proof, fresh import, exact member manifest and ZIP integrity. Independent approval of the exact ZIP is still required before upload or delivery.
+
+Additional explicit limits: legacy approval events without request IDs cannot distinguish undocumented same-call-ID reuse. ARES zero exit with no final file is process success only; OpenClaw embedded errors at exit 0 are outside this repair.
