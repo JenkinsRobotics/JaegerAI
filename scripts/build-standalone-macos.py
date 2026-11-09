@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
+import re
 import os
 from pathlib import Path
 import plistlib
@@ -29,6 +31,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-root', required=True, type=Path)
     parser.add_argument('--browser-bundle', required=True, type=Path)
+    parser.add_argument('--provider-cli', action='append', default=[], help='Owner-supplied runtime NAME=/absolute/binary; kept out of source control')
     parser.add_argument('--dependency-python', default=sys.executable)
     parser.add_argument('--native-dependency-root', action='append', default=[], type=Path)
     args = parser.parse_args()
@@ -100,12 +103,26 @@ def main():
     (runtime / 'dependency-manifest.json').write_text(json.dumps({'commit': sha, 'dirty': dirty, 'python': dependency['version'], 'distributions': dependency['packages'], 'omitted_unused_qt_sql_server_drivers': omitted}, indent=2) + '\n')
     launcher = runtime / 'bin/jaeger'
     launcher.parent.mkdir()
+    providers = []
+    for value in args.provider_cli:
+        name, separator, filename = value.partition('=')
+        if not separator or not re.fullmatch(r'[a-z][a-z0-9_-]{0,40}', name) or name == 'jaeger':
+            raise SystemExit('Provider CLI must be NAME=/absolute/binary')
+        binary = Path(filename).resolve()
+        if not Path(filename).is_absolute() or not binary.is_file():
+            raise SystemExit('Provider CLI must be an existing absolute binary path')
+        shutil.copy2(binary, launcher.parent / name)
+        (launcher.parent / name).chmod(0o755)
+        providers.append({'name': name, 'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(), 'source': str(binary), 'scope': 'owner-supplied local runtime; redistribution rights not asserted'})
+    (runtime / 'provider-runtimes.json').write_text(json.dumps(providers, indent=2) + '\n')
     launcher.write_text('''#!/bin/sh
 set -eu
 runtime_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONNOUSERSITE=1
 export JAEGER_INSTALL_ROOT="$runtime_dir/source"
+export JAEGER_BUNDLED_BIN="$runtime_dir/bin"
+export PATH="$JAEGER_BUNDLED_BIN:$runtime_dir/browser/node/bin:$PATH"
 export JAEGER_RUNTIME_PYTHON="$runtime_dir/python/bin/python3"
 export JAEGER_WEBUI_PYTHON="$JAEGER_RUNTIME_PYTHON"
 export JAEGER_BROWSER_BUNDLE="$runtime_dir/browser"
