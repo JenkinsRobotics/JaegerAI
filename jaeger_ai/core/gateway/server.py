@@ -6816,6 +6816,10 @@ class JaegerGatewayApp:
         request_id = request.match_info["request_id"]
         reading = getattr(request, 'method', 'POST') == 'GET'
         body = dict(request.query) if reading else await request.json() if request.can_read_body else {}
+        if not isinstance(body, dict) or any(
+            key in body and not isinstance(body[key], str) for key in ('text', 'steering_id')
+        ):
+            return web.json_response({'error': 'Invalid steering identity or text'}, status=400)
         text = str(body.get("text") or "").strip()
         steering_id = str(body.get("steering_id") or "").strip()
         if not reading and not steering_id:
@@ -6825,12 +6829,21 @@ class JaegerGatewayApp:
         row = self.store.get_request(request_id)
         if row is None or row.get("session_id") != session_id:
             return web.json_response({"error": "Request not found"}, status=404)
+        admission = self.store.steering_admission(session_id, request_id, steering_id)
+        if admission and not admission['request_matches']:
+            return web.json_response({'error': 'Steering identity belongs to a different request admission'}, status=409)
         if steering_id:
             original = self.store.steering_record(session_id, request_id, steering_id)
             if original:
                 if not reading and original.get('text') != text:
                     return web.json_response({'error': 'Steering identity already used for different text'}, status=409)
                 return web.json_response({**original, 'session_id': session_id, 'steered': True})
+        if admission:
+            if not reading and admission['text'] != text:
+                return web.json_response({'error': 'Steering identity already used for different text'}, status=409)
+            return web.json_response({'error': 'Steering delivery is unconfirmed; do not replay' if admission['state'] == 'delivery_unknown' else 'Agent did not accept steering',
+                                      'state': admission['state'], 'steered': False,
+                                      'request_id': request_id, 'steering_id': steering_id}, status=409)
         if reading:
             return web.json_response({'error': 'Steering receipt not found'}, status=404)
         if not text:
@@ -6847,18 +6860,42 @@ class JaegerGatewayApp:
                 },
                 status=409,
             )
-        accepted = bool(agent.steer(text))
+        authority = {'lease': getattr(self, '_owner_receipt_lease', None),
+                     'source_file': str(Path(__file__).resolve())}
+        try:
+            reserved = self.store.reserve_steering(session_id, request_id, steering_id, text, **authority)
+            if not reserved:
+                # Another caller committed admission after our read. Its outcome
+                # is not ours to replay, even if it has not reached the agent yet.
+                return web.json_response({'error': 'Steering already admitted; read its receipt',
+                                          'steering_id': steering_id, 'steered': False}, status=409)
+            def deliver() -> bool:
+                if self._cancellations.is_cancelled(request_id) or self._active_agents.get(request_id) is not agent:
+                    raise RuntimeError('Active steering target changed')
+                return bool(agent.steer(text))
+            accepted = self.store.deliver_steering(session_id, request_id, steering_id, text, deliver, producer_token=reserved, **authority)
+        except RequestConflict:
+            return web.json_response({'error': 'Steering identity already used for different text'}, status=409)
+        except Exception:
+            logger.warning('Steering admission or delivery did not complete', exc_info=True)
+            return web.json_response({'error': 'Steering delivery is unconfirmed; do not replay',
+                                      'steering_id': steering_id, 'steered': False}, status=503)
         if not accepted:
             return web.json_response(
                 {"error": "Agent did not accept steering", "request_id": request_id},
                 status=409,
             )
-        self.event_bus.publish(session_id, "turn.steer", {
-            "request_id": request_id,
-            "text": text,
-            "queued": True,
-            **({"steering_id": steering_id} if steering_id else {}),
-        })
+        try:
+            self.event_bus.publish(session_id, "turn.steer", {
+                "request_id": request_id,
+                "text": text,
+                "queued": True,
+                **({"steering_id": steering_id} if steering_id else {}),
+            })
+        except Exception:
+            logger.warning('Steering receipt did not complete; delivery remains unconfirmed', exc_info=True)
+            return web.json_response({'error': 'Steering delivery is unconfirmed; do not replay',
+                                      'steering_id': steering_id, 'steered': False}, status=503)
         return web.json_response({
             "session_id": session_id, "request_id": request_id,
             "steered": True, "queued": True,
