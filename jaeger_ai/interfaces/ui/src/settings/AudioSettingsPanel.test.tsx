@@ -20,3 +20,32 @@ it('reports unavailable saved devices and never silently overwrites them',async(
 it('reports persistence failure without claiming the new route was saved',async()=>{
  render(<AudioSettingsPanel io={io()}/>);await act(async()=>{});vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw Error('Storage unavailable');});fireEvent.change(screen.getByRole('combobox',{name:'Voice speaker'}),{target:{value:'desk-speaker'}});expect(screen.getByRole('alert').textContent).toContain('Storage unavailable');expect(readAudioPreferences().outputId).toBe('');
 });
+function deferred<T>(){let resolve!:(value:T)=>void;let reject!:(error:Error)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};}
+it.each(['capability','devices'] as const)('leaves loading on rejected %s and clears stale success on failed refresh',async(method)=>{
+ const adapter=io();const query=vi.spyOn(adapter,method);query.mockRejectedValueOnce(Error('Permission check failed'));
+ render(<AudioSettingsPanel io={adapter}/>);await act(async()=>{});expect(screen.queryByText('Checking…')).toBeNull();expect(screen.getByRole('alert').textContent).toBe('Permission check failed');
+ await act(async()=>fireEvent.click(screen.getByText('Refresh audio devices')));expect(screen.getByText('Speech services available')).toBeTruthy();
+ query.mockRejectedValueOnce(Error('Refresh failed'));await act(async()=>fireEvent.click(screen.getByText('Refresh audio devices')));
+ expect(screen.queryByText('Speech services available')).toBeNull();expect(screen.getByText('Check failed')).toBeTruthy();
+});
+it('shows unavailable and empty inventory without claiming hardware readiness',async()=>{
+ render(<AudioSettingsPanel io={{...io(),capability:async()=>({transcription:false,speech:false,reason:'Speech unavailable'}),devices:async()=>({microphones:[],speakers:[]})}}/>);await act(async()=>{});
+ expect(screen.getByText('Unavailable')).toBeTruthy();expect(screen.getByText('No microphones listed.')).toBeTruthy();expect(screen.getByText('Speech unavailable')).toBeTruthy();
+});
+it('ignores old refresh results and preserves saved selection',async()=>{
+ saveAudioPreferences({inputId:'saved',outputId:''});const old=deferred<Awaited<ReturnType<VoiceIO['capability']>>>();const adapter:VoiceIO=io();vi.spyOn(adapter,'capability').mockReturnValueOnce(old.promise);
+ render(<AudioSettingsPanel io={adapter}/>);expect(screen.getByText('Checking…')).toBeTruthy();expect(screen.getByText('Saved device (not verified)')).toBeTruthy();
+ await act(async()=>fireEvent.click(screen.getByText('Refresh audio devices')));await act(async()=>old.resolve({transcription:false,speech:false}));
+ expect(screen.getByText('Speech services available')).toBeTruthy();expect(readAudioPreferences().inputId).toBe('saved');
+});
+it('switches sources and ignores late failure after replacement or unmount',async()=>{
+ const old=deferred<Awaited<ReturnType<VoiceIO['capability']>>>();const first={...io(),capability:()=>old.promise,release:vi.fn()};const next={...io(),release:vi.fn()};
+ const view=render(<AudioSettingsPanel io={first}/>);view.rerender(<AudioSettingsPanel io={next}/>);await act(async()=>{});expect(first.release).toHaveBeenCalledOnce();
+ await act(async()=>old.reject(Error('Obsolete failure')));expect(screen.queryByRole('alert')).toBeNull();expect(screen.getByText('Speech services available')).toBeTruthy();
+ view.unmount();expect(next.release).toHaveBeenCalledOnce();
+});
+
+it('ignores completion after unmount and releases the source',async()=>{
+ const pending=deferred<Awaited<ReturnType<VoiceIO['capability']>>>();const adapter={...io(),capability:()=>pending.promise,release:vi.fn()};
+ const view=render(<AudioSettingsPanel io={adapter}/>);view.unmount();await act(async()=>pending.resolve({transcription:true,speech:true}));expect(view.container.textContent).toBe('');expect(adapter.release).toHaveBeenCalledOnce();
+});
