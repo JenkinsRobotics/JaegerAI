@@ -440,7 +440,6 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </header>
     <aside id="jaeger-navigation" className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__rail">
-        <button type="button" aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"} title={sidebarOpen ? "Close sidebar" : "Open sidebar"} aria-expanded={sidebarOpen} aria-controls="jaeger-navigation-context" onClick={() => setSidebarOpen(value => !value)}><PanelLeft size={20} /></button>
         <nav aria-label="Jaeger navigation">
           {([
             ["chat", "Chat", MessageSquare], ["studio", "Imagine", Image],

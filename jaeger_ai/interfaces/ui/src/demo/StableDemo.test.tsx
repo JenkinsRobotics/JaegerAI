@@ -9,16 +9,17 @@ vi.mock("../windows/AppWindow", () => ({ AppWindow: ({embedded}: {embedded?: boo
 let root: Root;
 afterEach(async () => { await act(async () => root?.unmount()); localStorage.clear(); document.body.innerHTML = ""; history.replaceState(null, "", "/"); });
 const flush = async (f: () => void = () => {}) => act(async () => {f();await new Promise(r=>setTimeout(r,0));});
-it("closes the sidebar from its own control and with Escape", async () => {
+it("toggles the sidebar from the top bar and closes with Escape", async () => {
  await mount();
  const shell = document.querySelector('.jg-stable-demo')!;
  const toggle = document.querySelector<HTMLButtonElement>('[aria-controls="jaeger-navigation"].jg-stable-demo__top-button')!;
  if (shell.getAttribute('data-sidebar') !== 'true') await flush(() => toggle.click());
- await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Close sidebar"]')!.click());
+ await flush(() => toggle.click());
  expect(shell).toHaveAttribute('data-sidebar', 'false');
  expect(document.querySelector('#jaeger-navigation')).not.toHaveAttribute('hidden');
  expect(document.querySelector('#jaeger-navigation-context')).toHaveAttribute('hidden');
- expect(document.querySelector('[aria-label="Open sidebar"]')).not.toBeNull();
+ expect(toggle).toHaveAttribute('aria-expanded', 'false');
+ expect(document.querySelector('.jg-stable-demo__rail [aria-controls="jaeger-navigation-context"]')).toBeNull();
  await flush(() => toggle.click());
  expect(shell).toHaveAttribute('data-sidebar', 'true');
  await flush(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})));
