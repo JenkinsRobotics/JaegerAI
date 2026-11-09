@@ -16,9 +16,12 @@ const issue=(observer:SSEIssueObserver|undefined,code:SSEIssue,id?:string)=>{try
 
 export function parseSSEChunk(buffer: string, observer?:SSEIssueObserver): { frames: SSEFrame[]; rest: string } {
   const frames: SSEFrame[] = [];
-  const normalized = buffer.replace(/\r\n/g, "\n");
+  // SSE allows CRLF, LF or a lone CR as the line ending. A trailing CR may be the first half of a CRLF
+  // split across network chunks, so it stays in `rest` until the next chunk decides it.
+  const heldCR = buffer.endsWith("\r") ? "\r" : "";
+  const normalized = (heldCR ? buffer.slice(0, -1) : buffer).replace(/\r\n?/g, "\n");
   const blocks = normalized.split("\n\n");
-  const rest = blocks.pop() ?? "";
+  const rest = (blocks.pop() ?? "") + heldCR;
   for (const block of blocks) {
     let id: string | undefined;
     let event: string | undefined;
@@ -64,7 +67,14 @@ export async function* decodeSSE(body: ReadableStream<Uint8Array>, signal?: Abor
         ]);
       } finally { if (timer !== undefined) clearTimeout(timer); }
       const { value, done } = result;
-      if (done) break;
+      if (done) {
+        // A server may close right after its last frame without the closing blank line. Flush the
+        // decoder and dispatch that frame instead of dropping it (a dropped terminal frame forces a
+        // needless reconnect and replay).
+        buffer += decoder.decode();
+        if (buffer.trim() && !signal?.aborted) yield* parseSSEChunk(buffer.replace(/\r$/, "") + "\n\n", observer).frames;
+        break;
+      }
       buffer += decoder.decode(value, { stream: true });
       if (buffer.length > MAX_BUFFER) {issue(observer,"frame_oversize");throw new Error("SSE frame exceeds 8 MB");}
       const { frames, rest } = parseSSEChunk(buffer,observer);

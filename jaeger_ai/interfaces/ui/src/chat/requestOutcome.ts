@@ -13,7 +13,10 @@ export function requestOutcome(row: Pick<RequestSnapshot, "status" | "result">, 
   // text by stable item identity and deduplicates an already-seen final.
   // A failed/stopped/unknown receipt may have no final reply. Do not erase
   // provisional text already observed before interruption with an empty item.
-  if (typeof output === "string" && (output.length > 0 || state === "complete")) onPart({ kind: "markdownContent", text: output, role:"final", itemId:"final" });
+  if (typeof output === "string" && (output.length > 0 || state === "complete")) onPart({
+    kind: "markdownContent", text: output, role:"final", itemId:"final",
+    ...(output === "" && state === "complete" ? {authoritativeEmpty: true as const} : {}),
+  });
   if (state === "unknown") onPart({ kind: "warning", message: "Execution outcome is unknown. This request has been preserved; it will not be resent." });
   if (state === "failed") onPart({ kind: "error", message: String(row.result?.error ?? row.result?.summary ?? "Request failed") });
   return state;
