@@ -194,9 +194,12 @@ it('shows acknowledged but unconfirmed owned IDs and keeps observing until real 
  const host=new WebHost({send:async()=>({request_id:'owned-stop-ack',start_event_id:1}),cancel,stream}as unknown as JaegerSource);
  const parts:ChatPart[]=[];const handle=host.startTurn({sessionId:'fixture',turnId:'owned-stop-ack',message:'fixture'},p=>parts.push(p));
  await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));handle.cancel();
- await vi.waitFor(()=>expect(parts).toContainEqual({kind:'warning',message:expect.stringContaining('owned-stop-ack, owned-child')}));
+ // 2026-11-08: the notice sits on the turn it stops, so it names only the owned work, not the turn's own request id.
+ await vi.waitFor(()=>expect(parts).toContainEqual({kind:'warning',noticeId:'stop',message:expect.stringContaining('background work still unconfirmed: owned-child')}));
  let done=false;void handle.done.then(()=>{done=true;});await Promise.resolve();expect(done).toBe(false);
  finish(ev(2,'turn.cancelled','owned-stop-ack'));expect((await handle.done).state).toBe('cancelled');expect(cancel).toHaveBeenCalledTimes(1);
+ // The settled notice keeps the still-unconfirmed owned work visible.
+ expect(parts.at(-1)).toEqual({kind:'warning',noticeId:'stop',message:expect.stringMatching(/^Stopped\..*Background work still unconfirmed: owned-child\.$/)});
 });
 it('retains late descendant Stop warning when the parent observation already ended',async()=>{
  let finish!:(event:GatewayEvent)=>void,ack!:(value:unknown)=>void;
