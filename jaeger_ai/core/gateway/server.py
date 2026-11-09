@@ -6843,7 +6843,8 @@ class JaegerGatewayApp:
                 return web.json_response({'error': 'Steering identity already used for different text'}, status=409)
             return web.json_response({'error': 'Steering delivery is unconfirmed; do not replay' if admission['state'] == 'delivery_unknown' else 'Agent did not accept steering',
                                       'state': admission['state'], 'steered': False,
-                                      'request_id': request_id, 'steering_id': steering_id}, status=409)
+                                      'request_id': request_id, 'steering_id': steering_id},
+                                     status=503 if admission['state'] == 'delivery_unknown' else 409)
         if reading:
             return web.json_response({'error': 'Steering receipt not found'}, status=404)
         if not text:
@@ -6868,7 +6869,7 @@ class JaegerGatewayApp:
                 # Another caller committed admission after our read. Its outcome
                 # is not ours to replay, even if it has not reached the agent yet.
                 return web.json_response({'error': 'Steering already admitted; read its receipt',
-                                          'steering_id': steering_id, 'steered': False}, status=409)
+                                          'steering_id': steering_id, 'state': 'delivery_unknown', 'steered': False}, status=503)
             def deliver() -> bool:
                 if self._cancellations.is_cancelled(request_id) or self._active_agents.get(request_id) is not agent:
                     raise RuntimeError('Active steering target changed')

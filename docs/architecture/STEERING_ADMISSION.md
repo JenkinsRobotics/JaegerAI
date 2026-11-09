@@ -23,8 +23,10 @@ agent accepted guidance. Only the post-injection `turn.steer` receipt records
 confirmed queue acceptance, not eventual model consumption.
 
 An interruption or exception before/during/after delivery leaves a durable
-unknown outcome. Retries and GET return 409 with `delivery_unknown` and never
-inject again. A known agent refusal is retained as `rejected`. A failed write
+unknown outcome. Retries and GET return 503 with `delivery_unknown` and never
+inject again. A known agent refusal is retained as `rejected` (409). Unknown delivery uses
+503 so existing clients retain the steering identity rather than offer a new
+queued turn after a definite rejection. A failed write
 returns a sanitized 503, and callers must read/retry the **same** ID rather
 than create a replacement. A successful retry reads the original receipt.
 Changing text under an existing identity returns a conflict. There is no
