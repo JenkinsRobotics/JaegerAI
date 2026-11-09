@@ -17,7 +17,7 @@ PASS applies only to an exact named gate and source, never a tab from code prese
 | Work / Pipeline | PARTIAL | Metadata, independent read failures and stale-response controls; metadata is not execution success. |
 | Work / Backlog | PARTIAL | Backlog records and reconciliation; not interchangeable with Gateway task completion. |
 | Work / Tasks | PARTIAL | Synthetic lifecycle, approval, transfer, cancellation and artifact checks; fresh integrated selected gates passed. Arbitrary native descendants are not forcibly terminated by settlement veto. |
-| Work / Production | PARTIAL | Artifact read errors/retry/stale guards; packaged provenance and installed operation pending/unverified respectively. |
+| Work / Production | PARTIAL | Artifact read errors/retry/stale guards; distribution provenance checks passed; installed operation remains unverified. |
 | Work / Calendar | PARTIAL | Independent schedule/task failures and due-date controls; real external scheduling unverified. |
 | Work / YouTube | PARTIAL | API/source inventory; no publishing, real account, download or credential operation. |
 | Research | PARTIAL | Structured evidence/outcome consistency controls; not factual truth, entailment or authentic retrieval. Fresh pinned research gates passed. |
@@ -30,4 +30,4 @@ The latest b129 shared UI build and bounded1061-test/217-file suite passed, as d
 
 Shared rendered browser/phone acceptance: BLOCKED or not run, not component PASS. Native Mac runtime and production rollout: not performed. Evolution: deferred.
 
-For exact fresh 731 and inherited b129 evidence, retained failures and current boundaries, see PINNED_STUDIO_QUALIFICATION.md. Package validation remains pending; no tab is fully accepted.
+For exact fresh 731 and inherited b129 evidence, retained failures and current boundaries, see PINNED_STUDIO_QUALIFICATION.md. Distribution validation passed; no tab is fully accepted.
