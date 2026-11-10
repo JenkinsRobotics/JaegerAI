@@ -223,6 +223,7 @@ export class GatewayClient implements JaegerSource {
     try {
       const response = await fetch(`${this.base}${path}`, {
         method: method ?? (body === undefined ? "GET" : "POST"),
+        cache: "no-store",
         headers: { ...(body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }), ...csrfHeader(method ?? (body === undefined ? "GET" : "POST")), ...extraHeaders },
         body: body === undefined ? undefined : JSON.stringify(body),
         credentials: "same-origin",

@@ -19,3 +19,10 @@ it("preserves caller cancellation instead of calling it a timeout", async () => 
   const result = expect(request).rejects.toMatchObject({ name: "AbortError" });
   controller.abort(); await result;
 });
+
+it("bypasses cached authority and recovery responses", async () => {
+  const fetch = vi.fn().mockResolvedValue(Response.json({latest_request: null}));
+  vi.stubGlobal("fetch", fetch);
+  await new GatewayClient("").sessionControl("s");
+  expect(fetch).toHaveBeenCalledWith("/v1/sessions/s?view=control", expect.objectContaining({cache: "no-store"}));
+});
