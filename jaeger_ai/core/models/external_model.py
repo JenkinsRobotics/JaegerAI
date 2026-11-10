@@ -468,6 +468,8 @@ class ExternalModelClient:
                 self.num_ctx = min(int(detected), 16_384)
             else:
                 self.num_ctx = detected
+            self.loaded_ctx = self.num_ctx
+            self.ext.ctx = self.num_ctx
 
     def refresh_active_context(self) -> int | None:
         """Adopt Ollama's loaded window when the model is resident.

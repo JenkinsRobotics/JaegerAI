@@ -44,6 +44,9 @@ from jaeger_agent.loop.loop_backstop import (
 )
 from jaeger_agent.loop.tool_result_safety import protect_tool_result
 from jaeger_agent.loop.turn_budget import TurnBudget, TurnBudgetLimits
+from jaeger_agent.loop.tool_dispatch_safety import (
+    cancelled_tool_result, paths_overlap, unique_tool_call_ids,
+)
 from jaeger_agent.schemas.message_types import Message, ToolCall
 from jaeger_agent.tool_executor import ToolExecutor
 from jaeger_agent.skill_registry.tool_selection import ToolSelection, in_agent_selection, tool_permitted
@@ -762,6 +765,10 @@ class JaegerAgent:
                 except Exception as exc:
                     logger.debug("tool_call_repair error: %s", exc)
 
+            if tool_calls:
+                tool_calls = unique_tool_call_ids(tool_calls, self.messages)
+                assistant_msg = {**assistant_msg, "tool_calls": tool_calls}
+
             if not tool_calls and final_text:
                 guarded_text, repetitions = collapse_generated_repetition(final_text)
                 if repetitions > 1:
@@ -1368,6 +1375,8 @@ class JaegerAgent:
         )
         prev_locked = self._tools_filter_locked
         prev_tools = self._all_tools
+        prev_finalizing = getattr(self, "_finalizing", False)
+        self._finalizing = True
         self._tools_filter_locked = True
         self._all_tools = []
         msg = None
@@ -1391,6 +1400,7 @@ class JaegerAgent:
         finally:
             self._tools_filter_locked = prev_locked
             self._all_tools = prev_tools
+            self._finalizing = prev_finalizing
             self._pop_message()  # the synthetic wind-down prompt
         text = ((msg or {}).get("content") or "").strip()
         if text:
@@ -1712,6 +1722,7 @@ class JaegerAgent:
     # adapter-fallback chain react in ~30s instead — set to ``None``
     # to disable and rely on SDK timeouts only.
     stale_call_timeout_s: float | None = 30.0
+    first_progress_timeout_s: float | None = None
 
     # Per-adapter retry caps by error class (Hermes error-classifier
     # pattern, scaled down for a voice agent where long waits are dead
@@ -1791,15 +1802,28 @@ class JaegerAgent:
         # Walking the fallback chain with the same oversized prompt is
         # pointless; tightening fixes the actual cause.
         overflow_tightened = False
+        original_budget = self.context_guard.budget if self.context_guard is not None else None
         for adapter in adapters:
+            if original_budget is not None:
+                from dataclasses import replace
+                window = getattr(adapter, "context_window", None) or original_budget.ctx_window
+                reserve = min(getattr(adapter, "max_tokens", original_budget.reserve_for_completion), max(1, window // 2))
+                self.context_guard.budget = replace(original_budget, ctx_window=window, reserve_for_completion=reserve)
             attempt = 0
             while True:
                 try:
+                    if original_budget is not None and self.context_guard.budget != original_budget:
+                        _pre_flight_trim()
                     self._refresh_tool_catalog()
                     formatted = adapter.format_messages(
                         self.messages, self.tools, self.system_prompt,
                     )
-                    self.callbacks.on_tool_selection(self._selection_receipt())
+                    if self.context_guard is not None and isinstance(formatted, dict):
+                        for key in ("max_tokens", "max_completion_tokens"):
+                            if key in formatted:
+                                formatted[key] = min(formatted[key], self.context_guard.budget.reserve_for_completion)
+                    if not getattr(self, "_finalizing", False):
+                        self.callbacks.on_tool_selection(self._selection_receipt())
                     self.callbacks.on_model_input(formatted)
                     self.callbacks.on_model_call_start()
                     before_prompt_tokens = self.last_prompt_tokens
@@ -1809,6 +1833,7 @@ class JaegerAgent:
                         formatted,
                         self._interrupt_event,
                         stale_timeout=self.stale_call_timeout_s,
+                        first_progress_timeout_s=getattr(adapter, "first_progress_timeout_s", self.first_progress_timeout_s),
                         on_heartbeat=self._on_call_heartbeat,
                         # Token-level deltas for live consumers (TTS
                         # sentence-chunking, TUI streaming). None when
@@ -1975,9 +2000,7 @@ class JaegerAgent:
     @staticmethod
     def _paths_overlap(a: str, b: str) -> bool:
         """True if two paths are the same file or one contains the other."""
-        import os
-        a, b = os.path.normpath(a), os.path.normpath(b)
-        return a == b or a.startswith(b + os.sep) or b.startswith(a + os.sep)
+        return paths_overlap(a, b)
 
     def _batch_is_parallel_safe(self, tool_calls: list[ToolCall]) -> bool:
         """A batch may run concurrently when every call is either a
@@ -2025,7 +2048,7 @@ class JaegerAgent:
         signatures execute once — later twins reuse the first result
         via a duplicate marker, same as the sequential path.
         """
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
         from contextvars import copy_context
 
         preps = [self._prepare_dispatch(tc) for tc in tool_calls]
@@ -2045,9 +2068,13 @@ class JaegerAgent:
                 i: pool.submit(copy_context().run, self._execute_prepared, preps[i])
                 for i in unique_idx
             }
-            for i, fut in futures.items():
+            index = {future: i for i, future in futures.items()}
+            for fut in as_completed(index):
+                i = index[fut]
                 try:
                     contents[i] = fut.result()
+                except CancelledError:
+                    contents[i] = cancelled_tool_result()
                 except Exception as exc:  # noqa: BLE001 — belt: execute() shouldn't raise
                     contents[i] = {
                         "ok": False,
@@ -2055,6 +2082,9 @@ class JaegerAgent:
                         "error_type": "tool_error",
                         "retryable": True,
                     }
+                if self._interrupt_event.is_set():
+                    for pending in futures.values():
+                        pending.cancel()
 
         for i, prep in enumerate(preps):
             owner = first_by_sig[prep["sig"]]
@@ -2166,6 +2196,8 @@ class JaegerAgent:
         for read-only tools. Exceptions become error-result dicts."""
         name = prep["name"]
         args = prep["args"]
+        if self._interrupt_event.is_set():
+            return cancelled_tool_result()
         if not tool_permitted(name):
             return {"ok": False, "error": "Tool is outside this request scope", "error_type": "permission_denied", "retryable": False}
         if name in self._CACHEABLE_READ_TOOLS and prep["sig"] in self._read_result_cache:

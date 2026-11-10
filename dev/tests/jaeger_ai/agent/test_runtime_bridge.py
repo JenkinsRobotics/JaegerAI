@@ -164,7 +164,8 @@ def test_local_ollama_adapter_forwards_client_num_ctx():
     out = adapter.format_messages(
         [{"role": "user", "content": "hi"}], [], "",
     )
-    assert out["extra_body"]["options"]["num_ctx"] == 32768
+    assert adapter._native_body(out, {})["options"]["num_ctx"] == 32768
+    assert "extra_body" not in out
 
 
 def test_unknown_client_shape_raises_with_diagnostic():
@@ -212,7 +213,10 @@ def test_build_jaeger_agent_picks_progress_aware_grace_for_local_backend():
     ("openai", "gpt-test", None),
 ])
 def test_first_token_grace_only_for_local_models(provider, model, grace):
-    agent = build_jaeger_agent(_FakeExternalClient(provider, model=model))
+    client = _FakeExternalClient(provider, model=model)
+    if provider == "ollama":
+        client.ext.base_url = "http://127.0.0.1:11434/v1"
+    agent = build_jaeger_agent(client)
     assert agent.stale_call_timeout_s == 120.0
     assert agent.first_progress_timeout_s == grace
 
@@ -440,8 +444,16 @@ def test_fallback_adapters_inherit_configured_sampling_parameters(monkeypatch):
     )
     monkeypatch.setitem(_main._pipeline, "config", fake_cfg)
     client = _FakeExternalClient(provider="ollama", model="glm-5.3-flash:cloud")
+    from jaeger_ai.core.instance.schemas import ExternalModelConfig
+    client.ext = ExternalModelConfig(provider="ollama", model="glm-5.3-flash:cloud", ctx=131072,
+        reasoning_effort="high", temperature=1.0, fallback=fake_cfg.external_model.fallback)
+    client.layout = None
+    monkeypatch.setattr("jaeger_ai.core.models.external_model.ExternalModelClient",
+        lambda ext, layout: SimpleNamespace(ext=ext, _api_key="", layout=layout))
     fallbacks = _fallback_adapters_for(client)
     assert len(fallbacks) == 2
+    assert all(a.context_window is None or a.context_window == 0 for a in fallbacks)
+    assert all(a.reasoning_effort is None for a in fallbacks)
 
     # First fallback has explicit temperature & top_p
     assert fallbacks[0].temperature == 0.7
@@ -456,3 +468,17 @@ def test_fallback_adapters_inherit_configured_sampling_parameters(monkeypatch):
     kw1 = fallbacks[1].format_messages([{"role": "user", "content": "hi"}], [], "")
     assert "temperature" not in kw1
     assert "top_p" not in kw1
+
+
+def test_fallback_uses_its_own_output_context_and_effort(monkeypatch):
+    from jaeger_ai.core.instance.schemas import ExternalModelConfig
+    from jaeger_agent.loop.runtime_bridge import _fallback_adapters_for
+    cfg=ExternalModelConfig(provider='openai',model='primary',ctx=131072,max_tokens=8192,
+        reasoning_effort='xhigh',fallback=[{'provider':'ollama','model':'local',
+        'ctx':4096,'max_tokens':512,'reasoning_effort':'none','timeout_s':45}])
+    monkeypatch.setattr('jaeger_ai.core.models.external_model.ExternalModelClient',
+        lambda ext,layout:SimpleNamespace(ext=ext,_api_key='',layout=layout,num_ctx=ext.ctx))
+    adapter=_fallback_adapters_for(SimpleNamespace(ext=cfg,layout=None))[0]
+    assert adapter.context_window==4096 and adapter.num_ctx==4096
+    assert adapter.max_tokens==512 and adapter.reasoning_effort=='none' and adapter.timeout_s==45
+    assert cfg.ctx==131072 and cfg.reasoning_effort=='xhigh'

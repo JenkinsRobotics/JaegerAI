@@ -7,8 +7,8 @@ import threading
 from typing import Callable
 
 
-def text_delta(line: bytes) -> str:
-    """Only public response deltas, not reasoning, tool arguments or final replay."""
+def stream_delta(line: bytes, channel: str = "text") -> str:
+    """Read only top-level provider delta events; never replay final messages."""
     try:
         row = json.loads(line)
     except (ValueError, UnicodeDecodeError):
@@ -19,13 +19,17 @@ def text_delta(line: bytes) -> str:
     if not isinstance(event, dict) or event.get("type") != "content_block_delta":
         return ""
     delta = event.get("delta")
-    if not isinstance(delta, dict) or delta.get("type") != "text_delta":
+    if not isinstance(delta, dict) or delta.get("type") != channel + "_delta":
         return ""
-    return delta.get("text") if isinstance(delta.get("text"), str) else ""
+    return delta.get(channel) if isinstance(delta.get(channel), str) else ""
+
+
+def text_delta(line: bytes) -> str:
+    return stream_delta(line)
 
 
 def collect_stream(proc: subprocess.Popen, stdin: bytes | None, timeout: float,
-                   on_delta: Callable[[str], None]) -> tuple[bytes, bytes]:
+                   on_delta: Callable[[str], None], on_reasoning=None, on_progress=None) -> tuple[bytes, bytes]:
     """Drain both pipes concurrently so a verbose CLI cannot deadlock streaming.
 
     Readers are joined before returning; final stdout remains available for the
@@ -41,6 +45,11 @@ def collect_stream(proc: subprocess.Popen, stdin: bytes | None, timeout: float,
                 if len(line) > 1_048_576 or len(output) + len(line) > 8_388_608:
                     raise RuntimeError("CLI response exceeded the stream output limit")
                 output.extend(line)
+                if on_progress:
+                    on_progress()
+                reasoning = stream_delta(line, "thinking")
+                if reasoning and on_reasoning:
+                    on_reasoning(reasoning)
                 delta = text_delta(line)
                 if delta:
                     on_delta(delta)

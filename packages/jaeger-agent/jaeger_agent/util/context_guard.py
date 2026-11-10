@@ -286,6 +286,8 @@ class ContextGuard:
         elif content is not None:
             cost += self.estimate_text_tokens(json.dumps(content, ensure_ascii=False))
         # Tool calls on assistant messages.
+        if m.get("provider_state"):
+            cost += self.estimate_text_tokens(json.dumps(m["provider_state"], ensure_ascii=False, default=str))
         for tc in (m.get("tool_calls") or []):
             cost += self.estimate_text_tokens(str(tc.get("name", "")))
             args = tc.get("arguments") or {}

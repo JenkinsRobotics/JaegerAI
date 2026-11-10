@@ -31,12 +31,17 @@ def test_router_apply_sensitivity_routing(tmp_path, monkeypatch):
     assert model == "glm-5.3-flash:cloud"
     assert provider == "ollama"
 
+    from jaeger_ai.core.models.request_policy import ModelPolicyError
+    with pytest.raises(ModelPolicyError, match="configured on-device model"):
+        router.apply_sensitivity_routing("my bank password is secret123")
     model_p, provider_p, decision_p = router.apply_sensitivity_routing(
         "my bank password is secret123",
+        config=SimpleNamespace(external_model=SimpleNamespace(fallback=[
+            SimpleNamespace(provider="ollama",model="configured-local:latest")])),
     )
     assert decision_p.classification == "private"
     assert provider_p == "ollama"
-    assert model_p == "gemma-4-26b:latest"
+    assert model_p == "configured-local:latest"
 
 
 def test_router_endpoint_resolution(monkeypatch):
@@ -52,20 +57,18 @@ def test_log_decision_redacts_private_prompts(tmp_path, monkeypatch):
 
     # 1. Private decision: text preview MUST NOT contain raw secrets
     secret_text = "super_secret_password_98765"
-    _, _, priv_decision = router.apply_sensitivity_routing(
-        secret_text,
-        log=True,
-    )
+    router.log_decision(router.SensitivityDecision("private", "configured-local", "ollama", "test", 5),
+                        text_preview=secret_text)
     log_file = tmp_path / "logs" / "sensitivity_gate.jsonl"
     assert log_file.is_file()
     lines = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line]
     last = lines[-1]
     assert last["class"] == "private"
     assert secret_text not in last["preview"]
-    assert "<redacted:sha256=" in last["preview"]
+    assert "<redacted:len=" in last["preview"]
     assert f":len={len(secret_text)}>" in last["preview"]
 
-    # 2. Public decision: text preview is preserved up to 160 chars
+    # Public classification is not permission to duplicate prompt text in logs.
     public_text = "this is a public inquiry"
     _, _, pub_decision = router.apply_sensitivity_routing(
         public_text,
@@ -74,4 +77,5 @@ def test_log_decision_redacts_private_prompts(tmp_path, monkeypatch):
     lines = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines() if line]
     last_pub = lines[-1]
     assert last_pub["class"] == "public"
-    assert last_pub["preview"] == public_text
+    assert public_text not in last_pub["preview"]
+    assert last_pub["preview"] == f"<redacted:len={len(public_text)}>"

@@ -68,7 +68,7 @@ KNOWN_BACKENDS: tuple[BackendSpec, ...] = (
         # Grok's documented one-shot today takes the prompt as an argv
         # value after --single. Stdin is not the published interface.
         args=(
-            "--single", "{prompt}", "--output-format", "json",
+            "--single", "{prompt}", "--output-format", "json", "--verbatim",
             "--permission-mode", "dontAsk", "--tools", "", "--deny", "*",
             "--disable-web-search", "--no-subagents",
             "--system-prompt-override", "You are Jaeger's model completion backend. "

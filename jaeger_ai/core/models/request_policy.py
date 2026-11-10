@@ -106,6 +106,12 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
         ext.api_key_env = ""
     if owner == "ollama" and not ext.base_url:
         ext.base_url = "http://127.0.0.1:11434/v1"
+    if owner != ext.provider or name != ext.model:
+        ext.ctx = 0
+        ext.reasoning_effort = "auto"
+        ext.temperature = ext.top_p = None
+        ext.verbosity = ext.thinking_budget_tokens = None
+        ext.first_progress_timeout_s = None
     ext.enabled, ext.provider, ext.model = True, owner, name
     client = ExternalModelClient(ext, layout)
     client.selected_lane = selected_lane

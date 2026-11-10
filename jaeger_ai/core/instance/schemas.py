@@ -696,6 +696,9 @@ class VoiceConfig(BaseModel):
     )
 
 
+ReasoningEffort = Literal["auto", "provider", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
 class FallbackModel(BaseModel):
     """One ordered alternative when the primary brain cannot serve."""
 
@@ -707,6 +710,13 @@ class FallbackModel(BaseModel):
     ]
     model: str = Field(..., min_length=1, max_length=256)
     base_url: str = ""
+    ctx: int = Field(0, ge=0, le=2_097_152)
+    max_tokens: int | None = Field(None, ge=16, le=131_072)
+    timeout_s: float | None = Field(None, gt=0, le=600)
+    first_progress_timeout_s: float | None = Field(None, gt=0, le=600)
+    reasoning_effort: ReasoningEffort = "auto"
+    verbosity: Literal["low", "medium", "high"] | None = None
+    thinking_budget_tokens: int | None = Field(None, ge=1024, le=131071)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     top_p: float | None = Field(None, ge=0.0, le=1.0)
 
@@ -818,17 +828,22 @@ class ExternalModelConfig(BaseModel):
                     "ARES writes this when it syncs a model; it can also "
                     "be set by hand.",
     )
-    reasoning_effort: Literal["auto", "provider", "none", "low", "medium", "high"] = Field(
+    reasoning_effort: ReasoningEffort = Field(
         "auto",
         json_schema_extra=_setting("model", restart=True, advanced=True),
-        description="Reasoning cap sent as ``reasoning_effort`` on "
-                    "OpenAI-compatible servers. ``auto`` = ``low`` for a "
-                    "local Ollama model (a thinking model otherwise spends "
-                    "hundreds of tokens per step at single-digit tok/s) and "
-                    "the provider default elsewhere; ``provider`` never "
-                    "sends the field. A step that ends with its whole "
-                    "budget spent thinking is retried once with reasoning "
-                    "off.",
+        description="Provider reasoning effort, not task difficulty. Auto/provider use the model default. Explicit levels are sent using the provider protocol; unsupported levels fail clearly.",
+    )
+    first_progress_timeout_s: float | None = Field(
+        None, gt=0, le=600, json_schema_extra=_setting("model", restart=True, advanced=True),
+        description="Seconds allowed before the first streamed progress. None uses a bounded local cold-start grace or the cloud timeout.",
+    )
+    verbosity: Literal["low", "medium", "high"] | None = Field(
+        None, json_schema_extra=_setting("model", restart=True, advanced=True),
+        description="Answer detail for OpenAI models that support verbosity. Independent of reasoning effort.",
+    )
+    thinking_budget_tokens: int | None = Field(
+        None, ge=1024, le=131071, json_schema_extra=_setting("model", restart=True, advanced=True),
+        description="Anthropic legacy explicit thinking budget. Must be smaller than max_tokens. Leave unset for adaptive thinking.",
     )
     temperature: float | None = Field(
         None, ge=0.0, le=2.0,

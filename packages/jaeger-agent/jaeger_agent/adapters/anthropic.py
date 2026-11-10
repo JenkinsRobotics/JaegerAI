@@ -62,7 +62,10 @@ def _to_anthropic_blocks(msg: Message) -> list[dict[str, Any]] | str:
     tool_calls = msg.get("tool_calls") or []
 
     if role == "assistant":
-        blocks: list[dict[str, Any]] = []
+        # Preserve opaque signatures exactly; only this model's provider state
+        # may be replayed, and other adapters ignore it during a fallback.
+        state = msg.get("provider_state") or {}
+        blocks: list[dict[str, Any]] = list(state.get("thinking_blocks") or [])
         if text:
             blocks.append({"type": "text", "text": text})
         for tc in tool_calls:
@@ -137,6 +140,10 @@ class AnthropicAdapter(ProviderAdapter):
         base_url: str | None = None,
         prompt_caching: bool = True,
         client: Any = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        reasoning_effort: str | None = None,
+        thinking_budget_tokens: int | None = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
@@ -144,6 +151,9 @@ class AnthropicAdapter(ProviderAdapter):
         self.timeout_s = float(timeout_s)
         self.base_url = base_url
         self.prompt_caching = bool(prompt_caching)
+        self.temperature, self.top_p = temperature, top_p
+        self.reasoning_effort = reasoning_effort
+        self.thinking_budget_tokens = thinking_budget_tokens
         # Lazily built so import-time has no network cost and unit tests
         # can pre-inject a stub client.
         self._client = client
@@ -189,6 +199,9 @@ class AnthropicAdapter(ProviderAdapter):
         """
         converted: list[dict[str, Any]] = []
         for msg in messages:
+            state = msg.get("provider_state") or {}
+            if state.get("model") != self.model or state.get("provider") != "anthropic":
+                msg = {k: v for k, v in msg.items() if k != "provider_state"}
             role = msg.get("role")
             if role == "system":
                 # Internal "system" messages roll into the top-level
@@ -246,6 +259,21 @@ class AnthropicAdapter(ProviderAdapter):
             "max_tokens": self.max_tokens,
             "messages": converted,
         }
+        if self.temperature is not None:
+            kwargs["temperature"] = self.temperature
+        if self.top_p is not None:
+            kwargs["top_p"] = self.top_p
+        if self.thinking_budget_tokens is not None:
+            if self.reasoning_effort not in {None, "auto", "provider"}:
+                raise ValueError("Select an Anthropic thinking budget or adaptive effort, not both")
+            if self.thinking_budget_tokens >= self.max_tokens:
+                raise ValueError("thinking_budget_tokens must be smaller than max_tokens")
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": self.thinking_budget_tokens}
+        elif self.reasoning_effort == "none":
+            kwargs["thinking"] = {"type": "disabled"}
+        elif self.reasoning_effort:
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": self.reasoning_effort}
         if system_payload is not None:
             kwargs["system"] = system_payload
         if tools:
@@ -309,8 +337,10 @@ class AnthropicAdapter(ProviderAdapter):
         interrupt_event: threading.Event,
         *,
         stale_timeout: float | None = None,
+        first_progress_timeout_s: float | None = None,
         on_heartbeat: Any = None,
         on_delta: Any = None,
+        on_reasoning: Any = None,
         **kwargs: Any,
     ) -> Any:
         """Run one request, interrupt-aware, streamed at the transport
@@ -342,6 +372,9 @@ class AnthropicAdapter(ProviderAdapter):
         """
         client = self._ensure_client()
         api_kwargs = {**formatted, **kwargs}
+        if first_progress_timeout_s is not None:
+            import httpx
+            api_kwargs["timeout"] = httpx.Timeout(max(self.timeout_s, first_progress_timeout_s), connect=10)
         self.last_ttft_s = None
         stream_api = getattr(getattr(client, "messages", None), "stream", None)
         if stream_api is None:
@@ -349,6 +382,7 @@ class AnthropicAdapter(ProviderAdapter):
                 lambda: client.messages.create(**api_kwargs),
                 interrupt_event,
                 stale_timeout=stale_timeout,
+                first_progress_timeout_s=first_progress_timeout_s,
                 on_heartbeat=on_heartbeat,
             )
 
@@ -370,6 +404,11 @@ class AnthropicAdapter(ProviderAdapter):
                                 piece = getattr(delta, "text", "")
                                 if piece:
                                     on_delta(piece)
+                        delta = getattr(event, "delta", None)
+                        if on_reasoning is not None and getattr(delta, "type", "") == "thinking_delta":
+                            piece = getattr(delta, "thinking", "")
+                            if piece:
+                                on_reasoning(piece)
                         if interrupt_event.is_set():
                             # Exiting the ``with`` closes the HTTP
                             # stream — the provider stops generating
@@ -406,6 +445,7 @@ class AnthropicAdapter(ProviderAdapter):
             _streamed,
             interrupt_event,
             stale_timeout=stale_timeout,
+            first_progress_timeout_s=first_progress_timeout_s,
             on_heartbeat=on_heartbeat,
             progress=progress,
         )
@@ -425,9 +465,15 @@ class AnthropicAdapter(ProviderAdapter):
         ``self.last_usage`` for the budget logic to read."""
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
+        thinking_blocks, reasoning = [], []
         for block in getattr(raw, "content", []) or []:
             kind = getattr(block, "type", None)
-            if kind == "text":
+            if kind in {"thinking", "redacted_thinking"}:
+                payload = block.model_dump() if hasattr(block, "model_dump") else vars(block).copy()
+                thinking_blocks.append(payload)
+                if kind == "thinking":
+                    reasoning.append(getattr(block, "thinking", "") or "")
+            elif kind == "text":
                 text_parts.append(getattr(block, "text", "") or "")
             elif kind == "tool_use":
                 tool_calls.append({
@@ -452,6 +498,10 @@ class AnthropicAdapter(ProviderAdapter):
         message: Message = {"role": "assistant", "content": "".join(text_parts) or None}
         if tool_calls:
             message["tool_calls"] = tool_calls
+        if thinking_blocks:
+            message["provider_state"] = {"provider": "anthropic", "model": self.model, "thinking_blocks": thinking_blocks}
+        if reasoning:
+            message["reasoning"] = "".join(reasoning)
         # Anthropic uses ``stop_reason`` rather than OpenAI's
         # ``finish_reason``; normalise so the agent loop's retry logic
         # reads one key regardless of backend. ``"max_tokens"`` is

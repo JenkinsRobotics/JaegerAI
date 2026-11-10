@@ -39,7 +39,7 @@ class _Progress:
 
 
 def _drain(chunks, **sinks):
-    return _aggregate_chat_stream(iter(chunks), threading.Event(), _Progress(), **sinks)
+    return _aggregate_chat_stream(iter([*chunks, {"choices": [{"delta": {}, "finish_reason": "stop"}]}]), threading.Event(), _Progress(), **sinks)
 
 
 def test_reasoning_streams_before_the_answer_it_produced() -> None:

@@ -843,6 +843,9 @@ def _external_serving_ctx(
         )
         return detected if detected is not None else current
 
+    configured = _positive_int(getattr(ext_cfg, "ctx", 0))
+    if configured is not None:
+        return configured
     if (current is None or current <= 8192) and model_name:
         return _estimate_model_context_length(model_name)
     return current

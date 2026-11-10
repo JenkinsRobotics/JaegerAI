@@ -106,6 +106,7 @@ def interruptible_call(
     *,
     poll_interval: float = 0.1,
     stale_timeout: float | None = None,
+    first_progress_timeout_s: float | None = None,
     on_heartbeat: Callable[[float], None] | None = None,
     on_abandon: Callable[[], None] | None = None,
     join_on_abandon: float = 0.0,
@@ -157,6 +158,8 @@ def interruptible_call(
         ``0`` (default) keeps the pure abandon behaviour for HTTP.
     """
 
+    if interrupt_event.is_set():
+        raise AgentInterrupted("agent loop was interrupted before dispatch")
     box: dict[str, Any] = {}
     context = copy_context()
 
@@ -212,17 +215,19 @@ def interruptible_call(
         if interrupt_event.is_set():
             _abandon(AgentInterrupted("agent loop was interrupted"))
         elapsed = time.perf_counter() - started
-        if stale_timeout is not None:
+        before_first = progress is None or progress.first is None
+        deadline = first_progress_timeout_s if before_first and first_progress_timeout_s is not None else stale_timeout
+        if deadline is not None:
             since_progress = (
                 time.perf_counter() - progress.last
                 if progress is not None
                 else elapsed
             )
-            if since_progress > stale_timeout:
+            if since_progress > deadline:
                 _abandon(StaleCallTimeout(
                     f"no progress for {since_progress:.1f}s "
                     f"({elapsed:.1f}s total, "
-                    f"stale_timeout={stale_timeout:.0f}s)"
+                    f"silence_limit={deadline:.0f}s)"
                 ))
         if on_heartbeat is not None:
             try:

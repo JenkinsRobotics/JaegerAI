@@ -170,10 +170,18 @@ def _adapter_for_client(
         api_key = getattr(client, "_api_key", "") or ""
         timeout_s = float(getattr(ext, "timeout_s", 60.0) or 60.0)
         max_tokens = int(getattr(ext, "max_tokens", 4096) or 4096)
+        effort = reasoning_effort_for(provider, model, getattr(ext, "reasoning_effort", None))
+        if provider != "anthropic" and getattr(ext, "thinking_budget_tokens", None) is not None:
+            raise ValueError("thinking_budget_tokens requires the Anthropic adapter")
+        if provider != "openai" and getattr(ext, "verbosity", None) is not None:
+            raise ValueError(f"verbosity is not supported by the {provider} adapter")
         if provider == "cli":
+            if any(getattr(ext, key, None) is not None for key in ("temperature", "top_p")):
+                raise ValueError("CLI providers own sampling; use an API provider to set temperature or top_p")
             return CliBackendAdapter(
                 backend_id=model,
                 timeout_s=timeout_s,
+                reasoning_effort=effort,
             )
         if provider == "anthropic":
             return AnthropicAdapter(
@@ -181,10 +189,20 @@ def _adapter_for_client(
                 model=model,
                 timeout_s=timeout_s,
                 max_tokens=max_tokens,
+                temperature=getattr(ext, "temperature", None),
+                top_p=getattr(ext, "top_p", None),
+                reasoning_effort=effort,
+                thinking_budget_tokens=getattr(ext, "thinking_budget_tokens", None),
             )
-        # Everything else (openai, gemini, ollama, ollama-cloud,
-        # lmstudio) rides the OpenAI-compat surface.
-        return OpenAIAdapter(
+        # Local Ollama needs its native runtime controls. Other providers and
+        # hosted Ollama retain their existing OpenAI-compatible wire protocol.
+        adapter_class = OpenAIAdapter
+        adapter_options = {}
+        if provider == "ollama":
+            from jaeger_agent.adapters.ollama import OllamaAdapter
+            adapter_class = OllamaAdapter
+            adapter_options["reasoning_policy"] = getattr(ext, "reasoning_effort", None)
+        adapter = adapter_class(
             provider=provider,
             model=model,
             api_key=api_key,
@@ -192,8 +210,18 @@ def _adapter_for_client(
             num_ctx=getattr(client, "num_ctx", None),
             timeout_s=timeout_s,
             max_tokens=max_tokens,
-            reasoning_effort=reasoning_effort_for(provider, model, getattr(ext, "reasoning_effort", None)),
+            temperature=getattr(ext, "temperature", None),
+            top_p=getattr(ext, "top_p", None),
+            reasoning_effort=effort,
+            verbosity=getattr(ext, "verbosity", None),
+            **adapter_options,
         )
+        from urllib.parse import urlparse
+        local = provider in {"ollama", "lmstudio"} and urlparse(getattr(ext, "base_url", "")).hostname in {"localhost", "127.0.0.1", "::1"} and not model.endswith((":cloud", "-cloud"))
+        configured_grace = getattr(ext, "first_progress_timeout_s", None)
+        adapter.first_progress_timeout_s = configured_grace if configured_grace is not None else (600.0 if local else None)
+        adapter.context_window = getattr(client, "num_ctx", None) or getattr(client, "loaded_ctx", None) or getattr(ext, "ctx", None)
+        return adapter
 
     # Unknown client shape — caller should have caught this; raise here
     # rather than silently building the wrong adapter.
@@ -207,25 +235,13 @@ _LOCAL_REASONING_PROVIDERS = frozenset({"ollama", "lmstudio"})
 
 
 def reasoning_effort_for(provider: str, model: str, configured: Any) -> str | None:
-    """The ``reasoning_effort`` to send, or None for the provider default.
-
-    ``auto`` (or unset) caps a local Ollama/LM Studio model at ``low``:
-    gemma-4-26b at ~8 tok/s spent 200-1,200 reasoning chunks per step in the
-    2026-10-09 capability run, and on a 300-token budget answered nothing at
-    the default but answered correctly at ``low`` (6.8 s) and ``none`` (3.5 s).
-    Cloud models keep their provider default.
-    """
+    """Preserve explicit effort; automatic selection uses the model default."""
     value = str(configured or "auto").strip().lower()
-    if value == "provider":
+    if value in {"auto", "provider"}:
         return None
-    if value in {"none", "low", "medium", "high"}:
-        return value
-    model_l = str(model or "").lower()
-    if str(provider or "").lower() in _LOCAL_REASONING_PROVIDERS and not (
-        model_l.endswith(":cloud") or model_l.endswith("-cloud")
-    ):
-        return "low"
-    return None
+    if value not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}:
+        raise ValueError(f"Unsupported reasoning effort: {configured}")
+    return value
 
 
 def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
@@ -251,6 +267,17 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
             continue
         target = ext.model_copy(deep=True)
         target.provider, target.model = provider, model
+        # Context and sampling belong to the target model. In particular a
+        # cloud model's 128K window must not become a local fallback allocation.
+        target.ctx = item.get("ctx", 0)
+        target.reasoning_effort = item.get("reasoning_effort", "auto")
+        for key in ("verbosity", "thinking_budget_tokens", "first_progress_timeout_s"):
+            setattr(target, key, item.get(key))
+        for key in ("max_tokens", "timeout_s"):
+            if item.get(key) is not None:
+                setattr(target, key, item[key])
+        for key in ("temperature", "top_p"):
+            setattr(target, key, item.get(key))
         if provider != ext.provider:
             if provider not in _BASE_URLS and not item.get("base_url"):
                 continue  # An unconfigured alternative must not disable the primary.
@@ -317,6 +344,7 @@ def build_jaeger_agent(
     completion_reserve: int | None = None,
     artifact_dir: Any = None,
     stale_call_timeout_s: float | None = None,
+    first_progress_timeout_s: float | None = None,
     context_summarizer: Any = None,
     turn_max_elapsed_s: float | None = None,
     turn_max_tokens: int | None = None,
@@ -377,7 +405,13 @@ def build_jaeger_agent(
 
     adapter = _adapter_for_client(client, system_prompt=system_prompt)
     guard = None
+    ctx_window = min(ctx_window, adapter.context_window) if ctx_window and getattr(adapter, "context_window", None) else (ctx_window or getattr(adapter, "context_window", None))
     if ctx_window:
+        requested_output = completion_reserve or getattr(adapter, "max_tokens", None)
+        if requested_output:
+            completion_reserve = min(int(requested_output), max(1, ctx_window // 2))
+            if hasattr(adapter, "max_tokens"):
+                adapter.max_tokens = completion_reserve
         # ``completion_reserve`` is the caller's configured ``max_tokens``.
         # The server counts prompt + completion against ONE window, so a
         # reserve smaller than the answer we asked for overflows at
@@ -457,6 +491,14 @@ def build_jaeger_agent(
         ),
     )
     agent.stale_call_timeout_s = stale_call_timeout_s
+    if first_progress_timeout_s is None:
+        first_progress_timeout_s = getattr(adapter, "first_progress_timeout_s", None)
+        if first_progress_timeout_s is None:
+            first_progress_timeout_s = getattr(getattr(client, "ext", None), "first_progress_timeout_s", None)
+        if first_progress_timeout_s is None and adapter.__class__.__name__ in {"LocalLlamaAdapter", "MLXAdapter"}:
+            first_progress_timeout_s = 600.0
+    agent.first_progress_timeout_s = first_progress_timeout_s
+    adapter.first_progress_timeout_s = first_progress_timeout_s
     return agent
 
 

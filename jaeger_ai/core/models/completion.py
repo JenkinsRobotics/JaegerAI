@@ -31,7 +31,7 @@ def user_content(text, attachments, adapter, route):
 
 
 def complete(config, layout, text, *, model=None, provider=None, system_prompt="",
-             history=(), attachments=(), interrupt_event=None, on_delta=None,
+             history=(), attachments=(), interrupt_event=None, on_delta=None, on_reasoning=None,
              on_input=None, on_route=None, on_model_identity=None, local_only=False,
              default_client=None):
     from jaeger_ai.contract.channel_messages import model_content
@@ -51,16 +51,34 @@ def complete(config, layout, text, *, model=None, provider=None, system_prompt="
     current["content"] = user_content(text, attachments, adapter, route)
     if not messages or messages[-1] != current:
         messages.append(current)
+    context = getattr(adapter, "context_window", None) or getattr(getattr(client, "ext", None), "ctx", None)
+    if context:
+        from jaeger_agent.util.context_guard import ContextGuard, ContextBudget
+        reserve = min(getattr(adapter, "max_tokens", 1024), max(1, context // 2))
+        guard = ContextGuard(ContextBudget(ctx_window=context, reserve_for_completion=reserve))
+        messages = guard.trim_to_fit(messages, system_prompt=system_prompt, tools=[]).messages
+        if hasattr(adapter, "max_tokens"):
+            adapter.max_tokens = reserve
     guarded = GovernedAdapter(adapter, route, local_only=local_only)
     formatted = guarded.format_messages(messages, [], system_prompt)
     if on_route:
         on_route(route.receipt())
     if on_input:
         on_input(formatted)
-    raw = guarded.call(formatted, interrupt, on_delta=on_delta)
+    reasoning_streamed = False
+    def reasoning_delta(piece):
+        nonlocal reasoning_streamed
+        reasoning_streamed = True
+        if on_reasoning:
+            on_reasoning(piece)
+    raw = guarded.call(formatted, interrupt, on_delta=on_delta,
+                       on_reasoning=reasoning_delta,
+                       first_progress_timeout_s=getattr(adapter, "first_progress_timeout_s", None))
     if interrupt.is_set():
         raise AgentInterrupted("Cancelled during model dispatch")
     parsed = adapter.parse_response(raw)
+    if on_reasoning and not reasoning_streamed and parsed.get("reasoning"):
+        on_reasoning(parsed["reasoning"])
     if parsed.get("finish_reason") in {"length", "partial_stream", "thinking_exhausted"}:
         raise RuntimeError("Model response stopped before completion. Retry or increase the response limit.")
     content = str(parsed.get("content") or "").strip()

@@ -21,7 +21,7 @@ import tempfile
 import time
 from typing import Any
 
-from jaeger_agent.loop.interrupt import AgentInterrupted, interruptible_call
+from jaeger_agent.loop.interrupt import AgentInterrupted, CallProgress, interruptible_call
 from jaeger_agent.schemas.message_types import Message
 from jaeger_os.core.tools.tool_schema import ToolDef
 
@@ -78,7 +78,11 @@ def flatten_messages(
                 parts.append(f"System:\n{text.strip()}")
             continue
         if role == "tool":
-            parts.append(f"Tool result:\n{text}")
+            # A flattened transcript still needs the structured protocol's
+            # call/result correlation, especially after a parallel batch.
+            identity = json.dumps({"tool_call_id": msg.get("tool_call_id"),
+                                   "name": msg.get("name")}, ensure_ascii=False)
+            parts.append(f"Tool result {identity}:\n{text}")
             continue
         if role == "assistant" and msg.get("tool_calls"):
             parts.append(f"Assistant (tool calls):\n{json.dumps(msg.get('tool_calls'), default=str)}")
@@ -166,10 +170,12 @@ class CliBackendAdapter(ProviderAdapter):
         executable: str | None = None,
         timeout_s: float = 600.0,
         spec: Any = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.backend_id = (backend_id or "").strip()
         self.timeout_s = float(timeout_s or 600.0)
         self._spec = spec
+        self.reasoning_effort = reasoning_effort
         self._executable = executable
         self._proc: subprocess.Popen[bytes] | None = None
 
@@ -217,9 +223,21 @@ class CliBackendAdapter(ProviderAdapter):
         spec = self._load_spec()
         executable = self._executable or ""
         argv, stdin_bytes = _build_argv(spec, executable, prompt)
+        if self.reasoning_effort:
+            if self.backend_id == "grok":
+                argv.extend(["--reasoning-effort", self.reasoning_effort])
+            elif self.backend_id == "claude":
+                argv.extend(["--effort", self.reasoning_effort])
+            elif self.backend_id == "codex":
+                argv.extend(["-c", 'model_reasoning_effort="' + self.reasoning_effort + '"'])
+            else:
+                raise ValueError(f"Explicit reasoning effort is not supported by the {self.backend_id} CLI adapter")
 
         on_delta = kwargs.get("on_delta") if self.backend_id == "grok" else None
-        if callable(on_delta):
+        on_reasoning = kwargs.get("on_reasoning") if self.backend_id == "grok" else None
+        progress = CallProgress()
+        if callable(on_delta) or callable(on_reasoning):
+            on_delta = on_delta or (lambda _: None)
             visible_stream = VisibleTextStream(on_delta)
             on_delta = visible_stream.feed
             # Grok emits actual token deltas in this mode; the result record still
@@ -246,8 +264,8 @@ class CliBackendAdapter(ProviderAdapter):
                     index = child_argv.index("--single")
                     child_argv[index:index + 2] = ["--prompt-file", path]
                     child_argv.extend(["--cwd", folder])
-                    return self._spawn(child_argv, stdin_bytes, spec, on_delta=on_delta)
-            return self._spawn(argv, stdin_bytes, spec, on_delta=on_delta)
+                    return self._spawn(child_argv, stdin_bytes, spec, on_delta=on_delta, on_reasoning=on_reasoning, on_progress=progress.touch)
+            return self._spawn(argv, stdin_bytes, spec, on_delta=on_delta, on_reasoning=on_reasoning, on_progress=progress.touch)
 
         def _abandon() -> None:
             self._kill()
@@ -255,6 +273,10 @@ class CliBackendAdapter(ProviderAdapter):
         raw = interruptible_call(
             _run,
             interrupt_event,
+            stale_timeout=kwargs.get("stale_timeout"),
+            first_progress_timeout_s=kwargs.get("first_progress_timeout_s"),
+            on_heartbeat=kwargs.get("on_heartbeat"),
+            progress=progress,
             on_abandon=_abandon,
             join_on_abandon=3.0,
         )
@@ -270,6 +292,8 @@ class CliBackendAdapter(ProviderAdapter):
         stdin_bytes: bytes | None,
         spec: Any,
         on_delta: Any = None,
+        on_reasoning: Any = None,
+        on_progress: Any = None,
     ) -> dict[str, Any]:
         env = self._environment(spec)
         popen_kwargs: dict[str, Any] = {
@@ -286,7 +310,7 @@ class CliBackendAdapter(ProviderAdapter):
         self._proc = subprocess.Popen(**popen_kwargs)
         try:
             if on_delta is not None:
-                stdout, stderr = collect_stream(self._proc, stdin_bytes, self.timeout_s, on_delta)
+                stdout, stderr = collect_stream(self._proc, stdin_bytes, self.timeout_s, on_delta, on_reasoning, on_progress)
             else:
                 stdout, stderr = self._proc.communicate(
                     input=stdin_bytes, timeout=self.timeout_s,

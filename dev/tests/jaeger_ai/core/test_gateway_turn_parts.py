@@ -260,3 +260,24 @@ def test_stream_extras_survive_completion_and_repeated_reload(tmp_path):
     replay = store.complete_request("r1", status="completed", result={}, assistant_text="Do not duplicate")
     assert replay["replayed"] is True
     assert store.get_session("s1")["messages"][-1]["parts"] == first
+
+
+def test_progress_notes_and_reasoning_are_durable_before_final_answer(tmp_path):
+    from jaeger_ai.core.gateway.turn_parts import project_parts
+    gateway = _gateway(tmp_path)
+    callbacks, finish = gateway._turn_stream_callbacks('s1', 'notes-proof')
+    callbacks.reasoning('Checking the available evidence.')
+    callbacks.thinking('Retrying the model after a temporary connection failure.')
+    # Events must already be durable while the turn is still running.
+    events = _events(gateway)
+    assert any(e['event'] == 'turn.reasoning' for e in events)
+    note = next(e for e in events if e['event'] == 'turn.progress')
+    assert note['data']['channel'] == 'status'
+    assert note['data']['request_id'] == 'notes-proof'
+    callbacks.stream_delta('Answer')
+    finish()
+    parts = project_parts(_events(gateway), 'Answer')
+    assert [p['type'] for p in parts] == ['reasoning', 'progress', 'text']
+    assert parts[0]['duration_ms'] >= 0
+    assert parts[1]['message'].startswith('Retrying')
+    assert sum(p.get('text') == 'Answer' for p in parts) == 1

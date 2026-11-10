@@ -45,6 +45,7 @@ from jaeger_agent.dialects import (
     detect_family,
     detect_reasoning,
     extract_tool_calls,
+    extract_think_blocks,
     render_tools_for,
     strip_reasoning_channels,
     strip_think_blocks,
@@ -292,6 +293,7 @@ class MLXAdapter(ProviderAdapter):
         interrupt_event: threading.Event,
         *,
         stale_timeout: float | None = None,
+        first_progress_timeout_s: float | None = None,
         on_heartbeat: Any = None,
         on_delta: Any = None,
         **kwargs: Any,
@@ -327,6 +329,7 @@ class MLXAdapter(ProviderAdapter):
                 lambda: self._explicit_runner(prompt, dict(raw_params)),
                 interrupt_event,
                 stale_timeout=stale_timeout,
+                first_progress_timeout_s=first_progress_timeout_s,
                 on_heartbeat=on_heartbeat,
                 progress=self._progress,
             )
@@ -420,6 +423,7 @@ class MLXAdapter(ProviderAdapter):
             _stream,
             interrupt_event,
             stale_timeout=stale_timeout,
+            first_progress_timeout_s=first_progress_timeout_s,
             on_heartbeat=on_heartbeat,
             progress=progress,
             executor=self._mlx_executor,
@@ -447,8 +451,9 @@ class MLXAdapter(ProviderAdapter):
         self.last_raw_response = text
 
         had_think = "<think>" in text
+        reasoning = None
         if had_think:
-            text = strip_think_blocks(text)
+            text, reasoning = extract_think_blocks(text)
         # Gemma 4 leaks malformed reasoning-channel markers
         # (``<|channel>thought\n<channel|>…``); strip them so the answer
         # surfaces clean instead of as a phantom "thought".
@@ -463,6 +468,8 @@ class MLXAdapter(ProviderAdapter):
             cleaned = ""
 
         message: Message = {"role": "assistant", "content": cleaned or None}
+        if reasoning:
+            message["reasoning"] = reasoning
         if tool_calls:
             message["tool_calls"] = tool_calls
         if finish == "length" or (

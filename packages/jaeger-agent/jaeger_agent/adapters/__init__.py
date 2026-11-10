@@ -11,6 +11,7 @@ from .hermes_xml import HERMES_TOOL_INSTRUCTIONS, HermesXMLAdapter
 from .local_llama import LocalLlamaAdapter
 from .mlx import MLXAdapter
 from .openai import KNOWN_PROVIDERS, OpenAIAdapter
+from .ollama import OllamaAdapter
 
 __all__ = [
     "AnthropicAdapter",
@@ -22,5 +23,6 @@ __all__ = [
     "LocalLlamaAdapter",
     "MLXAdapter",
     "OpenAIAdapter",
+    "OllamaAdapter",
     "ProviderAdapter",
 ]
