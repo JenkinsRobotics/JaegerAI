@@ -585,10 +585,10 @@ def test_reserve_survives_the_per_result_cap_rebuild():
     assert budget.max_tool_result_chars < 24_000
 
 
-def test_no_reserve_given_keeps_the_default():
+def test_no_reserve_given_uses_actual_adapter_output_budget():
     from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
     agent = build_jaeger_agent(_cloud_client(), ctx_window=8192)
-    assert agent.context_guard.budget.reserve_for_completion == 1024
+    assert agent.context_guard.budget.reserve_for_completion == agent.primary_adapter.max_tokens == 4096
 
 
 def test_inflight_prune_stops_as_soon_as_it_fits():

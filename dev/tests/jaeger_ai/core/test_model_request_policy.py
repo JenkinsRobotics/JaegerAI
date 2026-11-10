@@ -162,3 +162,24 @@ def test_loopback_cloud_proxy_is_not_evidence_of_local_inference(configured,adap
     configured.external_model.model='gpt-test'
     configured.external_model.base_url='http://localhost:1234/v1'
     assert not route_for(select_request_client(configured,None)).local
+
+
+def test_model_only_lane_streams_reasoning_once(configured,adapter):
+    events=[]
+    def call(payload, interrupt, **kwargs):
+        kwargs['on_reasoning']('Checking')
+        kwargs['on_delta']('Answer')
+        return {'role':'assistant','content':'Answer','reasoning':'Checking'}
+    adapter.call=call
+    assert complete(configured,None,'question',on_reasoning=lambda t:events.append(('reasoning',t)),
+        on_delta=lambda t:events.append(('text',t)))=='Answer'
+    assert events==[('reasoning','Checking'),('text','Answer')]
+
+
+def test_model_switch_resets_incompatible_controls(configured,adapter):
+    configured.external_model.reasoning_effort='xhigh'
+    configured.external_model.ctx=131072
+    configured.external_model.temperature=1.3
+    c=select_request_client(configured,None,model='@ollama:qwen2.5:3b')
+    assert c.ext.ctx==0 and c.ext.reasoning_effort=='auto' and c.ext.temperature is None
+    assert configured.external_model.ctx==131072

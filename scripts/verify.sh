@@ -100,6 +100,14 @@ run_backend() {
   echo "[back-end:models] Checking provider routing, first boot, resources and streamed receipts..."
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
     dev/tests/jaeger_ai/core/test_model_request_policy.py \
+    dev/tests/jaeger_ai/agent/test_runtime_bridge.py \
+    dev/tests/jaeger_ai/core/test_gateway_turn_parts.py \
+    dev/tests/jaeger_ai/core/test_gateway_session_stream_cards.py \
+    dev/tests/jaeger_ai/core/test_request_cancellation.py \
+    dev/tests/jaeger_ai/core/test_recovered_approval_context.py \
+    dev/tests/jaeger_ai/core/test_model_router.py \
+    dev/tests/jaeger_ai/core/test_continuation.py \
+    dev/tests/jaeger_ai/core/test_handoff_cancellation_tree.py \
     dev/tests/jaeger_ai/core/test_stabilization_regressions.py \
     dev/tests/jaeger_ai/core/test_gateway_model_history.py \
     dev/tests/jaeger_ai/core/test_gateway_single_terminal.py \
@@ -113,6 +121,14 @@ run_backend() {
   # Package tests establish their own state root; run separately from product tests.
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
     packages/jaeger-agent/tests/test_openai_adapter.py \
+    packages/jaeger-agent/tests/test_ollama_native_adapter.py \
+    packages/jaeger-agent/tests/test_model_controls.py \
+    packages/jaeger-agent/tests/test_dispatch_invariants.py \
+    packages/jaeger-agent/tests/test_context_guard.py \
+    packages/jaeger-agent/tests/test_turn_transcript_safety.py \
+    packages/jaeger-agent/tests/test_reasoning_cap.py \
+    packages/jaeger-agent/tests/test_reasoning_streaming.py \
+    packages/jaeger-agent/tests/test_cli_backend_adapter.py \
     packages/jaeger-agent/tests/test_anthropic_adapter.py \
     packages/jaeger-agent/tests/test_liveness.py \
     packages/jaeger-agent/tests/test_run_turn.py

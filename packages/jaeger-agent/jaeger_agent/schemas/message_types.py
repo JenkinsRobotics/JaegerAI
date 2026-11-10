@@ -17,7 +17,7 @@ gives us static type checking with zero runtime cost.
 
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 Role = Literal["system", "user", "assistant", "tool"]
@@ -29,6 +29,7 @@ class ToolCall(TypedDict):
     formats before we get here."""
 
     id: str
+    provider_id: NotRequired[str]  # original ID when admission repaired identity
     name: str
     arguments: dict[str, Any]
 
@@ -55,6 +56,8 @@ class Message(TypedDict, total=False):
     tool_calls: list[ToolCall] | None
     tool_call_id: str | None        # for role="tool"
     name: str | None                # for role="tool"
+    reasoning: str | None
+    provider_state: dict[str, Any]  # opaque signed blocks; never rendered as text
     # Optional metadata adapters may attach to the assistant turn. The
     # agent loop reads ``finish_reason`` to drive Phase-8 retry logic
     # (length-continue + truncated-tool-call retry).

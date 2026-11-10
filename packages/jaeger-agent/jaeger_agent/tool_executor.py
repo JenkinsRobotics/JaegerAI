@@ -181,6 +181,11 @@ class DirectToolExecutor:
 
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
         from jaeger_agent.skill_registry.tool_selection import tool_permitted
+        from jaeger_agent.core.cancellation import current_cancellation
+        from jaeger_agent.loop.tool_dispatch_safety import cancelled_tool_result
+        cancelled = current_cancellation()
+        if cancelled is not None and cancelled.is_set():
+            return cancelled_tool_result()
         if not tool_permitted(tool.name):
             return {"ok": False, "error": "Tool is outside this request scope", "error_type": "permission_denied", "retryable": False}
         # ToolDef.dispatch owns coercion + validation. Exceptions deliberately
@@ -367,7 +372,14 @@ class HookedToolExecutor:
             return {"ok": False, "error": "Bridge goal resource denied",
                     "error_type": "permission_denied", "retryable": False}
 
-        call_id = f"call-{int(time.time()*1000)}"
+        # A turn may be cancelled while waiting for authorization. Refuse before
+        # checkpoints/ledger claim an effect, not only between model iterations.
+        from jaeger_agent.core.cancellation import current_cancellation
+        from jaeger_agent.loop.tool_dispatch_safety import cancelled_tool_result
+        cancelled = current_cancellation()
+        if cancelled is not None and cancelled.is_set():
+            return cancelled_tool_result()
+        call_id = f"call-{uuid.uuid4().hex}"
         t0 = time.time()
         try:
             if runtime is not None:

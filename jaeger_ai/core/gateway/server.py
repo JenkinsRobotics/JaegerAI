@@ -4741,7 +4741,7 @@ class JaegerGatewayApp:
         self, text: str, *, model: str | None = None, provider: str | None = None,
         system_prompt: str | None = None, history=None, attachments=None,
         context_ids=None, context_references=(), on_model_identity=None,
-        timing=None, on_delta=None, local_only=False, on_route=None,
+        timing=None, on_delta=None, on_reasoning=None, local_only=False, on_route=None,
     ) -> str:
         """Model-only cognition: the configured provider, shared adapters and policy."""
         from jaeger_ai.core.entity.runtime import EntityRuntime, load_instance_config_or_default
@@ -4781,7 +4781,7 @@ class JaegerGatewayApp:
                 complete, config, runtime.layout, text, model=model, provider=provider,
                 system_prompt=system_prompt or "You are Jaeger. Reply helpfully.",
                 history=history or (), attachments=attachments or (),
-                interrupt_event=scope.event if scope else None, on_delta=on_delta,
+                interrupt_event=scope.event if scope else None, on_delta=on_delta, on_reasoning=on_reasoning,
                 on_input=observe_input, on_route=observe_route,
                 on_model_identity=on_model_identity, local_only=local_only,
                 default_client=lambda cfg: runtime.local_model_client(cfg),
@@ -5024,6 +5024,16 @@ class JaegerGatewayApp:
             flush()
             end_reasoning()
 
+        def on_thinking(message: str) -> None:
+            # Loop status (retry, context compaction, waiting), not invented
+            # model reasoning. Preserve chronological boundaries in the feed.
+            flush()
+            end_reasoning()
+            self.event_bus.publish(session_id, "turn.progress", {
+                **ids, "channel": "status", "content_type": "status",
+                "message": str(message)[:2000],
+            })
+
         def on_model_input(outline: dict[str, Any]) -> None:
             self.event_bus.publish(session_id, "turn.context", {
                 **ids, "outline": outline,
@@ -5031,6 +5041,7 @@ class JaegerGatewayApp:
 
         return AgentCallbacks(
             model_input=on_model_input,
+            thinking=on_thinking,
             tool_selection=lambda receipt: self.event_bus.publish(session_id, "tools.selected", {**ids, "receipt": receipt}),
             model_call_start=timing.model_start if timing is not None else None,
             model_call_done=timing.model_done if timing is not None else None,
@@ -5421,7 +5432,7 @@ class JaegerGatewayApp:
                 def selected_route(route):
                     nonlocal backend, model
                     backend, model = f"model:{route['provider']}", route["model"]
-                stream_options = {"on_delta": callbacks.stream_delta, "on_route": selected_route}
+                stream_options = {"on_delta": callbacks.stream_delta, "on_reasoning": callbacks.reasoning, "on_route": selected_route}
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._model_chat(
                         prompt,

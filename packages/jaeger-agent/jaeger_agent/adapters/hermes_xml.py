@@ -216,8 +216,10 @@ class HermesXMLAdapter(ProviderAdapter):
         interrupt_event: threading.Event,
         *,
         stale_timeout: float | None = None,
+        first_progress_timeout_s: float | None = None,
         on_heartbeat: Any = None,
         on_delta: Any = None,  # consumed: text-completion runners don't stream
+        on_reasoning: Any = None,
         **kwargs: Any,
     ) -> Any:
         """Invoke the runner with the assembled prompt, interrupt-aware.
@@ -237,6 +239,7 @@ class HermesXMLAdapter(ProviderAdapter):
             lambda: self.runner(prompt, merged),
             interrupt_event,
             stale_timeout=stale_timeout,
+            first_progress_timeout_s=first_progress_timeout_s,
             on_heartbeat=on_heartbeat,
         )
         self.last_usage = {

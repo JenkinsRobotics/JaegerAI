@@ -11,7 +11,6 @@ that new developers can easily understand:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -190,6 +189,8 @@ def classify(text: str) -> tuple[str, str]:
     """Classify user text as 'public' or 'private' and return the classification & reason."""
     body = text or ""
     lowered = body.lower()
+    if re.search(r"\b(?:do not|don't|never) (?:reveal|share|send|upload)\b", lowered):
+        return "private", "keyword:explicit_privacy_request"
     keywords, patterns = _load_rules()
     for kw in keywords:
         if kw in lowered:
@@ -214,12 +215,9 @@ def _log_path() -> Path:
 
 def log_decision(decision: SensitivityDecision, *, text_preview: str = "") -> Path:
     """Record an audit trail entry for every model routing decision."""
-    raw = text_preview or ""
-    if decision.classification != "public":
-        sha = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-        preview = f"<redacted:sha256={sha}:len={len(raw)}>"
-    else:
-        preview = raw[:160]
+    # Classifiers are imperfect. A diagnostic audit must not become a second
+    # plaintext conversation store, even for a prompt classified as public.
+    preview = f"<redacted:len={len(text_preview or '')}>"
 
     row = {
         "ts": time.time(),

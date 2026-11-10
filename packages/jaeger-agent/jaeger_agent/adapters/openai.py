@@ -247,25 +247,27 @@ class OpenAIAdapter(ProviderAdapter):
         api_key: str | None = None,
         base_url: str | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
+        temperature: float | None = 0.0,
+        top_p: float | None = 0.95,
         num_ctx: int | None = None,
         timeout_s: float = 60.0,
         stream_transport: bool = True,
         client: Any = None,
         reasoning_effort: str | None = None,
+        verbosity: str | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
         self.api_key = api_key
         self.base_url = base_url
         self.max_tokens = int(max_tokens)
-        self.temperature = float(temperature)
-        self.top_p = float(top_p)
+        self.temperature = float(temperature) if temperature is not None else None
+        self.top_p = float(top_p) if top_p is not None else None
         self.num_ctx = int(num_ctx) if num_ctx is not None else None
         # ``reasoning_effort``: none|low|medium|high, or None to send nothing.
         self.reasoning_effort = (str(reasoning_effort).strip().lower() or None) if reasoning_effort else None
         self.timeout_s = float(timeout_s)
+        self.verbosity = verbosity
         self.stream_transport = bool(stream_transport)
         self._client = client
 
@@ -358,19 +360,18 @@ class OpenAIAdapter(ProviderAdapter):
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": wire,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
+            ("max_completion_tokens" if self.provider == "openai" else "max_tokens"): self.max_tokens,
         }
+        if self.verbosity is not None:
+            if self.provider != "openai":
+                raise ValueError(f"verbosity is not supported by the {self.provider} adapter")
+            kwargs["verbosity"] = self.verbosity
+        if self.temperature is not None:
+            kwargs["temperature"] = self.temperature
+        if self.top_p is not None:
+            kwargs["top_p"] = self.top_p
         if tools:
             kwargs["tools"] = [t.to_openai_schema() for t in tools]
-        if (
-            self.provider == "ollama"
-            and self.num_ctx is not None
-            and self.num_ctx > 0
-            and ":cloud" not in self.model.lower()
-        ):
-            kwargs["extra_body"] = {"options": {"num_ctx": self.num_ctx}}
         if self.reasoning_effort:
             kwargs["reasoning_effort"] = self.reasoning_effort
         return kwargs
@@ -378,37 +379,13 @@ class OpenAIAdapter(ProviderAdapter):
     # ── call + parse ────────────────────────────────────────────────
 
     def call(self, formatted: Any, interrupt_event: threading.Event, **kwargs: Any) -> Any:
-        """One request; when the model spent the whole output budget
-        thinking and produced no answer or tool call, retry it once with
-        reasoning off (``reasoning_effort="none"``) instead of failing the
-        step. Only when this adapter is the one capping reasoning, or (for
-        Ollama providers at the provider default) once more at ``low``."""
-        raw = self._call_once(formatted, interrupt_event, **kwargs)
-        effort = (kwargs.get("reasoning_effort") or (formatted or {}).get("reasoning_effort")
-                  if isinstance(formatted, dict) else None)
-        if (
-            effort and effort != "none" and not interrupt_event.is_set()
-            and _thinking_exhausted(raw)
-        ):
-            retry = {**formatted, "reasoning_effort": "none"}
-            self.last_reasoning_retry = True
-            return self._call_once(retry, interrupt_event, **{k: v for k, v in kwargs.items() if k != "reasoning_effort"})
-        if (
-            not effort and self.provider in _OLLAMA_PROVIDERS
-            and isinstance(formatted, dict) and not interrupt_event.is_set()
-            and _thinking_exhausted(raw)
-        ):
-            # Ollama cloud models (glm-5.3-flash:cloud) keep the provider's
-            # default reasoning, which can spend a whole 4096-token step
-            # thinking on a ~26K-token tool prompt (2026-10-16 SOTA TERM-01:
-            # "spent its entire output budget thinking"). Ollama honours
-            # ``reasoning_effort`` for these models, so retry once at ``low``
-            # rather than failing the step.
-            retry = {**formatted, "reasoning_effort": "low"}
-            self.last_reasoning_retry = True
-            return self._call_once(retry, interrupt_event, **{k: v for k, v in kwargs.items() if k != "reasoning_effort"})
+        """Preserve the selected effort and output budget on every call.
+
+        Exhaustion is reported by parse_response; policy, not transport,
+        decides whether another model or a larger budget is appropriate.
+        """
         self.last_reasoning_retry = False
-        return raw
+        return self._call_once(formatted, interrupt_event, **kwargs)
 
     def _call_once(
         self,
@@ -416,6 +393,7 @@ class OpenAIAdapter(ProviderAdapter):
         interrupt_event: threading.Event,
         *,
         stale_timeout: float | None = None,
+        first_progress_timeout_s: float | None = None,
         on_heartbeat: Any = None,
         on_abandon: Any = None,
         join_on_abandon: float = 0.0,
@@ -442,6 +420,9 @@ class OpenAIAdapter(ProviderAdapter):
         stream so the server stops generating."""
         client = self._ensure_client()
         api_kwargs = {**formatted, **kwargs}
+        if first_progress_timeout_s is not None and self.provider != "local-llama":
+            import httpx
+            api_kwargs["timeout"] = httpx.Timeout(max(self.timeout_s, first_progress_timeout_s), connect=10)
         self.last_ttft_s = None
         effective_stale = stale_timeout if stale_timeout is not None else self.timeout_s
         if not self.stream_transport:
@@ -449,6 +430,7 @@ class OpenAIAdapter(ProviderAdapter):
                 lambda: client.chat.completions.create(**api_kwargs),
                 interrupt_event,
                 stale_timeout=effective_stale,
+                first_progress_timeout_s=first_progress_timeout_s,
                 on_heartbeat=on_heartbeat,
                 on_abandon=on_abandon,
                 join_on_abandon=join_on_abandon,
@@ -477,6 +459,7 @@ class OpenAIAdapter(ProviderAdapter):
             _streamed,
             interrupt_event,
             stale_timeout=effective_stale,
+            first_progress_timeout_s=first_progress_timeout_s,
             on_heartbeat=on_heartbeat,
             on_abandon=on_abandon,
             join_on_abandon=join_on_abandon,

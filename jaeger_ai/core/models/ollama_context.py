@@ -289,6 +289,12 @@ def resolve_serving_context(
     if hosted and configured is not None and configured > _LOCAL_DEFAULT_CTX:
         return configured, "configured"
 
+    if not hosted and configured is not None:
+        maximum = probed if source == "model_info" else None
+        if maximum is not None and configured > maximum:
+            raise ValueError(f"Configured context {configured} exceeds model maximum {maximum}")
+        return configured, "configured"
+
     if probed is not None:
         return probed, source
 

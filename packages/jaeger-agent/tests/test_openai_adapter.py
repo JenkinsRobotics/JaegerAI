@@ -278,12 +278,12 @@ def test_format_messages_temperature_top_p_max_tokens_carried_through():
         client=_FakeClient(_mk_response("ok")),
     )
     out = a.format_messages([{"role": "user", "content": "hi"}], [], "")
-    assert out["max_tokens"] == 512
+    assert out["max_completion_tokens"] == 512
     assert out["temperature"] == 0.7
     assert out["top_p"] == 0.5
 
 
-def test_only_local_ollama_sends_num_ctx():
+def test_context_options_are_not_sent_to_openai_compat_endpoints():
     local = OpenAIAdapter(provider="ollama", model="llama3.2", num_ctx=32768)
     cloud_provider = OpenAIAdapter(
         provider="ollama-cloud", model="qwen3.5:397b", num_ctx=8192
@@ -292,9 +292,7 @@ def test_only_local_ollama_sends_num_ctx():
         provider="ollama", model="qwen3.5:397b:cloud", num_ctx=8192
     )
 
-    assert local.format_messages([], [], "")["extra_body"] == {
-        "options": {"num_ctx": 32768}
-    }
+    assert "extra_body" not in local.format_messages([], [], "")
     assert "extra_body" not in cloud_provider.format_messages([], [], "")
     assert "extra_body" not in cloud_model.format_messages([], [], "")
 
