@@ -168,7 +168,7 @@ async def test_chat_tier_enforces_model_only_lane(tmp_path: pathlib.Path) -> Non
     assert admitted["execution"]["interaction_tier"] == "chat"
 
     # Mock ollama_chat to return a conversational response
-    gw._ollama_chat = AsyncMock(return_value="I am in Chat mode and cannot run tools.")
+    gw._model_chat = AsyncMock(return_value="I am in Chat mode and cannot run tools.")
     react_mock = AsyncMock()
     gw._continued_owner_react = react_mock
 
@@ -181,8 +181,8 @@ async def test_chat_tier_enforces_model_only_lane(tmp_path: pathlib.Path) -> Non
         execution=admitted["execution"],
     )
 
-    # _ollama_chat was invoked for pure conversational answer
-    assert gw._ollama_chat.await_count == 1
+    # _model_chat was invoked for pure conversational answer
+    assert gw._model_chat.await_count == 1
     # ReAct / tool execution was NEVER called
     assert react_mock.await_count == 0
 

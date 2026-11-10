@@ -155,6 +155,17 @@ async def test_native_type_error_does_not_execute_twice(tmp_path, monkeypatch):
         raise TypeError("after effect")
     owner_run_ids: list[str] = []
     runtime = EntityRuntime.get_singleton()
+    # Exercise the real owner/ledger path without loading weights or contacting a model.
+    from jaeger_ai.core.instance.schemas import Config
+    monkeypatch.setattr("jaeger_ai.core.entity.runtime.load_instance_config_or_default", lambda _: Config(
+        instance_name="test",model={"model_path":"unused"},
+        external_model={"enabled":True,"provider":"cli","model":"grok"}))
+    class UnavailableAdapter:
+        name="test-unavailable"
+        def format_messages(self,messages,tools,system):return {"messages":messages}
+        def supports(self,feature):return False
+        def call(self,*args,**kwargs):raise RuntimeError("fixture provider unavailable after binding")
+    monkeypatch.setattr("jaeger_agent.loop.runtime_bridge._adapter_for_client", lambda *a,**k:UnavailableAdapter())
     orig_react = runtime.run_subordinate_react
 
     def react_with_run(*args, **kwargs):

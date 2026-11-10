@@ -323,7 +323,7 @@ class JaegerAIRuntime:
             from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
             from jaeger_ai.core.models.session_selection import select_client
             model, provider, _ = apply_sensitivity_routing(
-                text, config=_pipeline.get("config"), model=model, provider=provider)
+                text, config=_pipeline.get("config"), model=model, provider=provider, default_client=client)
             client = select_client(client, _pipeline.get("config"),
                                    _pipeline.get("layout"), model, provider)
         turn_text = text

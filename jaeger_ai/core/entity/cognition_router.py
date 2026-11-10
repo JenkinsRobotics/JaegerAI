@@ -278,25 +278,14 @@ class ReActHandler(CognitionStrategyHandler):
         except Exception as exc:
             logger.error("ReActHandler runtime subordinate execution failed: %s", exc, exc_info=True)
 
-        model_runner = context.get("model_runner") or context.get("cognition_provider")
-        if callable(model_runner):
-            logger.warning("ReActHandler falling back to model_runner after runtime subordinate execution failure")
-            reply = model_runner(text)
-            if isinstance(reply, dict):
-                return reply
-            return {
-                "strategy": CognitiveStrategy.REACT_LOOP.value,
-                "text": reply,
-                "action_taken": True,
-                "llm_invoked": True,
-            }
-
-        # Fallback subordinate execution
+        # A model-only answer cannot stand in for failed tool execution.
         return {
             "strategy": CognitiveStrategy.REACT_LOOP.value,
-            "text": f"Completed ReAct execution for: {text[:100]}",
-            "action_taken": True,
-            "llm_invoked": True,
+            "text": "Agent execution is unavailable. No work was verified.",
+            "status": "failed",
+            "halt_reason": "execution_unavailable",
+            "action_taken": False,
+            "llm_invoked": False,
         }
 
 

@@ -37,12 +37,15 @@ def test_decide_routes_and_logs(tmp_path, monkeypatch):
     assert model == "glm-5.3-flash:cloud"
     assert provider == "ollama"
 
+    from types import SimpleNamespace
     model2, provider2, decision2 = gate.apply_sensitivity_routing(
         "here is my api key sk-abcdefghijklmnopqrstuvwxyz",
+        config=SimpleNamespace(external_model=SimpleNamespace(fallback=[
+            SimpleNamespace(provider="ollama", model="installed-local:latest")])),
     )
     assert decision2.classification == "private"
     assert provider2 == "ollama"
-    assert model2 == "gemma-4-26b:latest"
+    assert model2 == "installed-local:latest"
 
     log = tmp_path / "logs" / "sensitivity_gate.jsonl"
     assert log.is_file()
@@ -51,7 +54,7 @@ def test_decide_routes_and_logs(tmp_path, monkeypatch):
     assert '"class": "public"' in lines[0]
     assert '"model": "glm-5.3-flash:cloud"' in lines[0]
     assert '"class": "private"' in lines[1]
-    assert '"model": "gemma-4-26b:latest"' in lines[1]
+    assert '"model": "installed-local:latest"' in lines[1]
 
 
 def test_normalize_ollama_provider_lanes():
@@ -107,13 +110,13 @@ def test_private_uses_config_fallback(tmp_path, monkeypatch):
             enabled=True,
             model="glm-5.3-flash:cloud",
             fallback=[
-                SimpleNamespace(provider="ollama", model="gemma-4-26b:latest"),
+                SimpleNamespace(provider="ollama", model="installed-local:latest"),
             ],
         )
     )
     decision = decide("rotate the password please", config=config)
     assert decision.classification == "private"
-    assert decision.model == "gemma-4-26b:latest"
+    assert decision.model == "installed-local:latest"
     assert decision.provider == "ollama"
 
 
@@ -133,8 +136,6 @@ def test_private_turn_does_not_reuse_an_external_client():
     from types import SimpleNamespace
     from jaeger_ai.core.models.router import decide
 
-    decision = decide("Find saved API keys",
-                      default_client=SimpleNamespace(kind="external"))
-    assert decision.classification == "private"
-    assert decision.provider == "ollama"
-    assert decision.model != "local"
+    from jaeger_ai.core.models.request_policy import ModelPolicyError
+    with pytest.raises(ModelPolicyError, match="configured on-device model"):
+        decide("Find saved API keys", default_client=SimpleNamespace(kind="external"))

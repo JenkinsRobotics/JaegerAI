@@ -1705,6 +1705,15 @@ class GatewaySessionStore:
                 "accepted": True,
             }
 
+    def session_local_only(self, session_id: str) -> bool:
+        """Keep explicit local-only history local, including auxiliary requests."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT metadata_json FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+            if row and bool(_row_meta(row[0]).get("local_only")):
+                return True
+            return conn.execute("SELECT 1 FROM client_requests WHERE session_id=? "
+                "AND json_extract(execution_json, '$.options.local_only')=1 LIMIT 1", (session_id,)).fetchone() is not None
+
     @staticmethod
     def _resolve_execution(
         conn: sqlite3.Connection,
@@ -1721,6 +1730,11 @@ class GatewaySessionStore:
         else:
             model = meta.get("model")
             provider = choices.get("provider") or meta.get("provider")
+        options = dict(choices.get("options") or {})
+        prior_local = conn.execute("SELECT 1 FROM client_requests WHERE session_id=? "
+            "AND json_extract(execution_json, '$.options.local_only')=1 LIMIT 1", (session_id,)).fetchone()
+        if options.get("local_only") or meta.get("local_only") or prior_local:
+            options["local_only"] = True
         rows = conn.execute(
             "SELECT attachment_id, sha256, size_bytes, provenance FROM attachments "
             "WHERE session_id=? ORDER BY created_at",
@@ -1747,7 +1761,7 @@ class GatewaySessionStore:
                 for a in selected
             ],
             "workspace": choices.get("workspace") or session_workspace or "",
-            "options": choices.get("options") or {},
+            "options": options,
             "allowed_tools": choices.get("allowed_tools"),
             "display_text": choices["display_text"] if "display_text" in choices else None,
             "is_subordinate": bool(choices.get("is_subordinate")),

@@ -37,7 +37,11 @@ it('expands grouped activity and the retained tool result without hiding comment
  fireEvent.click(screen.getByRole('button',{name:/Show activity/}));
  expect(screen.getByText('2 tests passed')).toBeTruthy();
  expect(screen.getByText('2 tests passed').closest('details')?.open).toBe(false);
- fireEvent.click(screen.getByText('npm test'));
+ const command = screen.getByText('npm test', {selector: '.jg-tool-activity__target'});
+ const disclosure = command.closest('details')!;
+ fireEvent.click(command.closest('summary')!);
+ expect(disclosure.open).toBe(true);
+ expect(screen.getByText('2 tests passed')).toBeTruthy();
 });
 it('retains unknown terminal tool states instead of declaring success',()=>{
  const parts:ChatPart[]=[{...tool('a'),state:'executing'} as ChatPart];

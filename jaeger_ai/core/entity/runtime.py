@@ -60,15 +60,10 @@ logger = logging.getLogger("jaeger.entity.runtime")
 
 
 def load_instance_config_or_default(layout: Any) -> Any:
-    """The instance's ``config.yaml``, or the wizard's defaults when absent.
+    """Read the instance, or an unconfigured first-boot identity without I/O.
 
-    A first-boot instance has no ``config.yaml`` yet — the wizard (``jaeger
-    setup``) writes it. A Gateway turn against such an instance used to die
-    with ``FileNotFoundError`` at boot. This loader reads what exists and
-    falls back to the SAME defaults ``main.py`` / ``setup_wizard.py`` write
-    (registry model name, not a resolved path), so turn one reaches the
-    agent instead of failing at admission. The wizard remains the one
-    authoritative writer; nothing here persists a default to disk.
+    Onboarding owns model selection. A missing config must never imply that
+    Hugging Face weights are installed or authorize downloading them.
     """
     from jaeger_ai.core.instance.schemas import (
         Config, DisplayConfig, ModelConfig, SkillsConfig, load_yaml,
@@ -76,11 +71,11 @@ def load_instance_config_or_default(layout: Any) -> Any:
 
     if getattr(layout, "config_path", None) and Path(layout.config_path).is_file():
         return load_yaml(layout.config_path, Config)
-    from jaeger_ai.core.models.model_resolver import DEFAULT_MODEL
+    from jaeger_ai.contract.model_ids import UNCONFIGURED_MODEL
 
     return Config(
         instance_name=getattr(layout, "name", None) or "default",
-        model=ModelConfig(model_path=DEFAULT_MODEL),
+        model=ModelConfig(model_path=UNCONFIGURED_MODEL),
         display=DisplayConfig(show_help_on_start=False),
         skills=SkillsConfig(run_smoke_tests=True),
     )
@@ -114,6 +109,10 @@ class EntityRuntime:
     ) -> None:
         from jaeger_ai.core.agent_host import bind_agent_host
         bind_agent_host()
+        import threading
+        self._local_client_lock = threading.Lock()
+        self._local_client = None
+        self._local_client_key = None
         self.mode = mode or infer_runtime_mode()
         try:
             self.layout = instance_layout()
@@ -917,6 +916,27 @@ class EntityRuntime:
 
         return result_dict
 
+    def local_model_client(self, config):
+        """One explicitly configured local engine per resident owner; never auto-download."""
+        from jaeger_ai.core.models.model_resolver import resolve_model_path
+        from jaeger_ai.core.models.request_policy import ModelPolicyError
+        from jaeger_ai.contract.model_ids import UNCONFIGURED_MODEL
+        if str(config.model.model_path) == UNCONFIGURED_MODEL:
+            raise ModelPolicyError("Choose and connect a model in Models before starting a conversation.")
+        key = (config.model.model_path, config.model.ctx, config.model.backend)
+        with self._local_client_lock:
+            if self._local_client is not None:
+                if key != self._local_client_key:
+                    raise ModelPolicyError("Local model settings changed. Restart Jaeger to release the previous model before loading another.")
+                return self._local_client
+            resolved = resolve_model_path(config.model.model_path, auto_download=False)
+            from jaeger_ai.main import make_client
+            local_config = config.model_copy(deep=True)
+            local_config.model.model_path = resolved
+            self._local_client = make_client(local_config, self.layout, warmup=False)
+            self._local_client_key = key
+            return self._local_client
+
     def run_subordinate_react(
         self,
         prompt: str,
@@ -936,6 +956,8 @@ class EntityRuntime:
         continuation_state: dict[str, Any] | None = None,
         project_root: str | None = None,
         on_agent: Callable[[Any], None] | None = None,
+        local_only: bool = False,
+        attachments: Any = (),
     ) -> dict[str, Any]:
         """Execute subordinate ReAct loop inside the EntityRuntime.
 
@@ -1013,10 +1035,10 @@ class EntityRuntime:
             # turn one. The wizard/`jaeger setup` remains the authoritative
             # writer; this only reads what does not exist yet.
             cfg = load_instance_config_or_default(layout)
-            client = ExternalModelClient(cfg.external_model, layout)
-            if model:
-                from jaeger_ai.core.models.router import select_client
-                client = select_client(client, cfg, layout, model, provider)
+            from jaeger_ai.core.models.request_policy import select_request_client, GovernedClient
+            client = select_request_client(cfg, layout, model=model, provider=provider,
+                default_client=self.local_model_client)
+            client = GovernedClient(client, local_only=local_only)
             # A session override is the admitted configuration for this turn.
             cfg = cfg.model_copy(deep=True)
             if getattr(client, "kind", None) == "external":
@@ -1031,7 +1053,7 @@ class EntityRuntime:
         self._ensure_subordinate_skills(cfg=cfg)
         self._ensure_gateway_mcp()
         if on_model is not None:
-            on_model(f"{client.provider}:{client.model_name}")
+            on_model(f"{getattr(client, 'provider', 'local')}:{getattr(client, 'model_name', 'local')}")
         if cancellation is not None and cancellation.cancelled:
             return {"text": "(Cancelled before the turn started.)", "halt_reason": "interrupted"}
         # ``callbacks`` (an AgentCallbacks) carries the caller's per-turn
@@ -1043,6 +1065,9 @@ class EntityRuntime:
                                        max_tool_calls=max_tool_calls,
                                        callbacks=observe_tool_calls(callbacks, session_key),
                                        **owner_agent_options(layout, cfg, client))
+            from jaeger_ai.core.models.request_policy import GovernedAdapter, route_for, guarded_adapter
+            agent.primary_adapter = GovernedAdapter(agent.primary_adapter, route_for(client), local_only=local_only)
+            agent.fallback_adapters = [guarded_adapter(a, local_only=local_only) for a in agent.fallback_adapters]
             if continuation_state is not None:
                 continuation_state["agent"] = agent
                 continuation_state["client"] = client
@@ -1089,7 +1114,13 @@ class EntityRuntime:
                 on_run(run.id)
             from jaeger_ai.core.entity.owner_agent import traced_turn
             with traced_turn(layout, session_key, prompt) as traced:
-                out = turn_exec.run_turn(prompt)
+                content = None
+                if attachments and not getattr(agent, "_admitted_images_added", False):
+                    from jaeger_ai.core.models.completion import user_content
+                    from jaeger_ai.core.models.request_policy import route_for
+                    content = user_content(prompt, attachments, agent.primary_adapter, route_for(client))
+                    agent._admitted_images_added = True
+                out = turn_exec.run_turn(prompt) if content is None else turn_exec.run_turn(prompt, content=content)
                 traced.answer = str(out or "")
         out = (out or "").strip()
         return {

@@ -30,11 +30,8 @@ from jaeger_agent.schemas.message_types import Message, ToolCall
 from jaeger_os.core.tools.tool_schema import ToolDef
 from .base import ProviderAdapter
 
-# Features Anthropic supports. Token-level streaming is used at the
-# TRANSPORT level inside ``call`` (progress + cancellation), but the
-# loop-facing contract is still one whole message per call — so
-# "streaming" stays out of the declared feature set.
-_FEATURES: frozenset[str] = frozenset({"caching", "parallel_tools", "reasoning"})
+# Adapter transport capabilities; individual models can have narrower support.
+_FEATURES: frozenset[str] = frozenset({"caching", "parallel_tools", "reasoning", "vision", "streaming"})
 
 
 def _coerce_content_to_text(content: Any) -> str:
@@ -88,6 +85,22 @@ def _to_anthropic_blocks(msg: Message) -> list[dict[str, Any]] | str:
             "content": _coerce_content_to_text(text),
         }]
 
+    if isinstance(text, list):
+        blocks = []
+        for block in text:
+            if block.get("type") == "image_url":
+                url = str((block.get("image_url") or {}).get("url") or "")
+                if url.startswith("data:image/") and ";base64," in url:
+                    header, data = url.split(";base64,", 1)
+                    blocks.append({"type": "image", "source": {
+                        "type": "base64", "media_type": header[5:], "data": data}})
+                else:
+                    raise ValueError("Anthropic image inputs must be admitted base64 images")
+            elif block.get("type") == "text":
+                blocks.append(block)
+            else:
+                raise ValueError("Unsupported multimodal content block")
+        return blocks
     # Plain user/system text rides as a string.
     return text or ""
 

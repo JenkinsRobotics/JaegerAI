@@ -124,7 +124,7 @@ async def test_rolling_summary(gw, monkeypatch):
     async def fake(prompt, **kw):
         prompts.append(prompt)
         return "User's first message set code word PELICAN-7."
-    monkeypatch.setattr(gateway, "_ollama_chat", fake)
+    monkeypatch.setattr(gateway, "_model_chat", fake)
     out = await gateway._maybe_summarize("long")
     assert out and out["summary"]["covers_from"] == 1 and out["summary"]["message_count"] == 18
     assert "PELICAN-7" in prompts[0]

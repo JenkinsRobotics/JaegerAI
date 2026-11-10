@@ -56,13 +56,14 @@ def runtime(monkeypatch, tmp_path):
             return "ok"
 
     monkeypatch.setattr(sqlite_store, "bind", lambda layout: None)
-    monkeypatch.setattr(schemas, "load_yaml", lambda path, model: _Config(
-        external_model=SimpleNamespace(provider="scripted", enabled=True)))
+    cfg = schemas.Config(instance_name="test", model={"model_path":"unused"},
+                         external_model={"enabled":True,"provider":"cli","model":"grok"})
+    monkeypatch.setattr(runtime_module, "load_instance_config_or_default", lambda _: cfg)
     monkeypatch.setattr(external_model, "ExternalModelClient",
-                        lambda ext, layout: SimpleNamespace(provider="scripted", model_name="m"))
+                        lambda ext, layout: SimpleNamespace(provider="cli", model_name="grok", kind="external", ext=ext))
     monkeypatch.setattr(runtime_bridge, "build_jaeger_agent",
                         lambda client, **kw: SimpleNamespace(bind_run=lambda run_id: None,
-                                                             interrupt=lambda: None))
+                            interrupt=lambda: None, primary_adapter=SimpleNamespace(), fallback_adapters=[]))
     monkeypatch.setattr(executive, "TurnExecutive", _Executive)
     monkeypatch.setattr(sqlite_runs, "SqliteRunStore", lambda: None)
     monkeypatch.setattr(sqlite_commitments, "SqliteCommitmentStore", lambda: None)
@@ -124,3 +125,22 @@ def test_concurrent_turns_each_see_only_their_own_provider(runtime, monkeypatch)
         thread.join(timeout=10)
 
     assert observed == providers
+
+
+def test_admitted_image_reaches_the_same_tool_using_executive(runtime,monkeypatch,tmp_path):
+    from jaeger_agent.cognition import executive
+    from jaeger_agent.loop import runtime_bridge
+    rt,seen=runtime
+    class ImageExecutive(executive.TurnExecutive):
+        def run_turn(self,prompt,*,content=None):
+            seen['image_content']=content
+            return 'image observed'
+    monkeypatch.setattr(executive,'TurnExecutive',ImageExecutive)
+    monkeypatch.setattr(runtime_bridge,'build_jaeger_agent',lambda client,**kw:SimpleNamespace(
+        bind_run=lambda _:None,interrupt=lambda:None,
+        primary_adapter=SimpleNamespace(supports=lambda feature:True),fallback_adapters=[]))
+    picture=tmp_path/'picture.png';picture.write_bytes(b'synthetic-image')
+    result=rt.run_subordinate_react('Describe and work on this',attachments=[{'safe_path':str(picture),'mime_type':'image/png'}])
+    assert result['text']=='image observed'
+    assert seen['image_content'][0]=={'type':'text','text':'Describe and work on this'}
+    assert seen['image_content'][1]['image_url']['url'].startswith('data:image/png;base64,')

@@ -258,59 +258,67 @@ def _check_instance_config(layout: object) -> list[Check]:
     out.append(Check("config.yaml", "instance", True,
                      f"parsed ({config_path})"))
 
-    model_cfg = (cfg.get("model") or {}) if isinstance(cfg, dict) else {}
-    model_path = model_cfg.get("path") or model_cfg.get("model_path") or ""
-    if not model_path:
-        out.append(Check(
-            "model.path", "instance", False,
-            "not configured — agent has no LLM to call",
-            "set `model.path` in config.yaml to a GGUF file",
-        ))
+    external = cfg.get("external_model") or {}
+    if isinstance(external, dict) and external.get("enabled"):
+        configured = bool(external.get("provider") and external.get("model"))
+        out.append(Check("external_model", "instance", configured,
+                         "provider/model configured; local weights are optional (connectivity not checked)"
+                         if configured else "enabled provider requires a provider and model",
+                         unknown=configured))
     else:
-        # ``model_path`` may be a registry key (``gemma-4-12b-it-q4_k_m``),
-        # an absolute path, or an MLX directory — resolve it the same way
-        # the loader does instead of treating the raw string as a literal
-        # file (which false-flagged registry keys as "missing"). No
-        # network: ``auto_download=False`` raises rather than fetching.
-        from jaeger_ai.core.models.model_resolver import resolve_model_path
-        try:
-            resolved = pathlib.Path(resolve_model_path(model_path, auto_download=False))
-            if resolved.is_dir():               # MLX model directory
-                detail = f"{model_path} → {resolved.name}/ (MLX)"
-            else:
-                size_mb = resolved.stat().st_size / (1024 * 1024)
-                detail = f"{model_path} → {resolved.name} ({size_mb:,.0f} MB)"
-            out.append(Check("model.path", "instance", True, detail))
-        except FileNotFoundError:
+        model_cfg = (cfg.get("model") or {}) if isinstance(cfg, dict) else {}
+        model_path = model_cfg.get("path") or model_cfg.get("model_path") or ""
+        if not model_path:
             out.append(Check(
                 "model.path", "instance", False,
-                f"unresolved: {model_path!r} (not a known model / file on disk)",
-                "fix `model.path` in config.yaml or download the model",
+                "not configured — agent has no LLM to call",
+                "set `model.path` in config.yaml to a GGUF file",
             ))
+        else:
+            # ``model_path`` may be a registry key (``gemma-4-12b-it-q4_k_m``),
+            # an absolute path, or an MLX directory — resolve it the same way
+            # the loader does instead of treating the raw string as a literal
+            # file (which false-flagged registry keys as "missing"). No
+            # network: ``auto_download=False`` raises rather than fetching.
+            from jaeger_ai.core.models.model_resolver import resolve_model_path
+            try:
+                resolved = pathlib.Path(resolve_model_path(model_path, auto_download=False))
+                if resolved.is_dir():               # MLX model directory
+                    detail = f"{model_path} → {resolved.name}/ (MLX)"
+                else:
+                    size_mb = resolved.stat().st_size / (1024 * 1024)
+                    detail = f"{model_path} → {resolved.name} ({size_mb:,.0f} MB)"
+                out.append(Check("model.path", "instance", True, detail))
+            except FileNotFoundError:
+                out.append(Check(
+                    "model.path", "instance", False,
+                    f"unresolved: {model_path!r} (not a known model / file on disk)",
+                    "fix `model.path` in config.yaml or download the model",
+                ))
 
-    # ctx — sanity-check, but we can't know n_ctx_train without loading.
-    ctx = model_cfg.get("ctx") or model_cfg.get("n_ctx") or 0
-    try:
-        ctx_int = int(ctx)
-    except (TypeError, ValueError):
-        ctx_int = 0
-    if ctx_int <= 0:
-        out.append(Check(
-            "model.ctx", "instance", False,
-            f"invalid ctx: {ctx!r}",
-            "set `model.ctx` in config.yaml to a positive integer",
-        ))
-    elif ctx_int < 2048:
-        out.append(Check(
-            "model.ctx", "instance", False,
-            f"ctx={ctx_int} is unusually small — most prompts won't fit",
-            "raise `model.ctx` to at least 4096 (typical: 8192–32768)",
-        ))
-    else:
-        out.append(Check(
-            "model.ctx", "instance", True,
-            f"ctx={ctx_int}",
-        ))
+        # ctx — sanity-check, but we can't know n_ctx_train without loading.
+        ctx = model_cfg.get("ctx") or model_cfg.get("n_ctx") or 0
+        try:
+            ctx_int = int(ctx)
+        except (TypeError, ValueError):
+            ctx_int = 0
+        if ctx_int <= 0:
+            out.append(Check(
+                "model.ctx", "instance", False,
+                f"invalid ctx: {ctx!r}",
+                "set `model.ctx` in config.yaml to a positive integer",
+            ))
+        elif ctx_int < 2048:
+            out.append(Check(
+                "model.ctx", "instance", False,
+                f"ctx={ctx_int} is unusually small — most prompts won't fit",
+                "raise `model.ctx` to at least 4096 (typical: 8192–32768)",
+            ))
+        else:
+            out.append(Check(
+                "model.ctx", "instance", True,
+                f"ctx={ctx_int}",
+            ))
 
     # Logs dir — created lazily at boot, but if it exists and isn't
     # writable the boot will fail in a confusing place. Check up front.

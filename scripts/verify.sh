@@ -55,12 +55,21 @@ run_frontend() {
   echo "  [TIER 1: FRONT END] Interfaces & Presentation"
   echo "=================================================="
   echo "[front-end:ide] Running IDE interface & webview unit tests..."
-  IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1)
+  if ! IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1); then
+    echo "${IDE_OUTPUT}"
+    return 1
+  fi
   PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
   echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
+  echo "[front-end:shared-ui] Checking TypeScript and shared chat components..."
+  (cd jaeger_ai/interfaces/ui && npm run typecheck && npm test -- --configLoader=runner --no-cache --maxWorkers=2)
   echo "[front-end:webui] Running WebUI backend packaging and canonical UI routing tests..."
   "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/features/test_webui_packaging_contract.py dev/tests/jaeger_ai/features/webui/test_ui_shell_serving.py dev/tests/jaeger_ai/features/test_no_legacy_frontends.py -q --no-header
   echo "[+] WebUI front-end asset tests passed."
+  if [[ "$(uname -s)" == Darwin ]]; then
+    echo "[front-end:macos] Checking the native shell..."
+    swift test --package-path jaeger_ai/interfaces/macos-shell --scratch-path "${TMPDIR:-/tmp}/jaeger-swift-verification"
+  fi
 }
 
 run_backend() {
@@ -76,6 +85,25 @@ run_backend() {
   echo "[back-end:skills] Running Skill Catalog and Tool Registry audit..."
   "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
   echo "[+] Skill Catalog audit passed."
+  echo "[back-end:models] Checking provider routing, first boot, resources and streamed receipts..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
+    dev/tests/jaeger_ai/core/test_model_request_policy.py \
+    dev/tests/jaeger_ai/core/test_stabilization_regressions.py \
+    dev/tests/jaeger_ai/core/test_gateway_model_history.py \
+    dev/tests/jaeger_ai/core/test_gateway_single_terminal.py \
+    dev/tests/jaeger_ai/core/test_model_context_observation.py \
+    dev/tests/jaeger_ai/core/test_sensitivity_gate.py \
+    dev/tests/jaeger_ai/core/test_runtime_policy_isolation.py \
+    dev/tests/jaeger_ai/core/test_first_boot_config.py \
+    dev/tests/jaeger_ai/core/test_stack_controller.py \
+    dev/tests/jaeger_ai/core/test_preflight.py \
+    dev/tests/jaeger_ai/core/test_setup_wizard.py
+  # Package tests establish their own state root; run separately from product tests.
+  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
+    packages/jaeger-agent/tests/test_openai_adapter.py \
+    packages/jaeger-agent/tests/test_anthropic_adapter.py \
+    packages/jaeger-agent/tests/test_liveness.py \
+    packages/jaeger-agent/tests/test_run_turn.py
 }
 
 run_wiring() {
@@ -108,7 +136,10 @@ case "${TARGET}" in
     ;;
   ide)
     echo "[ide] Running IDE interface unit tests..."
-    IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1)
+    if ! IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1); then
+      echo "${IDE_OUTPUT}"
+      exit 1
+    fi
     PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
     echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
     ;;

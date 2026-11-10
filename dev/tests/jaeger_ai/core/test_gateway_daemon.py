@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+from dev.tests.fixtures.model_completion import model_completion
 import pytest
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 from pathlib import Path
@@ -369,7 +370,7 @@ async def test_execute_turn_lead_uses_mcp_backend(monkeypatch, tmp_path):
         raise AssertionError("ollama should not run when MCP succeeds")
 
     monkeypatch.setattr(app, "_native_lead_turn", _fake_native)
-    monkeypatch.setattr(app, "_ollama_chat", _should_not_ollama)
+    monkeypatch.setattr(app, "_model_chat", _should_not_ollama)
     monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: None)
 
     await app._execute_turn("s1", "turn-1", "Describe autonomy mode briefly.")
@@ -402,7 +403,7 @@ async def test_execute_turn_specialist_skips_mcp(monkeypatch, tmp_path):
         return "SPECIALIST:Ops"
 
     monkeypatch.setattr(app, "_native_lead_turn", _boom_native)
-    monkeypatch.setattr(app, "_ollama_chat", _ollama)
+    monkeypatch.setattr(app, "_model_chat", _ollama)
     monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: _Agent())
 
     await app._execute_turn("s2", "turn-2", "name?")
@@ -425,7 +426,7 @@ async def test_owner_failure_does_not_silently_complete_with_text(monkeypatch, t
     monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: None)
     monkeypatch.setattr(app, "_native_lead_turn", unavailable)
     monkeypatch.setattr(app, "_owner_react_turn", owner_unavailable)
-    monkeypatch.setattr(app, "_ollama_chat", forbidden)
+    monkeypatch.setattr(app, "_model_chat", forbidden)
     await app._execute_turn("s", "t", "Remember this")
     assert store.get_session("s")["status"] == "failed"
     # ``jaeger.state`` is the presence projection of the same stream, not a turn event.
@@ -445,7 +446,7 @@ async def test_explicit_text_mode_reports_missing_native_capabilities(monkeypatc
         return "Text response"
     monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: None)
     monkeypatch.setattr(app, "_native_lead_turn", unavailable)
-    monkeypatch.setattr(app, "_ollama_chat", text)
+    monkeypatch.setattr(app, "_model_chat", text)
     await app._execute_turn("s", "t", "hello")
     finish = app.event_bus.get_replay_events("s", since_event_id=0)[-1]
     assert finish.event == "turn.finish"
@@ -470,7 +471,7 @@ async def test_actionable_text_mode_is_promoted_to_native(monkeypatch, tmp_path)
 
     monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: None)
     monkeypatch.setattr(app, "_native_lead_turn", native)
-    monkeypatch.setattr(app, "_ollama_chat", forbidden)
+    monkeypatch.setattr(app, "_model_chat", forbidden)
     await app._execute_turn("s", "t", "Create calculator.py and run the tests")
     assert seen
     finish = app.event_bus.get_replay_events("s", since_event_id=0)[-1]
@@ -479,46 +480,23 @@ async def test_actionable_text_mode_is_promoted_to_native(monkeypatch, tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_text_mode_sends_history_without_a_128_token_cap(monkeypatch, tmp_path):
-    captured = {}
-
-    class Response:
-        status = 200
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        async def text(self): return '{"message":{"content":"remembered"}}'
-
-    class Session:
-        def __init__(self, *args, **kwargs): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        def post(self, url, *, json, headers=None):
-            captured.update(json)
-            return Response()
-
-    monkeypatch.setattr("jaeger_ai.core.gateway.server.ClientSession", Session)
+async def test_text_mode_sends_history_without_a_128_token_cap(tmp_path, model_completion):
     app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "history.sqlite3"))
-    answer = await app._ollama_chat("second", history=[
-        {"role": "user", "content": "first"},
-        {"role": "assistant", "content": "one"},
-    ])
+    answer = await app._model_chat("second", history=[
+        {"role": "user", "content": "first"}, {"role": "assistant", "content": "one"}])
     assert answer == "remembered"
-    assert captured["messages"][1:] == [
-        {"role": "user", "content": "first"},
-        {"role": "assistant", "content": "one"},
-        {"role": "user", "content": "second"},
-    ]
-    assert "options" not in captured
+    assert model_completion.calls[-1]["messages"][1:] == [
+        {"role": "user", "content": "first"}, {"role": "assistant", "content": "one"},
+        {"role": "user", "content": "second"}]
+    assert "options" not in model_completion.calls[-1]
 
 
 @pytest.mark.asyncio
-async def test_text_only_mode_rejects_an_empty_model(monkeypatch, tmp_path):
+async def test_text_only_mode_uses_configured_model_without_ollama_default(monkeypatch, tmp_path, model_completion):
     import jaeger_ai.core.gateway.server as gateway
-
     app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "text-model.sqlite3"))
     monkeypatch.setattr(gateway, "DEFAULT_OLLAMA_MODEL", "")
-    with pytest.raises(RuntimeError, match="JAEGER_GATEWAY_OLLAMA_MODEL"):
-        await app._ollama_chat("hello")
+    assert await app._model_chat("hello") == "remembered"
 
 
 @pytest.mark.asyncio
@@ -1032,68 +1010,32 @@ async def test_disconnect_does_not_cancel_accepted_work(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_ollama_images_require_admitted_attachments(monkeypatch, tmp_path):
+async def test_images_require_admitted_attachments(tmp_path, model_completion):
     import base64
-    captured = []
     private = tmp_path / 'private.png'
     private.write_bytes(b'private-image')
     admitted = tmp_path / 'admitted.png'
     admitted.write_bytes(b'admitted-image')
-
-    class Response:
-        status = 200
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        async def text(self): return '{"message":{"content":"done"}}'
-
-    class Session:
-        def __init__(self, *args, **kwargs): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        def post(self, url, *, json, headers=None):
-            captured.append(json)
-            return Response()
-
-    monkeypatch.setattr('jaeger_ai.core.gateway.server.ClientSession', Session)
     app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / 'images.sqlite3'))
     history = [{'role': 'assistant', 'content': f'stored at {private}'}]
-    await app._ollama_chat(f'file: {private}', model='owned-model', history=history)
-    assert all('images' not in message for message in captured[-1]['messages'])
-    await app._ollama_chat(f'file: {private}', model='owned-model', history=history,
+    await app._model_chat(f'file: {private}', model='owned-model', history=history)
+    assert all(isinstance(m['content'],str) for m in model_completion.calls[-1]['messages'])
+    await app._model_chat(f'file: {private}', model='owned-model', history=history,
         attachments=[{'safe_path': str(admitted), 'mime_type': 'image/png'}])
-    assert captured[-1]['messages'][-1]['images'] == [base64.b64encode(b'admitted-image').decode()]
+    image = model_completion.calls[-1]['messages'][-1]['content'][1]['image_url']['url']
+    assert image == 'data:image/png;base64,' + base64.b64encode(b'admitted-image').decode()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("complete", [True, False])
-async def test_voice_model_lane_streams_text_before_completion_and_requires_a_terminal_chunk(monkeypatch, tmp_path, complete):
+async def test_model_lane_streams_text_and_propagates_incomplete_stream(tmp_path, complete, model_completion):
     seen = []
-    captured = {}
-    class Response:
-        status = 200
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        @property
-        def content(self):
-            async def lines():
-                yield b'{"model":"owned-model","message":{"content":"Hello"},"done":false}\n'
-                assert seen == ["Hello"]
-                if complete:
-                    yield b'{"model":"owned-model","message":{"content":" there"},"done":true,"eval_count":2}\n'
-            return lines()
-    class Session:
-        def __init__(self, *args, **kwargs): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        def post(self, url, *, json, headers=None):
-            captured.update(json)
-            return Response()
-    monkeypatch.setattr("jaeger_ai.core.gateway.server.ClientSession", Session)
-    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "voice-stream.sqlite3"))
+    model_completion.finish = complete
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "stream.sqlite3"))
     if complete:
-        assert await app._ollama_chat("Hello", model="owned-model", on_delta=seen.append) == "Hello there"
+        assert await app._model_chat("Hello", model="owned-model", on_delta=seen.append) == "remembered"
         assert seen == ["Hello", " there"]
     else:
         with pytest.raises(RuntimeError, match="before confirming completion"):
-            await app._ollama_chat("Hello", model="owned-model", on_delta=seen.append)
-    assert captured["stream"] is True
+            await app._model_chat("Hello", model="owned-model", on_delta=seen.append)
+        assert seen == ["Hello"]

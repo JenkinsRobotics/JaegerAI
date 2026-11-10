@@ -17,6 +17,9 @@ the provider's model name, colons included (Ollama tags such as ``:cloud``).
 """
 from __future__ import annotations
 
+# A fresh identity is valid before the operator chooses an inference provider.
+UNCONFIGURED_MODEL = "unconfigured"
+
 
 def split_routed_model_id(model_id: str) -> tuple[str | None, str]:
     """Return ``(lane, model)`` for ``@lane:model``, or ``(None, model_id)``."""

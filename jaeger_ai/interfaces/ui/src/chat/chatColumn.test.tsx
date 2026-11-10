@@ -33,9 +33,11 @@ describe("chat column", () => {
       tool("c", "npm run build"),
     ] as Extract<ChatPart, { kind: "toolInvocation" }>[];
     const html = renderToStaticMarkup(<StepsFold tools={steps} defaultOpen />);
-    expect(html).toContain('<span class="jg-tool__verb">Read</span> <code class="jg-tool__target">src/app.tsx</code>');
-    expect(html).toContain('<span class="jg-tool__verb">Searched</span> <span class="jg-tool__target">swift ui shimmer</span>');
-    expect(html).toContain('<span class="jg-tool__verb">Ran</span> <code class="jg-tool__target">npm run build</code>');
+    // The shared activity components own markup; assert retained information.
+    for (const text of ['Read', 'src/app.tsx', 'Searched', 'swift ui shimmer', 'Ran', 'npm run build']) {
+      expect(html).toContain(text);
+    }
+    expect(html).toContain('codex-ui-activity');
   });
 
   it("renders the steps fold collapsed with a summary, expanded on demand", () => {

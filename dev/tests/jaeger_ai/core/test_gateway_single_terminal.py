@@ -45,7 +45,7 @@ def app(tmp_path, monkeypatch):
     async def candidate_plans(*args, **kwargs):
         return '[{"name": "candidate plan"}]'
 
-    monkeypatch.setattr(app, "_ollama_chat", candidate_plans)
+    monkeypatch.setattr(app, "_model_chat", candidate_plans)
     return app
 
 
@@ -169,7 +169,7 @@ def image_session(app, tmp_path, monkeypatch):
             "halt_reason": None,
         }
 
-    monkeypatch.setattr(app, "_ollama_chat", vision_chat)
+    monkeypatch.setattr(app, "_model_chat", vision_chat)
     monkeypatch.setattr(app, "_native_lead_turn", no_native)
     monkeypatch.setattr(app, "_owner_react_turn", owner_react)
     monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: _ReActRuntime()))
@@ -193,12 +193,12 @@ async def test_in_an_image_session_work_goes_through_the_entity(app, image_sessi
 
 
 @pytest.mark.asyncio
-async def test_in_an_image_session_a_question_goes_to_vision(app, image_session):
+async def test_in_an_image_session_an_agent_question_keeps_its_tools(app, image_session):
     admitted = app.store.admit_request("s", "What colour is the square?", request_id="r4")
 
     await app._execute_turn("s", admitted["turn_id"], "What colour is the square?", request_id="r4")
 
-    assert image_session == ["vision_chat"]
+    assert image_session == ["entity_react"]
 
 
 @pytest.mark.asyncio
@@ -215,7 +215,7 @@ async def test_an_image_name_in_recalled_history_does_not_make_an_image_turn(app
     async def no_native(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(app, "_ollama_chat", vision_chat)
+    monkeypatch.setattr(app, "_model_chat", vision_chat)
     monkeypatch.setattr(app, "_native_lead_turn", no_native)
     monkeypatch.setattr(
         app,

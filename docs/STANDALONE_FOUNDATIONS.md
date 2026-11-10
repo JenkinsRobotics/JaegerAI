@@ -30,7 +30,6 @@ Build outside the checkout, preferably under `/private/tmp` (Finder metadata in 
 
 ```
 npm --prefix jaeger_ai/interfaces/ui ci
-npm --prefix jaeger_ai/interfaces/ui run build
 python3 packages/jaeger-browser/build.py --help
 # Build the browser bundle using that script's explicit output arguments.
 ~/.jaeger/venv/bin/python -B scripts/build-standalone-macos.py \
@@ -38,6 +37,8 @@ python3 packages/jaeger-browser/build.py --help
   --browser-bundle /absolute/path/to/browser-runtime \
   --dependency-python ~/.jaeger/venv/bin/python
 ```
+
+Commit a clean, tested source revision before building. The standalone builder runs the shared UI tests and builds a fresh external UI snapshot; it rejects source changes during assembly and never copies a stale developer `dist`. Its manifest records the revision, UI input digest, lockfile digest, and every emitted UI file hash.
 
 The Python dependency environment is an explicit build input, recorded in `dependency-manifest.json`; this is a sealed environment snapshot, not yet a fully reproducible wheel build. The builder rejects editable path files and missing native dependencies. Optional external native inputs can be provided with `--native-dependency-root`. The resulting app is locally ad-hoc signed; public distribution still needs Developer ID signing/notarization.
 

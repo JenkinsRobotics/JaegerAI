@@ -8,11 +8,13 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
+  cacheDir: path.join(os.tmpdir(), `jaeger-vitest-cache-${process.pid}`),
   plugins: [react()],
   test: {
     // Environment
@@ -51,7 +53,7 @@ export default defineConfig({
     // Reporters
     reporters: ['verbose', 'json'],
     outputFile: {
-      json: './test-results/results.json',
+      json: process.env.JAEGER_TEST_RESULTS || path.join(os.tmpdir(), `jaeger-vitest-${process.pid}.json`),
     },
   },
 
@@ -63,7 +65,7 @@ export default defineConfig({
       { find: /^@aether\/ui\/home\.css$/, replacement: here('./vendor/aether-ui/tokens/home.css') },
       { find: /^@aether\/ui\/widgets\.css$/, replacement: here('./vendor/aether-ui/src/widgets.css') },
       { find: /^@aether\/ui$/, replacement: here('./vendor/aether-ui/src/index.ts') },
-      { find: '@', replacement: path.resolve(__dirname, './src') },
+      { find: '@', replacement: here('./src') },
     ],
   },
 })
