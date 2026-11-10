@@ -63,31 +63,9 @@ self.addEventListener('fetch', (event) => {
   // Skip WebSocket
   if (url.protocol === 'ws:' || url.protocol === 'wss:') return
 
-  // API requests: Network only (with fallback to cache)
+  // Live authority and recovery state must never come from an offline cache.
   if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          // Cache successful API responses
-          if (response.ok) {
-            const clone = response.clone()
-            caches.open(RUNTIME_CACHE).then((cache) => {
-              cache.put(request, clone)
-            })
-          }
-          return response
-        })
-        .catch(() => {
-          // Offline: return cached response if available
-          return caches.match(request).then((cached) => {
-            if (cached) return cached
-            return new Response(JSON.stringify({ error: 'Offline' }), {
-              status: 503,
-              headers: { 'Content-Type': 'application/json' },
-            })
-          })
-        })
-    )
+    event.respondWith(fetch(request, { cache: 'no-store' }))
     return
   }
 

@@ -251,7 +251,7 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: 
 
 /** Same-origin JSON GET for contractHome (the dev proxy / WebUI adds the caller token). */
 export const httpGetJson = (base = ""): GetJson => async (path) => {
-  const response = await fetch(`${base}${path}`, { headers: { Accept: "application/json" }, credentials: "same-origin" });
+  const response = await fetch(`${base}${path}`, { headers: { Accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
   const body = await response.json().catch(() => undefined);
   if (!response.ok) {
     const error = (body as { error?: string } | undefined)?.error;
