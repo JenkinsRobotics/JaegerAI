@@ -1,3 +1,4 @@
+import { toolSelection } from "./toolSelection";
 import "../../../ide/media/timeline.js";
 import { modelContext } from "./modelContext";
 /* Gateway SSE event -> ChatPart mapping. ONE place, on purpose: this file is
@@ -20,6 +21,7 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
   switch (event.event) {
     case "turn.steer": return {parts:[{kind:"userGuidance",text:str(p.text),steeringId:str(p.steering_id ?? event.event_id)}]};
     case "turn.model": return {parts:[{kind:"modelIdentity",actualModel:p.scope==="provider_reported"&&typeof p.actual_model==="string"?p.actual_model:null,scope:p.scope==="provider_reported"?"provider_reported":"unknown"}]};
+    case "tools.selected": return {parts: [{kind: "toolSelection", receipt: toolSelection(p.receipt)}]};
     case "turn.context": return {parts: [{kind: "modelContext", outline: modelContext(p.outline)}]};
     case "agent.knowledge": {
       const documents = Array.isArray(p.documents) ? p.documents.filter((doc): doc is { id: string; revision: number; digest: string; title: string } => Boolean(doc && typeof doc === "object" && typeof doc.id === "string" && typeof doc.revision === "number" && typeof doc.digest === "string" && typeof doc.title === "string")) : [];

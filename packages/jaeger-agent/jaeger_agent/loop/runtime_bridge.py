@@ -366,7 +366,6 @@ def build_jaeger_agent(
     """
     from jaeger_agent.schemas.tool_bundles import resolve_toolsets
     from jaeger_agent.skill_registry.toolset_scoping import (
-        scoped_tool_visible,
         tool_visible,
     )
     from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
@@ -446,7 +445,8 @@ def build_jaeger_agent(
 
         context_guard=guard,
         toolset_resolver=resolve_toolsets,
-        tool_visibility=scoped_tool_visible if scope_tools else tool_visible,
+        tool_visibility=tool_visible,
+        scope_tools=True if scope_tools else None,
         turn_start_hook=_reset_turn_state,
         turn_budget_limits=TurnBudgetLimits(
             max_tool_calls=max(1, int(max_tool_calls or max_iterations)),

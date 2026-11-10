@@ -313,4 +313,5 @@ def test_list_tools_with_no_match_returns_the_toolset_catalog():
 
     out = list_tools("zzqqxx-no-such-capability")
     assert out["count"] == 0
-    assert out["toolsets"] and "load_tools" in out["note"]
+    # An empty registry has no loadable groups; do not advertise phantom tools.
+    assert out["toolsets"] == {} and "load_tools" in out["note"]

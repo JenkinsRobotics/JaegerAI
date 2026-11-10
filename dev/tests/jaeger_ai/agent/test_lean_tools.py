@@ -133,7 +133,9 @@ def test_load_toolset_widens_view_on_the_next_access(monkeypatch, stub_tools):
     assert "stub_hidden" not in before, "stub_hidden should start hidden"
 
     # Simulate the load_tools tool firing.
-    assert ts.enable_toolset("code") is True
+    from jaeger_agent.skill_registry.tool_selection import selection_scope
+    with selection_scope(agent._tool_selection):
+        assert ts.enable_toolset("code") is True
 
     after = {t.name for t in agent.tools}
     assert "stub_hidden" in after, "loading 'code' should expose stub_hidden"

@@ -87,6 +87,16 @@ run_backend() {
   echo "[back-end:skills] Running Skill Catalog and Tool Registry audit..."
   "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
   echo "[+] Skill Catalog audit passed."
+  echo "[back-end:tools] Checking discovery isolation, ranking, MCP inventory and policy..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
+    dev/tests/jaeger_ai/core/test_tool_discovery.py \
+    dev/tests/jaeger_ai/core/test_mcp_discovery.py \
+    dev/tests/jaeger_ai/core/test_toolsets.py \
+    dev/tests/jaeger_ai/agent/test_agent_toolsets.py \
+    dev/tests/jaeger_ai/agent/test_lean_tools.py \
+    dev/tests/jaeger_ai/core/test_owner_agent_options.py \
+    dev/tests/jaeger_ai/plugins/test_mcp_limits.py \
+    dev/tests/jaeger_ai/core/test_mcp_lifecycle_controls.py
   echo "[back-end:models] Checking provider routing, first boot, resources and streamed receipts..."
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
     dev/tests/jaeger_ai/core/test_model_request_policy.py \

@@ -60,7 +60,8 @@ def _prompt_signature(layout: Any) -> str:
 
 
 def _system_prompt(main: Any, layout: Any) -> str:
-    sig = _prompt_signature(layout)
+    from jaeger_agent.skill_registry.toolset_scoping import _scoping_enabled
+    sig = f"{_prompt_signature(layout)}:scoped={_scoping_enabled()}"
     cached = _prompt_cache.get(sig)
     if cached is None:
         cached = main.build_system_prompt(layout)
@@ -87,7 +88,10 @@ def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
     global _registered_for, _owns_pipeline
     import jaeger_ai.main as main
 
-    with _lock:
+    from jaeger_agent.skill_registry.tool_selection import ToolSelection, selection_scope
+    full_tools = os.environ.get("JAEGER_FULL_TOOLS", "").strip().lower() in {"1", "true", "yes", "on"}
+    scope_tools = is_local_client(client) and not full_tools
+    with _lock, selection_scope(ToolSelection(scoped=True if scope_tools else None)):
         pipeline = main._pipeline
         if _owns_pipeline is None:
             _owns_pipeline = pipeline.get("layout") is None
@@ -109,7 +113,6 @@ def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 — budget is a guard, never a blocker
         ctx, reserve = None, None
     logs = Path(getattr(layout, "logs_dir", Path(layout.root) / "logs")) if _is_real_layout(layout) else None
-    full_tools = os.environ.get("JAEGER_FULL_TOOLS", "").strip().lower() in {"1", "true", "yes"}
     return {
         "system_prompt": prompt,
         "ctx_window": ctx,
@@ -118,7 +121,7 @@ def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
         "skip_final_tools": getattr(main, "SKIP_FINAL_TOOLS", None),
         # Local models route far better over the curated CORE surface plus
         # list_tools/load_tools than over the full catalogue.
-        "scope_tools": is_local_client(client) and not full_tools,
+        "scope_tools": scope_tools,
     }
 
 

@@ -5031,6 +5031,7 @@ class JaegerGatewayApp:
 
         return AgentCallbacks(
             model_input=on_model_input,
+            tool_selection=lambda receipt: self.event_bus.publish(session_id, "tools.selected", {**ids, "receipt": receipt}),
             model_call_start=timing.model_start if timing is not None else None,
             model_call_done=timing.model_done if timing is not None else None,
             stream_delta=on_delta,

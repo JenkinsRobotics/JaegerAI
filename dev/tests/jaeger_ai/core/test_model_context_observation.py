@@ -37,6 +37,8 @@ def test_actual_formatted_boundary_persists_only_outline(tmp_path):
     finish()
     events = store.activity_history('owned')['events']
     parts = project_parts(events)
+    selection = next(p['receipt'] for p in parts if p['type'] == 'tool_selection')
+    assert selection['selected_count'] == 0 and selection['tools'] == []
     outline = next(p['outline'] for p in parts if p['type'] == 'model_context')
     assert outline['messages'] == [{'role': 'user', 'text_chars': 9, 'omitted_blocks': 1}]
     assert outline['system_chars'] == 14 and outline['tool_count'] == 1
@@ -47,6 +49,7 @@ def test_actual_formatted_boundary_persists_only_outline(tmp_path):
     for i in range(6):
         store.append_event('owned', 'turn.delta', {'request_id':'owned-request', 'delta':'.'})
     store.complete_request('owned-request', status='completed', result={}, assistant_text='Done')
+    assert any(p['type'] == 'tool_selection' and p['receipt'] == selection for p in store.get_session('owned')['messages'][-1]['parts'])
     assert any(p['type'] == 'model_context' and p['outline'] == outline for p in store.get_session('owned')['messages'][-1]['parts'])
 
 

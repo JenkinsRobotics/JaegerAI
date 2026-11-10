@@ -1,3 +1,4 @@
+import { toolSelection } from "./toolSelection";
 import {mapEvent} from "./eventMap";
 import { modelContext } from "./modelContext";
 import { readIntent, saveIntent, settleIntent, type SendIntent } from "./sendJournal";
@@ -41,6 +42,7 @@ function persistedToPart(p: PersistedPart, agentName: (id: string) => string): C
       return mapEvent({event,payload:p})?.parts[0] ?? null;
     }
     case "model_identity": return {kind:"modelIdentity",actualModel:p.scope==="provider_reported"&&typeof p.actual_model==="string"?p.actual_model:null,scope:p.scope==="provider_reported"?"provider_reported":"unknown"};
+    case "tool_selection": return {kind: "toolSelection", receipt: toolSelection(p.receipt)};
     case "model_context": return {kind: "modelContext", outline: modelContext(p.outline)};
     case "knowledge": return { kind: "knowledgeContext", documents: p.documents };
     case "text": return p.text ? { kind: "markdownContent", text: p.text, role:p.role, itemId:p.item_id } : null;

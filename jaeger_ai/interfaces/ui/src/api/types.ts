@@ -86,6 +86,7 @@ export type PersistedPart =
   | {type:"steer";text:string;steering_id:string}
   | {type:"progress"|"checkpoint"|"sources"|"search_count"|"follow_ups";[key:string]:unknown}
   | {type:"model_identity";actual_model:string|null;scope:string}
+  | { type: "tool_selection"; receipt: unknown }
   | { type: "model_context"; outline: unknown }
   | { type: "knowledge"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { type: "text"; text: string; role?: "provisional"|"commentary"|"final"; item_id?: string }
