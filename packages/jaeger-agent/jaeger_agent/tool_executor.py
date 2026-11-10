@@ -180,6 +180,9 @@ class DirectToolExecutor:
     """Compatibility adapter using ``ToolDef`` validation and dispatch."""
 
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
+        from jaeger_agent.skill_registry.tool_selection import tool_permitted
+        if not tool_permitted(tool.name):
+            return {"ok": False, "error": "Tool is outside this request scope", "error_type": "permission_denied", "retryable": False}
         # ToolDef.dispatch owns coercion + validation. Exceptions deliberately
         # cross this replaceable boundary: JaegerAgent._execute_prepared turns
         # them into structured model feedback and can still distinguish a bad

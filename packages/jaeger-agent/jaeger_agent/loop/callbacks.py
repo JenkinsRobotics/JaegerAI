@@ -114,11 +114,19 @@ class AgentCallbacks:
     model_call_done: Callable[[dict[str, int]], None] | None = None
     model_input: Callable[[dict[str, Any]], None] | None = None
     context_references: tuple[Any, ...] = ()
+    tool_selection: Callable[[dict[str, Any]], None] | None = None
 
     # ── safe-invocation helpers ──────────────────────────────────────
     # Always call these from the agent loop rather than reaching for the
     # field directly: they no-op on missing callbacks and swallow handler
     # exceptions so a buggy observer never breaks the turn.
+
+    def on_tool_selection(self, payload: dict[str, Any]) -> None:
+        try:
+            if self.tool_selection is not None:
+                self.tool_selection(payload)
+        except Exception:
+            pass
 
     def on_model_call_start(self) -> None:
         try:

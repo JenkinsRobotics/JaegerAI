@@ -17,6 +17,7 @@ export type ChatPart =
   | {kind:"searchCount";searches:number;completed:number;failed:number}
   | {kind:"followUps";prompts:string[]}
   | {kind:"modelIdentity";actualModel:string|null;scope:string}
+  | { kind: "toolSelection"; receipt: import("./toolSelection").ToolSelectionReceipt }
   | { kind: "modelContext"; outline: import("./modelContext").ModelContextOutline }
   | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { kind: "markdownContent"; text: string; role?: AssistantContentRole; itemId?: string }
@@ -175,7 +176,7 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
     const index = parts.findIndex((p) => p.kind === "handoff" && p.handoffId === part.handoffId && p.direction === part.direction);
     if (index >= 0) return parts.map((p, i) => i === index && !(p.kind === "handoff" && p.status === "delivered" && part.status !== "delivered") ? part : p);
   }
-  if (["plan","searchCount","followUps"].includes(part.kind)) {
+  if (["plan","searchCount","followUps","toolSelection"].includes(part.kind)) {
     const index=parts.findIndex(p=>p.kind===part.kind);
     if(index>=0)return parts.map((p,i)=>i===index?part:p);
   }

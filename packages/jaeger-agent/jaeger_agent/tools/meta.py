@@ -1,188 +1,99 @@
-"""Meta-tools — the model's introspection surface for its own toolbox.
-
-When the lean tool surface is on (opt-in via ``JAEGER_TOOLSET_SCOPING=1``;
-default OFF in 0.1.0), the model sees a CORE set + a catalog of every
-other toolset. Two meta-tools make that pattern workable:
-
-  - :func:`describe_tool` — peek at any registered tool's schema
-    without changing the active set. Cheap.
-  - :func:`load_tools` — widen the active set to include a whole
-    category for the rest of the session.
-
-Both also exist when the lean surface is OFF — describe_tool stays
-useful as introspection, load_tools is a no-op-by-config but won't
-break.
-
-Why a separate ``meta.py`` instead of folding into ``_common.py``:
-the meta-tools touch the agent's tool *registry* rather than the
-filesystem or the model — distinct enough that growing this file
-(future: ``introspect_message_count``, ``trace_last_turn``) makes
-sense in one place.
-
-Both tools are registered at module-import time via
-``register_tool_from_function`` so they're available before any
-agent is built — main.py used to wrap them again inside the agent
-construction closure, which created a drift risk (two copies of the
-same docstring + dispatch shape).
-"""
-
+"""Search, inspect and load tools through Jaeger's existing registry and executor."""
 from __future__ import annotations
-
 from typing import Any
-
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_agent.skill_registry import tool_discovery as discovery
 
 
-@register_tool_from_function
+@register_tool_from_function(permission_tier='READ_ONLY', side_effect='read')
 def describe_tool(name: str) -> dict[str, Any]:
-    """Show the FULL schema + registry metadata for one tool — even
-    one that's not currently in the agent's visible toolset. Use this
-    when you see a tool name in the catalog and want to know exactly
-    what arguments it takes (or what its permission tier / availability
-    constraints are) BEFORE deciding to use it.
-
-    Returns:
-      * ``name`` / ``description`` / ``parameters`` — the same schema
-        the model would see in its tools list
-      * ``toolset`` — the category the tool belongs to (``"core"``,
-        ``"files"``, ``"computer_use"``, etc.) so you know which
-        ``load_tools`` call would bring its siblings in
-      * ``permission_tier`` — ``READ_ONLY`` / ``WRITE_LOCAL`` /
-        ``EXTERNAL_EFFECT`` / ``HARDWARE`` / ``PRIVILEGED``. Tells you
-        whether calling it will need user confirmation.
-      * ``side_effect`` — coarser hint: ``read`` / ``write`` /
-        ``external`` / ``hardware``.
-      * ``available`` — False when a runtime precondition fails
-        (missing deps, missing env var). The tool is still registered
-        but calling it would fail; you'd need to install / configure
-        first.
-      * ``requires_env`` — env-var names the tool needs at runtime
-        (e.g. ``["OPENAI_API_KEY"]``).
-      * ``max_result_chars`` — per-tool result size cap (0 = use the
-        global default).
-      * ``examples`` — short example call shapes, when authored.
-
-    ``{ok: False, error}`` for an unknown name.
+    """Inspect a permitted tool's schema, availability and permission metadata before loading it.
+    An unspecified permission tier is unknown; it never implies approval to execute.
     """
-    from jaeger_os.core.tools.tool_registry import get_tool, has_tool
-    from jaeger_agent.skill_registry.toolset_scoping import (
-        CORE, TOOLSETS, _SKILL_TOOLSETS,
-    )
-
-    clean = (name or "").strip()
-    if not clean:
-        return {"ok": False, "error": "empty tool name"}
-    if not has_tool(clean):
-        return {"ok": False, "error": f"unknown tool {name!r}"}
-    tool = get_tool(clean)
-    schema: dict[str, Any] = (
-        tool.to_openai_schema() if hasattr(tool, "to_openai_schema") else {}
-    )
-    function = schema.get("function", {}) if isinstance(schema, dict) else {}
-
-    # Toolset resolution: prefer the explicit ``ToolDef.toolset`` field
-    # when populated; fall back to membership scan of the static maps
-    # so unmigrated tools still report something meaningful.
-    declared = getattr(tool, "toolset", "") or ""
-    if not declared:
-        if clean in CORE:
-            declared = "core"
-        else:
-            for ts_name, members in TOOLSETS.items():
-                if clean in members:
-                    declared = ts_name
-                    break
-            else:
-                for ts_name, members in _SKILL_TOOLSETS.items():
-                    if clean in members:
-                        declared = f"skill:{ts_name}"
-                        break
-
-    return {
-        "ok": True,
-        "name": function.get("name") or tool.name,
-        "description": function.get("description", ""),
-        "parameters": function.get("parameters", {}),
-        "toolset": declared or "(unclassified)",
-        "permission_tier": getattr(tool, "permission_tier", "") or "READ_ONLY",
-        "side_effect": getattr(tool, "side_effect", "") or "(unclassified)",
-        "available": tool.is_available() if hasattr(tool, "is_available")
-                     else True,
-        "requires_env": list(getattr(tool, "requires_env", ()) or ()),
-        "max_result_chars": int(getattr(tool, "max_result_chars", 0) or 0),
-        "examples": list(getattr(tool, "examples", ()) or ()),
-        "interactive": bool(getattr(tool, "interactive", False)),
-        "dangerous": bool(getattr(tool, "dangerous", False)),
-        "beta": bool(getattr(tool, "beta", False)),
-    }
+    tool = next((t for t in discovery.catalog() if t.name == name.strip()), None)
+    if tool is None:
+        return {'ok': False, 'error': 'Unknown or unavailable tool in this agent’s catalog'}
+    fn = discovery.schema(tool)['function']
+    return {'ok': True, **discovery.row(tool), 'name': tool.name,
+            'description': fn.get('description', ''), 'parameters': fn.get('parameters', {}),
+            'permission_tier': getattr(tool, 'permission_tier', '') or 'UNKNOWN',
+            'side_effect': getattr(tool, 'side_effect', '') or 'unknown',
+            'requires_env': list(getattr(tool, 'requires_env', ()) or ()),
+            'max_result_chars': int(getattr(tool, 'max_result_chars', 0) or 0),
+            'examples': list(getattr(tool, 'examples', ()) or ()),
+            'interactive': bool(getattr(tool, 'interactive', False)),
+            'dangerous': bool(getattr(tool, 'dangerous', False)),
+            'beta': bool(getattr(tool, 'beta', False))}
 
 
-@register_tool_from_function
-def load_tools(name: str = "") -> dict[str, Any]:
-    """Make a group of extra tools visible. You start each turn with
-    a small CORE toolset; everything else is grouped — built-in
-    classes (``files``, ``code``, ``media``, …) and skills (each skill
-    is its own toolset of curated tools).
-
-    Call this the MOMENT a task needs a capability you don't see a
-    tool for — BEFORE concluding you can't do it. The new tools appear
-    on your very next step. Call with no name (or an unknown one) to
-    get the catalog of every toolset and what it holds. Returns the
-    toolsets now active.
-
-    No-op when ``JAEGER_TOOLSET_SCOPING`` is off (the 0.1.0 default) —
-    every tool is already visible. The active-set tracking still works
-    so this is harmless to call regardless of the scoping mode.
+@register_tool_from_function(permission_tier='READ_ONLY', side_effect='write')
+def load_tools(name: str = '', tools: list[str] | None = None) -> dict[str, Any]:
+    """Load exact tool names returned by list_tools using tools=[...], or a named toolset.
+    Tools become visible on the next model step for this agent only. Loading grants no
+    permission to execute. Missing prerequisites are reported without installing anything.
+    Call with no arguments to see permitted groups. At most 20 exact tools per call.
     """
+    from jaeger_agent.skill_registry.tool_selection import current_selection
     from jaeger_agent.skill_registry.toolset_scoping import (
-        active_toolset_names, all_toolsets, enable_toolset,
+        active_toolset_names, enable_toolset, is_untrusted_content,
     )
-    clean = (name or "").strip().lower()
-    if enable_toolset(clean):
-        return {"ok": True, "loaded": clean,
-                "active": sorted(active_toolset_names())}
-    return {
-        "ok": False,
-        "error": (f"unknown toolset {name!r}" if clean
-                  else "give a toolset name — catalog below"),
-        "available": all_toolsets(),
-    }
+    if is_untrusted_content():
+        return {'ok': False, 'error': 'Tool loading is unavailable for untrusted content'}
+    catalog = discovery.catalog()
+    by_name = {t.name: t for t in catalog}
+    clean = name.strip()
+    exact = list(dict.fromkeys(tools or ([] if clean not in by_name else [clean])))
+    if len(exact) > 20:
+        return {'ok': False, 'error': 'Load at most 20 exact tools at a time'}
+    if exact:
+        state = current_selection()
+        if state is None:
+            return {'ok': False, 'error': 'Exact tools must be loaded within an agent session'}
+        if any(n not in by_name for n in exact):
+            return {'ok': False, 'error': 'Requested tool is not in this agent’s catalog'}
+        unavailable = [discovery.row(by_name[n]) for n in exact if not discovery.availability(by_name[n])[0]]
+        if unavailable:
+            return {'ok': False, 'error': 'Resolve tool prerequisites before loading', 'unavailable': unavailable}
+        state.names.update(exact)
+        state.reasons.update({n: 'Explicitly loaded' for n in exact})
+        return {'ok': True, 'loaded': exact, 'tools': [describe_tool(n) for n in exact]}
+    available = discovery.groups(catalog)
+    clean = clean.lower()
+    if clean in available:
+        members = [t for t in catalog if discovery.group(t) == clean]
+        ready = [t for t in members if discovery.availability(t)[0]]
+        if not ready:
+            return {'ok': False, 'error': 'Group has no available tools',
+                    'unavailable': [discovery.row(t) for t in members]}
+        state = current_selection()
+        enabled = enable_toolset(clean)
+        if state is not None:
+            state.names.update(t.name for t in ready)
+            state.reasons.update({t.name: 'Loaded group: ' + clean for t in ready})
+            enabled = True
+        if enabled:
+            return {'ok': True, 'loaded': clean, 'active': sorted(active_toolset_names()),
+                    'tools': [t.name for t in ready],
+                    'unavailable': [discovery.row(t) for t in members if t not in ready]}
+    return {'ok': False, 'error': 'Choose a permitted tool or group', 'available': available}
 
 
-@register_tool_from_function
-def list_tools(query: str = "") -> dict[str, Any]:
-    """Find a SPECIFIC tool by keyword when the exact tool a task needs isn't in
-    your current view — e.g. ``list_tools("weather")`` → ``get_weather`` in the
-    ``web`` toolset; then ``load_tools("web")`` to use it. It returns matching
-    tool names + their toolset, NOT a description of your capabilities — for
-    "what can you do / help" use ``help_me``, not this. When every tool is
-    already visible you rarely need it. Optional ``query`` filters by substring."""
-    from jaeger_os.core.tools.tool_registry import get_tools
-    from jaeger_agent.skill_registry.toolset_scoping import CORE, TOOLSETS
-    where: dict[str, str] = {}
-    for ts, tools in TOOLSETS.items():
-        for t in tools:
-            where[t] = ts
-    q = (query or "").strip().lower()
-    rows = []
-    for t in sorted(get_tools(), key=lambda x: x.name):
-        full_desc = " ".join((t.description or "").split())
-        desc = full_desc[:80]
-        loc = "CORE" if t.name in CORE else where.get(t.name, "other")
-        # Match the toolset name and the whole description too: a model that
-        # asks for "delegate" means the ``delegates`` toolset (call_agent),
-        # not only tools whose name happens to contain the word.
-        if q and q not in t.name.lower() and q not in full_desc.lower() and q not in loc.lower():
-            continue
-        rows.append({"tool": t.name, "toolset": loc, "does": desc})
-    out = {"ok": True, "count": len(rows), "tools": rows,
-           "note": "not-CORE tools: load their toolset with load_tools(<toolset>)"}
-    if q and not rows:
-        from jaeger_agent.skill_registry.toolset_scoping import all_toolsets
-        out["note"] = ("no tool matches that word; these are the loadable toolsets — "
-                       "try a broader word or load_tools(<toolset>)")
-        out["toolsets"] = all_toolsets()
+@register_tool_from_function(permission_tier='READ_ONLY', side_effect='read')
+def list_tools(query: str = '', limit: int = 5, source: str = '') -> dict[str, Any]:
+    """Find tools by task, exact name or service, e.g. 'search inbox'. Results are ranked
+    and bounded, with availability and loadable names. Use load_tools(tools=[name]) next.
+    Source optionally limits results to a group/server. Search does not execute tools.
+    """
+    limit = max(1, min(int(limit), 20))
+    catalog = discovery.catalog()
+    candidates = [t for t in catalog if not source or discovery.group(t) == source]
+    matches = discovery.ranked(candidates, query[:1000], limit) if query.strip() else candidates[:limit]
+    rows = [discovery.row(t) for t in matches]
+    out = {'ok': True, 'count': len(rows), 'catalog_count': len(candidates), 'tools': rows,
+           'note': 'Load exact tools with load_tools(tools=[name]), or load_tools(name=<toolset>)'}
+    if not rows:
+        out['toolsets'] = discovery.groups(catalog)
     return out
 
 
-__all__ = ["describe_tool", "load_tools", "list_tools"]
+__all__ = ['describe_tool', 'load_tools', 'list_tools']

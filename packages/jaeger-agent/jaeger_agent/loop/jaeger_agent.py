@@ -46,6 +46,7 @@ from jaeger_agent.loop.tool_result_safety import protect_tool_result
 from jaeger_agent.loop.turn_budget import TurnBudget, TurnBudgetLimits
 from jaeger_agent.schemas.message_types import Message, ToolCall
 from jaeger_agent.tool_executor import ToolExecutor
+from jaeger_agent.skill_registry.tool_selection import ToolSelection, in_agent_selection, tool_permitted
 from jaeger_os.core.tools.tool_registry import get_tools
 from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled
 from jaeger_agent.util.context_guard import ContextGuard, ContextOverflow
@@ -180,6 +181,7 @@ class JaegerAgent:
         turn_start_hook: TurnStartHook | None = None,
         tool_executor: ToolExecutor | None = None,
         turn_budget_limits: TurnBudgetLimits | None = None,
+        scope_tools: bool | None = None,
     ) -> None:
         self.primary_adapter = adapter
         self.fallback_adapters: list[ProviderAdapter] = list(fallback_adapters or [])
@@ -261,6 +263,9 @@ class JaegerAgent:
         # the legacy module-level active set, this cannot leak one session's
         # privileged tool choices into another concurrent agent.
         self._intent_tool_names: set[str] = set()
+        self._tool_selection = ToolSelection(scoped=scope_tools,
+            grant=self.allowed_tools,
+            restricted=frozenset(t.name for t in self._all_tools) if self._tools_filter_locked or toolsets is not None else None)
         # Record the originally-requested toolset names for diagnostics
         # (the ``/runtime`` panel surfaces this); not used by the loop.
         self.toolsets: frozenset[str] = frozenset(toolsets or ())
@@ -387,6 +392,7 @@ class JaegerAgent:
     # ── tool visibility ─────────────────────────────────────────────
 
     @property
+    @in_agent_selection
     def tools(self) -> list[ToolDef]:
         """The tools visible to the model THIS turn.
 
@@ -400,11 +406,17 @@ class JaegerAgent:
         if self._tools_filter_locked:
             # Caller passed ``tools=[...]`` explicitly — honour it.
             visible = list(self._all_tools)
+            if self._tools_filter_locked_reason == "overflow":
+                existing = {tool.name for tool in visible}
+                visible.extend(tool for tool in _filter_available_tools(get_tools())
+                               if tool.name in self._tool_selection.names and tool.name not in existing)
         elif self._tool_visibility is None:
             visible = list(self._all_tools)
         else:
             visible = [t for t in self._all_tools
                        if t.name in self._intent_tool_names or self._tool_visibility(t.name)]
+
+        visible = [t for t in visible if tool_permitted(t.name)]
 
         # Final-output speech in a multimodal face is a typed response channel,
         # not an agent tool. Exclude both current and legacy spellings even from
@@ -472,6 +484,7 @@ class JaegerAgent:
             self._ephemeral_run = False
 
     @bind_turn_cancellation
+    @in_agent_selection
     def run_turn(self, user_message: str, *, content: Any = None) -> str:
         """Run one conversational turn end-to-end.
 
@@ -515,16 +528,16 @@ class JaegerAgent:
         if not self._tools_filter_locked and self._toolset_resolver is not None:
             try:
                 from jaeger_agent.skill_registry.toolset_scoping import (
-                    _scoping_enabled, infer_toolsets,
+                    _scoping_enabled, infer_toolsets, resolve_groups, is_untrusted_content,
                 )
-                if _scoping_enabled():
+                if _scoping_enabled() and not is_untrusted_content():
                     selected = infer_toolsets(user_message)
                     if selected:
                         self._intent_tool_names.update(
-                            self._toolset_resolver(selected)
+                            resolve_groups(selected)
                         )
-            except Exception:  # noqa: BLE001 — routing hints must fail open
-                pass
+            except KeyError as exc:
+                raise ValueError(f"Invalid tool discovery category: {exc}") from exc
 
         # Fresh per-turn state. Counters from a previous turn would
         # falsely trip the backstop on the second message of a session.
@@ -1426,6 +1439,24 @@ class JaegerAgent:
         after.discard(None)
         return len(after) < len(before)
 
+    def _selection_receipt(self) -> dict[str, Any]:
+        from jaeger_agent.skill_registry import tool_discovery as discovery
+        from jaeger_agent.skill_registry.toolset_scoping import _scoping_enabled
+        selected = {tool.name for tool in self.tools}
+        rows = []
+        for tool in discovery.catalog():
+            row = discovery.row(tool)
+            row['selected'] = tool.name in selected
+            if row['selected'] and tool.name in self._intent_tool_names:
+                row['selection_reason'] = 'Matched this task'
+            rows.append({key: row[key] for key in ('tool', 'source', 'available', 'selected',
+                                                'selection_reason', 'unavailable_reason')})
+        # Selected tools first; bound the user receipt without truncating model schemas.
+        rows.sort(key=lambda row: (not row['selected'], row['available'], row['tool']))
+        return {'mode': 'progressive' if _scoping_enabled() else 'full',
+                'selected_count': len(selected), 'catalog_count': len(rows),
+                'truncated': len(rows) > 250, 'tools': rows[:250]}
+
     def _refresh_tool_catalog(self) -> None:
 
         """Pick up tools registered AFTER this agent was built (skill
@@ -1437,18 +1468,23 @@ class JaegerAgent:
         outside dev mode (re-checked per turn, so flipping
         ``JAEGER_DEV_MODE`` doesn't need an agent rebuild)."""
         if self._tools_filter_locked:
+            self._tool_selection.catalog = tuple(
+                _exclude_beta(get_tools()) if self._tools_filter_locked_reason == "overflow"
+                else self._all_tools)
             return
         try:
             if self.toolsets:
                 if self._toolset_resolver is None:
                     return
                 wanted = self._toolset_resolver(set(self.toolsets))
+                self._tool_selection.restricted = frozenset(wanted)
                 self._all_tools = _filter_available_tools(
                     [t for t in get_tools() if t.name in wanted]
                 )
             else:
                 self._all_tools = _filter_available_tools(get_tools())
             self._dispatch_by_name = {t.name: t for t in self._all_tools}
+            self._tool_selection.catalog = tuple(_exclude_beta(get_tools()))
         except Exception:  # noqa: BLE001 — a registry hiccup must not kill the turn
             pass
 
@@ -1760,9 +1796,11 @@ class JaegerAgent:
             attempt = 0
             while True:
                 try:
+                    self._refresh_tool_catalog()
                     formatted = adapter.format_messages(
                         self.messages, self.tools, self.system_prompt,
                     )
+                    self.callbacks.on_tool_selection(self._selection_receipt())
                     self.callbacks.on_model_input(formatted)
                     self.callbacks.on_model_call_start()
                     before_prompt_tokens = self.last_prompt_tokens
@@ -2123,11 +2161,14 @@ class JaegerAgent:
             "started": started,
         }
 
+    @in_agent_selection
     def _execute_prepared(self, prep: dict[str, Any]) -> Any:
         """The actual tool call — the only part safe to run off-thread
         for read-only tools. Exceptions become error-result dicts."""
         name = prep["name"]
         args = prep["args"]
+        if not tool_permitted(name):
+            return {"ok": False, "error": "Tool is outside this request scope", "error_type": "permission_denied", "retryable": False}
         if name in self._CACHEABLE_READ_TOOLS and prep["sig"] in self._read_result_cache:
             import copy
             prep["cache_hit"] = True

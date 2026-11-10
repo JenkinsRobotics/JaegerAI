@@ -40,6 +40,10 @@ def _scoping_enabled() -> bool:
     100% → 67.6%. ``JAEGER_TOOLSET_SCOPING=1`` enables CORE + load_tools.
     ``JAEGER_FULL_TOOLS=1`` forces the full surface even when scoping is on.
     """
+    from .tool_selection import current_selection
+    state = current_selection()
+    if state is not None and state.scoped is not None:
+        return state.scoped
     if os.environ.get("JAEGER_FULL_TOOLS", "").strip().lower() in (
         "1", "true", "yes", "on",
     ):
@@ -239,7 +243,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     }),
     # Ask the operator's editor: open a file at a line, list Problems, read what is open.
     "ide": frozenset({"ide_context", "ide_open_file", "ide_diagnostics"}),
-    "sessions": frozenset({"session_search"}),
+    "sessions": frozenset({"session_organize","session_search"}),
     "board": frozenset({
         # board_add / board_view are CORE; the rest load on intent.
         "board_move", "board_update", "board_delete",
@@ -516,7 +520,8 @@ def unregister_mcp_server_toolset(name: str) -> None:
     _MCP_TOOLS.difference_update(members)
     _SKILL_TOOLSETS.pop(name, None)
     _SKILL_SUMMARY.pop(name, None)
-    _active.discard(name)
+    from .tool_selection import active_groups, set_groups
+    set_groups(active_groups() - {name})
 
 
 def is_gated_tool(name: str) -> bool:
@@ -528,7 +533,8 @@ def register_mcp_tools(names: list[str]) -> None:
     _MCP_TOOLS.update(n for n in (names or []) if n)
 
 # Active extended toolsets for the session. Core is always implicitly on.
-_active: set[str] = set()
+# Active groups belong to the current agent, never to the process.
+from .tool_selection import active_groups, set_groups
 
 
 def register_skill_toolset(name: str, tools: list[str],
@@ -547,7 +553,7 @@ register_toolset = register_skill_toolset
 
 def reset_toolsets() -> None:
     """Reset to core-only. Called at session start / instance switch."""
-    _active.clear()
+    set_groups(set())
 
 
 def enable_toolset(name: str) -> bool:
@@ -563,14 +569,14 @@ def enable_toolset(name: str) -> bool:
         return False
     name = (name or "").strip().lower()
     if name in TOOLSETS or name in _SKILL_TOOLSETS:
-        _active.add(name)
+        set_groups(active_groups() | {name})
         return True
     return False
 
 
 def active_toolset_names() -> set[str]:
     """The toolsets currently visible (``core`` always included)."""
-    return {"core"} | _active
+    return {"core"} | active_groups()
 
 
 def all_toolsets() -> dict[str, str]:
@@ -595,11 +601,15 @@ def tool_visible(name: str) -> bool:
     """
     if _untrusted.get():
         return name in UNTRUSTED_SAFE
+    from .tool_selection import current_selection
+    state = current_selection()
+    if state is not None and name in state.names:
+        return True
     if name in _GATED_MCP_TOOLS:
         from jaeger_agent.tool_executor import active_tool_allowlist
         allowed = active_tool_allowlist()
         return (allowed is not None and name in allowed) or any(
-            name in _members(toolset) for toolset in _active
+            name in _members(toolset) for toolset in active_groups()
         )
     if not _scoping_enabled():
         return True
@@ -616,12 +626,38 @@ def scoped_tool_visible(name: str) -> bool:
     """
     if _untrusted.get():
         return name in UNTRUSTED_SAFE
+    from .tool_selection import current_selection
+    state = current_selection()
+    if state is not None and name in state.names:
+        return True
     if name in CORE:
         return True
-    for ts in _active:
+    for ts in active_groups():
         if name in _members(ts):
             return True
     # Fail-open: a tool that belongs to NO toolset is never hidden.
     in_any = (any(name in m for m in TOOLSETS.values())
               or any(name in m for m in _SKILL_TOOLSETS.values()))
     return not in_any
+
+
+def resolve_groups(names: set[str]) -> set[str]:
+    """Resolve the canonical categories used by intent and discovery."""
+    result: set[str] = set()
+    for name in names:
+        if name == "core":
+            result.update(CORE)
+        elif name in TOOLSETS or name in _SKILL_TOOLSETS:
+            result.update(_members(name))
+        else:
+            raise KeyError(f"unknown discovery group: {name}")
+    return result
+
+
+def tool_group(name: str) -> str:
+    if name in CORE:
+        return "core"
+    for group, members in {**TOOLSETS, **_SKILL_TOOLSETS, **_MCP_SERVER_TOOLS}.items():
+        if name in members:
+            return group
+    return ""

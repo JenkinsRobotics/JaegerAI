@@ -122,3 +122,15 @@ def test_a_stand_in_with_a_real_root_is_still_not_published(layout, monkeypatch)
     monkeypatch.setattr(main, "_register_builtins", lambda client: None)
     owner_agent.owner_agent_options(MagicMock(root=layout.root), _cfg(), _client("ollama", "gemma-4-26b:latest"))
     assert "layout" not in main._pipeline
+
+
+def test_prompt_and_visibility_use_same_effective_scope(layout, monkeypatch):
+    import jaeger_ai.main as main
+    from jaeger_agent.skill_registry.toolset_scoping import _scoping_enabled
+    monkeypatch.delenv('JAEGER_TOOLSET_SCOPING', raising=False)
+    monkeypatch.delenv('JAEGER_FULL_TOOLS', raising=False)
+    monkeypatch.setattr(main, 'build_system_prompt', lambda layout: 'progressive' if _scoping_enabled() else 'full')
+    local = owner_agent.owner_agent_options(layout, _cfg(), _client('ollama', 'local'))
+    cloud = owner_agent.owner_agent_options(layout, _cfg('openai', 'cloud'), _client('openai', 'cloud'))
+    assert local['system_prompt'] == 'progressive' and local['scope_tools'] is True
+    assert cloud['system_prompt'] == 'full' and cloud['scope_tools'] is False

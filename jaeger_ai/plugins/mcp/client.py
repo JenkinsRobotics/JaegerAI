@@ -224,13 +224,9 @@ def check_mcp_permission(spec: MCPToolSpec, arguments: dict[str, Any]) -> None:
     ))
 
 
-def _register_agent_tool(spec: MCPToolSpec) -> None:
+def _agent_tool_def(spec: MCPToolSpec, invoke_call: Any = None) -> Any:
     """Expose a connected MCP tool through Jaeger's canonical registry."""
-    from jaeger_os.core.tools.tool_registry import (
-        ToolDef,
-        has_tool,
-        register_tool_instance,
-    )
+    from jaeger_os.core.tools.tool_schema import ToolDef
     from pydantic import BaseModel, ConfigDict
 
     schema = dict(spec.input_schema or {"type": "object", "properties": {}})
@@ -281,13 +277,17 @@ def _register_agent_tool(spec: MCPToolSpec) -> None:
             pass
 
         check_mcp_permission(spec, arguments if isinstance(arguments, dict) else {})
-        return call_mcp_tool(spec.qualified_name, arguments)
+        return invoke_call(spec, arguments) if invoke_call is not None else call_mcp_tool(spec.qualified_name, arguments)
 
-    if has_tool(spec.agent_name):
-        raise ValueError(f"MCP tool name collides with an existing tool: {spec.agent_name}")
-    register_tool_instance(ToolDef(name=spec.agent_name, description=spec.description,
-                                   args_model=MCPArguments, fn=invoke,
-                                   side_effect="external"))
+    return ToolDef(name=spec.agent_name, description=spec.description,
+                   args_model=MCPArguments, fn=invoke, toolset=spec.server_name,
+                   permission_tier="READ_ONLY" if spec.read_only else "EXTERNAL_EFFECT",
+                   side_effect="read" if spec.read_only else "external")
+
+
+def _register_agent_tool(spec: MCPToolSpec) -> None:
+    from jaeger_os.core.tools.tool_registry import replace_tool_inventory
+    replace_tool_inventory({}, [_agent_tool_def(spec)])
 
 
 class _MCPClient:
@@ -298,6 +298,7 @@ class _MCPClient:
         self._session: Any = None
         self._exit_stack: Any = None
         self.resources_advertised = False
+        self.inventory_changed: Any = None
 
     async def connect(self) -> list[Any]:
         from contextlib import AsyncExitStack
@@ -346,11 +347,35 @@ class _MCPClient:
                 env={**inherited, **self.config.env},
             )
             read, write = await self._exit_stack.enter_async_context(stdio_client(params))
-        self._session = await self._exit_stack.enter_async_context(ClientSession(read, write))
+        self._session = await self._exit_stack.enter_async_context(ClientSession(read, write, message_handler=self._on_message))
         initialization = await self._session.initialize()
         self.resources_advertised = getattr(getattr(initialization,"capabilities",None),"resources",None) is not None
-        listing = await self._session.list_tools()
-        return list(listing.tools)
+        return await self.list_tools()
+
+    async def _on_message(self, message: Any) -> None:
+        notification = getattr(message, 'root', message)
+        if getattr(notification, 'method', '') == 'notifications/tools/list_changed':
+            if self.inventory_changed is not None:
+                self.inventory_changed()
+
+    async def list_tools(self) -> list[Any]:
+        """Read every page before publishing an inventory; fail on broken cursors."""
+        tools, cursors, names = [], set(), set()
+        cursor = None
+        for _ in range(100):
+            page = await self._session.list_tools(cursor=cursor)
+            for tool in page.tools:
+                if tool.name in names:
+                    raise ValueError('MCP inventory contains duplicate tool names')
+                names.add(tool.name)
+                tools.append(tool)
+            cursor = getattr(page, 'nextCursor', None)
+            if not cursor:
+                return tools
+            if cursor in cursors:
+                raise ValueError('MCP inventory repeated a pagination cursor')
+            cursors.add(cursor)
+        raise ValueError('MCP inventory exceeds pagination limit')
 
     async def call(self, tool_name: str, arguments: dict[str, Any],
                    inflight: dict[str, Any] | None = None) -> Any:
@@ -400,6 +425,12 @@ class MCPRegistry:
         self._resource_handles: dict[tuple[str,str],dict[str,str]] = {}
         self._resource_pages: dict[tuple[str,str],str] = {}
         self._resource_snapshots: dict[str,dict[str,Any]] = {}
+        self._agent_inventories: dict[str, dict[str, Any]] = {}
+        self._refresh_tasks: dict[str, Any] = {}
+        self._refresh_pending: set[str] = set()
+        self._inventory_errors: dict[str, str] = {}
+        self._inventory_versions: dict[str, int] = {}
+        self._inventory_dirty: set[str] = set()
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -442,55 +473,106 @@ class MCPRegistry:
         timeout = connect_timeout if connect_timeout is not None else config.connect_timeout_s
         tools = self._submit(client.connect(), timeout=timeout)
         elapsed = time.perf_counter() - started
-        offered = len(tools)
-        keep = set(filter_tool_names([t.name for t in tools], config))
-        tools = [t for t in tools if t.name in keep]
-        specs: list[MCPToolSpec] = []
-        for tool in tools:
-            qualified = f"mcp:{config.name}/{tool.name}"
-            schema = getattr(tool, "inputSchema", None) or getattr(tool, "input_schema", None) or {}
-            spec = MCPToolSpec(
-                qualified_name=qualified,
-                server_name=config.name,
-                tool_name=tool.name,
-                description=tool.description or "",
-                input_schema=schema if isinstance(schema, dict) else {},
-                agent_name=_agent_tool_name(config.name, tool.name),
-                read_only=is_read_only_tool(tool.name, config),
-            )
-            specs.append(spec)
-        registered: list[MCPToolSpec] = []
         try:
-            for spec in specs:
-                _register_agent_tool(spec)
-                registered.append(spec)
-                self._tools[spec.qualified_name] = spec
+            with self._lifecycle_lock:
+                if config.name in self._clients:
+                    raise ValueError('MCP server is already connected')
+                self._publish_inventory(config, tools)
+                self._clients[config.name] = client
+                client.inventory_changed = lambda: self._schedule_refresh(config.name)
         except Exception:
-            from jaeger_os.core.tools.tool_registry import unregister_tool
-            for spec in registered:
-                unregister_tool(spec.agent_name)
-                self._tools.pop(spec.qualified_name, None)
             try:
                 self._submit(client.close(), timeout=5.0)
             except Exception:
                 pass
             raise
-        self._clients[config.name] = client
-        try:
-            from jaeger_agent.skill_registry.toolset_scoping import register_mcp_server_toolset
-            register_mcp_server_toolset(config.name, [s.agent_name for s in specs], gated=config.gated)
-        except Exception:  # noqa: BLE001 — visibility bookkeeping must not drop a connected server
-            pass
-        limited = f" (of {offered} offered)" if offered != len(specs) else ""
-        gated = " gated" if config.gated else ""
-        print(f"[mcp] connected to '{config.name}' in {elapsed:.2f}s — {len(specs)}{gated} tool(s){limited}", flush=True)
+        specs = [spec for spec in self._tools.values() if spec.server_name == config.name]
+        print(f"[mcp] connected to '{config.name}' in {elapsed:.2f}s — {len(specs)} tool(s)", flush=True)
         return specs
 
-    def call(self, qualified_name: str, arguments: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+    def _publish_inventory(self, config: MCPServerConfig, tools: list[Any]) -> None:
+        from jaeger_os.core.tools.tool_registry import replace_tool_inventory
+        from jaeger_agent.skill_registry.toolset_scoping import register_mcp_server_toolset
+        keep = set(filter_tool_names([t.name for t in tools], config))
+        specs = []
+        for tool in tools:
+            if tool.name not in keep:
+                continue
+            schema = getattr(tool, 'inputSchema', None) or getattr(tool, 'input_schema', None) or {}
+            specs.append(MCPToolSpec(f'mcp:{config.name}/{tool.name}', config.name,
+                                    tool.name, tool.description or '', schema,
+                                    _agent_tool_name(config.name, tool.name),
+                                    is_read_only_tool(tool.name, config)))
+        definitions = [_agent_tool_def(spec, self._call_current_spec) for spec in specs]
+        for definition, spec in zip(definitions, specs):
+            definition.check_fn = lambda spec=spec: self._tool_available(spec)
+        replace_tool_inventory(self._agent_inventories.get(config.name, {}), definitions)
+        self._agent_inventories[config.name] = {t.name: t for t in definitions}
+        self._tools = {key: spec for key, spec in self._tools.items() if spec.server_name != config.name}
+        self._tools.update({spec.qualified_name: spec for spec in specs})
+        register_mcp_server_toolset(config.name, [s.agent_name for s in specs], gated=config.gated)
+        self._inventory_versions[config.name] = self._inventory_versions.get(config.name, 0) + 1
+        self._inventory_errors.pop(config.name, None)
+        self._inventory_dirty.discard(config.name)
+
+    def _tool_available(self, spec: MCPToolSpec) -> bool:
+        with self._lifecycle_lock:
+            return (spec.server_name not in self._inventory_dirty
+                    and self._server_states.get(spec.server_name, 'loaded_not_probed') == 'loaded_not_probed'
+                    and self._tools.get(spec.qualified_name) is spec)
+
+    def _call_current_spec(self, spec: MCPToolSpec, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self.call(spec.qualified_name, arguments, expected_spec=spec)
+
+    def _schedule_refresh(self, name: str) -> None:
+        # This callback runs on the SDK loop. Never block it with _submit().
+        with self._lifecycle_lock:
+            self._inventory_dirty.add(name)
+        self._refresh_pending.add(name)
+        previous = self._refresh_tasks.get(name)
+        if previous is None or previous.done():
+            task = self._loop.create_task(self._refresh_inventory(name))
+            self._refresh_tasks[name] = task
+            def finished(done):
+                if self._refresh_tasks.get(name) is done:
+                    self._refresh_tasks.pop(name, None)
+            task.add_done_callback(finished)
+
+    async def _refresh_inventory(self, name: str) -> None:
+        # Coalesce bursts, but process a notification received during listing.
+        await asyncio.sleep(0.05)
+        while name in self._refresh_pending:
+            self._refresh_pending.discard(name)
+            with self._lifecycle_lock:
+                client = self._clients.get(name)
+                state = self._server_states.get(name, 'loaded_not_probed')
+            if client is None or state != 'loaded_not_probed':
+                return
+            try:
+                tools = await asyncio.wait_for(client.list_tools(), client.config.connect_timeout_s)
+                while True:
+                    with self._lifecycle_lock:
+                        if self._clients.get(name) is not client or self._server_states.get(name, 'loaded_not_probed') != 'loaded_not_probed':
+                            return
+                        if not self._active_calls.get(name, 0):
+                            self._publish_inventory(client.config, tools)
+                            break
+                    await asyncio.sleep(0.05)
+            except Exception:
+                # Old complete snapshot is retained. Never expose partial results
+                # or leak remote error content/credentials into user diagnostics.
+                self._inventory_errors[name] = 'Tool inventory refresh failed; previous snapshot retained'
+                return
+
+    def call(self, qualified_name: str, arguments: dict[str, Any], *, timeout: float | None = None, expected_spec: MCPToolSpec | None = None) -> dict[str, Any]:
         with self._lifecycle_lock:
             spec = self._tools.get(qualified_name)
             if spec is None:
                 raise ValueError(f"unknown MCP tool: {qualified_name}")
+            if spec.server_name in self._inventory_dirty:
+                raise ValueError('MCP inventory refresh pending or failed; no call dispatched')
+            if expected_spec is not None and spec is not expected_spec:
+                raise ValueError('MCP inventory changed; reload the current tool schema before calling')
             if self._server_states.get(spec.server_name, 'loaded_not_probed') != 'loaded_not_probed':
                 raise RuntimeError('MCP server lifecycle or prior outcome requires reconciliation; no call dispatched')
             client = self._clients[spec.server_name]
@@ -581,6 +663,7 @@ class MCPRegistry:
                             unregister_tool(spec.agent_name)
                             del self._tools[key]
                     unregister_mcp_server_toolset(name)
+                    self._agent_inventories.pop(name, None)
                     self._disconnected[name] = client.config
                     del self._clients[name]
                     self._server_states[name] = 'disconnected'
@@ -605,6 +688,13 @@ class MCPRegistry:
         return qualified_name in self._tools
 
     def shutdown(self) -> None:
+        async def stop_refreshes():
+            tasks = list(self._refresh_tasks.values())
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        self._submit(stop_refreshes(), timeout=5.0)
         from jaeger_os.core.tools.tool_registry import unregister_tool
         for spec in self._tools.values():
             unregister_tool(spec.agent_name)
@@ -764,6 +854,8 @@ def runtime_inventory() -> dict[str, Any]:
         state = states.get(name, 'loaded_not_probed')
         actions = [] if active.get(name, 0) else ['disconnect'] if state == 'loaded_not_probed' else ['reconnect'] if state == 'disconnected' else []
         servers.append({'id': registry.control_id(name), 'name': safe(name), 'state': state,
+                        'inventory_version': registry._inventory_versions.get(name, 0),
+                        'inventory_status': 'refresh_failed' if name in registry._inventory_errors else 'refreshing' if name in registry._inventory_dirty else 'current',
                         'tool_count': sum(t.server_name == name for t in specs), 'active_calls': active.get(name, 0), 'resources_advertised':bool(getattr(registry._clients.get(name),'resources_advertised',False)), 'actions': actions})
     loaded_names = {name for name, _ in clients}
     servers.extend({"name": safe(name), "state": "connection_failed", "tool_count": 0} for name in connection_errors() if name not in loaded_names)

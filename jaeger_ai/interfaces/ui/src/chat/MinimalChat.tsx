@@ -111,6 +111,8 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
       return <section aria-label="Suggested follow-ups"><strong>Suggested follow-ups</strong><ul>{part.prompts.map(prompt=><li key={prompt}>{links.onSuggest ? <button type="button" className="jg-action" onClick={()=>links.onSuggest?.(prompt)}>{prompt}</button> : prompt}</li>)}</ul></section>;
     case "modelIdentity":
       return <details className="jg-knowledge-context jg-knowledge-context--diagnostic"><summary>Actual model · {part.actualModel??"Unknown"}</summary><p>{part.actualModel?"Model identity reported by the provider response; this is not independent backend verification.":"No provider model identity was retained for this response. The configured or requested model is not proof of the actual remote model."}</p></details>;
+    case "toolSelection":
+      return <details className="jg-knowledge-context"><summary>Tools available · {part.receipt.selected_count}</summary><p>{part.receipt.mode === "progressive" ? "Tools are loaded as this task needs them." : "The full available tool set is enabled."}</p><ul>{part.receipt.tools.filter(tool => tool.selected || !tool.available).map(tool => <li key={tool.tool}><strong>{tool.tool}</strong> · {tool.source}<small> · {tool.available ? tool.selection_reason : tool.unavailable_reason}</small></li>)}</ul>{part.receipt.truncated && <p>Showing a limited tool list.</p>}</details>;
     case "modelContext":
       return <details className="jg-knowledge-context jg-knowledge-context--diagnostic"><summary>Model dispatch context · {part.outline.messages.length} messages</summary><p>Observed immediately before an adapter call; provider acceptance and consumption are unknown. No prompt content is retained.</p><p>Format: {part.outline.shape} · Separate system text: {part.outline.system_chars} characters · Tool schemas: {part.outline.tool_count}</p><ol>{part.outline.messages.map((row, index) => <li key={index}>{row.role} · {row.text_chars} text characters · {row.omitted_blocks} non-text blocks omitted</li>)}</ol>{part.outline.truncated && <p>Outline limited; some entries omitted.</p>}<p>Character counts are not token usage.</p>{part.outline.items && <><h4>Context item provenance</h4><ul>{part.outline.items.map(item=><li key={item.reference}>{item.owner} · {item.claim_id ?? item.event_id ?? (item.document_id?item.document_id+" revision "+item.document_revision:item.record_ref.slice(0,16))} · {({retained_exact:"Complete item retained at dispatch",budget_dropped:"Excluded by context budget",not_retained_exact:"Complete item absent after formatting/compaction",unobservable:"Adapter representation unobservable"} as Record<string,string>)[item.state]}</li>)}</ul><p>Checks require the complete owner-framed item, not a matching marker or count. An absent item may have been summarized; this does not mean its durable record was forgotten. Opaque references identify source records without exposing paths or private text.</p></>}<p>Provider consumption and execution permissions are not inferred from these receipts.</p></details>;
     case "knowledgeContext":
@@ -191,7 +193,7 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
         out[out.length-1] = {marker:{...prev,agents}};
       } else out.push({marker:part});
     } else if (part.kind === "confirmation" || part.kind === "question") out.push({card:part});
-    else if (["modelIdentity", "modelContext", "knowledgeContext"].includes(part.kind)) {
+    else if (["modelIdentity", "modelContext", "knowledgeContext", "toolSelection"].includes(part.kind)) {
       const previous = out.at(-1);
       if (previous && "diagnostic" in previous) previous.diagnostic.push(part);
       else out.push({diagnostic:[part]});
@@ -242,7 +244,7 @@ export function ProgressLine({ phrase }: { phrase: string }) {
 /** Text is its own streaming indicator. Keep activity only before text or for live tools. */
 export function showsProgress(turn: ChatTurn): boolean {
   if (turn.state !== "pending") return false;
-  const last = turn.parts.filter(p => p.kind !== "modelContext" && p.kind !== "modelIdentity" && p.kind !== "knowledgeContext").at(-1);
+  const last = turn.parts.filter(p => p.kind !== "toolSelection" && p.kind !== "modelContext" && p.kind !== "modelIdentity" && p.kind !== "knowledgeContext").at(-1);
   return !(last?.kind === "markdownContent" && last.text);
 }
 

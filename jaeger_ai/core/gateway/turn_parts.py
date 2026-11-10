@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 _TOOL_END = {"tool.completed": "done", "tool.done": "done", "tool.failed": "error", "tool.error": "error"}
 _HANDOFF = {"agent.handoff": "to", "agent.handoff.finished": "from"}
-PART_EVENTS = ("turn.delta", "turn.steer", "turn.reasoning", "turn.reasoning.done", "tool.started", "agent.knowledge", "turn.context", "turn.model",
+PART_EVENTS = ("turn.delta", "turn.steer", "turn.reasoning", "turn.reasoning.done", "tool.started", "agent.knowledge", "turn.context", "turn.model", "tools.selected",
                *_TOOL_END, "turn.plan", "turn.progress", "turn.checkpoint", "sources", "search.count", "follow_ups", *_HANDOFF)
 
 
@@ -63,6 +63,13 @@ def project_parts(events: Iterable[dict[str, Any]], final_text: str | None = Non
                 part["summary"] = data.get("summary") or data.get("text")
         elif name == "turn.model":
             parts.append({"type":"model_identity", "actual_model":data.get("actual_model"), "scope":data.get("scope") or "unknown"})
+        elif name == "tools.selected":
+            replacement = {"type": "tool_selection", "receipt": data.get("receipt") or {}}
+            index = next((i for i, part in enumerate(parts) if part.get("type") == "tool_selection"), None)
+            if index is None:
+                parts.append(replacement)
+            else:
+                parts[index] = replacement
         elif name == "turn.context":
             parts.append({"type": "model_context", "outline": data.get("outline") or {}})
         elif name == "agent.knowledge":

@@ -23,6 +23,8 @@ same handler (a module reload) is idempotent.
 from __future__ import annotations
 
 import inspect
+import threading
+from functools import wraps
 from typing import Any, Callable, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -31,6 +33,37 @@ from jaeger_os.core.tools.tool_schema import ToolDef
 
 
 _registry: dict[str, ToolDef] = {}
+_lock = threading.RLock()
+
+
+def _synchronized(fn):
+    @wraps(fn)
+    def call(*args, **kwargs):
+        with _lock:
+            return fn(*args, **kwargs)
+    return call
+
+
+@_synchronized
+def replace_tool_inventory(previous: dict[str, ToolDef], tools: list[ToolDef]) -> None:
+    """Atomically replace an owner's inventory after validating every name.
+
+    Identity checks prevent a stale refresh from removing another owner's tools.
+    No partial registrations are visible if a collision or validation fails.
+    """
+    proposed = {tool.name: tool for tool in tools}
+    if len(proposed) != len(tools):
+        raise ToolConflict('Duplicate tool names in proposed inventory')
+    for name, tool in previous.items():
+        if _registry.get(name) is not tool:
+            raise ToolConflict(f'Tool ownership changed during refresh: {name}')
+    for name in proposed:
+        if name in _registry and name not in previous:
+            raise ToolConflict(f'Tool name collides with existing inventory: {name}')
+    for name in previous:
+        del _registry[name]
+    _registry.update(proposed)
+
 
 
 def register_tool(
@@ -205,6 +238,7 @@ def _owner(tool_def: ToolDef) -> str:
     return f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', repr(fn))}"
 
 
+@_synchronized
 def register_tool_instance(tool_def: ToolDef, *, replace: bool = False) -> None:
     """Runtime registration path. Used by the MCP bridge, hardware
     capabilities and the decorators — anywhere a ToolDef is built.
@@ -222,12 +256,14 @@ def register_tool_instance(tool_def: ToolDef, *, replace: bool = False) -> None:
     _registry[tool_def.name] = tool_def
 
 
+@_synchronized
 def unregister_tool(name: str) -> None:
     """Remove a tool from the registry. Used by tests and by the skill
     loader's hot-reload path. No-op when the tool is not registered."""
     _registry.pop(name, None)
 
 
+@_synchronized
 def get_tool(name: str) -> ToolDef:
     """Look up a tool by exact name. Raises ``KeyError`` when not
     registered — the agent loop catches it and turns the error into a
@@ -235,6 +271,7 @@ def get_tool(name: str) -> ToolDef:
     return _registry[name]
 
 
+@_synchronized
 def get_tools() -> list[ToolDef]:
     """Snapshot of every registered tool, in insertion order. The
     snapshot is a fresh list so callers can mutate it (filter by
@@ -242,23 +279,27 @@ def get_tools() -> list[ToolDef]:
     return list(_registry.values())
 
 
+@_synchronized
 def has_tool(name: str) -> bool:
     """``True`` when ``name`` is registered. Cheap predicate the agent
     loop uses before dispatching a model-supplied tool name."""
     return name in _registry
 
 
+@_synchronized
 def clear_registry() -> None:
     """Drop every registration. Tests use this to keep state from
     leaking between cases; production code should never call it."""
     _registry.clear()
 
 
+@_synchronized
 def snapshot_registry() -> dict[str, ToolDef]:
     """Copy of the live map. Tests restore this after ``clear_registry``."""
     return dict(_registry)
 
 
+@_synchronized
 def restore_registry(snapshot: dict[str, ToolDef]) -> None:
     """Replace the live map with ``snapshot``. Used by the test suite so
     a case that emptied the registry cannot strand later cases — module
@@ -272,6 +313,7 @@ __all__ = [
     "register_tool",
     "register_tool_from_function",
     "register_tool_instance",
+    "replace_tool_inventory",
     "unregister_tool",
     "get_tool",
     "get_tools",
