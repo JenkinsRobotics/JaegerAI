@@ -180,6 +180,10 @@ def test_model_switch_resets_incompatible_controls(configured,adapter):
     configured.external_model.reasoning_effort='xhigh'
     configured.external_model.ctx=131072
     configured.external_model.temperature=1.3
+    configured.external_model.max_tokens=32768
     c=select_request_client(configured,None,model='@ollama:qwen2.5:3b')
     assert c.ext.ctx==0 and c.ext.reasoning_effort=='auto' and c.ext.temperature is None
     assert configured.external_model.ctx==131072
+    assert c.ext.max_tokens == 1024
+    unchanged=select_request_client(configured,None,model='grok',provider='cli')
+    assert unchanged.ext.max_tokens == 32768

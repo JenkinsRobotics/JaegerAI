@@ -27,6 +27,11 @@ selection paths are under `packages/jaeger-agent/jaeger_agent/`.
   `options.num_ctx`; OpenAI-compatible `extra_body.options` is not enforcement.
 - A model switch resets incompatible model-specific settings. Fallback targets
   use their own context and sampling, never a cloud model's large local KV cache.
+- Optional recall and automatically selected schemas have separate budgets on
+  the local lane. Keep identity and operating directives intact. Route tools
+  from the admitted request, not instructions quoted in recalled context.
+  Discovery remains available; explicitly loaded schemas and caller-supplied
+  tool lists are not silently truncated to make a request pass admission.
 - `reasoning_effort` is effort, not a promise of task difficulty or accuracy.
   `auto` and `provider` use the model default. Named levels are not universal.
   Native Ollama validates against `/api/show`; boolean-only thinking does not

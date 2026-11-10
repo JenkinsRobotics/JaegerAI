@@ -100,6 +100,7 @@ run_backend() {
   echo "[back-end:models] Checking provider routing, first boot, resources and streamed receipts..."
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
     dev/tests/jaeger_ai/core/test_model_request_policy.py \
+    dev/tests/jaeger_ai/core/test_context_item_provenance.py \
     dev/tests/jaeger_ai/agent/test_runtime_bridge.py \
     dev/tests/jaeger_ai/core/test_gateway_turn_parts.py \
     dev/tests/jaeger_ai/core/test_gateway_session_stream_cards.py \

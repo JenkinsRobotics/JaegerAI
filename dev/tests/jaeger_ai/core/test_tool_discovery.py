@@ -171,3 +171,36 @@ def test_intent_selection_matches_discovery_metadata():
         row=list_tools('terminal')['tools'][0]
         assert row['selected'] is True
         assert row['selection_reason']=='Matched this task'
+
+
+def test_small_window_budgets_schemas_and_routes_only_admitted_request():
+    from jaeger_agent.util.context_guard import ContextGuard, ContextBudget
+    from jaeger_agent.task_port import task_scope
+    for name in ('list_tools', 'load_tools', 'describe_tool', 'read_file', 'get_time'):
+        add(name)
+    for name in ('execute_code', 'delegate_task', 'memory', 'board_add', 'board_view'):
+        add(name, 'Large schema documentation ' * 1000)
+    adapter = Adapter()
+    guard = ContextGuard(ContextBudget(ctx_window=16384, reserve_for_completion=1024))
+    system = 'Required identity and operating directives. ' * 400
+    agent = JaegerAgent(adapter=adapter, scope_tools=True, context_guard=guard,
+                        system_prompt=system)
+    with task_scope(None,session_id='s',request_id='r',execution={},user_text='Use read_file for verification.txt'):
+        agent.run_turn('<background>old terminal command python task</background>\nCurrent request: read_file')
+    names = {t.name for t in adapter.tools}
+    assert {'read_file', 'list_tools', 'load_tools', 'describe_tool'} <= names
+    assert 'execute_code' not in names
+    assert 'terminal' not in agent._tool_selection.inferred
+    assert guard.estimate_messages_tokens([],system_prompt=system,tools=adapter.tools) < guard.budget.prompt_budget
+    with selection_scope(agent._tool_selection):
+        assert load_tools(tools=['execute_code'])['ok']
+        # Explicit activation remains intact and the guard can report overflow.
+        assert 'execute_code' in agent.tool_names()
+
+
+def test_explicit_tool_list_is_never_silently_budgeted():
+    from jaeger_agent.util.context_guard import ContextGuard, ContextBudget
+    tool = add('required', 'long ' * 10000)
+    agent = JaegerAgent(adapter=Adapter(),tools=[tool],scope_tools=True,
+        context_guard=ContextGuard(ContextBudget(ctx_window=2048)))
+    assert agent.tool_names() == ['required']

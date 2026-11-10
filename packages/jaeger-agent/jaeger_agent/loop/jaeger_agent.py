@@ -435,6 +435,12 @@ class JaegerAgent:
                 ]
         except Exception:  # noqa: BLE001 — tool presentation must stay safe
             pass
+        if self._tool_selection.scoped and not self._tools_filter_locked and self.context_guard:
+            from jaeger_agent.skill_registry.tool_selection import budget_visible_tools
+            visible = budget_visible_tools(
+                visible, self._tool_selection, self.context_guard, self.system_prompt,
+                getattr(self, '_tool_route_query', ''),
+            )
         return visible
 
     @property
@@ -524,6 +530,13 @@ class JaegerAgent:
             appends a ``[turn failed: …]`` assistant note, then
             re-raises for the caller to surface.
         """
+        # Route against the admitted request, never recalled instructions
+        # inside the host's background envelope.
+        from jaeger_agent.task_port import current_task_context
+        task_context = current_task_context() or {}
+        route_query = str(task_context.get('user_text', user_message))
+        self._tool_route_query = route_query
+        self.__dict__.setdefault('_skill_route_query', route_query)
         # Hermes-style focus profile: widen this agent's visible surface for
         # obvious intent before the first model call. The set only grows for
         # the session, preserving prompt-prefix/KV stability.
@@ -533,7 +546,7 @@ class JaegerAgent:
                     _scoping_enabled, infer_toolsets, resolve_groups, is_untrusted_content,
                 )
                 if _scoping_enabled() and not is_untrusted_content():
-                    selected = infer_toolsets(user_message)
+                    selected = infer_toolsets(route_query)
                     if selected:
                         self._tool_selection.inferred.update(
                             resolve_groups(selected)

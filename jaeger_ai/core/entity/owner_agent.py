@@ -37,6 +37,21 @@ LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio", "lm_studio", "llamacpp", "lla
                              "local", "mlx", "vllm-local"})
 
 
+def background_budget_tokens(cfg: Any, *, model=None, provider=None) -> int:
+    """Bound optional recall before it becomes the protected user message.
+
+    The small on-device lane must leave room for identity, directives, tool
+    schemas and the answer. The complete memories remain available via tools.
+    """
+    from jaeger_ai.core.models.request_policy import split_routed_model_id
+    lane, name = split_routed_model_id(model or '')
+    ext = cfg.external_model
+    owner = str(provider or lane or (ext.provider if ext.enabled else 'local')).lower()
+    name = str(name or (ext.model if ext.enabled else 'local')).lower()
+    local = owner in (LOCAL_PROVIDERS | {'ollama-local', 'huggingface', 'hf', 'in-process'})
+    return 1024 if local and not name.endswith((':cloud', '-cloud')) else 4096
+
+
 def is_local_client(client: Any) -> bool:
     """True when the turn is served by a local model (the lean lane)."""
     if getattr(client, "kind", None) not in (None, "external"):
