@@ -406,9 +406,18 @@ class CommissioningCoordinator:
         if config_path.is_file() and provider and model:
             try:
                 config = load_yaml(config_path, Config)
-                updated, _, _ = selected_model_config(config, provider=provider, model=model)
-                dump_yaml(config_path, Config.model_validate(updated.model_dump()))
-                fb.record_model_selection(self.root, provider, model)
+                # Commissioning recommendations must not replace the model the
+                # operator already selected in setup (including a local engine).
+                selected = config.external_model.enabled and bool(config.external_model.model.strip())
+                local_selected = str(config.model.model_path).strip() not in {"", "unconfigured", "/dev/null"}
+                if selected:
+                    fb.record_model_selection(self.root, config.external_model.provider, config.external_model.model)
+                elif local_selected:
+                    fb.record_model_selection(self.root, "local", str(config.model.model_path))
+                else:
+                    updated, _, _ = selected_model_config(config, provider=provider, model=model)
+                    dump_yaml(config_path, Config.model_validate(updated.model_dump()))
+                    fb.record_model_selection(self.root, provider, model)
             except Exception as exc:
                 _patch_state(self.root, **{"c.configure_error": str(exc)[:200]})
         if not load_authority_policy(self.root):
