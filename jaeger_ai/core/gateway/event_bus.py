@@ -42,7 +42,7 @@ EVENT_TYPES = frozenset({
     # Tools and files.
     # The Gateway publishes tool.completed / tool.failed; tool.done / tool.error
     # are the older names some clients still accept.
-    "tool.started", "tool.completed", "tool.failed", "tool.done", "tool.error", "files.changed", "sources",
+    "tools.selected", "tool.started", "tool.completed", "tool.failed", "tool.done", "tool.error", "files.changed", "sources",
     # Session lifecycle (the projection's list is built from these).
     "chat.organization.updated", "session.created", "session.updated", "session.deleted", "session.active.changed",
     # Owner/auto handoff of a session to an agent; ``agent.direct_chat`` is the
