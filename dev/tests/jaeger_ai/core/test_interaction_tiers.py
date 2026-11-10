@@ -103,7 +103,11 @@ async def test_gateway_tier_enforcement_and_events(tmp_path: pathlib.Path) -> No
     from aiohttp.test_utils import make_mocked_request
 
     cfg_path = tmp_path / "config.yaml"
-    dump_yaml(cfg_path, Config(instance_name="test-inst", model=ModelConfig(model_path="/dev/null")))
+    tuning = {"env": {"ollama": {"OLLAMA_MAX_LOADED_MODELS": "1",
+                                 "OLLAMA_NUM_PARALLEL": 1,
+                                 "OLLAMA_CONTEXT_LENGTH": "32768"}}}
+    dump_yaml(cfg_path, Config(instance_name="test-inst", model=ModelConfig(model_path="/dev/null"),
+                              stack=tuning))
 
     store = GatewaySessionStore(tmp_path / "gateway_sessions.sqlite3")
     gw = JaegerGatewayApp(store=store)
@@ -137,6 +141,7 @@ async def test_gateway_tier_enforcement_and_events(tmp_path: pathlib.Path) -> No
     req.json = AsyncMock(return_value={"tier": "chat"})
     await gw.handle_set_tier(req)
     assert gw._current_tier() == "chat"
+    assert load_yaml(cfg_path, Config).stack.model_dump() == tuning
 
     # In Chat mode, task submission is disabled
     req_task = make_mocked_request("POST", "/v1/tasks")
