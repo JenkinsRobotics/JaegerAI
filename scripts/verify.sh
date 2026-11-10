@@ -41,6 +41,8 @@ run_git() {
 }
 
 run_hygiene() {
+  "${VENV_PY}" -B scripts/build-standalone-macos.py --help >/dev/null
+  "${VENV_PY}" -B jaeger_ai/interfaces/ui/scripts/build-external.py --help >/dev/null
   echo "[hygiene] Running CI hygiene tripwires (root allowlist, features READMEs, zero in-repo state)..."
   # -p no:cacheprovider + PYTHONDONTWRITEBYTECODE keep the run from dropping
   # .pytest_cache / __pycache__ into the repo root (AGENTS.md §1: zero in-repo
