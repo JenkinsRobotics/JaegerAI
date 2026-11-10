@@ -429,8 +429,16 @@ def test_new_onboarding_identity_reaches_welcome_and_preserves_provider(tmp_path
     for question, reply in [("social", "social"), ("voice", "female"), ("q2", "prefer not")]:
         ok, error = _command("first_boot_answer", {"question": question, "reply": reply}, boot)
         assert ok, error
+    # Commissioning progresses in bounded ticks; one UI poll need not finish
+    # all automatic stages on a busy host.
+    from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+    CommissioningCoordinator(layout).tick(budget_s=40)
     state = _query("first_boot", {}, boot)
     assert state["turn"]["speaker"] == "persona"
     assert "Hello, I'm here." in state["turn"]["text"]
     assert state["complete"] is False
+    final_config = load_yaml(layout.config_path, Config)
+    assert final_config.external_model.provider == "ollama"
+    assert final_config.external_model.model == "gemini-test:cloud"
+    assert final_config.external_model.base_url == "http://model-host:11434/v1"
     assert layout.root.is_relative_to(tmp_path)
