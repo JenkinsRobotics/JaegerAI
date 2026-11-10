@@ -1228,12 +1228,23 @@ class ContainersConfig(BaseModel):
     )
 
 
+class StackConfig(BaseModel):
+    """Persist operator service tuning across typed config reads and writes.
+
+    The stack controller still filters these values against its environment
+    allowlist before launching any service; this schema grants no new access.
+    """
+    model_config = ConfigDict(extra="forbid")
+    env: dict[str, dict[str, str | int | float | bool | None]] = Field(default_factory=dict)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     instance_name: str = Field(..., min_length=1, max_length=64)
     model: ModelConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    stack: StackConfig = Field(default_factory=StackConfig)
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     retention: RetentionConfig = Field(default_factory=RetentionConfig)
