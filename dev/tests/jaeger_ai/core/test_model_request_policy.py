@@ -87,6 +87,32 @@ def test_security_discussion_does_not_select_gemma():
     assert classify('my password is example')[0]=='private'
 
 
+def test_cli_tool_descriptions_do_not_trigger_private_data_fallback(monkeypatch):
+    from jaeger_agent.adapters.cli_backend import CliBackendAdapter
+    from jaeger_ai.core.models.router import classify
+    adapter = CliBackendAdapter(backend_id="grok")
+    calls = []
+    monkeypatch.setattr(adapter, "call", lambda payload, interrupt, **kw: calls.append(payload))
+    guarded = GovernedAdapter(adapter, ModelRoute("cli", "grok", "", False))
+    from jaeger_os.core.tools.tool_schema import ToolDef
+    from pydantic import BaseModel
+    class EmptyArgs(BaseModel):
+        pass
+    tools = [ToolDef(name="inspect_keys", description="Inspect private keys only when authorized",
+                     args_model=EmptyArgs, fn=lambda: None, side_effect="read")]
+    formatted = guarded.format_messages([{"role": "user", "content": "Say hello"}], tools, "Be helpful")
+    assert classify(formatted["prompt"])[0] == "private"  # flattened schemas caused the regression
+    guarded.call(formatted, threading.Event())
+    assert len(calls) == 1
+    with pytest.raises(ModelPolicyError):
+        guarded.format_messages([{"role": "tool", "content": "confidential user record"}], tools, "Be helpful")
+    # Mutation after formatting cannot reuse the earlier policy decision.
+    formatted["prompt"] += "\nmy password is synthetic-only"
+    with pytest.raises(ModelPolicyError):
+        guarded.call(formatted, threading.Event())
+    assert len(calls) == 1
+
+
 def test_explicit_cloud_alias_never_becomes_a_local_route(configured, adapter):
     from jaeger_ai.core.models.request_policy import route_for
     client=select_request_client(configured,None,model="@ollama-cloud:hosted-model")
