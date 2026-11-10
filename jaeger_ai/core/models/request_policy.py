@@ -108,6 +108,10 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
         ext.base_url = "http://127.0.0.1:11434/v1"
     if owner != ext.provider or name != ext.model:
         ext.ctx = 0
+        # An unrelated provider's output allowance is not this model's
+        # configuration. In particular a CLI's 32K setting consumed half
+        # a small local window before its first prompt could fit.
+        ext.max_tokens = type(ext).model_fields['max_tokens'].default
         ext.reasoning_effort = "auto"
         ext.temperature = ext.top_p = None
         ext.verbosity = ext.thinking_budget_tokens = None

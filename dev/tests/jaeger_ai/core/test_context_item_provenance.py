@@ -131,19 +131,14 @@ async def test_normal_authenticated_gateway_turn_keeps_exact_item_receipt(tmp_pa
     gateway.store.ensure_session('owned-gateway',metadata={'execution_mode':'text_only'})
     monkeypatch.setattr(gateway,'_resolve_session_agent',lambda sid:None)
     captured=[]
-    class Response:
-        status=200
-        async def __aenter__(self):return self
-        async def __aexit__(self,*args):pass
-        async def text(self):return '{"message":{"content":"Owned fixture response"}}'
-    class Session:
-        def __init__(self,*args,**kwargs):pass
-        async def __aenter__(self):return self
-        async def __aexit__(self,*args):pass
-        def post(self,url,*,json,headers):
-            captured.append(json)
-            return Response()
-    monkeypatch.setattr('jaeger_ai.core.gateway.server.ClientSession',Session)
+    class CapturingAdapter(LocalAdapter):
+        def call(self, formatted, interrupt_event, **kwargs):
+            captured.append(formatted)
+            return {'role':'assistant','content':'Owned fixture response','finish_reason':'stop'}
+    monkeypatch.setattr('jaeger_agent.loop.runtime_bridge._adapter_for_client',lambda client:CapturingAdapter())
+    monkeypatch.setattr('jaeger_ai.core.models.external_model.ExternalModelClient',
+        lambda ext,layout:SimpleNamespace(kind='external',provider='ollama',model_name='fixture',
+            base_url='http://127.0.0.1:11434/v1',ext=ext))
     async with TestClient(TestServer(gateway.app),headers=client_headers('webui')) as http:
         response=await http.post('/v1/sessions/owned-gateway/turns',json={'text':'A fixture question','request_id':'owned-provenance-normal'})
         assert response.status in {200,202},await response.text()

@@ -61,3 +61,35 @@ def tool_permitted(name: str) -> bool:
     state = current_selection()
     return state is None or ((state.restricted is None or name in state.restricted)
                              and (state.grant is None or name in state.grant))
+
+
+def budget_visible_tools(tools, selection, guard, system_prompt: str, query: str):
+    """Fit automatic schemas while keeping discovery and explicit loads intact.
+
+    This changes presentation only: the registry and authorization remain
+    authoritative. Explicitly loaded schemas are never silently cut; if they
+    exceed context the ordinary guard reports the actual overflow.
+    """
+    import json
+    import re
+    discovery = {'list_tools', 'describe_tool', 'load_tools'}
+    from .toolset_scoping import resolve_groups
+    required = discovery | selection.names | resolve_groups(selection.groups)
+    limit = max(0, min(2048, guard.budget.prompt_budget
+                       - guard.estimate_text_tokens(system_prompt) - 1536))
+    costs = {t.name: guard.estimate_text_tokens(json.dumps(t.to_openai_schema())) + 2
+             for t in tools}
+    if sum(costs.values()) <= limit:
+        return tools
+    selected = {t.name for t in tools if t.name in required}
+    used = sum(costs[n] for n in selected)
+    mentioned = set(re.findall(r'[A-Za-z_][A-Za-z_0-9]*', query))
+    ranked = sorted(tools, key=lambda t: (
+        t.name not in mentioned, t.name not in selection.inferred, costs[t.name], t.name))
+    for tool in ranked:
+        if tool.name in selected:
+            continue
+        if used + costs[tool.name] <= limit:
+            selected.add(tool.name)
+            used += costs[tool.name]
+    return [t for t in tools if t.name in selected]

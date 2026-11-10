@@ -415,8 +415,10 @@ class EntityRuntime:
         request_id: str | None = None,
         gateway_session: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
-        budget_tokens: int = 4096,
+        budget_tokens: int | None = None,
         ide_context: dict[str, Any] | None = None,
+        model: str | None = None,
+        provider: str | None = None,
     ) -> "PreparedTurn":
         """Everything the main loop needs before the model runs: the request with its
         fenced memory context, and the human-message event recorded.
@@ -426,6 +428,12 @@ class EntityRuntime:
         never gates the turn: the operator asked, so the agent loop runs.
         """
         from .cognition_router import with_background
+
+        if budget_tokens is None:
+            from .owner_agent import background_budget_tokens
+            budget_tokens = background_budget_tokens(
+                load_instance_config_or_default(self.layout), model=model, provider=provider,
+            ) if self.layout is not None else 4096
 
         meta = dict(metadata or {})
         prompt_chars = max(

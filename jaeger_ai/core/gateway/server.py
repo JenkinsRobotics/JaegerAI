@@ -5491,6 +5491,8 @@ class JaegerGatewayApp:
                     gateway_session=session,
                     metadata=turn_meta,
                     ide_context=((execution or {}).get("options") or {}).get("ide"),
+                    model=(execution or {}).get("model"),
+                    provider=(execution or {}).get("provider"),
                 )
                 prompt = prepared.prompt
                 context_references = pinned_references + tuple(getattr(prepared, "context_references", ()))

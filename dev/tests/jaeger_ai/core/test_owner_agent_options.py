@@ -52,6 +52,14 @@ def test_in_process_worker_is_local():
     assert owner_agent.is_local_client(SimpleNamespace(kind="local", provider="", model_name="x"))
 
 
+def test_background_budget_follows_admitted_model_not_primary():
+    cfg = _cfg('cli', 'grok')
+    assert owner_agent.background_budget_tokens(cfg) == 4096
+    assert owner_agent.background_budget_tokens(cfg, model='@ollama:qwen2.5:3b') == 1024
+    assert owner_agent.background_budget_tokens(cfg, model='kimi:cloud', provider='ollama') == 4096
+    assert owner_agent.background_budget_tokens(cfg, model='local', provider='huggingface') == 1024
+
+
 def test_options_carry_system_prompt_budget_and_artifacts(layout, monkeypatch):
     import jaeger_ai.main as main
     monkeypatch.setattr(main, "_context_budget_for", lambda cfg: (32768, 4096))
