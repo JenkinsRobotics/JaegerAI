@@ -37,6 +37,8 @@ def test_actual_formatted_boundary_persists_only_outline(tmp_path):
     finish()
     events = store.activity_history('owned')['events']
     parts = project_parts(events)
+    from jaeger_ai.core.gateway.event_bus import EVENT_TYPES
+    assert 'tools.selected' in EVENT_TYPES
     selection = next(p['receipt'] for p in parts if p['type'] == 'tool_selection')
     assert selection['selected_count'] == 0 and selection['tools'] == []
     outline = next(p['outline'] for p in parts if p['type'] == 'model_context')
