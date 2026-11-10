@@ -11,6 +11,7 @@ class ToolSelection:
     scoped: bool | None = None
     groups: set[str] = field(default_factory=set)
     names: set[str] = field(default_factory=set)
+    inferred: set[str] = field(default_factory=set)
     reasons: dict[str, str] = field(default_factory=dict)
     catalog: tuple[Any, ...] | None = None
     restricted: frozenset[str] | None = None

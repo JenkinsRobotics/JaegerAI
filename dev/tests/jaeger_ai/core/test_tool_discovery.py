@@ -161,3 +161,13 @@ def test_exact_loading_survives_emergency_core_reduction():
         assert agent.tool_names()==['get_time']
         assert load_tools(tools=['terminal'])['ok']
         assert set(agent.tool_names())=={'get_time','terminal'}
+
+
+def test_intent_selection_matches_discovery_metadata():
+    add('terminal')
+    agent=JaegerAgent(adapter=Adapter(), scope_tools=True)
+    agent.run_turn('Run a terminal command')
+    with selection_scope(agent._tool_selection):
+        row=list_tools('terminal')['tools'][0]
+        assert row['selected'] is True
+        assert row['selection_reason']=='Matched this task'

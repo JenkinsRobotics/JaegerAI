@@ -49,6 +49,7 @@ def row(tool: Any) -> dict[str, Any]:
     state = current_selection()
     selected = ready and tool_visible(tool.name)
     why = (state.reasons.get(tool.name) if state else None) or (
+        'Matched this task' if state and tool.name in state.inferred else
         'Core tool' if g == 'core' else 'Loaded group' if state and g in state.groups
         else 'Available by default')
     return {'tool': tool.name, 'toolset': g, 'source': g or 'registered',

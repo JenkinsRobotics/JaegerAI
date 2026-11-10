@@ -262,7 +262,6 @@ class JaegerAgent:
         # Per-agent, monotonically growing intent-selected surface. Unlike
         # the legacy module-level active set, this cannot leak one session's
         # privileged tool choices into another concurrent agent.
-        self._intent_tool_names: set[str] = set()
         self._tool_selection = ToolSelection(scoped=scope_tools,
             grant=self.allowed_tools,
             restricted=frozenset(t.name for t in self._all_tools) if self._tools_filter_locked or toolsets is not None else None)
@@ -414,7 +413,7 @@ class JaegerAgent:
             visible = list(self._all_tools)
         else:
             visible = [t for t in self._all_tools
-                       if t.name in self._intent_tool_names or self._tool_visibility(t.name)]
+                       if t.name in self._tool_selection.inferred or self._tool_visibility(t.name)]
 
         visible = [t for t in visible if tool_permitted(t.name)]
 
@@ -533,7 +532,7 @@ class JaegerAgent:
                 if _scoping_enabled() and not is_untrusted_content():
                     selected = infer_toolsets(user_message)
                     if selected:
-                        self._intent_tool_names.update(
+                        self._tool_selection.inferred.update(
                             resolve_groups(selected)
                         )
             except KeyError as exc:
@@ -1409,7 +1408,7 @@ class JaegerAgent:
         turn. Locked / already-slimmed agents return False (fail closed to the
         existing ContextOverflow raise path).
 
-        Scoping is OFF by default, so mutating ``_intent_tool_names`` alone
+        Scoping is OFF by default, so mutating ``ToolSelection.inferred`` alone
         does not hide tools (``tools`` fails open via ``_tool_visibility``).
         For this emergency retry we REPLACE ``_all_tools`` with the CORE
         subset and lock the filter for the rest of the turn.
@@ -1431,7 +1430,7 @@ class JaegerAgent:
             return False
         self._all_tools = slimmed
         self._dispatch_by_name = {t.name: t for t in self._all_tools}
-        self._intent_tool_names = set(CORE)
+        self._tool_selection.inferred = set(CORE)
         self._tools_filter_locked = True
         self._tools_filter_locked_reason = "overflow"
         self._overflow_tools_slimmed = True
@@ -1447,7 +1446,7 @@ class JaegerAgent:
         for tool in discovery.catalog():
             row = discovery.row(tool)
             row['selected'] = tool.name in selected
-            if row['selected'] and tool.name in self._intent_tool_names:
+            if row['selected'] and tool.name in self._tool_selection.inferred:
                 row['selection_reason'] = 'Matched this task'
             rows.append({key: row[key] for key in ('tool', 'source', 'available', 'selected',
                                                 'selection_reason', 'unavailable_reason')})
