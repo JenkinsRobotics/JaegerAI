@@ -603,7 +603,7 @@ def tool_visible(name: str) -> bool:
         return name in UNTRUSTED_SAFE
     from .tool_selection import current_selection
     state = current_selection()
-    if state is not None and name in state.names:
+    if state is not None and (name in state.names or name in state.inferred):
         return True
     if name in _GATED_MCP_TOOLS:
         from jaeger_agent.tool_executor import active_tool_allowlist
@@ -628,7 +628,7 @@ def scoped_tool_visible(name: str) -> bool:
         return name in UNTRUSTED_SAFE
     from .tool_selection import current_selection
     state = current_selection()
-    if state is not None and name in state.names:
+    if state is not None and (name in state.names or name in state.inferred):
         return True
     if name in CORE:
         return True
