@@ -6,6 +6,8 @@ executes tools, invents a fallback, or owns conversations.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any
 from urllib.parse import urlparse
 
@@ -114,12 +116,29 @@ class GovernedAdapter:
     """Check every actual call, including accumulated tool results and retries."""
     def __init__(self, adapter, route: ModelRoute, *, local_only=False):
         self.adapter, self.route, self.local_only = adapter, route, local_only
+        self._formatted_policy = None
 
     def __getattr__(self, name):
         return getattr(self.adapter, name)
 
+    @staticmethod
+    def _fingerprint(formatted):
+        return hashlib.sha256(json.dumps(formatted, sort_keys=True, default=str).encode()).digest()
+
+    def format_messages(self, messages, tools, system):
+        # CLI adapters flatten tool schemas into prose. Classify the actual
+        # conversation and system context before that conversion, so a tool's
+        # description of private keys is not mistaken for supplied private data.
+        policy_text = payload_text({"messages": messages, "system": system})
+        require_egress(self.route, policy_text, local_only=self.local_only)
+        formatted = self.adapter.format_messages(messages, tools, system)
+        self._formatted_policy = (self._fingerprint(formatted), policy_text)
+        return formatted
+
     def call(self, formatted, interrupt_event, **kwargs):
-        require_egress(self.route, formatted, local_only=self.local_only)
+        checked = self._formatted_policy
+        payload = checked[1] if checked and checked[0] == self._fingerprint(formatted) else formatted
+        require_egress(self.route, payload, local_only=self.local_only)
         return self.adapter.call(formatted, interrupt_event, **kwargs)
 
 
