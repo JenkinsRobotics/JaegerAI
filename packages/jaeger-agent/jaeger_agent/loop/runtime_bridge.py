@@ -229,55 +229,46 @@ def reasoning_effort_for(provider: str, model: str, configured: Any) -> str | No
 
 
 def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
-    """Configured ``external_model.fallback`` → extra adapters.
+    """Build only declared alternatives, with each provider's own credentials.
 
-    Same API key / timeout as the primary client. Skips the serving
-    model so a stall actually walks to a *different* brain.
+    The client carries the admitted configuration. Process-global pipeline state
+    can belong to a concurrent turn and must not choose this turn's fallback.
     """
-    try:
-        from jaeger_ai.main import _pipeline
-        cfg = _pipeline.get("config")
-        rows = list(getattr(getattr(cfg, "external_model", None), "fallback", None) or [])
-    except Exception:  # noqa: BLE001 — missing config is "no fallback"
-        return []
-    if not rows:
-        return []
     ext = getattr(client, "ext", None)
-    primary_model = str(getattr(ext, "model", "") or "")
-    primary_provider = str(getattr(ext, "provider", "") or "openai")
-    api_key = getattr(client, "_api_key", "") or ""
-    timeout_s = float(getattr(ext, "timeout_s", 60.0) or 60.0) if ext else 60.0
-    max_tokens = int(getattr(ext, "max_tokens", 4096) or 4096)
-    num_ctx = getattr(client, "num_ctx", None)
-    primary_base = getattr(ext, "base_url", None) if ext is not None else None
-    out: list[ProviderAdapter] = []
-    for row in rows:
-        if isinstance(row, dict):
-            provider = str(row.get("provider") or primary_provider)
-            model = str(row.get("model") or "")
-            base_url = row.get("base_url") or primary_base
-        else:
-            provider = str(getattr(row, "provider", None) or primary_provider)
-            model = str(getattr(row, "model", "") or "")
-            base_url = getattr(row, "base_url", None) or primary_base
-        if not model or model == primary_model:
+    if ext is None:
+        return []
+    from jaeger_ai.core.models.external_model import ExternalModelClient
+    from jaeger_ai.core.models.configuration import _BASE_URLS, _CREDENTIALS
+    out = []
+    for row in getattr(ext, "fallback", ()) or ():
+        item = row if isinstance(row, dict) else row.model_dump()
+        provider = item.get("provider") or ext.provider
+        model = item.get("model")
+        if not model or (provider == ext.provider and model == ext.model):
             continue
-        if provider == "cli":
-            out.append(CliBackendAdapter(
-                backend_id=model, timeout_s=timeout_s,
-            ))
-        elif provider == "anthropic":
-            out.append(AnthropicAdapter(
-                api_key=api_key, model=model, timeout_s=timeout_s,
-                max_tokens=max_tokens,
-            ))
-        else:
-            out.append(OpenAIAdapter(
-                provider=provider, model=model, api_key=api_key,
-                base_url=base_url or None, num_ctx=num_ctx,
-                timeout_s=timeout_s,
-                max_tokens=max_tokens,
-            ))
+        if provider == "local":
+            # Loading a second in-process engine is not an inference retry.
+            continue
+        target = ext.model_copy(deep=True)
+        target.provider, target.model = provider, model
+        if provider != ext.provider:
+            if provider not in _BASE_URLS and not item.get("base_url"):
+                continue  # An unconfigured alternative must not disable the primary.
+            target.base_url = _BASE_URLS.get(provider, "")
+            target.api_key_credential = _CREDENTIALS.get(provider, f"{provider}_api_key")
+            target.api_key_env = ""
+        if item.get("base_url"):
+            if item["base_url"] != target.base_url:
+                target.api_key_credential = f"{provider}_api_key"
+                target.api_key_env = ""
+            target.base_url = item["base_url"]
+        target.fallback = []
+        try:
+            fallback = ExternalModelClient(target, getattr(client, "layout", None))
+            out.append(_adapter_for_client(fallback))
+        except (ValueError, RuntimeError):
+            import logging
+            logging.getLogger(__name__).warning("Fallback provider %s is unavailable; primary remains selected", provider)
     return out
 
 

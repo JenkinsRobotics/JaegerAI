@@ -1003,7 +1003,7 @@ class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
             captured["text"] = text
             return "SPECIALIST:Gateway"
 
-        self.gateway_app._ollama_chat = fake_chat  # type: ignore[method-assign]
+        self.gateway_app._model_chat = fake_chat  # type: ignore[method-assign]
 
         await self.gateway_app._execute_turn(
             "p6-turn", "turn-abc", "Reply with exactly: SPECIALIST:<your display name>"
@@ -1063,7 +1063,7 @@ class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
             captured["system_prompt"] = system_prompt
             return "SPECIALIST:Surfaces"
 
-        self.gateway_app._ollama_chat = fake_chat  # type: ignore[method-assign]
+        self.gateway_app._model_chat = fake_chat  # type: ignore[method-assign]
 
         await self.gateway_app._execute_turn(
             "p6-double",
@@ -1112,7 +1112,7 @@ class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
         async def fake_chat(text: str, *, system_prompt: str | None = None, history=None, **_lane_kwargs) -> str:
             return "ok-after-clear"
 
-        self.gateway_app._ollama_chat = fake_chat  # type: ignore[method-assign]
+        self.gateway_app._model_chat = fake_chat  # type: ignore[method-assign]
         await self.gateway_app._execute_turn("p6-kh", "turn-kh", "ping")
 
         session = self.temp_store.get_session("p6-kh")

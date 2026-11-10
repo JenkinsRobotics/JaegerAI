@@ -573,86 +573,101 @@ def run_wizard(
 
     # ── Step 2 · Model ──────────────────────────────────────────────
     _step(2, "Model")
-    # Detect the host's unified-memory tier so we can recommend a
-    # data-validated awake / asleep pair, then scan the filesystem so
-    # an operator who already has the recommended GGUFs (LM Studio,
-    # HF cache, ~/.jaeger/models, …) doesn't get re-prompted to
-    # download 15+ GB.
-    from jaeger_ai.core.models.host_recommendation import (
-        detect_total_memory_gb, classify_tier, recommend_for_tier,
-    )
-    from jaeger_ai.core.models.discovery import (
-        discover_local_gguf_files, match_to_registry,
-    )
-    from jaeger_ai.core.models.model_resolver import (
-        ensure_symlink_in_model_cache,
-    )
-    detected_gb = detect_total_memory_gb()
-    detected_tier = classify_tier(detected_gb)
-    rec = recommend_for_tier(detected_tier)
-    print(f"  Host: {detected_gb:.1f} GB unified memory → "
-          f"{rec.tier_label} tier")
-    print(f"  {rec.description}")
-    print()
-
-    # Step 2a — discover existing GGUFs so we can annotate the prompts
-    print("  Scanning for GGUF models on this machine…")
-    discovered = discover_local_gguf_files()
-    by_key = match_to_registry(discovered)
-    if discovered:
-        print(f"  Found {len(discovered)} GGUF file(s):")
-        for d in discovered:
-            size = f"{d.size_gb:.1f} GB" if d.size_gb >= 0 else "size?"
-            print(f"    • {d.filename}  ({size})  — {d.source}")
+    awake_provider = _ask_choice("Where should the model run?", [
+        ("cloud", "Configured cloud / CLI provider (no local model download)"),
+        ("local", "On-device GGUF / MLX model (optional download)"),
+    ], default=0)
+    if awake_provider == "cloud":
+        awake_provider = _ask_choice("Provider", [
+            ("cli", "Installed model CLI"), ("openai", "OpenAI"),
+            ("anthropic", "Anthropic"), ("xai", "xAI"), ("ollama", "Ollama cloud"),
+        ])
+        model_path = _ask("Model ID (or CLI name)", "grok" if awake_provider == "cli" else "")
+        if not model_path.strip():
+            raise ValueError("Choose a model before continuing setup")
+        asleep_path = model_path
+        print("  Provider authentication is configured in Models. No GGUF will be downloaded.")
     else:
-        print("  (none found — registry picks will download from "
-              "Hugging Face on first use)")
-    print()
-
-    model_path = _wizard_pick_model(
-        role_label="Awake model (real-time conversation)",
-        rec_entry=rec.awake,
-        discovered=discovered,
-        by_key=by_key,
-        allow_same_as_awake=False,
-        awake_choice=None,
-    )
-    # Auto-symlink: if the recommended awake model is already on disk
-    # somewhere we know about, drop a symlink into the in-repo models
-    # dir so the resolver finds it without a Hugging Face round-trip.
-    if model_path == rec.awake.registry_key and rec.awake.registry_key in by_key:
-        linked = ensure_symlink_in_model_cache(
-            by_key[rec.awake.registry_key].path,
-            registry_key=rec.awake.registry_key,
+        # Detect the host's unified-memory tier so we can recommend a
+        # data-validated awake / asleep pair, then scan the filesystem so
+        # an operator who already has the recommended GGUFs (LM Studio,
+        # HF cache, ~/.jaeger/models, …) doesn't get re-prompted to
+        # download 15+ GB.
+        from jaeger_ai.core.models.host_recommendation import (
+            detect_total_memory_gb, classify_tier, recommend_for_tier,
         )
-        if linked is not None:
-            print(f"     ✓ linked {linked.name} (no download needed)")
-
-    print()
-    asleep_path = _wizard_pick_model(
-        role_label="Asleep model (deep-think / kanban work)",
-        rec_entry=rec.asleep,
-        discovered=discovered,
-        by_key=by_key,
-        # Gate on what the operator ACTUALLY picked for awake, not on the
-        # tier recommendation. On every tier where the two recommendations
-        # coincide (<=8GB and >=64GB) the old `rec.awake != rec.asleep`
-        # test hid "same as awake" outright — so an operator who picked a
-        # custom or non-recommended awake model could not decline the
-        # second model, and got an unwanted download plus a needless
-        # deep-think swap.
-        allow_same_as_awake=(model_path != rec.asleep.registry_key),
-        awake_choice=model_path,
-    )
-    if (asleep_path == rec.asleep.registry_key
-            and rec.asleep.registry_key in by_key
-            and asleep_path != model_path):
-        linked = ensure_symlink_in_model_cache(
-            by_key[rec.asleep.registry_key].path,
-            registry_key=rec.asleep.registry_key,
+        from jaeger_ai.core.models.discovery import (
+            discover_local_gguf_files, match_to_registry,
         )
-        if linked is not None:
-            print(f"     ✓ linked {linked.name} (no download needed)")
+        from jaeger_ai.core.models.model_resolver import (
+            ensure_symlink_in_model_cache,
+        )
+        detected_gb = detect_total_memory_gb()
+        detected_tier = classify_tier(detected_gb)
+        rec = recommend_for_tier(detected_tier)
+        print(f"  Host: {detected_gb:.1f} GB unified memory → "
+              f"{rec.tier_label} tier")
+        print(f"  {rec.description}")
+        print()
+
+        # Step 2a — discover existing GGUFs so we can annotate the prompts
+        print("  Scanning for GGUF models on this machine…")
+        discovered = discover_local_gguf_files()
+        by_key = match_to_registry(discovered)
+        if discovered:
+            print(f"  Found {len(discovered)} GGUF file(s):")
+            for d in discovered:
+                size = f"{d.size_gb:.1f} GB" if d.size_gb >= 0 else "size?"
+                print(f"    • {d.filename}  ({size})  — {d.source}")
+        else:
+            print("  (none found — registry picks will download from "
+                  "Hugging Face on first use)")
+        print()
+
+        model_path = _wizard_pick_model(
+            role_label="Awake model (real-time conversation)",
+            rec_entry=rec.awake,
+            discovered=discovered,
+            by_key=by_key,
+            allow_same_as_awake=False,
+            awake_choice=None,
+        )
+        # Auto-symlink: if the recommended awake model is already on disk
+        # somewhere we know about, drop a symlink into the in-repo models
+        # dir so the resolver finds it without a Hugging Face round-trip.
+        if model_path == rec.awake.registry_key and rec.awake.registry_key in by_key:
+            linked = ensure_symlink_in_model_cache(
+                by_key[rec.awake.registry_key].path,
+                registry_key=rec.awake.registry_key,
+            )
+            if linked is not None:
+                print(f"     ✓ linked {linked.name} (no download needed)")
+
+        print()
+        asleep_path = _wizard_pick_model(
+            role_label="Asleep model (deep-think / kanban work)",
+            rec_entry=rec.asleep,
+            discovered=discovered,
+            by_key=by_key,
+            # Gate on what the operator ACTUALLY picked for awake, not on the
+            # tier recommendation. On every tier where the two recommendations
+            # coincide (<=8GB and >=64GB) the old `rec.awake != rec.asleep`
+            # test hid "same as awake" outright — so an operator who picked a
+            # custom or non-recommended awake model could not decline the
+            # second model, and got an unwanted download plus a needless
+            # deep-think swap.
+            allow_same_as_awake=(model_path != rec.asleep.registry_key),
+            awake_choice=model_path,
+        )
+        if (asleep_path == rec.asleep.registry_key
+                and rec.asleep.registry_key in by_key
+                and asleep_path != model_path):
+            linked = ensure_symlink_in_model_cache(
+                by_key[rec.asleep.registry_key].path,
+                registry_key=rec.asleep.registry_key,
+            )
+            if linked is not None:
+                print(f"     ✓ linked {linked.name} (no download needed)")
 
     # ── Step 3 · Permissions ────────────────────────────────────────
     _step(3, "Permissions")
@@ -788,6 +803,7 @@ def run_wizard(
         personality=personality,
         voice_id=voice_id,
         awake_model=model_path,
+        awake_provider=awake_provider,
         asleep_model=asleep_path,
         permission_mode=perm_mode,
         interaction_mode=interaction_mode,
@@ -1261,7 +1277,7 @@ def onboarding_model_matrix(layout: InstanceLayout | None = None) -> dict:
     except Exception:
         pass
 
-    if configured_stack:
+    if configured_stack and configured_stack["primary_model"] != "unconfigured":
         # Ollama is both a local server and a gateway to hosted models.
         # Resolve the provider from discovery rather than labeling every
         # Ollama-backed selection as local.
@@ -1397,9 +1413,11 @@ def create_instance(
         MODEL_REGISTRY,
     )
     rec = recommend_for_tier(classify_tier(detect_total_memory_gb()))
-    awake_model = (awake_model or "").strip() or rec.awake.registry_key
-    asleep_model = (asleep_model or "").strip() or rec.asleep.registry_key
-    by_key = match_to_registry(discover_local_gguf_files())
+    from jaeger_ai.contract.model_ids import UNCONFIGURED_MODEL
+    awake_model = (awake_model or "").strip() or (rec.awake.registry_key if awake_provider == "local" else UNCONFIGURED_MODEL)
+    external_selected = bool(awake_provider and awake_provider != "local")
+    asleep_model = (asleep_model or "").strip() or (awake_model if external_selected or awake_model == UNCONFIGURED_MODEL else rec.asleep.registry_key)
+    by_key = {} if external_selected or awake_model == UNCONFIGURED_MODEL else match_to_registry(discover_local_gguf_files())
     for key in dict.fromkeys((awake_model, asleep_model)):  # ordered unique
         if key in by_key:
             ensure_symlink_in_model_cache(by_key[key].path, registry_key=key)
@@ -1450,7 +1468,8 @@ def create_instance(
             provider = "xai"
         else:
             provider = "ollama"
-    config, _, _ = selected_model_config(config, provider=provider, model=awake_model)
+    if awake_model != UNCONFIGURED_MODEL:
+        config, _, _ = selected_model_config(config, provider=provider, model=awake_model)
     # The asleep model is a background role, not an external failover target.
     manifest = Manifest(instance_name=name, schema_version=SCHEMA_VERSION,
                         bound_character=character_id)

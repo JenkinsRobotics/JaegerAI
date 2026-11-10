@@ -730,8 +730,8 @@ class WebhookConfig(BaseModel):
 
 
 class ExternalModelConfig(BaseModel):
-    """Opt-in external-model pipeline. Jaeger is local-first — this is
-    OFF by default. When ``enabled``, the agent's brain runs on an
+    """Configured inference provider. Fresh onboarding asks the operator to
+    choose a provider. When ``enabled``, the agent's brain runs on an
     external provider instead of the in-process llama-cpp model.
 
     Providers:

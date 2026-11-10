@@ -294,8 +294,8 @@ def test_supports_returns_known_feature_flags():
     assert adapter.supports("caching") is True
     assert adapter.supports("parallel_tools") is True
     assert adapter.supports("reasoning") is True
-    assert adapter.supports("streaming") is False
-    assert adapter.supports("vision") is False
+    assert adapter.supports("streaming") is True
+    assert adapter.supports("vision") is True
     assert adapter.supports("nonsense") is False
 
 
@@ -445,3 +445,12 @@ def test_call_falls_back_to_create_when_stream_missing():
     raw = adapter.call({"model": "m", "messages": []}, threading.Event())
     parsed = adapter.parse_response(raw)
     assert parsed["content"] == "plain answer"
+
+
+def test_admitted_image_blocks_keep_the_selected_anthropic_provider():
+    from jaeger_agent.adapters.anthropic import _to_anthropic_blocks
+    assert _to_anthropic_blocks({"role":"user","content":[
+        {"type":"text","text":"Describe"},
+        {"type":"image_url","image_url":{"url":"data:image/png;base64,YWJj"}}
+    ]}) == [{"type":"text","text":"Describe"},
+             {"type":"image","source":{"type":"base64","media_type":"image/png","data":"YWJj"}}]

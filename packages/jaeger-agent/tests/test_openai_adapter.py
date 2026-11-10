@@ -645,8 +645,8 @@ def test_supports_streaming_is_false_token_streaming_not_exposed():
     the transport flag."""
     a = OpenAIAdapter(provider="openai", model="x", stream_transport=False)
     b = OpenAIAdapter(provider="openai", model="x", stream_transport=True)
-    assert a.supports("streaming") is False
-    assert b.supports("streaming") is False
+    assert a.supports("streaming") is True
+    assert b.supports("streaming") is True
 
 
 def test_supports_parallel_tools_true_by_default():
@@ -737,3 +737,13 @@ def test_reasoning_only_length_stop_is_not_an_empty_retry():
     parsed = adapter.parse_response({'choices': [{'message': {
         'content': '', 'reasoning_content': 'reasoning without final answer'}, 'finish_reason': 'length'}]})
     assert parsed['finish_reason'] == 'thinking_exhausted'
+
+
+def test_truncated_stream_is_an_error_and_closes_transport():
+    from jaeger_agent.adapters.openai import _aggregate_chat_stream
+    from jaeger_agent.loop.interrupt import CallProgress
+    stream = _FakeStream([_mk_chunk(content="partial")])
+    seen = []
+    with pytest.raises(RuntimeError, match="before confirming completion"):
+        _aggregate_chat_stream(stream, threading.Event(), CallProgress(), seen.append, None)
+    assert seen == ["partial"] and stream.closed

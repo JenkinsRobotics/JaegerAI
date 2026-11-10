@@ -4092,8 +4092,8 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
                 client, _pipeline.get("config"), _pipeline.get("layout"),
                 model, provider,
             )
-    except Exception:  # noqa: BLE001 — gate must never break a turn
-        pass
+    except Exception as exc:
+        raise RuntimeError("Model privacy routing failed; no request was dispatched") from exc
     from jaeger_agent.core.outputs import (
         DYNAMIC_OUTPUT_PROMPT, decide_output, multimodal_output_scope,
     )
@@ -4446,8 +4446,8 @@ def run_for_voice(
             if _decision.classification == "private" or model:
                 model = s_model
                 provider = s_provider
-        except Exception:  # noqa: BLE001 — gate must never break a turn
-            pass
+        except Exception as exc:
+            raise RuntimeError("Model privacy routing failed; no request was dispatched") from exc
     signature = (id(client), model or None, provider or None)
     cached = _session_model_clients.get(session)
     if cached is None or cached[0] != signature:
@@ -4987,6 +4987,9 @@ def make_client(config: Any, layout: Any = None, *, warmup: bool = True) -> Any:
             f"Selected engine {engine.display_name!r} for "
             f"{config.model.model_path!r} is not installed — {engine.install_hint}."
         )
+    from jaeger_ai.contract.model_ids import UNCONFIGURED_MODEL
+    if str(config.model.model_path) == UNCONFIGURED_MODEL:
+        raise RuntimeError("Choose and connect a model in Models before starting a conversation.")
     return engine.loader(config.model, warmup=warmup)
 
 
@@ -5274,7 +5277,7 @@ def _cli_create_instance(name: str, *, force: bool = False) -> int:
         Config, DisplayConfig, Identity, Manifest, ModelConfig, SkillsConfig,
         dump_json, dump_yaml,
     )
-    from jaeger_ai.core.models.model_resolver import DEFAULT_MODEL
+    from jaeger_ai.contract.model_ids import UNCONFIGURED_MODEL
 
     layout.root.mkdir(parents=True, exist_ok=True)
     layout.ensure_dirs()
@@ -5288,11 +5291,8 @@ def _cli_create_instance(name: str, *, force: bool = False) -> int:
     ))
     dump_yaml(layout.config_path, Config(
         instance_name=name,
-        # Store the registry NAME, not a resolved absolute path —
-        # ``LlamaCppPythonClient`` resolves through ``model_resolver``
-        # at boot, which auto-downloads from HF Hub if the file isn't
-        # in the user cache. Survives moves / new machines unchanged.
-        model=ModelConfig(model_path=DEFAULT_MODEL),
+        # Creating an identity is not permission to download model weights.
+        model=ModelConfig(model_path=UNCONFIGURED_MODEL),
         display=DisplayConfig(show_help_on_start=False),
         skills=SkillsConfig(run_smoke_tests=True),
     ))

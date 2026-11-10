@@ -357,23 +357,27 @@ def _existing_plist_env(service: ServiceDef) -> dict[str, str]:
 def operator_env(service: ServiceDef) -> dict[str, str]:
     """Operator tuning env for one service, kept across ``stack up``.
 
-    Precedence (later wins): the service's current plist, values derived from
+    Precedence (later wins): conservative local defaults, current plist, values derived from
     the instance's chosen model (``external_model.ctx`` sets Ollama's context
-    for a local model; ``external_model.model`` sets the Gateway's direct
+    for a local model, bounded to 32K unless stack.env explicitly overrides; ``external_model.model`` sets the Gateway's direct
     Ollama model), then ``stack.env.all`` / ``stack.env.<service id>`` in
     the instance config. Only tuning keys pass; see ``_operator_env_allowed``.
     """
-    env = dict(_existing_plist_env(service))
+    env = ({"OLLAMA_MAX_LOADED_MODELS": "1", "OLLAMA_NUM_PARALLEL": "1",
+            "OLLAMA_CONTEXT_LENGTH": "32768", "OLLAMA_KEEP_ALIVE": "5m"}
+           if service.id == "ollama" else {})
+    env.update(_existing_plist_env(service))
     config = _instance_config()
     external = config.get("external_model")
     if isinstance(external, dict):
         model = str(external.get("model") or "").strip()
         provider = str(external.get("provider") or "ollama")
         ctx = external.get("ctx")
-        local = bool(model) and not model.endswith((":cloud", "-cloud"))
+        local = (external.get("enabled", True) and provider in {"ollama", "ollama-local"}
+                 and bool(model) and not model.endswith((":cloud", "-cloud")))
         if service.id == "ollama" and local and isinstance(ctx, int) \
                 and not isinstance(ctx, bool) and ctx > 0:
-            env["OLLAMA_CONTEXT_LENGTH"] = str(ctx)
+            env["OLLAMA_CONTEXT_LENGTH"] = str(min(ctx, 32768))
         if service.id == "gateway" and model and provider == "ollama":
             env["JAEGER_GATEWAY_OLLAMA_MODEL"] = model
     stack_section = config.get("stack")

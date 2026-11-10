@@ -137,7 +137,6 @@ class EndpointResolver:
 
 _PATTERNS_PATH = Path(__file__).with_name("sensitivity_patterns.yaml")
 _DEFAULT_CLOUD = "glm-5.3-flash:cloud"
-_DEFAULT_LOCAL = "gemma-4-26b:latest"
 
 # Built-in fallback sensitivity keywords if YAML is absent
 _DEFAULT_PRIVATE_KEYWORDS = [
@@ -194,6 +193,10 @@ def classify(text: str) -> tuple[str, str]:
     keywords, patterns = _load_rules()
     for kw in keywords:
         if kw in lowered:
+            # Discussing security is not the same as supplying a credential.
+            if kw in {"password", "secret", "api key", "apikey", "api_key", "token"}:
+                if not re.search(r"(?:my|our)\s+(?:password|secret|api[ _]?key|token)\s*(?:is|[=:])|(?:password|secret|api[ _]?key|token)\s*(?:is\s+|[=:])\s*\S+|(?:find saved|store|remember|rotate)\b.{0,30}\b" + re.escape(kw), lowered):
+                    continue
             return "private", f"keyword:{kw}"
     for pat in patterns:
         if pat.search(body):
@@ -250,7 +253,7 @@ def _local_model(config: Any | None) -> str:
             if model and provider in {"ollama", "ollama-local", ""}:
                 if not (model.endswith(":cloud") or model.endswith("-cloud")):
                     return model
-    return _DEFAULT_LOCAL
+    return ""
 
 
 def decide(
@@ -273,9 +276,13 @@ def decide(
                 classification="private", model="local", provider="local",
                 reason=reason, tokens_est=tokens,
             )
+        local_model = _local_model(config)
+        if not local_model:
+            from .request_policy import ModelPolicyError
+            raise ModelPolicyError("Local-only content requires a configured on-device model; no model was downloaded or selected automatically.")
         return SensitivityDecision(
             classification="private",
-            model=_local_model(config),
+            model=local_model,
             provider="ollama",
             reason=reason,
             tokens_est=tokens,

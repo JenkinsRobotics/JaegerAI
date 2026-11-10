@@ -49,7 +49,7 @@ def main():
     if args.mock:
         env['VITE_JAEGER_MOCK'] = '1'
     if args.test:
-        subprocess.run(['npm', 'test', '--', '--cache=false'], cwd=work, env=env, check=True)
+        subprocess.run(['npm', 'test', '--', '--configLoader=runner', '--no-cache', '--maxWorkers=2], cwd=work, env=env, check=True)
     subprocess.run(['npm', 'run', 'build'], cwd=work, env=env, check=True)
     if not (work / 'dist/index.html').is_file():
         raise RuntimeError('UI build produced no index.html')

@@ -92,7 +92,7 @@ async def test_custom_agent_knowledge_pins_context_and_preserves_policy(tmp_path
     seen = []
     async def model_boundary(prompt, **kwargs):
         seen.append(kwargs['system_prompt']); return 'Owned knowledge result'
-    gateway._ollama_chat = model_boundary
+    gateway._model_chat = model_boundary
     async with TestClient(TestServer(gateway.app), headers=client_headers('webui')) as client:
         created = await client.post('/v1/agents', json={'name':'owned-knowledge', 'role':'specialist', 'operation_id':'owned-knowledge-agent'})
         assert created.status == 201

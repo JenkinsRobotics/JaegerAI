@@ -88,7 +88,7 @@ _LOCAL_PLACEHOLDER_KEYS: dict[str, str] = {
 # Features the chat-completions surface supports. Gated by capability
 # rather than provider — a Gemini-on-OpenAI-compat call and an
 # OpenAI-on-OpenAI call behave identically here.
-_FEATURES: frozenset[str] = frozenset({"parallel_tools"})
+_FEATURES: frozenset[str] = frozenset({"parallel_tools", "vision", "streaming"})
 
 
 def _coerce_content_to_text(content: Any) -> str:
@@ -558,9 +558,8 @@ class OpenAIAdapter(ProviderAdapter):
     # ── capabilities + health ───────────────────────────────────────
 
     def supports(self, feature: str) -> bool:
-        # Transport-level streaming is an implementation detail of
-        # ``call`` — the loop still receives one whole message, so
-        # "streaming" (token-level delivery to the loop) stays False.
+        # These are transport capabilities. Individual models may reject an
+        # image; callers must surface that error without changing providers.
         return feature in _FEATURES
 
     def health_check(self) -> dict[str, Any]:
@@ -626,12 +625,14 @@ def _aggregate_chat_stream(
     calls_by_index: dict[int, dict[str, Any]] = {}
     finish_reason: Any = None
     usage: Any = None
+    reported_model = None
     try:
         try:
             for chunk in stream:
                 progress.touch()
                 if interrupt_event.is_set():
                     raise AgentInterrupted("interrupted mid-stream")
+                reported_model = _get(chunk, "model") or reported_model
                 chunk_usage = _get(chunk, "usage")
                 if chunk_usage is not None:
                     usage = chunk_usage
@@ -681,16 +682,9 @@ def _aggregate_chat_stream(
         except AgentInterrupted:
             raise
         except Exception:
-            # Partial-stream recovery (Hermes pattern): the connection
-            # died mid-answer. If TEXT already arrived and no tool call
-            # was being assembled, return what we have — the words may
-            # already be on screen / spoken, and a retry would produce
-            # a different answer. A half-assembled tool call re-raises:
-            # truncated arguments must never dispatch.
-            if content_parts and not calls_by_index:
-                finish_reason = "partial_stream"
-            else:
-                raise
+            # Partial words may be visible, but a broken connection is not a
+            # completed answer. Let the caller persist the failure and retry.
+            raise
     finally:
         close = getattr(stream, "close", None)
         if close is not None:
@@ -699,6 +693,8 @@ def _aggregate_chat_stream(
             except Exception:
                 logger.debug("Could not close OpenAI-compatible stream", exc_info=True)
 
+    if finish_reason is None:
+        raise RuntimeError("Model stream ended before confirming completion")
     message: dict[str, Any] = {
         "role": "assistant",
         "content": "".join(content_parts) or None,
@@ -724,6 +720,8 @@ def _aggregate_chat_stream(
             "finish_reason": finish_reason,
         }],
     }
+    if reported_model:
+        out["model"] = reported_model
     if usage is not None:
         out["usage"] = {
             "prompt_tokens": _get(usage, "prompt_tokens"),

@@ -1,6 +1,7 @@
 """Owned adapter boundary, no provider or private prompt logging."""
 import json
 import pytest
+from dev.tests.fixtures.model_completion import model_completion
 from jaeger_agent import JaegerAgent, ProviderAdapter
 from jaeger_agent.loop.callbacks import AgentCallbacks
 from jaeger_agent.loop.input_outline import input_outline
@@ -63,30 +64,15 @@ def test_unsupported_and_untrusted_shapes_do_not_echo_values():
 
 
 @pytest.mark.asyncio
-async def test_model_only_payload_is_observed_before_http_without_secrets(tmp_path, monkeypatch):
+async def test_model_only_payload_is_observed_before_http_without_secrets(tmp_path, monkeypatch, model_completion):
     store = GatewaySessionStore(tmp_path / 'model-only.sqlite3')
     store.ensure_session('owned')
     store.admit_request('owned', 'Owned request', request_id='owned-request')
     gateway = JaegerGatewayApp(store=store)
     gateway.app.on_startup.clear()
     monkeypatch.setenv('OLLAMA_API_KEY', 'owned-dummy-not-a-real-key')
-    class Response:
-        status = 200
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        async def text(self): return '{"message":{"content":"local fixture"}}'
-    class Session:
-        def __init__(self, *args, **kwargs): pass
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        def post(self, url, *, json, headers):
-            events = store.activity_history('owned')['events']
-            assert events[-1]['event'] == 'turn.context'
-            assert json['messages'][-1]['content'] == 'PRIVATE-QUESTION'
-            return Response()
-    monkeypatch.setattr('jaeger_ai.core.gateway.server.ClientSession', Session)
-    assert await gateway._ollama_chat('PRIVATE-QUESTION', model='owned-model',
-        system_prompt='PRIVATE-SYSTEM', context_ids=('owned','owned-request')) == 'local fixture'
+    assert await gateway._model_chat('PRIVATE-QUESTION', model='owned-model',
+        system_prompt='PRIVATE-SYSTEM', context_ids=('owned','owned-request')) == 'remembered'
     event = store.activity_history('owned')['events'][-1]
     assert event['data']['outline']['messages'][-1]['text_chars'] == 16
     assert event['data']['turn_id'] == store.get_request('owned-request')['turn_id']

@@ -206,6 +206,8 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
         candidates=[]
         if ext.api_key_credential:candidates.append(ext.api_key_credential)
         for alias in _PROVIDER_CREDENTIAL_ALIASES.get(ext.provider,()):
+            if alias == "external_model_api_key" and ext.api_key_credential != alias:
+                continue
             if alias not in candidates:candidates.append(alias)
         for name in candidates:
             name=creds._validate_name(name)
@@ -341,6 +343,7 @@ class ExternalModelClient:
         from jaeger_ai.core.agent_host import bind_agent_host
         bind_agent_host()
         self.ext = ext
+        self.layout = layout
         self._api_key = validate_external_provider(
             ext, resolve_api_key(ext, layout),
         )

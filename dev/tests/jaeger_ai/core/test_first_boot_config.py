@@ -12,7 +12,7 @@ from jaeger_ai.core.instance.instance import InstanceLayout
 from jaeger_ai.core.instance.schemas import (
     Config, ModelConfig, dump_yaml, load_yaml,
 )
-from jaeger_ai.core.models.model_resolver import DEFAULT_MODEL
+from jaeger_ai.contract.model_ids import UNCONFIGURED_MODEL
 
 
 def _layout(tmp_path: Path) -> InstanceLayout:
@@ -21,12 +21,12 @@ def _layout(tmp_path: Path) -> InstanceLayout:
     return layout
 
 
-def test_first_boot_instance_loads_wizard_defaults_without_config_file(tmp_path):
+def test_first_boot_instance_awaits_explicit_model_selection_without_config_file(tmp_path):
     layout = _layout(tmp_path)
     assert not layout.config_path.exists()
     cfg = load_instance_config_or_default(layout)
     assert cfg.instance_name == "default"
-    assert str(cfg.model.model_path) == DEFAULT_MODEL
+    assert str(cfg.model.model_path) == UNCONFIGURED_MODEL
     assert cfg.automation.interaction_tier == "agent"
 
 

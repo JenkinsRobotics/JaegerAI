@@ -93,14 +93,6 @@ def no_tools_lane_system_prompt(system_prompt: str | None) -> str:
     return f"{base}\n\n{NO_TOOLS_LANE_NOTE}" if base else NO_TOOLS_LANE_NOTE
 
 
-def _model_has_vision(model: str) -> bool:
-    """True when this model has a VISION certification (or an explicit override)."""
-    try:
-        from jaeger_ai.core.entity.model_capabilities import capabilities_for
-        return str(capabilities_for(model).get("vision") or "").lower() == "pass"
-    except Exception:
-        pass
-    return False
 # Agent turns require native MCP. Reduced text mode must be explicitly selected.
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
@@ -386,20 +378,6 @@ def _normalize_salience(value: str | int | None) -> str:
         return SalienceLevel[str(value or "digest").strip().upper()].name.lower()
     except (KeyError, ValueError):
         return "digest"
-
-
-def _asks_about_the_image(request: str) -> bool:
-    """True for a question about an image; anything else goes to the Entity.
-
-    The direct vision lane has no tools. Defaulting to it made "save the
-    phrase to a file" in an image session a tool-less reply recorded as
-    completed, and ``is_actionable_request`` does not recognise that
-    sentence as work. So the tool-less lane is opt-in by shape of request:
-    a question, or a read/describe-style ask. A heuristic, deliberately
-    narrow — a misread costs a slower turn, not a lost action.
-    """
-    words = request.strip().lower().split()
-    return bool(words) and (request.strip().endswith("?") or words[0].strip(",.:") in _IMAGE_QUESTION_OPENERS)
 
 
 _LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -3093,13 +3071,13 @@ class JaegerGatewayApp:
         self._summarizing[session_id] = task
         task.add_done_callback(lambda _t, sid=session_id: self._summarizing.pop(sid, None))
 
-    async def _summary_text(self, prompt: str) -> tuple[str, str]:
-        models = [m for m in (os.environ.get("JAEGER_SUMMARY_MODEL") or DEFAULT_OLLAMA_MODEL,
+    async def _summary_text(self, prompt: str, *, local_only: bool = False) -> tuple[str, str]:
+        models = [m for m in (os.environ.get("JAEGER_SUMMARY_MODEL") or "default",
                               os.environ.get("JAEGER_SUMMARY_FALLBACK_MODEL")) if m]
         last: Exception | None = None
         for model in models:
             try:
-                text = await self._ollama_chat(prompt, model=model, system_prompt=self._SUMMARY_SYSTEM)
+                text = await self._model_chat(prompt, model=model, system_prompt=self._SUMMARY_SYSTEM, local_only=local_only)
                 if text and text.strip():
                     return text.strip(), model
             except Exception as exc:  # noqa: BLE001 — try the fallback model
@@ -3134,7 +3112,7 @@ class JaegerGatewayApp:
             prev = str(meta.get("summary_text") or "").strip()
             prompt = ((f"Previous summary:\n{prev}\n\n" if prev else "")
                       + "New messages to fold in:\n" + "\n".join(lines))
-            text, model = await self._summary_text(prompt)
+            text, model = await self._summary_text(prompt, local_only=self.store.session_local_only(session_id))
             covers_from = int(meta.get("summary_covers_from") or block[0]["id"])
             covers_to = int(block[-1]["id"])
             count = int(meta.get("summary_message_count") or 0) + len(block)
@@ -3846,6 +3824,11 @@ class JaegerGatewayApp:
         session_id = request.match_info["id"]
         active_state = self.store.active_session_state()
         was_active = active_state.get("active_session_id") == session_id
+        # Retire owned resources before losing the session needed to address them.
+        # A shutdown error leaves the conversation available for a safe retry.
+        browser = getattr(self, "browser_runtime", None)
+        if browser is not None:
+            await browser.close_session(session_id)
         deleted = self.store.delete_session(session_id)
         if not deleted:
             return web.json_response({"error": "Session not found"}, status=404)
@@ -4754,181 +4737,58 @@ class JaegerGatewayApp:
             return messages[:-1]
         return messages
 
-    async def _ollama_chat(
-        self,
-        text: str,
-        *,
-        model: str | None = None,
-        system_prompt: str | None = None,
-        history: list[dict[str, Any]] | None = None,
-        attachments: list[dict[str, Any]] | None = None,
-        context_ids: tuple[str, str] | None = None,
-        context_references: tuple[Any, ...] = (),
-        on_model_identity: Callable[[str | None], None] | None = None,
-        timing: Any = None,
-        on_delta: Callable[[str], None] | None = None,
+    async def _model_chat(
+        self, text: str, *, model: str | None = None, provider: str | None = None,
+        system_prompt: str | None = None, history=None, attachments=None,
+        context_ids=None, context_references=(), on_model_identity=None,
+        timing=None, on_delta=None, local_only=False, on_route=None,
     ) -> str:
-        """Live text turn via locked Ollama — never routes through :8813."""
-        target_model = model or DEFAULT_OLLAMA_MODEL
-        if not target_model:
-            raise RuntimeError(
-                "Explicit text-only mode requires JAEGER_GATEWAY_OLLAMA_MODEL"
-            )
-        sys_content = system_prompt or "You are Jaeger. Reply briefly and helpfully."
-
-        # Capability inventory injection when user asks about capabilities or tools
+        """Model-only cognition: the configured provider, shared adapters and policy."""
+        from jaeger_ai.core.entity.runtime import EntityRuntime, load_instance_config_or_default
+        from jaeger_ai.core.models.completion import complete
+        from jaeger_agent.loop.input_outline import input_outline
+        runtime = EntityRuntime.get_singleton()
+        config = load_instance_config_or_default(runtime.layout)
+        scope = self._cancellations.get(context_ids[1]) if context_ids else None
+        system_prompt = system_prompt or "You are Jaeger. Reply helpfully."
         if any(w in text.lower() for w in ("capabilities", "tools available", "what can you do", "what tools")):
             try:
                 from jaeger_ai.interfaces.mcp_server import capability_inventory
-                inv = capability_inventory()
-                tool_list = []
-                for grp, gdata in (inv.get("groups") or {}).items():
-                    tool_list.extend(gdata.get("agent_tools") or [])
-                if tool_list:
-                    tools_str = ", ".join(sorted(set(tool_list)))
-                    sys_content += f"\n\n[Live Capabilities Inventory]\nAvailable tools: {tools_str}"
+                groups = capability_inventory().get("groups") or {}
+                names = sorted({name for group in groups.values() for name in group.get("agent_tools", [])})
+                if names:
+                    system_prompt += "\n\n[Jaeger capabilities; tools are disabled in this model-only lane]\n" + ", ".join(names)
             except Exception:
-                pass
-
-        from jaeger_ai.contract.channel_messages import model_content
-        messages = [
-            {"role": item.get("role"), "content": model_content(item)}
-            for item in (history or [])
-            if item.get("role") in {"user", "assistant"} and item.get("content")
-        ]
-        if not messages or messages[-1] != {"role": "user", "content": text}:
-            messages.append({"role": "user", "content": text})
-
-        # Only admission-selected attachments may become model input. Conversation
-        # text (including assistant history) never authorizes a filesystem read.
-        import base64
-        from pathlib import Path
-
-        image_b64s: list[str] = []
-        seen_paths: set[str] = set()
-
-        for att in (attachments or []):
-            safe_path = att.get("safe_path")
-            mime = att.get("mime_type") or ""
-            if safe_path and (mime.startswith("image/") or Path(safe_path).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}):
-                p = Path(safe_path)
-                if p.is_file() and str(p) not in seen_paths:
-                    seen_paths.add(str(p))
-                    try:
-                        image_b64s.append(base64.b64encode(p.read_bytes()).decode("utf-8"))
-                    except Exception:
-                        pass
-        if image_b64s and messages:
-            messages[-1]["images"] = image_b64s
-            # Respect a model the operator or certification says has VISION.
-            # Fall back only when the selected model is not vision-certified.
-            if not _model_has_vision(target_model):
-                target_model = DEFAULT_OLLAMA_MODEL
-
-        payload = {
-            "model": target_model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": sys_content,
-                },
-                *messages,
-            ],
-            "stream": on_delta is not None,
-        }
-        # Ollama Cloud models (":cloud" suffix, e.g. kimi-k2.7-code:cloud)
-        # require Authorization: Bearer <key>. This call never attached one,
-        # unlike every other model path in the codebase (see
-        # external_model.py:556) — confirmed root cause of real 401s
-        # ("Ollama chat HTTP 401: {\"error\":\"Unauthorized\"}\n") on the
-        # vision-test / non-image-doc-test sessions in
-        # gateway_sessions.sqlite3. Local Ollama needs no key, so an absent
-        # one is fine (matches external_model.py's `if key else {}`).
-        ollama_headers: dict[str, str] = {}
-        ollama_key = (
-            os.environ.get("OLLAMA_API_KEY")
-            or os.environ.get("OLLAMA_CLOUD_API_KEY")
-            or os.environ.get("OLLAMA_KEY")
-        )
-        if not ollama_key:
-            try:
-                from jaeger_ai.core.entity.runtime import EntityRuntime
-                from jaeger_agent import credentials as creds
-                layout = getattr(EntityRuntime.get_singleton(), "layout", None)
-                if layout is not None:
-                    ollama_key = creds.get_credential(layout, "ollama_cloud_api_key") or None
-            except Exception:
-                ollama_key = None
-        if ollama_key:
-            ollama_headers["Authorization"] = f"Bearer {ollama_key}"
-
-        timeout = ClientTimeout(total=90)
-        if timing is not None:
-            try:
-                timing.model_start()
-            except Exception:
-                logger.debug("Model timing observer unavailable", exc_info=False)
-        async with ClientSession(timeout=timeout) as session:
-            if context_ids is not None:
-                from jaeger_agent.loop.input_outline import input_outline
-                try:
-                    self.event_bus.publish(context_ids[0], "turn.context", {
-                        "request_id": context_ids[1],
-                        "turn_id": (self.store.get_request(context_ids[1]) or {}).get("turn_id") or context_ids[1],
-                        "outline": input_outline(payload, references=context_references),
-                    })
-                except Exception:
-                    logger.debug("Model context observer unavailable", exc_info=False)
-            async with session.post(
-                f"{LOCKED_OLLAMA_URL}/api/chat", json=payload, headers=ollama_headers
-            ) as resp:
-                if resp.status >= 400:
-                    body = await resp.text()
-                    raise RuntimeError(f"Ollama chat HTTP {resp.status}: {body[:500]}")
-                if on_delta is None:
-                    body = await resp.text()
-                    data = json.loads(body)
-                else:
-                    pieces: list[str] = []
-                    data = {}
-                    finished = False
-                    async for line in resp.content:
-                        if not line.strip():
-                            continue
-                        chunk = json.loads(line)
-                        if chunk.get("error"):
-                            raise RuntimeError(f"Ollama stream failed: {str(chunk['error'])[:500]}")
-                        data.update(chunk)
-                        piece = str((chunk.get("message") or {}).get("content") or "")
-                        if piece:
-                            pieces.append(piece)
-                            on_delta(piece)
-                        if chunk.get("done") is True:
-                            finished = True
-                            break
-                    if not finished:
-                        raise RuntimeError("Ollama stream ended before confirming completion")
-                    data["message"] = {"content": "".join(pieces)}
-                    body = json.dumps(data)
-        if timing is not None:
-            try:
-                timing.model_done({
-                    "prompt_tokens": data.get("prompt_eval_count"),
-                    "completion_tokens": data.get("eval_count"),
+                logger.debug("capability inventory unavailable", exc_info=True)
+        def observe_input(payload):
+            if context_ids:
+                self.event_bus.publish(context_ids[0], "turn.context", {
+                    "request_id": context_ids[1],
+                    "turn_id": (self.store.get_request(context_ids[1]) or {}).get("turn_id") or context_ids[1],
+                    "outline": input_outline(payload, references=context_references),
                 })
-            except Exception:
-                logger.debug("Model timing observer unavailable", exc_info=False)
-        if on_model_identity is not None:
-            from jaeger_ai.core.redaction import redact_text
-            reported=data.get('model')
-            valid=isinstance(reported,str) and 0<len(reported)<=200 and re.fullmatch(r'[A-Za-z0-9._:/@+ -]+',reported) and redact_text(reported)==reported and not (ollama_key and ollama_key in reported)
-            try:on_model_identity(reported if valid else None)
-            except Exception:logger.debug('Model identity observer unavailable')
-        message = (data.get("message") or {})
-        content = str(message.get("content") or "").strip()
-        if not content:
-            raise RuntimeError(f"Ollama returned empty content: {body[:500]}")
-        return content
+        def observe_route(route):
+            if on_route:
+                on_route(route)
+            if context_ids:
+                self.event_bus.publish(context_ids[0], "model.route", {
+                    "request_id": context_ids[1], **route,
+                })
+        if timing is not None:
+            timing.model_start()
+        try:
+            return await asyncio.to_thread(
+                complete, config, runtime.layout, text, model=model, provider=provider,
+                system_prompt=system_prompt or "You are Jaeger. Reply helpfully.",
+                history=history or (), attachments=attachments or (),
+                interrupt_event=scope.event if scope else None, on_delta=on_delta,
+                on_input=observe_input, on_route=observe_route,
+                on_model_identity=on_model_identity, local_only=local_only,
+                default_client=lambda cfg: runtime.local_model_client(cfg),
+            )
+        finally:
+            if timing is not None:
+                timing.model_done({})
 
     def _turn_attachments(
         self, session_id: str, execution: dict[str, Any] | None,
@@ -5235,6 +5095,8 @@ class JaegerGatewayApp:
                     native_run_id=native,
                     model=selected_model or None,
                     provider=str(selection.get("provider") or lane or "") or None,
+                    local_only=bool(options.get("local_only")),
+                    attachments=self._turn_attachments(session_key, execution),
                     on_model=on_model,
                     on_agent=lambda agent: self._active_agents.__setitem__(request_id, agent),
                     cancellation=self._cancellations.get(request_id),
@@ -5476,8 +5338,8 @@ class JaegerGatewayApp:
                 system_prompt += "\n\n" + knowledge['text']
                 pinned_references = tuple(knowledge.get("context_references", ()))
                 self.event_bus.publish(session_id, 'agent.knowledge', {'request_id': rid, 'turn_id': turn_id, 'agent_id': agent.id, 'documents': knowledge['documents']})
-            backend = LOCKED_OLLAMA_URL
-            model = DEFAULT_OLLAMA_MODEL
+            backend = "model"
+            model = "configured"
             response_text: str | None = None
 
             text_only = (session or {}).get("metadata", {}).get("execution_mode") == "text_only"
@@ -5496,56 +5358,8 @@ class JaegerGatewayApp:
 
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
-                session_atts = self._turn_attachments(session_id, execution)
-                has_image = any(str(a.get("mime_type") or "").startswith("image/") for a in session_atts)
-                if not has_image:
-                    # The operator's request, not ``prompt``: the Entity
-                    # prefixes recalled history, and an image filename from
-                    # another session's turn sent an unrelated WebUI question
-                    # down the tool-less vision lane.
-                    import re as _re
-                    has_image = bool(_re.search(r"\.(?:png|jpg|jpeg|webp)\b", request_text, _re.IGNORECASE))
-                # A question about an image goes straight to a vision model.
-                # Anything that asks for work goes through the Entity with its
-                # tools and Authority: in an image session, "save this to a
-                # file" used to be answered "I'll create the file" by a model
-                # with no tools, and recorded as completed.
-                if has_image and not actionable and _asks_about_the_image(request_text):
-                    backend = LOCKED_OLLAMA_URL
-                    model = self._lane_model(request_text, None)
-                    current = self.store.get_session(session_id) or {}
-                    chat_fut = asyncio.run_coroutine_threadsafe(
-                        self._ollama_chat(
-                            # request_text, not prompt: prompt has been
-                            # rewritten by inline_webui_text_attachments to
-                            # say "inspect it with the vision_analyze tool",
-                            # a tool this bare _ollama_chat call never
-                            # attaches. The model spent its whole output
-                            # budget narrating a tool call it couldn't make
-                            # and returned empty content (verified against
-                            # real failures: session da59748d.../97afa8d5...,
-                            # "Ollama returned empty content", thinking cut
-                            # off mid-"I'll use visi[on_analyze]"). This path
-                            # already sends the image directly as base64 via
-                            # attachments=session_atts below, so it needs the
-                            # operator's actual question, not a tool note.
-                            request_text,
-                            model=model,
-                            system_prompt=system_prompt,
-                            history=self._history_before_admitted_user(
-                                current, admitted_request,
-                            ),
-                            attachments=session_atts,
-                            context_ids=(session_id, request_id or turn_id),
-                            context_references=context_references,
-                            on_model_identity=observed_model,
-                            timing=timing,
-                        ),
-                        loop,
-                    )
-                    txt = chat_fut.result()
-                    return {"text": txt, "status": "completed"}
-
+                # Agent turns keep their tools, including image analysis. Chat mode
+                # uses the selected adapter's direct image support below.
                 owner_first = os.environ.get("JAEGER_OWNER_REACT", "").strip() in {"1", "true", "yes"}
                 try:
                     from jaeger_ai.core.entity.ownership import EntityRuntimeMode
@@ -5583,10 +5397,12 @@ class JaegerGatewayApp:
 
             session_meta = (session.get("metadata") or {}) if isinstance(session, dict) and isinstance(session.get("metadata"), dict) else {}
             if execution is not None:
-                req_model = provider_model_name(execution.get("model") or "")
+                req_lane, req_model = split_routed_model_id(execution.get("model") or "")
             else:
-                req_model = provider_model_name(session_meta.get("model") or (session or {}).get("model") or "")
-            active_model = req_model or DEFAULT_OLLAMA_MODEL
+                req_lane, req_model = split_routed_model_id(session_meta.get("model") or (session or {}).get("model") or "")
+            active_model = req_model or None
+            active_provider = (execution or {}).get("provider") or req_lane or session_meta.get("provider")
+            local_only = bool(((execution or {}).get("options") or {}).get("local_only"))
 
             def _model_only_lane(prompt: str) -> dict[str, Any]:
                 """A plain model answer with no tools: text-only chats and specialist agents.
@@ -5597,15 +5413,18 @@ class JaegerGatewayApp:
                 do not pass through the agent loop and therefore never call tools.
                 """
                 nonlocal backend, model
-                backend = LOCKED_OLLAMA_URL
-                model = self._lane_model(request_text, active_model)
+                backend = f"model:{active_provider or 'configured'}"
+                model = active_model or "configured"
                 current = self.store.get_session(session_id) or {}
                 callbacks, finish_stream = self._turn_stream_callbacks(session_id, rid)
-                stream_options = {"on_delta": callbacks.stream_delta} if fast_lane else {}
+                def selected_route(route):
+                    nonlocal backend, model
+                    backend, model = f"model:{route['provider']}", route["model"]
+                stream_options = {"on_delta": callbacks.stream_delta, "on_route": selected_route}
                 chat_fut = asyncio.run_coroutine_threadsafe(
-                    self._ollama_chat(
+                    self._model_chat(
                         prompt,
-                        model=model,
+                        model=model, provider=active_provider, local_only=local_only,
                         system_prompt=no_tools_lane_system_prompt(system_prompt),
                         history=self._history_before_admitted_user(current, admitted_request),
                         attachments=self._turn_attachments(session_id, execution),
@@ -5869,19 +5688,6 @@ class JaegerGatewayApp:
         except Exception:
             logger.warning("voice strategy unavailable; retaining owner execution", exc_info=True)
             return False
-
-    @staticmethod
-    def _lane_model(request_text: str, requested: str | None) -> str:
-        """The Gateway's one routing decision for a direct model lane.
-
-        It is the existing router's sensitivity decision (``core/models/router.py``):
-        private text stays on the local model, public text uses the requested one.
-        Judged on what the operator wrote, not on the prompt with recalled memory.
-        """
-        from jaeger_ai.core.models.router import apply_sensitivity_routing
-
-        model, _provider, _decision = apply_sensitivity_routing(request_text, model=requested or None)
-        return provider_model_name(model or requested or DEFAULT_OLLAMA_MODEL)
 
     def _present(self, session_id: str, state: str, **fields: Any) -> None:
         """Publish ``jaeger.state``. Presence reports a turn; it never decides whether one runs."""

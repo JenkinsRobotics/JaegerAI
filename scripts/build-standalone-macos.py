@@ -42,9 +42,17 @@ def main():
     app = output / 'JaegerAI.app'
     if app.exists():
         raise SystemExit('Candidate already exists; use a new output directory')
-    ui = repo / 'jaeger_ai/interfaces/ui/dist'
-    if not (ui / 'index.html').is_file():
-        raise SystemExit('Build the production UI first')
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+    if subprocess.check_output(['git', 'status', '--porcelain'], cwd=repo):
+        raise SystemExit('Commit the tested candidate first; standalone builds require a clean source revision')
+    output.mkdir(parents=True, exist_ok=True)
+    # Build from this revision, never reuse a developer's existing dist directory.
+    run(args.dependency_python, '-B', str(repo / 'jaeger_ai/interfaces/ui/scripts/build-external.py'),
+        '--test', '--output-root', str(output / 'ui-build'))
+    ui = output / 'ui-build/dist'
+    ui_manifest = json.loads((ui / 'build.json').read_text())
+    if ui_manifest.get('mock') is not False:
+        raise SystemExit('Standalone builds require a real production UI')
     browser = args.browser_bundle.resolve()
     json.loads((browser / 'manifest.json').read_text())
     raw = subprocess.check_output([args.dependency_python, '-B', '-c',
@@ -80,7 +88,7 @@ def main():
     run(args.dependency_python, '-B', str(repo / 'scripts/bundle-macos-native.py'), str(runtime / 'python'), *[str(p.resolve()) for p in args.native_dependency_root])
     source = runtime / 'source'
     source.mkdir()
-    files = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd=repo).decode().split('\0')
+    files = subprocess.check_output(['git', 'ls-files', '-z', '--cached'], cwd=repo).decode().split('\0')
     for name in dict.fromkeys(files):
         if not name:
             continue
@@ -97,10 +105,12 @@ def main():
         shutil.rmtree(bundled_ui)
     clone(ui, bundled_ui)
     clone(browser, runtime / 'browser')
-    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
-    dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], cwd=repo))
+    if (subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip() != sha
+            or subprocess.check_output(['git', 'status', '--porcelain'], cwd=repo)):
+        raise SystemExit('Source changed during assembly; discard this candidate and rebuild')
+    dirty = False
     (source / 'build-revision').write_text(sha + '\n')
-    (runtime / 'dependency-manifest.json').write_text(json.dumps({'commit': sha, 'dirty': dirty, 'python': dependency['version'], 'distributions': dependency['packages'], 'omitted_unused_qt_sql_server_drivers': omitted}, indent=2) + '\n')
+    (runtime / 'dependency-manifest.json').write_text(json.dumps({'commit': sha, 'dirty': dirty, 'python': dependency['version'], 'distributions': dependency['packages'], 'ui': ui_manifest, 'uiFiles': {str(p.relative_to(ui)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(ui.rglob('*')) if p.is_file()}, 'omitted_unused_qt_sql_server_drivers': omitted}, indent=2) + '\n')
     launcher = runtime / 'bin/jaeger'
     launcher.parent.mkdir()
     providers = []

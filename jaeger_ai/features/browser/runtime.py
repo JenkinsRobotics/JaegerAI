@@ -58,6 +58,11 @@ class BrowserRuntime:
             if worker:
                 await worker.close()
                 del self.workers[session_id]
+            # Reap crashed workers even when the operator opens a different chat.
+            for stale_id, stale in list(self.workers.items()):
+                if stale.process.returncode is not None:
+                    await stale.close()
+                    del self.workers[stale_id]
             if len(self.workers) >= 4:
                 raise BrowserUnavailable("Four browser workspaces are open. Close one before opening another.")
             manifest_file = self.bundle / "manifest.json"

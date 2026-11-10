@@ -12,11 +12,11 @@ from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
 
 @pytest.mark.asyncio
-async def test_gateway_vision_callsite_removes_only_current_admitted_row(
+async def test_gateway_image_chat_removes_only_current_admitted_row(
     monkeypatch,
     tmp_path,
 ):
-    """The vision lane is the Gateway's one direct model callsite. The turn's
+    """Explicit Chat mode uses the shared provider adapter. The turn's
     request (with its recalled context) and the stored history must not repeat
     the admitted user row."""
     lane = "vision"
@@ -25,7 +25,7 @@ async def test_gateway_vision_callsite_removes_only_current_admitted_row(
 
     store = GatewaySessionStore(tmp_path / f"{lane}.sqlite3")
     app = JaegerGatewayApp(store=store)
-    store.ensure_session("s")
+    store.ensure_session("s", metadata={"execution_mode":"text_only"})
     # The earlier user turn is intentionally byte-for-byte identical to the
     # current one. Only the final row admitted below may be removed.
     store.append_message("s", "user", current_text, timestamp=10.0)
@@ -54,32 +54,9 @@ async def test_gateway_vision_callsite_removes_only_current_admitted_row(
     )
     captured: list[dict] = []
 
-    class Response:
-        status = 200
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def text(self):
-            return '{"message":{"content":"MODEL-OK"}}'
-
-    class Session:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        def post(self, _url, *, json, headers=None):
-            del headers
-            captured.append(std_json.loads(std_json.dumps(json)))
-            return Response()
+    async def model_chat(text, *, history, attachments, **kwargs):
+        captured.append({"messages": [*history, {"role":"user","content":text}], "attachments":attachments})
+        return "MODEL-OK"
 
     class Runtime:
         def prepare_turn(self, text, *, session_id, **_kwargs):
@@ -89,7 +66,7 @@ async def test_gateway_vision_callsite_removes_only_current_admitted_row(
         def finish_turn(self, prepared, response_text):
             pass
 
-    monkeypatch.setattr("jaeger_ai.core.gateway.server.ClientSession", Session)
+    monkeypatch.setattr(app, "_model_chat", model_chat)
     monkeypatch.setattr(app, "_resolve_session_agent", lambda _sid: None)
     monkeypatch.setattr(app, "_system_prompt_for_agent", lambda _agent: "SYSTEM")
     monkeypatch.setattr(
@@ -107,26 +84,8 @@ async def test_gateway_vision_callsite_removes_only_current_admitted_row(
     )
 
     assert len(captured) == 1
-    expected_current = {"role": "user", "content": prompt}
-    if image_bytes is not None:
-        import base64
-
-        expected_current["images"] = [base64.b64encode(image_bytes).decode("utf-8")]
-    assert captured[0]["messages"] == [
-        {"role": "system", "content": "SYSTEM"},
-        {"role": "user", "content": current_text},
-        {"role": "assistant", "content": "Earlier answer."},
-        expected_current,
-    ]
-    # Two equal strings are intentional: one historical turn and one current
-    # prompt. A third would be the duplicate admitted tail-row regression.
-    if prompt == current_text:
-        assert sum(
-            row.get("content") == current_text
-            for row in captured[0]["messages"]
-        ) == 2
-    else:
-        assert prompt.count(current_text) == 1
+    assert [row['content'] for row in captured[0]['messages']] == [current_text, 'Earlier answer.', prompt]
+    assert captured[0]['attachments'][0]['attachment_id'] == 'att_image'
 
 
 def test_history_projection_does_not_drop_an_unadmitted_tail(tmp_path):
