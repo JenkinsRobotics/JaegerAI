@@ -13,9 +13,24 @@ only asks the other CLI to produce text. (Handing a whole job to another agent i
 | `discovery.py` | Looks along `PATH` for known CLIs and reports which are installed. |
 | `service.py` | Runs the chosen CLI as a model and returns its answer. |
 
-**Turn it on:** install a supported CLI. It appears in the model list by itself.
+**Turn it on:** install a supported CLI and sign in the way that CLI expects
+(browser / subscription login — not Jaeger API keys). It appears in the model
+list by itself.
+
+Supported subscription-style brains today:
+
+| CLI | Binary | Auth |
+| :--- | :--- | :--- |
+| Claude Code | `claude` | `claude` → `/login` |
+| OpenAI Codex / ChatGPT | `codex` | `codex login` (ChatGPT subscription) |
+| Grok | `grok` | Grok account / key the CLI already uses |
+| Gemini CLI | `gemini` | browser Google sign-in under `~/.gemini` |
+| Antigravity | `agy` | browser Google sign-in / OS keyring |
+| Hermes | `hermes` | whatever that CLI is already signed into |
 
 **Check it works:** open the model picker — a discovered CLI is listed there.
+Pick `cli:agy` (or `cli:gemini` / `cli:codex`) to burn your existing
+subscription quota instead of a separate API key.
 
 ---
 

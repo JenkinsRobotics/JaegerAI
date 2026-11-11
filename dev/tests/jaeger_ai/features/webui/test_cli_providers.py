@@ -107,12 +107,12 @@ def test_settings_enable_and_models(cli, monkeypatch, tmp_path):
     assert row["state"] == "not-installed" and row["enabled"] is False
 
 
-# ── VS Code Copilot bridge ──
+# ── IDE host LM bridge ──
 import http.server
 import threading
 
 
-def _fake_bridge(token, consent="granted", models=("gpt-5.6-luna",), lines=None):
+def _fake_bridge(token, consent="granted", models=("gpt-5.6-luna",), lines=None, host="Visual Studio Code"):
     class H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -125,26 +125,26 @@ def _fake_bridge(token, consent="granted", models=("gpt-5.6-luna",), lines=None)
             if self.headers.get("Authorization") != f"Bearer {token}":
                 return self._json(401, {"error": "unauthorized"})
             if self.path == "/health":
-                return self._json(200, {"ok": True, "vscode": "1.143.0", "consent": consent})
+                return self._json(200, {"ok": True, "vscode": host, "host": host, "consent": consent})
             return self._json(200, {"models": [{"id": m, "name": m.upper(), "max_input_tokens": 128000} for m in models]})
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0); body = json.loads(self.rfile.read(n))
             self.send_response(200); self.send_header("Content-Type", "application/x-ndjson"); self.end_headers()
-            for ev in (lines or [{"type": "start"}, {"type": "delta", "text": f"hi from {body['model']}"}, {"type": "done", "elapsed_s": 1.2, "ttft_s": 0.4, "eval_count": 4, "prompt_eval_count": 2, "tokens_per_s": 5.0}]):
+            for ev in (lines or [{"type": "start"}, {"type": "delta", "text": f"hi from {body['model']}"}, {"type": "done", "elapsed_s": 1.2, "ttft_s": 0.4, "eval_count": 4, "prompt_eval_count": 2, "tokens_per_s": 5.0, "source": host}]):
                 self.wfile.write((json.dumps(ev) + "\n").encode())
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
 
-def _vs_home(cli, tmp_path, monkeypatch, port=None, token="t" * 64, pid=None):
+def _vs_home(cli, tmp_path, monkeypatch, port=None, token="t" * 64, pid=None, module="host-lm-bridge.js", ext_root=".vscode/extensions"):
     monkeypatch.setattr(cli, "HOME", tmp_path)
-    ext = tmp_path / ".vscode/extensions/jenkins-robotics.jaeger-ide-0.3.0"
-    ext.mkdir(parents=True); (ext / "copilot-bridge.js").write_text("//")
+    ext = tmp_path / ext_root / "jenkins-robotics.jaeger-ide-0.4.2"
+    ext.mkdir(parents=True); (ext / module).write_text("//")
     if port:
         run = tmp_path / ".jaeger/run"; run.mkdir(parents=True)
-        (run / "vscode-bridge.json").write_text(json.dumps({"port": port, "token": token, "pid": pid or __import__("os").getpid()}))
+        (run / "vscode-bridge.json").write_text(json.dumps({"port": port, "token": token, "pid": pid or __import__("os").getpid(), "host": "Visual Studio Code"}))
 
 
 def test_vscode_states_without_bridge(cli, tmp_path, monkeypatch):
@@ -152,12 +152,23 @@ def test_vscode_states_without_bridge(cli, tmp_path, monkeypatch):
     assert cli._vscode_row()["bridge"] == "not-installed"
     _vs_home(cli, tmp_path, monkeypatch)
     row = cli._vscode_row()
-    assert row["installed"] and row["bridge"] == "not-running" and "VS Code not running" in row["status_note"]
+    assert row["installed"] and row["bridge"] == "not-running" and "IDE not running" in row["status_note"]
 
 
 def test_vscode_stale_bridge_file_is_not_running(cli, tmp_path, monkeypatch):
     _vs_home(cli, tmp_path, monkeypatch, port=1, pid=999999)
     assert cli._vscode_row()["bridge"] == "not-running"
+
+
+def test_legacy_copilot_bridge_module_still_counts_as_installed(cli, tmp_path, monkeypatch):
+    _vs_home(cli, tmp_path, monkeypatch, module="copilot-bridge.js")
+    row = cli._vscode_row()
+    assert row["installed"] and row["bridge"] == "not-running"
+
+
+def test_antigravity_extension_root_is_detected(cli, tmp_path, monkeypatch):
+    _vs_home(cli, tmp_path, monkeypatch, ext_root=".antigravity/extensions")
+    assert cli._bridge_installed() is True
 
 
 def test_vscode_ready_lists_copilot_models_and_never_returns_the_token(cli, tmp_path, monkeypatch):
@@ -169,10 +180,12 @@ def test_vscode_ready_lists_copilot_models_and_never_returns_the_token(cli, tmp_
         rows = cli.detect(refresh=True)
         row = next(r for r in rows if r["id"] == "vscode")
         assert row["state"] == "ready" and [m["id"] for m in row["models"]] == ["gpt-5.6-luna"]
+        assert row["label"] == "IDE Host Models"
         assert token not in json.dumps(rows)
         evs = list(cli.stream("vscode", "gpt-5.6-luna", "hello"))
         assert [e["type"] for e in evs] == ["start", "delta", "done"]
         assert evs[1]["text"] == "hi from gpt-5.6-luna" and evs[-1]["eval_count"] == 4 and evs[-1]["model"] == "cli:vscode:gpt-5.6-luna"
+        assert evs[-1]["source"] == "Visual Studio Code"
     finally:
         srv.shutdown()
 
@@ -184,8 +197,9 @@ def test_vscode_consent_and_errors(cli, tmp_path, monkeypatch):
         _vs_home(cli, tmp_path, monkeypatch, port=srv.server_address[1], token=token)
         monkeypatch.setattr(cli, "SPECS", {})
         row = next(r for r in cli.detect(refresh=True) if r["id"] == "vscode")
-        assert row["state"] == "needs-consent" and "Allow Copilot for Jaeger" in row["status_note"]
-        assert list(cli._vscode_stream(row, "gpt-5.6-luna", "hi"))[-1] == {"type": "error", "error": "Copilot: Run Allow"}
+        assert row["state"] == "needs-consent" and "Allow Host Models for Jaeger" in row["status_note"]
+        assert "Allow Copilot for Jaeger" in row["status_note"]
+        assert list(cli._vscode_stream(row, "gpt-5.6-luna", "hi"))[-1] == {"type": "error", "error": "Host model: Run Allow"}
     finally:
         srv.shutdown()
 

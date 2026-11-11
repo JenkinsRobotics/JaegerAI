@@ -2,7 +2,9 @@
 
 Owns the lifecycle of all Jaeger host services via launchd in ``~/.jaeger/launchd/``:
 - No unmanaged plists in ``~/Library/LaunchAgents`` (so macOS never auto-starts services at login).
-- The Mac menu-bar app is the sovereign owner: app up -> stack up; app quit -> stack down.
+- launchd owns managed service lifetime. The Mac app / CLI can start and stop the stack, but
+  quitting the app must not tear Gateway down: plists set ``JAEGER_LIFECYCLE_OWNER=launchd`` so
+  client (menu-bar) leases are ignored while ppid is launchd (see lifecycle_lease.py).
 - Automatic shutdown boots out Jaeger's launchd labels and signals only the PIDs those jobs reported, plus descendants snapshotted from those PIDs. It does not kill by process name or by whoever happens to hold a port.
 - Verification: reset and health checks run real synthetic test turns through the Gateway.
 - Code freshness: tracks running process commit vs repo HEAD to flag stale code.

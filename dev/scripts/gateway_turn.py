@@ -51,11 +51,19 @@ def stream(base, session_id, deadline):
                 return
 
 
-def run_turn(gateway, prompt, workspace, *, model="", provider="", timeout=600, auto_approve=False):
+def run_turn(gateway, prompt, workspace, *, session="", model="", provider="", timeout=600, auto_approve=False):
     """One admitted turn, followed to its terminal event. Returns the summary dict."""
-    sid = uuid.uuid4().hex
-    call(gateway, "POST", "/v1/sessions",
-         {"session_id": sid, "title": "gateway_turn", "workspace": workspace, "source": "ide"})
+    if session:
+        sid = session
+        try:
+            call(gateway, "GET", f"/v1/sessions/{sid}")
+        except Exception:
+            call(gateway, "POST", "/v1/sessions",
+                 {"session_id": sid, "title": "gateway_turn", "workspace": workspace, "source": "ide"})
+    else:
+        sid = uuid.uuid4().hex
+        call(gateway, "POST", "/v1/sessions",
+             {"session_id": sid, "title": "gateway_turn", "workspace": workspace, "source": "ide"})
     rid = uuid.uuid4().hex
     body = {"text": prompt, "request_id": rid}
     if model:
@@ -102,14 +110,16 @@ def main() -> int:
     ap.add_argument("prompt")
     ap.add_argument("--gateway", default="http://127.0.0.1:18810")
     ap.add_argument("--workspace", required=True)
+    ap.add_argument("--session", default="", help="reuse an existing session id for multi-turn")
     ap.add_argument("--model", default="")
     ap.add_argument("--provider", default="")
     ap.add_argument("--timeout", type=float, default=600)
     ap.add_argument("--auto-approve", action="store_true")
     ap.add_argument("--json", action="store_true", help="print one JSON summary line")
     args = ap.parse_args()
-    summary = run_turn(args.gateway, args.prompt, args.workspace, model=args.model,
-                       provider=args.provider, timeout=args.timeout, auto_approve=args.auto_approve)
+    summary = run_turn(args.gateway, args.prompt, args.workspace, session=args.session,
+                       model=args.model, provider=args.provider, timeout=args.timeout,
+                       auto_approve=args.auto_approve)
     print(json.dumps(summary) if args.json else json.dumps(summary, indent=2))
     return 0 if summary["terminal"] == "turn.finish" else 1
 

@@ -18,12 +18,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import pathlib
 import sys
 import time
-from dataclasses import dataclass, field
 from typing import Any
 
 # Ensure repo root is on sys.path
@@ -33,8 +31,6 @@ if str(_REPO) not in sys.path:
 os.chdir(_REPO)
 
 from jaeger_ai.core.bench.cases import BenchCase
-from jaeger_ai.core.bench.scenarios import build_hermetic_instance
-from jaeger_ai.core.instance.instance import resolve_instance_dir
 
 
 MASTER_CASES: list[BenchCase] = [
@@ -228,11 +224,14 @@ def run_master_eval(
     verbose: bool = True,
 ) -> dict[str, Any]:
     """Execute the master agentic benchmark and return performance telemetry."""
-    from jaeger_ai.core.bench.scenarios import build_hermetic_instance
+    from jaeger_ai.contract.legacy_paths import LEGACY_PATHS_ENV
     from dev.benchmark.bench import _prepared_config
     from jaeger_ai.main import boot_for_tui, _run_turn
 
-    live_dir = pathlib.Path(resolve_instance_dir(None))
+    # In-process bench uses _run_turn (isolated by default). Opt in for this
+    # hermetic offline runner only — production stays Gateway-only.
+    os.environ[LEGACY_PATHS_ENV] = "1"
+
     results: list[dict[str, Any]] = []
     category_stats: dict[str, dict[str, int]] = {}
 

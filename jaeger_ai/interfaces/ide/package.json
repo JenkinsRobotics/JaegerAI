@@ -2,7 +2,7 @@
   "name": "jaeger-ide",
   "displayName": "Jaeger",
   "description": "The built-in Jaeger Desktop agent and thin IDE controller for the Jaeger Gateway.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "jenkins-robotics",
   "icon": "media/jaeger.png",
   "engines": {
@@ -33,6 +33,7 @@
     "THIRD_PARTY_NOTICES.md",
     "native-turn.js",
     "language-model-provider.js",
+    "host-lm-bridge.js",
     "build.json",
     "chat-panel.js"
   ],
@@ -122,6 +123,14 @@
       {
         "command": "jaeger.selectModel",
         "title": "Jaeger: Select Model"
+      },
+      {
+        "command": "jaeger.allowHostModels",
+        "title": "Jaeger: Allow Host Models for Jaeger"
+      },
+      {
+        "command": "jaeger.allowCopilotForJaeger",
+        "title": "Jaeger: Allow Copilot for Jaeger"
       }
     ],
     "viewsContainers": {

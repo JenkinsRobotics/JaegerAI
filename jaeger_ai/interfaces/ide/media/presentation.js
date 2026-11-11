@@ -245,6 +245,7 @@ function groupSelectableModels(rows) {
     let key = row.provider || 'Other';
     if (key === 'ollama-cloud') key = 'Ollama Cloud';
     else if (key === 'ollama') key = 'Ollama';
+    else if (key === 'xai') key = 'xAI Grok';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   }

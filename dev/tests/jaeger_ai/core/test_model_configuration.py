@@ -226,3 +226,23 @@ def test_restored_onboarding_identity_and_calibration_are_saved(tmp_path):
     assert saved["voice_profile"] == "male"
     assert saved["interaction_posture"] == "pragmatic"
     assert load_yaml(layout.config_path, Config).kokoro_tts.voice == "am_michael"
+
+
+def test_fallback_configuration_preserves_explicit_model_controls(tmp_path):
+    from jaeger_ai.core.models.configuration import configure_fallback_chain
+    layout = _layout(tmp_path)
+    configure_fallback_chain(layout, [{
+        'provider':'ollama', 'model':'qwen3-vl:8b', 'ctx':8192,
+        'max_tokens':1536, 'timeout_s':180, 'reasoning_effort':'none'}])
+    row = load_yaml(layout.config_path, Config).external_model.fallback[0]
+    assert (row.ctx, row.max_tokens, row.timeout_s, row.reasoning_effort) == (8192,1536,180,'none')
+
+
+def test_fallback_configuration_rejects_unknown_settings_atomically(tmp_path):
+    import pytest
+    from jaeger_ai.core.models.configuration import configure_fallback_chain
+    layout = _layout(tmp_path)
+    before = layout.config_path.read_bytes()
+    with pytest.raises(ValueError):
+        configure_fallback_chain(layout, [{'provider':'ollama','model':'qwen3-vl:8b','made_up_control':True}])
+    assert layout.config_path.read_bytes() == before
