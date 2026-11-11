@@ -46,7 +46,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-ai"
-description = "A general-purpose AI assistant platform with local and hosted models, tools, skills, memory, automation, delegation, and native chat, web, terminal, and voice interfaces."
+description = "Jaeger: an AI assistant product built on its own model-agnostic agent framework"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dynamic = ["version", "dependencies"]
