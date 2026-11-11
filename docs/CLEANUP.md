@@ -46,3 +46,17 @@ Total removed from the active docs tree: about 760,000 bytes across 8 files.
 6. Git commit the whole 2026-10-22 change set from Terminal, with a new git-add list that includes the new module folders and docs edits, and excludes all Desktop folders.
 
 When those six are done, and only then, can anyone honestly claim JaegerAI runs with the new modules wired in. Until then, the honest status is: docs clean, junk out, modules defined and preserved, runtime still on clean jaeger-agent + existing interfaces, NOT yet wired or tested.
+
+## 2026-11-11 — one source of truth
+
+Folder-by-folder pass: every tracked file that no running code, build, install
+step, launchd service or test needs (release records, ADRs, migration notes,
+integration catalogs, plans/reviews/handoffs, dated benchmark output, folder
+READMEs outside `jaeger_ai/features/`, package doc-site pages, the duplicate UI
+`DESIGN.md`, the unused `dev/scripts/run_tests_v2.sh`) was copied to
+`~/Desktop/JaegerAI-repo-cleanup-2026-11-11/` (same relative paths, see its
+`MANIFEST.md`) and removed with `git rm`. Untracked junk (`.DS_Store`,
+`__pycache__/`, `*.egg-info/`, `macos-shell/.build/`) went to that folder's
+`untracked-junk/`. Kept: everything code, tests or packaging reference, feature
+READMEs (enforced by `test_repo_structure.py`), and the docs the contributor
+tests require. Git history still has every removed file.

@@ -1,4 +1,4 @@
-> Current frontend: `interfaces/ui`, hosted by `interfaces/macos-shell` or browser. Old Hermes static app/overlays are archived outside the repo. This directory retains backend API/proxy and login support only; missing shared UI builds fail explicitly. See `docs/integration/SCOPED_CLEANUP.md`. Historical frontend statements below are superseded.
+> Current frontend: `interfaces/ui`, hosted by `interfaces/macos-shell` or browser. Old Hermes static app/overlays are archived outside the repo. This directory retains backend API/proxy and login support only; missing shared UI builds fail explicitly. Historical frontend statements below are superseded.
 
 # Jaeger WebUI
 

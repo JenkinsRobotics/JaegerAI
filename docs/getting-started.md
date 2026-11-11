@@ -173,7 +173,7 @@ I prefer concise, technical answers.
 """
 ```
 
-See [docs/migration/OPERATOR_CONFIG.md](migration/OPERATOR_CONFIG.md) for all options.
+See docs/migration/OPERATOR_CONFIG.md for all options.
 
 ---
 
@@ -242,9 +242,9 @@ lsof -i :8790                    # See what's using the port
 
 ## Next Steps
 
-- **[Configure your operator profile](migration/OPERATOR_CONFIG.md)** — Customize how the agent addresses you
-- **[Set up YouTube Studio](migration/YOUTUBE_STUDIO_CONFIG.md)** — Automate video content
-- **[Explore commands](COMMANDS.md)** — Full CLI reference
+- **Configure your operator profile** — Customize how the agent addresses you
+- **Set up YouTube Studio** — Automate video content
+- **Explore commands** — Full CLI reference
 - **[Understand the architecture](architecture/ARCHITECTURE.md)** — How JaegerAI works
 - **[Security & trust model](TRUST.md)** — What stays on your device
 - **[Join the community](#community)** — Get help and share your setup

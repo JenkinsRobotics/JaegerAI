@@ -114,7 +114,7 @@ checks. IDs make retries durable; changed content with the same ID returns 409.
 
 Root bridge sessions are pinned to the existing lead, so keyword triage cannot
 silently switch the goal to a specialist with a smaller catalog.
-[OWNER_PATH_ACCEPTANCE.md](OWNER_PATH_ACCEPTANCE.md) records the actual isolated
+OWNER_PATH_ACCEPTANCE.md records the actual isolated
 Gateway → EntityRuntime OWNER → approval → native write/readback proof.
 
 The grant comes from the lead's existing native-file catalog, limited to tools
@@ -137,7 +137,7 @@ cancels matching pending/running handoffs and closes child approvals. Handoff
 approval never waives per-tool approvals. Only the owner can approve either.
 
 The seven-file grant is not claimed to be the lead's full normal catalog.
-[FOLLOWUP_INTEGRATION.md](FOLLOWUP_INTEGRATION.md) identifies the exact remaining
+FOLLOWUP_INTEGRATION.md identifies the exact remaining
 catalog/policy contracts and concrete REA qualification result.
 
 The existing 27772caf write/exec card behavior is preserved. Writes can wait for
@@ -155,7 +155,7 @@ failed and running states remain explicit. A real file effect and independently
 verified task completion are different claims.
 
 All nonempty `rea_tools` grants remain blocked: unknown/mutating names return
-403, known names return 501 before admission. [PHASE2_REA.md](PHASE2_REA.md)
+403, known names return 501 before admission. PHASE2_REA.md
 lists the precise unsupported set and prerequisite; no shared live REA process
 or Hopper context is used.
 
@@ -183,7 +183,7 @@ or Hopper context is used.
    a separate prerequisite. No webhook, email fallback or A2A setup is performed.
 
 Validation details and exact commands are recorded in
-[PHASE2_VALIDATION.md](PHASE2_VALIDATION.md). Earlier `REVIEW*` documents describe
+PHASE2_VALIDATION.md. Earlier `REVIEW*` documents describe
 Phase 1 snapshots and are retained as history.
 
 ## Correlated peer responses (schema 15)

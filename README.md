@@ -230,7 +230,7 @@ jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh`; output is
 This is currently a development bundle; production installation is deferred.
 No old SwiftUI app is selected as a fallback. Archived implementations and remaining runtime
 the recoverable Desktop archive are documented in
-[scoped cleanup](docs/integration/SCOPED_CLEANUP.md).
+scoped cleanup.
 
 The supported install is the repository installer above (or the one-line
 installer in [`scripts/install.sh`](scripts/install.sh)). It creates an
@@ -477,7 +477,7 @@ JaegerAI is an open-source project. We'd love to have you join us!
 
 ### Getting Help
 
-1. **Check the docs** — [Getting Started](docs/getting-started.md), [Commands](docs/COMMANDS.md), [Troubleshooting](docs/OPERATIONS.md)
+1. **Check the docs** — [Getting Started](docs/getting-started.md), Commands, Troubleshooting
 2. **Run diagnostics** — `./jaeger doctor` checks your setup
 3. **Search existing issues** — Your question might already be answered
 4. **Ask in Discussions** — For usage questions and community help

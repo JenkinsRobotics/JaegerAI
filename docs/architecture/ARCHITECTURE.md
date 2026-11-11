@@ -78,7 +78,7 @@ PERSISTENT ENTITY RUNTIME   EntityRuntime (OWNER, resident=true)
 | Canonical WorkState lifecycle | **IMPLEMENTED** (module) | `jaeger_ai.core.runtime.lifecycle` + `test_execution_lifecycle.py` | jaeger-agent RunStore mapped; residual Gateway helpers remain |
 | Control-plane vs runtime split | **IMPLEMENTED** (partial) | `run_subordinate_react` + `test_control_plane_consolidation.py` | Historical `_native_lead_turn` / `_sync_react` still in `server.py` |
 | Typed contracts | **IMPLEMENTED** (schemas) | `jaeger_ai.contract.schemas` | Not every wire frame validates yet |
-| State ownership map | **IMPLEMENTED** (doc + coordinator) | [STATE_OWNERSHIP_MAP.md](STATE_OWNERSHIP_MAP.md) | Duplicate files may still exist; owner is the map |
+| State ownership map | **IMPLEMENTED** (doc + coordinator) | STATE_OWNERSHIP_MAP.md | Duplicate files may still exist; owner is the map |
 | ContextCompiler | **IMPLEMENTED** (EntityRuntime) | `execute_turn` constructs compiler | Budget/provenance unit-tested |
 | World-state / semantic knowledge | **IMPLEMENTED** (partial) | `jaeger_ai.core.world` + SemanticMemory | Observation ≠ claim ≠ fact in the new store; older WorldModel code still exists |
 | PolicyKernel | **IMPLEMENTED** | AuthorityLayer → kernel first | Fail-closed on kernel exception; some legacy policies still fail-open on import error |
@@ -148,7 +148,7 @@ Prompt context is not the persistence layer. Provider swap must not rewrite iden
 
 ## 7. State ownership (summary)
 
-See [STATE_OWNERSHIP_MAP.md](STATE_OWNERSHIP_MAP.md).
+See STATE_OWNERSHIP_MAP.md.
 
 | Fact | Authoritative owner |
 | :--- | :--- |

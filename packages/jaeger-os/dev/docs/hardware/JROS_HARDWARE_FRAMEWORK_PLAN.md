@@ -4,7 +4,7 @@
 **Status:** PLAN — nothing in this document is implemented. Every
 path under `jaeger_os/hardware/` is `PROPOSED`. Implementation is
 gated on operator approval (brief §12.2).
-**Brief:** [`JROS_HARDWARE_INTEGRATION_BRIEF.md`](JROS_HARDWARE_INTEGRATION_BRIEF.md)
+**Brief:** `JROS_HARDWARE_INTEGRATION_BRIEF.md`
 **Sibling:** [`JROS_DAEMON_ARCH_BRIEF.md`](JROS_DAEMON_ARCH_BRIEF.md)
 (Tier 1–4 model assumed, not redesigned here)
 **Repos read:** `/Users/jonathanjenkins/GITHUB/JROS` (working tree),
