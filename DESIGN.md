@@ -1,6 +1,6 @@
 # DESIGN.md: Jaeger
 
-The format follows [awesome-design-md](https://github.com/VoltAgent/awesome-design-md). Written 2026-10-31 from the live unified UI code (`jaeger_ai/interfaces/ui/src/shell/tokens.jaeger.css`, `src/unified/design.css`, `src/unified/ui.tsx`, `ui/DESIGN.md`) and the approved Design & Style specs (`~/Documents/Jaeger-Design-Specs/`: `family/RESPONSIVE-SYSTEM.md`, `SPEC-00-shared-tokens.md`, `tabs/*`, `tabs/widgets/WIDGETS-SPEC.md`). Where this file and an approved tab spec disagree, the tab spec wins. Agents must read this file before any UI work.
+The format follows [awesome-design-md](https://github.com/VoltAgent/awesome-design-md). Written 2026-10-31 from the live unified UI code (`jaeger_ai/interfaces/ui/src/shell/tokens.jaeger.css`, `src/unified/design.css`, `src/unified/ui.tsx`) and the approved Design & Style specs (`~/Documents/Jaeger-Design-Specs/`: `family/RESPONSIVE-SYSTEM.md`, `SPEC-00-shared-tokens.md`, `tabs/*`, `tabs/widgets/WIDGETS-SPEC.md`). Where this file and an approved tab spec disagree, the tab spec wins. Agents must read this file before any UI work.
 
 ## 1. Visual theme and atmosphere
 A quiet, native-feeling Apple workspace for running agents: calm neutral surfaces, one blue accent, translucent "materials" for chrome, and dense but readable information. It should feel like a macOS app (Finder/Xcode/Settings) and the Grok/ChatGPT desktop apps, not a marketing site. Live data only: no fake numbers or placeholder content. When a backend is missing, show a disabled control with a setup note.
@@ -85,3 +85,18 @@ Don't: hard-code hex or px outside the token files, add new greys or fonts, use 
 
 ## 11. Agent prompt guide
 "Build this in Jaeger's design system: read DESIGN.md, use `--jg-*` tokens and `src/unified/ui.tsx` primitives, system font, the in-repo icon set, the 8pt spacing and radius scale, and container-query size classes. Give it loading, empty and error states. Verify at 390/412/1024/1440 in light and dark with Playwright and axe, then run the `ux-audit` skill." Pair with the `frontend-design` and `ui-ux-pro-max` skills for direction, but **this file overrides them** where they conflict (for example, no Tailwind and no new fonts).
+
+## References
+
+Merged 2026-11-11 from the former `jaeger_ai/interfaces/ui/DESIGN.md`; this file is the single design authority.
+
+- Apple Human Interface Guidelines — Layout, Typography, Materials, Color/Accessibility, Motion
+  (developer.apple.com/design/human-interface-guidelines). Source of the macOS text-style scale,
+  vibrancy materials for chrome (dock, tab bar, popovers, sheets), Control Center tile pattern,
+  and "reduce motion" behaviour.
+- Refactoring UI principles (Wathan & Schoger): limited spacing and type scales, hierarchy by
+  weight and colour rather than size alone, fewer borders, empty states as design surfaces.
+- Radix UI / shadcn/ui patterns (github.com/radix-ui, github.com/shadcn-ui/ui): segmented control as
+  a `radiogroup` with roving tabindex and arrow keys, modal sheet with focus capture + Escape,
+  toasts in a polite live region. Patterns only; no code copied.
+- WCAG 2.2 AA: 4.5:1 body text (text tiers ≥ 54% foreground on our surfaces), visible focus.

@@ -134,7 +134,7 @@ module-level import of an agent/Mind-owned prefix — empty allowlist by
 design. See
 [`dev/docs/vision/THREE_TIER_STRUCTURE.md`](dev/docs/vision/THREE_TIER_STRUCTURE.md)
 for the full reasoning and
-[`dev/docs/vision/JAEGER_ECOSYSTEM.md`](dev/docs/vision/JAEGER_ECOSYSTEM.md)
+`dev/docs/vision/JAEGER_ECOSYSTEM.md`
 for the whole-ecosystem rundown (module inventory, the connection rule,
 the roadmap ladder).
 
@@ -162,7 +162,7 @@ pytest dev/tests           # the framework's own test suite (279 passed, 0 faile
 ruff check                 # lint
 ```
 
-Follow [`CONVENTIONS.md`](CONVENTIONS.md) — no doc describes behavior
+Follow `CONVENTIONS.md` — no doc describes behavior
 the code doesn't implement yet (mark it `(planned)` instead), and every
 commit that changes behavior keeps its `STATUS.md`/docs truthful in the
 same commit.

@@ -1,6 +1,6 @@
 # voice — speak to the resident Entity
 
-For the persistent Stream Deck voice/video controls, see [Droid conversation](CONVERSATION.md).
+For the persistent Stream Deck voice/video controls, see Droid conversation.
 
 ```text
 microphone → speech detection → STT        stt slot: jaeger-whisper-stt (whisper.cpp)

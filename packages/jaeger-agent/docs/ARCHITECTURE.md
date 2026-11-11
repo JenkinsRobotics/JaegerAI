@@ -10,10 +10,10 @@ Companion docs live beside this one:
 
 | Area | Doc |
 | --- | --- |
-| One turn, end to end | [`pipelines/agent_turn_pipeline.md`](pipelines/agent_turn_pipeline.md) |
+| One turn, end to end | `pipelines/agent_turn_pipeline.md` |
 | Context window management | [`core/context_guard.md`](core/context_guard.md) |
 | The public runtime contract | [`core/agent_contract.md`](core/agent_contract.md) |
-| Dynamic tool surface (and why it is off) | [`core/toolset_scoping_ab.md`](core/toolset_scoping_ab.md) |
+| Dynamic tool surface (and why it is off) | `core/toolset_scoping_ab.md` |
 | Skill format and lifecycle | [`skills/skill_schema_v3.md`](skills/skill_schema_v3.md) |
 | Station 3 / the voice pipeline | [`skills/agentic_runners.md`](skills/agentic_runners.md) |
 
@@ -236,7 +236,7 @@ never takes the meta-step at all.
 
 This is the house discipline, and it recurs: build it, benchmark it, and
 if it is not a win, **flag it off rather than ship it**. The same
-happened to the native chat handler ([`core/native_handler_ab.md`](core/native_handler_ab.md)).
+happened to the native chat handler (`core/native_handler_ab.md`).
 
 ### Permission tiers
 
@@ -281,8 +281,8 @@ care about.
 
 Skills are also the self-improvement seam: `reload_skills()` re-scans
 after the agent authors a new one. See
-[`pipelines/skill_discovery_pipeline.md`](pipelines/skill_discovery_pipeline.md)
-and [`pipelines/skill_self_improvement_pipeline.md`](pipelines/skill_self_improvement_pipeline.md).
+`pipelines/skill_discovery_pipeline.md`
+and `pipelines/skill_self_improvement_pipeline.md`.
 
 ---
 
@@ -531,9 +531,9 @@ anything.
 ## 8. Reading order
 
 New to the module: §2, then
-[`pipelines/agent_turn_pipeline.md`](pipelines/agent_turn_pipeline.md).
+`pipelines/agent_turn_pipeline.md`.
 
-Changing routing or tools: [`core/toolset_scoping_ab.md`](core/toolset_scoping_ab.md)
+Changing routing or tools: `core/toolset_scoping_ab.md`
 first — it will save you from re-running a refuted experiment.
 
 Changing the context guard: [`core/context_guard.md`](core/context_guard.md),

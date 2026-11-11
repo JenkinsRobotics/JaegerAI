@@ -175,7 +175,7 @@ native input recovery happens outside the node tick so a wedged OS audio call
 cannot stop health heartbeats.
 
 The release gates and per-mode support matrix are maintained in
-[`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
+`docs/PRODUCTION_READINESS.md`.
 
 Complete JaegerOS demos live in `JaegerOS Demos/whisper stt`: offline files,
 benchmarks, live/streaming captions, keywords, wake-command routing, bounded
