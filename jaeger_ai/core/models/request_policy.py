@@ -116,6 +116,24 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
         ext.temperature = ext.top_p = None
         ext.verbosity = ext.thinking_budget_tokens = None
         ext.first_progress_timeout_s = None
+        # A declared alternative is also a configured selectable model. Keep
+        # its own controls when the user selects it directly, just as on fallback.
+        for alternative in config.external_model.fallback:
+            if normalize_ollama_provider(alternative.provider) != owner or alternative.model != name:
+                continue
+            for key in ("ctx", "reasoning_effort", "temperature", "top_p", "verbosity",
+                        "thinking_budget_tokens", "first_progress_timeout_s"):
+                setattr(ext, key, getattr(alternative, key))
+            for key in ("max_tokens", "timeout_s"):
+                value = getattr(alternative, key)
+                if value is not None:
+                    setattr(ext, key, value)
+            if alternative.base_url:
+                if alternative.base_url != ext.base_url:
+                    ext.api_key_credential = _CREDENTIALS.get(owner, "")
+                    ext.api_key_env = ""
+                ext.base_url = alternative.base_url
+            break
     ext.enabled, ext.provider, ext.model = True, owner, name
     client = ExternalModelClient(ext, layout)
     client.selected_lane = selected_lane

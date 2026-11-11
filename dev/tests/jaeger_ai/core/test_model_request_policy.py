@@ -187,3 +187,17 @@ def test_model_switch_resets_incompatible_controls(configured,adapter):
     assert c.ext.max_tokens == 1024
     unchanged=select_request_client(configured,None,model='grok',provider='cli')
     assert unchanged.ext.max_tokens == 32768
+
+
+def test_selected_configured_alternative_uses_its_own_controls(configured, adapter):
+    from jaeger_ai.core.instance.schemas import FallbackModel
+    configured.external_model.fallback = [FallbackModel(
+        provider='ollama', model='qwen3-vl:8b', base_url='http://127.0.0.1:11434/v1',
+        ctx=8192, max_tokens=1536, timeout_s=180, reasoning_effort='none')]
+    client = select_request_client(configured, None, model='qwen3-vl:8b', provider='ollama')
+    assert client.ext.ctx == 8192
+    assert client.ext.max_tokens == 1536
+    assert client.ext.reasoning_effort == 'none'
+    assert client.ext.timeout_s == 180
+    assert client.ext.base_url == 'http://127.0.0.1:11434/v1'
+    assert configured.external_model.model == 'grok'

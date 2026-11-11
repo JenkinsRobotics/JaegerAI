@@ -29,6 +29,7 @@ const {
   JaegerSidebarProvider,
 } = require('./controller');
 const { registerJaegerLanguageModelProvider } = require('./language-model-provider');
+const { registerHostLmBridge } = require('./host-lm-bridge');
 const chatPanel = require('./chat-panel');
 
 // Commands the controller below registers itself. The chat panel owns the rest:
@@ -63,6 +64,10 @@ function activate(context) {
 
   // Make the Gateway a first-class native model for Jaeger Desktop's built-in chat.
   registerJaegerLanguageModelProvider(vscode, context, gateway, output);
+
+  // Loopback bridge so Gateway can use this host's signed-in subscription
+  // models (Antigravity / Copilot / ChatGPT panels) without API keys.
+  registerHostLmBridge(vscode, context, output);
 
   // Create controller
   controller = new JaegerController(context, gateway);

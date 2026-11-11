@@ -64,7 +64,8 @@ function modelInformation() {
 function providerLabel(provider, providerId) {
   if (providerId === 'ollama-cloud') return 'Ollama Cloud';
   if (providerId === 'cli') return 'CLI Runtime';
-  const value = String(provider?.display_name || provider?.displayName || provider?.name || providerId || '').trim();
+  if (providerId === 'xai') return 'xAI Grok';
+  const value = String(provider?.display_name || provider?.displayName || provider?.provider || provider?.name || providerId || '').trim();
   return value || 'Jaeger model';
 }
 

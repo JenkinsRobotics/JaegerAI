@@ -229,7 +229,7 @@ def configure_fallback_chain(
     else:
         raise ValueError("fallback chain must be a list of {provider, model}")
 
-    cleaned: list[dict[str, str]] = []
+    cleaned: list[dict[str, Any]] = []
     for raw in rows:
         if not isinstance(raw, dict):
             raise ValueError("each fallback entry must be an object")
@@ -245,18 +245,13 @@ def configure_fallback_chain(
         from jaeger_ai.core.models.ollama_endpoint import normalize_ollama_provider
         provider = normalize_ollama_provider(provider)
         _reject_cross_vendor_pair(provider, model)
-        FallbackModel.model_validate({
-            "provider": provider,
-            "model": model,
+        validated = FallbackModel.model_validate({
+            **raw, "provider": provider, "model": model,
             "base_url": str(raw.get("base_url") or ""),
         })
         if provider not in {"local", *_BASE_URLS}:
             raise ValueError(f"unsupported Jaeger provider: {provider!r}")
-        cleaned.append({
-            "provider": provider,
-            "model": model,
-            "base_url": str(raw.get("base_url") or ""),
-        })
+        cleaned.append(validated.model_dump(exclude_unset=True))
 
     def change(current):
         current.external_model.fallback=[FallbackModel.model_validate(row) for row in cleaned]

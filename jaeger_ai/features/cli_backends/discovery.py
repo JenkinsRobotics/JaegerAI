@@ -85,8 +85,20 @@ KNOWN_BACKENDS: tuple[BackendSpec, ...] = (
         executables=("gemini",),
         args=("--prompt", "{prompt}"),
         prompt_mode="placeholder",
+        # Optional: Gemini CLI prefers browser/Google OAuth under ~/.gemini.
+        # Env keys remain allowed if the operator exports them.
         credential_env=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-        display_name="Gemini CLI",
+        display_name="Gemini CLI (Google subscription)",
+    ),
+    BackendSpec(
+        # Antigravity CLI (`agy`) — Google subscription models via browser
+        # sign-in / OS keyring. No API key required. One-shot: `agy -p`.
+        id="agy",
+        executables=("agy", "antigravity"),
+        args=("-p", "{prompt}"),
+        prompt_mode="placeholder",
+        credential_env=(),
+        display_name="Antigravity (Google subscription)",
     ),
     BackendSpec(
         id="hermes",

@@ -512,6 +512,13 @@ def canonical_runtime_inventory(
     cloud_models: list[dict[str, Any]] = []
     local_models: list[dict[str, Any]] = []
 
+    from jaeger_ai.core.models.model_features import features_dict_for_inventory, probe_ollama_show
+    from jaeger_ai.core.models.ollama_context import estimate_model_context_length
+
+    # Optional live /api/show enrichment for thinking values (bounded).
+    show_cache: dict[str, dict[str, Any]] = {}
+    probe_budget = 6
+
     for m in all_ollama_models:
         name = str(m.get("name") or "")
         if not name or "embed" in name.lower():
@@ -520,11 +527,47 @@ def canonical_runtime_inventory(
         ollama_caps = list(m.get("capabilities") or [])
         certified_roles = [r.upper() for r, s in caps.items() if s == "pass"]
         failed_roles = [r.upper() for r, s in caps.items() if s == "fail"]
-        multimodal = "vision" in ollama_caps or "VISION" in certified_roles or "vision" in name.lower() or "v:" in name.lower()
-        tool_use = "tools" in ollama_caps or "REACT" in certified_roles
         is_cloud = bool(m.get("remote_host")) or name.endswith(":cloud") or name.endswith("-cloud")
+        provider_lane = "ollama-cloud" if is_cloud else "ollama-local"
 
-        from jaeger_ai.core.models.ollama_context import estimate_model_context_length
+        live_meta: dict[str, Any] = {
+            "capabilities": ollama_caps,
+            "remote_host": m.get("remote_host"),
+        }
+        # Probe a small set: default model, certified REACT, or thinking-ish names.
+        should_probe = (
+            ollama_online
+            and probe_budget > 0
+            and (
+                name == default_model_name
+                or "REACT" in certified_roles
+                or any(tok in name.lower() for tok in ("r1", "reason", "think", "qwq", "o1", "o3"))
+            )
+        )
+        if should_probe:
+            show = probe_ollama_show(name)
+            show_cache[name] = show
+            probe_budget -= 1
+            if show.get("capabilities"):
+                # Prefer show caps when present; keep tag caps as fallback union.
+                merged = list(dict.fromkeys([*(show.get("capabilities") or []), *ollama_caps]))
+                ollama_caps = merged
+                live_meta["capabilities"] = merged
+            if show.get("thinking"):
+                live_meta["thinking"] = show["thinking"]
+            if show.get("context_length"):
+                live_meta["context_length"] = show["context_length"]
+
+        features = features_dict_for_inventory(
+            name,
+            provider_id=provider_lane,
+            live=live_meta,
+            state_root=None,
+        )
+        multimodal = bool(features.get("vision")) or "VISION" in certified_roles
+        tool_use = bool(features.get("tool_use")) or "REACT" in certified_roles
+        ctx = features.get("context_length") or estimate_model_context_length(name)
+
         model_entry = {
             "id": f"@ollama-cloud:{name}" if is_cloud else f"@ollama-local:{name}",
             "name": name,
@@ -535,7 +578,15 @@ def canonical_runtime_inventory(
             "failed_roles": failed_roles,
             "multimodal": multimodal,
             "tool_use": tool_use,
-            "context_length": estimate_model_context_length(name),
+            "open_weights": features.get("open_weights"),
+            "weights_class": features.get("weights_class"),
+            "thinking_mode": features.get("thinking_mode"),
+            "supports_thinking": features.get("supports_thinking"),
+            "effort_modes": features.get("effort_modes") or [],
+            "effort_param": features.get("effort_param"),
+            "feature_sources": features.get("sources") or [],
+            "features": features,
+            "context_length": ctx,
         }
 
         if is_cloud:
@@ -570,19 +621,29 @@ def canonical_runtime_inventory(
     # 2. LM Studio — only when the server actually lists models
     lm_res = discover_lmstudio()
     lm_online = bool(lm_res.get("online"))
-    lm_models = [
-        {
-            "id": f"@lmstudio:{m['name']}",
-            "name": m["name"],
-            "label": m["name"],
-            "capabilities": ["completion"],
+    lm_models = []
+    for m in (lm_res.get("models") or []):
+        if not m.get("name"):
+            continue
+        m_name = m["name"]
+        features = features_dict_for_inventory(m_name, provider_id="lmstudio")
+        lm_models.append({
+            "id": f"@lmstudio:{m_name}",
+            "name": m_name,
+            "label": m_name,
+            "capabilities": ["completion"] + (["tools"] if features.get("tool_use") else []),
             "certified_roles": [],
-            "multimodal": False,
-            "tool_use": False,
-        }
-        for m in (lm_res.get("models") or [])
-        if m.get("name")
-    ]
+            "multimodal": bool(features.get("vision")),
+            "tool_use": bool(features.get("tool_use")),
+            "open_weights": features.get("open_weights"),
+            "weights_class": features.get("weights_class"),
+            "thinking_mode": features.get("thinking_mode"),
+            "supports_thinking": features.get("supports_thinking"),
+            "effort_modes": features.get("effort_modes") or [],
+            "effort_param": features.get("effort_param"),
+            "feature_sources": features.get("sources") or [],
+            "features": features,
+        })
     if lm_models:
         groups.append({
             "provider": "LM Studio",
@@ -611,14 +672,24 @@ def canonical_runtime_inventory(
             for m_name in curated:
                 caps = capabilities_for(m_name)
                 c_roles = [r.upper() for r, s in caps.items() if s == "pass"]
+                features = features_dict_for_inventory(m_name, provider_id=p_id)
                 models.append({
                     "id": f"@{p_id}:{m_name}",
                     "name": m_name,
                     "label": m_name,
-                    "capabilities": ["completion", "tools"],
+                    "capabilities": ["completion"] + (["tools"] if features.get("tool_use") else []),
                     "certified_roles": c_roles,
-                    "multimodal": "vision" in m_name.lower() or "flash" in m_name.lower() or "4o" in m_name.lower(),
-                    "tool_use": True,
+                    "multimodal": bool(features.get("vision")),
+                    "tool_use": bool(features.get("tool_use")),
+                    "open_weights": features.get("open_weights"),
+                    "weights_class": features.get("weights_class"),
+                    "thinking_mode": features.get("thinking_mode"),
+                    "supports_thinking": features.get("supports_thinking"),
+                    "effort_modes": features.get("effort_modes") or [],
+                    "effort_param": features.get("effort_param"),
+                    "feature_sources": features.get("sources") or [],
+                    "features": features,
+                    "context_length": features.get("context_length"),
                 })
 
         if models:

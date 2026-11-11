@@ -128,10 +128,18 @@ SPECS: dict[str, dict] = {
 }
 
 
-# ── VS Code Copilot bridge (Jaeger IDE extension ≥ 0.3.0) ─────────────
-# The extension writes ~/.jaeger/run/vscode-bridge.json (0600) with a per-start token. Jaeger reads it to
-# call the bridge on 127.0.0.1; the token never leaves this process (not returned, not logged).
+# ── IDE host LM bridge (Jaeger IDE extension ≥ 0.4.2) ────────────────
+# The extension writes ~/.jaeger/run/vscode-bridge.json (0600) with a per-start
+# token. Jaeger reads it to call the bridge on 127.0.0.1; the token never leaves
+# this process (not returned, not logged). Hosts: VS Code, Cursor, Antigravity.
 VSCODE_EXT_GLOB = "jenkins-robotics.jaeger-ide-*"
+_BRIDGE_MODULE_NAMES = ("host-lm-bridge.js", "copilot-bridge.js")  # new + legacy
+_EXT_ROOTS = (
+    ".vscode/extensions",
+    ".cursor/extensions",
+    ".antigravity/extensions",
+    ".vscode-oss/extensions",
+)
 CODE_PLIST = Path("/Applications/Visual Studio Code.app/Contents/Info.plist")
 
 
@@ -139,8 +147,22 @@ def _bridge_file() -> Path:
     return HOME / ".jaeger" / "run" / "vscode-bridge.json"
 
 
+def _extension_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    for root in _EXT_ROOTS:
+        base = HOME / root
+        if not base.is_dir():
+            continue
+        dirs.extend(base.glob(VSCODE_EXT_GLOB))
+    return dirs
+
+
 def _bridge_installed() -> bool:
-    return any((d / "copilot-bridge.js").exists() for d in (HOME / ".vscode" / "extensions").glob(VSCODE_EXT_GLOB))
+    return any(
+        (d / name).exists()
+        for d in _extension_dirs()
+        for name in _BRIDGE_MODULE_NAMES
+    )
 
 
 def _vscode_version() -> str | None:
@@ -164,7 +186,7 @@ def _bridge_info() -> dict | None:
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
-            return None  # stale file from a VS Code that quit
+            return None  # stale file from an IDE that quit
         except PermissionError:
             pass
     return info
@@ -178,20 +200,29 @@ def _bridge_req(info: dict, method: str, path: str, body: dict | None = None, ti
     return urllib.request.urlopen(req, timeout=timeout)
 
 
+def _host_label(health: dict | None = None, info: dict | None = None) -> str:
+    for source in (health or {}, info or {}):
+        for key in ("host", "vscode"):
+            value = str(source.get(key) or "").strip()
+            if value:
+                return value
+    return "IDE"
+
+
 def _vscode_row() -> dict:
     code = _which("code")
-    row = {"id": "vscode", "label": "VS Code Copilot", "kind": "vscode", "installed": False, "path": code, "version": _vscode_version(),
+    row = {"id": "vscode", "label": "IDE Host Models", "kind": "vscode", "installed": False, "path": code, "version": _vscode_version(),
            "signed_in": None, "status_note": "", "login_command": "", "streams": "tokens", "models": [], "bridge": "not-installed",
            "install_command": None}
     vsix = sorted((HOME / ".jaeger" / "ide-dist").glob("jaeger-ide-*.vsix"), key=lambda p: p.stat().st_mtime)
     row["install_command"] = f'code --install-extension "{vsix[-1]}"' if vsix else None
     if not _bridge_installed():
-        row.update(status_note="Bridge not installed: install the Jaeger IDE extension 0.3.0+ in VS Code", bridge="not-installed")
+        row.update(status_note="Bridge not installed: install the Jaeger IDE extension 0.4.2+ in your IDE", bridge="not-installed")
         return row
     row["installed"] = True
     info = _bridge_info()
     if not info:
-        row.update(status_note="VS Code not running (or the Copilot bridge is turned off in VS Code)", bridge="not-running")
+        row.update(status_note="IDE not running (or the host model bridge is turned off)", bridge="not-running")
         return row
     try:
         with _bridge_req(info, "GET", "/health") as r:
@@ -199,23 +230,36 @@ def _vscode_row() -> dict:
         with _bridge_req(info, "GET", "/models", timeout=8) as r:
             models = json.loads(r.read()).get("models", [])
     except Exception as exc:  # noqa: BLE001
-        row.update(status_note=f"VS Code bridge not answering ({exc.__class__.__name__})", bridge="not-running")
+        row.update(status_note=f"IDE host bridge not answering ({exc.__class__.__name__})", bridge="not-running")
         return row
     row["models"] = [{"id": m["id"], "label": m.get("name") or m["id"], "context": m.get("max_input_tokens")} for m in models if isinstance(m, dict) and m.get("id")]
     consent = health.get("consent")
+    host = _host_label(health, info)
     if not row["models"]:
-        row.update(signed_in=False, status_note="No Copilot models in VS Code: sign in to GitHub Copilot there", bridge="running", login_command="VS Code → Accounts → Sign in with GitHub")
+        row.update(
+            signed_in=False,
+            status_note=f"No host models in {host}: sign in to Copilot / Google / ChatGPT there",
+            bridge="running",
+            login_command=f"{host} → Accounts / provider panel → sign in",
+        )
     elif consent == "needed":
-        row.update(signed_in=True, status_note="Waiting for your OK: in VS Code run “Jaeger: Allow Copilot for Jaeger” and click Allow", bridge="needs-consent")
+        row.update(
+            signed_in=True,
+            status_note='Waiting for your OK: in the IDE run “Jaeger: Allow Host Models for Jaeger” (or “Allow Copilot for Jaeger”) and click Allow',
+            bridge="needs-consent",
+        )
     else:
-        row.update(signed_in=True, status_note=f"Bridge running in {health.get('vscode') and 'VS Code ' + health['vscode'] or 'VS Code'}" + ("" if consent == "granted" else "; VS Code asks for consent on first use"), bridge="running")
+        note = f"Bridge running in {host}"
+        if consent != "granted":
+            note += "; IDE asks for consent on first use"
+        row.update(signed_in=True, status_note=note, bridge="running")
     return row
 
 
 def _vscode_stream(row: dict, model: str, prompt: str, timeout: float = 300):
     info = _bridge_info()
     if not info:
-        yield {"type": "error", "error": "VS Code not running, or the Copilot bridge is off"}
+        yield {"type": "error", "error": "IDE not running, or the host model bridge is off"}
         return
     import urllib.error
     t0 = time.perf_counter()
@@ -231,10 +275,11 @@ def _vscode_stream(row: dict, model: str, prompt: str, timeout: float = 300):
                     yield {"type": "delta", "text": ev.get("text", "")}
                 elif ev.get("type") == "done":
                     _last_error.pop("vscode", None)
-                    yield {**{k: ev.get(k) for k in ("elapsed_s", "ttft_s", "eval_count", "prompt_eval_count", "tokens_per_s")}, "type": "done", "model": f"cli:vscode:{model}", "load_s": None, "cost_usd": None, "source": "VS Code Copilot"}
+                    source = str(ev.get("source") or _host_label(info=info) or "IDE Host Models")
+                    yield {**{k: ev.get(k) for k in ("elapsed_s", "ttft_s", "eval_count", "prompt_eval_count", "tokens_per_s")}, "type": "done", "model": f"cli:vscode:{model}", "load_s": None, "cost_usd": None, "source": source}
                     return
                 elif ev.get("type") == "error":
-                    msg = f"Copilot: {ev.get('error')}"[:300]
+                    msg = f"Host model: {ev.get('error')}"[:300]
                     _last_error["vscode"] = msg
                     yield {"type": "error", "error": msg}
                     return
@@ -243,12 +288,12 @@ def _vscode_stream(row: dict, model: str, prompt: str, timeout: float = 300):
             msg = json.loads(exc.read()).get("error")
         except ValueError:
             msg = None
-        yield {"type": "error", "error": f"VS Code bridge {exc.code}: {msg or exc.reason}"}
+        yield {"type": "error", "error": f"IDE host bridge {exc.code}: {msg or exc.reason}"}
         return
     except (OSError, ValueError) as exc:
-        yield {"type": "error", "error": f"VS Code bridge unreachable ({exc.__class__.__name__})"}
+        yield {"type": "error", "error": f"IDE host bridge unreachable ({exc.__class__.__name__})"}
         return
-    yield {"type": "error", "error": f"VS Code bridge ended without an answer after {time.perf_counter() - t0:.1f}s"}
+    yield {"type": "error", "error": f"IDE host bridge ended without an answer after {time.perf_counter() - t0:.1f}s"}
 
 
 def known(pid: str) -> bool:
