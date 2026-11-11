@@ -1,7 +1,7 @@
 {
   "name": "jaeger-ide",
   "displayName": "Jaeger",
-  "description": "The built-in Jaeger Desktop agent and thin IDE controller for the Jaeger Gateway.",
+  "description": "Jaeger: an AI assistant product built on its own model-agnostic agent framework",
   "version": "0.4.2",
   "publisher": "jenkins-robotics",
   "icon": "media/jaeger.png",

@@ -2,7 +2,7 @@
   "name": "jaeger-ui",
   "private": true,
   "version": "0.1.0",
-  "description": "Jaeger main screen: agents sidebar and chat, in the AetherStudio design language.",
+  "description": "Jaeger: an AI assistant product built on its own model-agnostic agent framework",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",

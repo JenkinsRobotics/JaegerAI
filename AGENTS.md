@@ -1,8 +1,35 @@
 # AGENTS.md — JaegerAI Engineering Doctrine & Operational Standards
 
+## What Jaeger is
+
+An agent framework is the software that turns an AI model into an assistant that can do work.
+
+The model generates answers and decides what to try. The framework connects those decisions to tools, remembers progress, controls permissions, and handles execution.
+
+For Jaeger, that means:
+
+| Part | Responsibility |
+|---|---|
+| Models | Understand requests, reason, and generate responses |
+| Tools | Browse, edit files, run commands, and interact with apps |
+| Execution loop | Ask the model → run its requested tool → return the result → continue |
+| State and memory | Preserve conversations, task progress, and useful knowledge |
+| Permissions | Decide which actions are allowed or require approval |
+| Orchestration | Select models and coordinate specialist agents |
+| Reliability | Handle cancellation, timeouts, failures, and recovery |
+| Events | Tell the interface what is happening as it happens |
+
+For example, when you say “fix this webpage,” the framework supplies the page and project context, lets the model inspect and edit files, runs checks, and sends actual progress and results into your chat.
+
+Jaeger is the whole product. Its agent framework is the execution machinery underneath the chat, avatar, browser, and desktop interface. Multiple models can use that same machinery; changing models shouldn’t require rebuilding the app or losing the conversation.
+
+**When auditing, evaluate Jaeger against these eight framework responsibilities.**
+
+---
+
 Telegraph style. Root rules only. Applies to all human contributors, subagents, and AI coding assistants.
 
-Current product definition: [`docs/PRODUCT.md`](docs/PRODUCT.md). Read it before planning or editing release-path work. JaegerAI is the standalone intelligence stack for Jenkins Robotics — a proactive, world-model AI companion and operator, one identity, integrating with JROS, Aether Suite, the NAS, and YouTube. It is not a workspace hub, not a CAD suite, not a machine project, and not a local-model system by default (LLM work today is cloud-based; on-device is the goal). See docs/STACK.md and docs/TRUST.md.
+Current product definition: [`docs/PRODUCT.md`](docs/PRODUCT.md). Read it before planning or editing release-path work. JaegerAI is the standalone intelligence stack for Jenkins Robotics — a proactive, world-model AI companion and operator, one identity, integrating with JROS, Aether Suite, the NAS, and YouTube. It is not a workspace hub, not a CAD suite, not a machine project, and not defined by where models run: models are interchangeable (hosted, CLI-backed, or local), and on-device inference is a feature, not the identity. See docs/STACK.md and docs/TRUST.md.
 
 ---
 
