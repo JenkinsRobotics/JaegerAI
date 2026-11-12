@@ -35,7 +35,7 @@ def test_confirm_round_trips_via_a_channel_responder() -> None:
     session publishes an AgentResponse; confirm() unblocks with the answer."""
     from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
     from jaeger_os.transport import InProcBus
-    from jaeger_ai.core.messages import AgentRequest, AgentResponse
+    from jaeger_agent.core.messages import AgentRequest, AgentResponse
 
     from jaeger_os.core.safety import session_trust
     bus = InProcBus()

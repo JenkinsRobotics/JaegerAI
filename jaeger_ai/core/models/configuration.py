@@ -10,7 +10,7 @@ from jaeger_ai.core.instance.schemas import Config, load_yaml
 
 
 def _ollama_base_url() -> str:
-    from jaeger_ai.core.models.ollama_endpoint import resolve_ollama_base_url
+    from jaeger_ai.core.models.router import resolve_ollama_base_url
     return resolve_ollama_base_url(openai_compat=True)
 
 
@@ -150,7 +150,7 @@ def selected_model_config(
     # ollama-local vs ollama-cloud. Both still execute through that one
     # daemon — :cloud tags ride the Ollama subscription, not a second
     # https://ollama.com connection that demands an API key in-repo.
-    from jaeger_ai.core.models.ollama_endpoint import normalize_ollama_provider
+    from jaeger_ai.core.models.router import normalize_ollama_provider
     selected_provider = normalize_ollama_provider(selected_provider)
     try:
         from jaeger_ai.features.cli_backends.service import normalize_cli_selection
@@ -242,7 +242,7 @@ def configure_fallback_chain(
                 "local fallback is disabled — a selected cloud brain must "
                 "not load on-device weights"
             )
-        from jaeger_ai.core.models.ollama_endpoint import normalize_ollama_provider
+        from jaeger_ai.core.models.router import normalize_ollama_provider
         provider = normalize_ollama_provider(provider)
         _reject_cross_vendor_pair(provider, model)
         validated = FallbackModel.model_validate({

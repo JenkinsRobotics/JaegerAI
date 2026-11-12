@@ -359,7 +359,7 @@ def test_build_audio_session_node_routes_custom_config(monkeypatch, tmp_path):
     from jaeger_ai.core.instance.schemas import (
         Config, ModelConfig, VoiceConfig, dump_yaml)
     from jaeger_whisper_stt.config import WhisperSTTConfig
-    import jaeger_ai.core.context as context
+    import jaeger_agent.core.workspace as context
 
     cfg_path = tmp_path / "config.yaml"
     dump_yaml(cfg_path, Config(
@@ -430,7 +430,7 @@ def test_build_audio_session_node_defaults_match_config_defaults(
     byte-for-byte; only ``require_wake_word`` intentionally flips.
     """
     from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
-    import jaeger_ai.core.context as context
+    import jaeger_agent.core.workspace as context
 
     cfg_path = tmp_path / "config.yaml"
     dump_yaml(cfg_path, Config(
@@ -470,7 +470,7 @@ def test_build_audio_session_node_defaults_match_config_defaults(
 def test_load_audio_session_config_falls_back_on_load_failure(monkeypatch):
     """No instance layout available (fresh/unconfigured) -> the loader
     degrades to construction defaults instead of raising."""
-    import jaeger_ai.core.context as context
+    import jaeger_agent.core.workspace as context
 
     def _raise():
         raise RuntimeError("no active instance")

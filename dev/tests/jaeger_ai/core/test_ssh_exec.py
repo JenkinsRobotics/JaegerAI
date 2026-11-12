@@ -185,7 +185,7 @@ def test_interrupt_surfaces_with_exit_code_130(monkeypatch):
     """A user-cancelled turn kills the ssh child; we report it the same
     way ``run_shell`` does (exit 130, ``interrupted=True``) so callers
     can treat both uniformly."""
-    from jaeger_ai.core.runtime.tool_interrupt import ToolInterrupted
+    from jaeger_agent.util.tool_interrupt import ToolInterrupted
 
     def boom(argv, **kw):
         raise ToolInterrupted(stdout=b"part", stderr=b"")

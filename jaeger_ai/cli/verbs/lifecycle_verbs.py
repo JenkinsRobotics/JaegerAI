@@ -9,6 +9,7 @@ Controls the complete multi-agent system:
 
 from __future__ import annotations
 
+from jaeger_ai.contract.ports import A2A_GATEWAY_PORT, A2A_PORT, LOOPBACK, MCP_GATEWAY_PORT, MCP_HTTP_PORT, WEBUI_PORT
 import argparse
 import json
 import os
@@ -37,8 +38,8 @@ SERVICES_ORDERED = (
     # The bridge uses a Unix socket; :8791 may belong to the legacy webhook
     # service, so an open HTTP port is not evidence of bridge readiness.
     ("com.jenkinsrobotics.jaeger-bridge", "Jaeger Bridge", None),
-    ("com.jenkinsrobotics.jaeger-mcp-http", "Jaeger MCP HTTP", 8792),
-    ("com.jenkinsrobotics.jaeger-a2a", "Jaeger A2A", 8796),
+    ("com.jenkinsrobotics.jaeger-mcp-http", "Jaeger MCP HTTP", MCP_HTTP_PORT),
+    ("com.jenkinsrobotics.jaeger-a2a", "Jaeger A2A", A2A_PORT),
     ("com.jenkinsrobotics.jaeger-hermes-adapter", "Jaeger Adapter", 8642),
     ("com.jenkinsrobotics.roundtable-hermes-adapter", "Roundtable Adapter", 8643),
     ("com.jenkinsrobotics.openclaw-hermes-adapter", "OpenClaw Adapter", 8644),
@@ -415,7 +416,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                 failures.append("Jaeger gateway")
             else:
                 for _ in range(10):
-                    if _is_port_open(8811) and _is_port_open(8812):
+                    if _is_port_open(MCP_GATEWAY_PORT) and _is_port_open(A2A_GATEWAY_PORT):
                         break
                     time.sleep(0.2)
                 else:
@@ -455,7 +456,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                 from jaeger_ai.features.webui import WebUIService
                 webui_svc = WebUIService()
                 w_status = webui_svc.status()
-                webui_running = bool(w_status.get("webui", {}).get("running")) or _is_port_open(8790)
+                webui_running = bool(w_status.get("webui", {}).get("running")) or _is_port_open(WEBUI_PORT)
                 adapter_running = bool(w_status.get("adapter", {}).get("running")) or _is_port_open(8791)
                 if webui_running and adapter_running:
                     ts = None
@@ -464,8 +465,8 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                         ts = _tailscale_ipv4()
                     except Exception:
                         ts = None
-                    local = "http://127.0.0.1:8790/"
-                    remote = f"http://{ts}:8790/" if ts else "http://0.0.0.0:8790/"
+                    local = f"http://{LOOPBACK}:{WEBUI_PORT}/"
+                    remote = f"http://{ts}:{WEBUI_PORT}/" if ts else f"http://0.0.0.0:{WEBUI_PORT}/"
                     print(f"  Already running: Web UI ({local} / {remote})")
                 else:
                     res = webui_svc.start()
@@ -476,10 +477,10 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                             ts = _tailscale_ipv4()
                         except Exception:
                             ts = None
-                        open_url = res.get("open", "http://127.0.0.1:8790/")
+                        open_url = res.get("open", f"http://{LOOPBACK}:{WEBUI_PORT}/")
                         print(f"  Started Web UI: {open_url}")
                         if ts:
-                            print(f"  Tailscale Web UI: http://{ts}:8790/")
+                            print(f"  Tailscale Web UI: http://{ts}:{WEBUI_PORT}/")
                     else:
                         failures.append("web ui")
                         print(f"  Failed to start Web UI: {res.get('error') or res}")
@@ -636,12 +637,12 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
         from jaeger_ai.features.webui.service.service import _tailscale_ipv4
         wsvc = WebUIService()
         wstatus = wsvc.status()
-        webui_running = bool(wstatus.get("webui", {}).get("running")) or _is_port_open(8790)
+        webui_running = bool(wstatus.get("webui", {}).get("running")) or _is_port_open(WEBUI_PORT)
         ts = _tailscale_ipv4()
-        webui_url = f"http://{ts}:8790/" if (webui_running and ts) else "http://127.0.0.1:8790/"
+        webui_url = f"http://{ts}:{WEBUI_PORT}/" if (webui_running and ts) else f"http://{LOOPBACK}:{WEBUI_PORT}/"
     except Exception:
-        webui_running = _is_port_open(8790)
-        webui_url = "http://127.0.0.1:8790/"
+        webui_running = _is_port_open(WEBUI_PORT)
+        webui_url = f"http://{LOOPBACK}:{WEBUI_PORT}/"
 
     runtime_doc: dict[str, Any] = {}
     try:

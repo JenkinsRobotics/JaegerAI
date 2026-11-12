@@ -7,7 +7,7 @@ import types
 
 from jaeger_agent import AgentBridge, Message, OpenAIAdapter, ProviderAdapter
 from jaeger_agent import JaegerAgent
-from jaeger_ai.core.messages import ChatMessage, ChatReply
+from jaeger_agent.core.messages import ChatMessage, ChatReply
 from jaeger_os.transport import InProcBus
 
 

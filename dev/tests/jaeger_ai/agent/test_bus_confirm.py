@@ -12,7 +12,7 @@ import time
 import types
 
 from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
-from jaeger_ai.core.messages import AgentRequest, AgentResponse
+from jaeger_agent.core.messages import AgentRequest, AgentResponse
 from jaeger_os.transport.inproc_bus import InProcBus
 
 

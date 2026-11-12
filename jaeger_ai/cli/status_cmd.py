@@ -148,9 +148,4 @@ def _find_pid_file(layout) -> Path | None:
     return None
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+from jaeger_os.core.process import pid_alive as _pid_alive  # single owner

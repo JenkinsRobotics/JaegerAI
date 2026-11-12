@@ -38,7 +38,7 @@ def test_request_to_prompt_routes_only_its_channel() -> None:
 
 def test_reply_as_approval_publishes_response() -> None:
     from jaeger_os.transport import InProcBus
-    from jaeger_ai.core.messages import AgentResponse
+    from jaeger_agent.core.messages import AgentResponse
 
     bus = InProcBus()
     got: list = []

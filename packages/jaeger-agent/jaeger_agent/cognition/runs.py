@@ -80,15 +80,7 @@ class Checkpoint:
     created_at: str
 
 
-def pid_is_alive(pid: int) -> bool:
-    """Default liveness probe for ``recover``. Signal 0 tests existence."""
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # exists, owned by another user
-    return True
+from jaeger_os.core.process import pid_alive as pid_is_alive  # single owner
 
 
 @runtime_checkable

@@ -12,6 +12,7 @@ any model on the host system or local network.
 
 from __future__ import annotations
 
+from jaeger_ai.contract.ports import LOOPBACK, OLLAMA_PORT
 from pathlib import Path
 
 import json
@@ -603,7 +604,7 @@ def canonical_runtime_inventory(
             "endpoint": "https://ollama.com",
             "models": cloud_models,
             "host": "cloud",
-            "base_url": "http://127.0.0.1:11434",
+            "base_url": f"http://{LOOPBACK}:{OLLAMA_PORT}",
         })
 
     if local_models:
@@ -612,10 +613,10 @@ def canonical_runtime_inventory(
             "provider_id": "ollama-local",
             "status": "online" if ollama_online else "unavailable",
             "credentials_available": ollama_online,
-            "endpoint": "http://127.0.0.1:11434",
+            "endpoint": f"http://{LOOPBACK}:{OLLAMA_PORT}",
             "models": local_models,
             "host": "local",
-            "base_url": "http://127.0.0.1:11434",
+            "base_url": f"http://{LOOPBACK}:{OLLAMA_PORT}",
         })
 
     # 2. LM Studio — only when the server actually lists models

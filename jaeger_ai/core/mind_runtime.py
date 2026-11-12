@@ -320,8 +320,8 @@ class JaegerAIRuntime:
             raise ValueError("input_modality must be text or speech")
         client = self.client
         if model or provider:
-            from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
-            from jaeger_ai.core.models.session_selection import select_client
+            from jaeger_ai.core.models.router import apply_sensitivity_routing
+            from jaeger_ai.core.models.router import select_client
             model, provider, _ = apply_sensitivity_routing(
                 text, config=_pipeline.get("config"), model=model, provider=provider, default_client=client)
             client = select_client(client, _pipeline.get("config"),

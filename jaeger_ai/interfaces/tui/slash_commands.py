@@ -963,7 +963,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
         cfg.external_model.enabled = True
         cfg.external_model.provider = provider
         if provider == "ollama":
-            from jaeger_ai.core.models.ollama_endpoint import resolve_ollama_base_url
+            from jaeger_ai.core.models.router import resolve_ollama_base_url
             cfg.external_model.base_url = resolve_ollama_base_url()
             cfg.external_model.api_key_credential = ""
             cfg.external_model.api_key_env = ""
@@ -1016,7 +1016,7 @@ def _model_use(ctx: SlashContext, args: list[str]) -> SlashResult:
             # Match the WebUI ollama-cloud lane: :cloud tags ride the Mac
             # Ollama daemon / subscription. Do not point at ollama.com or
             # demand an API key in the repo.
-            from jaeger_ai.core.models.ollama_endpoint import resolve_ollama_base_url
+            from jaeger_ai.core.models.router import resolve_ollama_base_url
             cfg.external_model.enabled = True
             cfg.external_model.provider = "ollama"
             cfg.external_model.base_url = resolve_ollama_base_url()

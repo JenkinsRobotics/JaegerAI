@@ -77,7 +77,7 @@ def test_unconfigured_returns_friendly_error(bound_instance, monkeypatch):
 
 def test_fal_key_env_fallback(monkeypatch):
     monkeypatch.setattr(
-        "jaeger_ai.core.context.get_layout",
+        "jaeger_agent.core.workspace.get_layout",
         lambda: (_ for _ in ()).throw(RuntimeError("unbound")))
     monkeypatch.delenv("fal_key", raising=False)
     monkeypatch.setenv("FAL_KEY", "env-key-123")

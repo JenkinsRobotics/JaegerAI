@@ -6,6 +6,7 @@ Gateway, Bridge, and MCP stay on loopback.
 
 from __future__ import annotations
 
+from jaeger_ai.contract.ports import LOOPBACK, MCP_HTTP_PORT, WEBUI_PORT
 import hashlib
 import json
 import os
@@ -25,7 +26,7 @@ from jaeger_ai.contract.ports import GATEWAY_PORT, resolve_gateway_url
 from jaeger_ai.features.remote_access import store
 from jaeger_ai.features.remote_access.policy import RemoteAccessPolicy
 
-WEBUI_LOOPBACK_PORT = 8790
+WEBUI_LOOPBACK_PORT = WEBUI_PORT
 HTTPS_PORT = 8443
 PAIR_TTL_S = 15 * 60
 
@@ -381,12 +382,12 @@ def enable(*, https_port: int = HTTPS_PORT, start_webui: bool = True, serve: boo
             deadline = time.time() + 20
             healthy = False
             while time.time() < deadline:
-                probe = _http_ok("http://127.0.0.1:8790/api/auth/status")
+                probe = _http_ok(f"http://{LOOPBACK}:{WEBUI_PORT}/api/auth/status")
                 if probe.get("status") in {200, 401, 403}:
                     healthy = True
                     break
                 time.sleep(0.4)
-            webui = {"ok": healthy, "launchagent": True, "auth_probe": probe if healthy else _http_ok("http://127.0.0.1:8790/api/auth/status")}
+            webui = {"ok": healthy, "launchagent": True, "auth_probe": probe if healthy else _http_ok(f"http://{LOOPBACK}:{WEBUI_PORT}/api/auth/status")}
     serve_res = {"ok": True, "skipped": True}
     if serve:
         serve_res = _serve_https(f"http://127.0.0.1:{WEBUI_LOOPBACK_PORT}", https_port)
@@ -440,11 +441,11 @@ def doctor() -> dict[str, Any]:
     gw = _listener(GATEWAY_PORT)
     webui = _listener(WEBUI_LOOPBACK_PORT)
     adapter = _listener(8791)
-    mcp = _listener(8792)
+    mcp = _listener(MCP_HTTP_PORT)
     origin = phone_url(state)
     https = _http_ok(origin + "/") if origin.startswith("https://") else {"ok": False, "error": "no https origin"}
-    auth = _http_ok(origin + "/api/auth/status") if origin.startswith("https://") else _http_ok("http://127.0.0.1:8790/api/auth/status")
-    sessions = _http_ok(origin + "/api/jaeger/sessions") if origin.startswith("https://") else _http_ok("http://127.0.0.1:8790/api/jaeger/sessions")
+    auth = _http_ok(origin + "/api/auth/status") if origin.startswith("https://") else _http_ok(f"http://{LOOPBACK}:{WEBUI_PORT}/api/auth/status")
+    sessions = _http_ok(origin + "/api/jaeger/sessions") if origin.startswith("https://") else _http_ok(f"http://{LOOPBACK}:{WEBUI_PORT}/api/jaeger/sessions")
     auth_body = {}
     try:
         auth_body = json.loads((auth.get("body") or b"{}").decode("utf-8", "replace"))

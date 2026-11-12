@@ -550,14 +550,7 @@ class JaegerApp:
         return qt_app.exec()
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+from jaeger_os.core.process import pid_alive as _pid_alive  # single owner
 
 
 __all__ = ["JaegerApp", "SecondInstanceError", "resolve_ref"]

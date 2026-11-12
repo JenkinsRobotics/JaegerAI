@@ -101,7 +101,7 @@ class IMessageBridge:
         register_bridge("imessage", self)
         if self._bus is not None:
             try:
-                from jaeger_ai.core.messages import AgentRequest
+                from jaeger_agent.core.messages import AgentRequest
                 self._bus.subscribe(AgentRequest.topic, self._on_agent_request)
             except Exception:  # noqa: BLE001 — approvals-over-imessage is best-effort
                 pass
@@ -131,7 +131,7 @@ class IMessageBridge:
         from .. import deregister_bridge
         deregister_bridge('imessage', expected=self)
         if self._bus is not None:
-            from jaeger_ai.core.messages import AgentRequest
+            from jaeger_agent.core.messages import AgentRequest
             self._bus.unsubscribe(AgentRequest.topic, self._on_agent_request)
 
     # ----- outbound: agent-initiated messages -----

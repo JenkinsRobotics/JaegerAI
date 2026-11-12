@@ -7,6 +7,7 @@ Sessions and configuration live outside the processes it restarts.
 
 from __future__ import annotations
 
+from jaeger_ai.contract.ports import A2A_GATEWAY_PORT, MCP_GATEWAY_PORT, MCP_HTTP_PORT
 import argparse
 import json
 import os
@@ -124,13 +125,13 @@ def _start_jaeger_gateway() -> bool:
     try:
         from jaeger_ai.features.agentgateway.service import start, status
         current = status()
-        if current.get("running") and not (_tcp("127.0.0.1", 8811) and _tcp("127.0.0.1", 8812)):
+        if current.get("running") and not (_tcp(LOOPBACK, MCP_GATEWAY_PORT) and _tcp(LOOPBACK, A2A_GATEWAY_PORT)):
             # A half-responsive gateway may still own an in-flight MCP/A2A
             # request.  Automatic recovery must not kill ambiguous work.  An
             # operator can explicitly stop it after checking the run ledger.
             return False
         start()
-        return _tcp("127.0.0.1", 8811) and _tcp("127.0.0.1", 8812)
+        return _tcp(LOOPBACK, MCP_GATEWAY_PORT) and _tcp(LOOPBACK, A2A_GATEWAY_PORT)
     except Exception:  # noqa: BLE001
         return False
 
@@ -141,7 +142,7 @@ def _repair_jaeger() -> bool:
         return False
     # Preserve healthy dependencies when only one endpoint has failed.
     bridge = _bridge_ready() or _kickstart("com.jenkinsrobotics.jaeger-bridge")
-    mcp = _tcp("127.0.0.1", 8792) or _kickstart("com.jenkinsrobotics.jaeger-mcp-http")
+    mcp = _tcp(LOOPBACK, MCP_HTTP_PORT) or _kickstart("com.jenkinsrobotics.jaeger-mcp-http")
     adapter = _http(f"http://{LOOPBACK}:8642/v1/health") or _kickstart("com.jenkinsrobotics.jaeger-hermes-adapter")
     gateway = _start_jaeger_gateway()
     return bridge and mcp and adapter and gateway
@@ -233,7 +234,7 @@ def components() -> tuple[Component, ...]:
         Component(
             "jaeger",
             lambda: _bridge_ready() and _http(f"http://{bridge}:8642/v1/health")
-            and _tcp("127.0.0.1", 8792) and _tcp("127.0.0.1", 8811),
+            and _tcp(LOOPBACK, MCP_HTTP_PORT) and _tcp(LOOPBACK, MCP_GATEWAY_PORT),
             _repair_jaeger,
         ),
         Component(

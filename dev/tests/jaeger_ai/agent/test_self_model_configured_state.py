@@ -86,7 +86,7 @@ def test_messaging_configured_state_none_when_no_channels_installed(monkeypatch)
 def test_messaging_configured_state_falls_back_to_bare_names_without_a_bound_layout(monkeypatch):
     """Never overclaim a status it can't check — with tools unbound, the
     line lists channels without a ✓/✗ suffix rather than guessing."""
-    from jaeger_ai.core import context as core_context
+    from jaeger_agent.core import workspace as core_context
     saved = core_context._layout
     core_context._layout = None
     try:

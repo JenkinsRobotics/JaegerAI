@@ -424,7 +424,7 @@ def _reset_pipeline_config() -> None:
 @_pytest.fixture(autouse=True)
 def _reset_tool_interrupt():
     """Keep the process-global interrupt flag from leaking across tests."""
-    from jaeger_ai.core.runtime import tool_interrupt
+    from jaeger_agent.util import tool_interrupt
 
     tool_interrupt.clear_interrupt()
     yield

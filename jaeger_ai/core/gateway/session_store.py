@@ -140,16 +140,7 @@ def _normalize_requested(requested: dict[str, Any] | None) -> dict[str, Any]:
     return out
 
 
-def pid_is_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+from jaeger_os.core.process import pid_alive as pid_is_alive  # single owner
 
 
 def _row_meta(raw: str | None) -> dict[str, Any]:

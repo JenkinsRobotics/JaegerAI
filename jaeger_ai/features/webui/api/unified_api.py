@@ -25,6 +25,7 @@ setup note.
 """
 from __future__ import annotations
 
+from jaeger_ai.contract.ports import LOOPBACK, OLLAMA_PORT
 import base64
 import contextlib
 import json
@@ -39,7 +40,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
-OLLAMA = "http://127.0.0.1:11434"
+OLLAMA = f"http://{LOOPBACK}:{OLLAMA_PORT}"
 MAX_ASSET = 14 * 1024 * 1024  # base64 must fit read_body's 20 MB cap
 MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "image/svg+xml": ".svg"}
 _ID = re.compile(r"^[a-z0-9-]{6,64}$")

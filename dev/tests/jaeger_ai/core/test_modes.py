@@ -58,7 +58,7 @@ def test_back_to_normal_swaps_back(monkeypatch) -> None:
 
 
 def test_mode_state_message_shape() -> None:
-    from jaeger_ai.core.messages import ModeState
+    from jaeger_agent.core.messages import ModeState
     assert ModeState(mode="high").topic == "/sense/mode"
 
 

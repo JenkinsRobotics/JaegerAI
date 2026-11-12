@@ -97,7 +97,7 @@ class DiscordBridge:
         # Answer mid-turn approvals for our own channels over the bus.
         if self._bus is not None:
             try:
-                from jaeger_ai.core.messages import AgentRequest
+                from jaeger_agent.core.messages import AgentRequest
                 self._bus.subscribe(AgentRequest.topic, self._on_agent_request)
             except Exception:  # noqa: BLE001 — approvals-over-discord is best-effort
                 pass
@@ -130,7 +130,7 @@ class DiscordBridge:
         from .. import deregister_bridge
         deregister_bridge('discord', expected=self)
         if self._bus is not None:
-            from jaeger_ai.core.messages import AgentRequest
+            from jaeger_agent.core.messages import AgentRequest
             self._bus.unsubscribe(AgentRequest.topic, self._on_agent_request)
 
     # ----- outbound: agent-initiated messages -----

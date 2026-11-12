@@ -534,7 +534,7 @@ class RunnerBroker:
 
     def _jaeger_provider(self, requested: str, model: str) -> str:
         """Translate a WebUI transport provider into Jaeger's model owner."""
-        from jaeger_ai.core.models.ollama_endpoint import normalize_ollama_provider
+        from jaeger_ai.core.models.router import normalize_ollama_provider
 
         requested = requested.strip().lower()
         if requested in {"ollama-local", "ollama-cloud"}:

@@ -36,7 +36,7 @@ def _req():
 def test_confirm_auto_denies_non_admin_and_never_prompts() -> None:
     from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
     from jaeger_os.transport import InProcBus
-    from jaeger_ai.core.messages import AgentRequest
+    from jaeger_agent.core.messages import AgentRequest
     from jaeger_os.core.safety.session_trust import forget_session
 
     forget_session("telegram:guest")              # the global registry is shared
@@ -56,7 +56,7 @@ def test_confirm_auto_denies_non_admin_and_never_prompts() -> None:
 def test_confirm_prompts_an_admin_session() -> None:
     from jaeger_agent.loop.bus_confirm import BusConfirmationProvider
     from jaeger_os.transport import InProcBus
-    from jaeger_ai.core.messages import AgentRequest, AgentResponse
+    from jaeger_agent.core.messages import AgentRequest, AgentResponse
 
     bus = InProcBus()
     asked: list = []

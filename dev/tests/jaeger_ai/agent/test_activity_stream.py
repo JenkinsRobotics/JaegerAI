@@ -6,7 +6,7 @@ event adapter forwarding agent.activity onto the chassis bus.
 """
 
 from jaeger_ai.core.instance.schemas import DisplayConfig
-from jaeger_ai.core.messages import AgentActivity
+from jaeger_agent.core.messages import AgentActivity
 
 
 class _FakeBus:

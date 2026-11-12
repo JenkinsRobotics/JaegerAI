@@ -113,7 +113,7 @@ class TelegramBridge:
         # Answer mid-turn approval prompts for our own chats over the bus.
         if self._bus is not None:
             try:
-                from jaeger_ai.core.messages import AgentRequest
+                from jaeger_agent.core.messages import AgentRequest
                 self._bus.subscribe(AgentRequest.topic, self._on_agent_request)
             except Exception:  # noqa: BLE001 — approvals-over-telegram is best-effort
                 pass
@@ -131,7 +131,7 @@ class TelegramBridge:
         from .. import deregister_bridge
         deregister_bridge('telegram', expected=self)
         if self._bus is not None:
-            from jaeger_ai.core.messages import AgentRequest
+            from jaeger_agent.core.messages import AgentRequest
             self._bus.unsubscribe(AgentRequest.topic, self._on_agent_request)
 
     # ----- outbound: agent-initiated messages -----
@@ -240,7 +240,7 @@ class TelegramBridge:
                 rid = self._awaiting.pop(chat_id, None)
                 if rid is not None and self._bus is not None:
                     try:
-                        from jaeger_ai.core.messages import AgentResponse
+                        from jaeger_agent.core.messages import AgentResponse
                         self._bus.publish(AgentResponse(
                             id=rid, answer=preview, session=f"telegram:{chat_id}"))
                         await msg.reply_text("✓ got it")

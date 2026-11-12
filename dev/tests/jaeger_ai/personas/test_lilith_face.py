@@ -175,7 +175,7 @@ def test_avatar_tool_falls_back_to_framework_defaults(
     """A fresh instance with no avatar/ directory should still get
     Lilith's face — the avatar tool falls back to the framework
     default location."""
-    from jaeger_ai.core import context as tool_common
+    from jaeger_agent.core import workspace as tool_common
     from jaeger_ai.core.instance.instance import InstanceLayout
     from jaeger_ai.nodes.animation import tools as avatar
 

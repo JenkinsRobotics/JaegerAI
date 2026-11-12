@@ -41,9 +41,9 @@ from jaeger_agent.core import credentials as creds
 from jaeger_ai.core.runtime import log_rotation
 from jaeger_agent.memory import memory as mem
 from jaeger_agent.prompts import assemble as prompt_module
-from jaeger_ai.core.runtime import tool_interrupt
+from jaeger_agent.util import tool_interrupt
 from jaeger_agent import tools as jaeger_tools
-from jaeger_ai.core import context as _context
+from jaeger_agent.core import workspace as _context
 from jaeger_agent.background.cron_runner import CronRunner
 from jaeger_ai.core.instance.instance import (
     CoreVersionMismatch,
@@ -4083,8 +4083,8 @@ def run_command(client: Any, user_text: str, session_key: str | None = None) -> 
     outcome instead of trusting that returning == succeeding."""
     session = session_key or _DEFAULT_SESSION_KEY
     try:
-        from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
-        from jaeger_ai.core.models.session_selection import select_client
+        from jaeger_ai.core.models.router import apply_sensitivity_routing
+        from jaeger_ai.core.models.router import select_client
         model, provider, _decision = apply_sensitivity_routing(
             user_text,
             config=_pipeline.get("config"),
@@ -4429,7 +4429,7 @@ def run_for_voice(
     from jaeger_ai.contract.legacy_paths import require_legacy_path
     require_legacy_path("In-process agent turn (run_for_voice)")
     session = session_key or "voice"
-    from jaeger_ai.core.models.session_selection import select_client
+    from jaeger_ai.core.models.router import select_client
     # The standalone voice daemon owns a local client and promises that no
     # transcript leaves the machine. Other transports retain dynamic routing.
     if local_only:
@@ -4438,7 +4438,7 @@ def run_for_voice(
         # Sensitivity gate: private → local gemma; public → selected lane.
         # Runs before any cloud-bound model selection.
         try:
-            from jaeger_ai.core.models.sensitivity_gate import apply_sensitivity_routing
+            from jaeger_ai.core.models.router import apply_sensitivity_routing
             s_model, s_provider, _decision = apply_sensitivity_routing(
                 user_text,
                 config=_pipeline.get("config"),
@@ -4943,7 +4943,7 @@ def make_client(config: Any, layout: Any = None, *, warmup: bool = True) -> Any:
             ExternalModelSelectionError,
             selection_failure_message,
         )
-        from jaeger_ai.core.models.ollama_endpoint import (
+        from jaeger_ai.core.models.router import (
             normalize_ollama_provider,
             resolve_ollama_base_url,
         )

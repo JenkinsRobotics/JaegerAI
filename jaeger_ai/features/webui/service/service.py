@@ -8,6 +8,7 @@ Port map (coherent defaults):
 
 from __future__ import annotations
 
+from jaeger_ai.contract.ports import WEBUI_PORT
 import json
 import os
 import re
@@ -26,7 +27,7 @@ from urllib.parse import unquote
 
 DEFAULT_ADAPTER_PORT = 8791
 DEFAULT_ADAPTER_HOST = "127.0.0.1"
-DEFAULT_WEBUI_PORT = 8790
+DEFAULT_WEBUI_PORT = WEBUI_PORT
 REPO_ROOT = Path(__file__).resolve().parents[4]
 WEBUI_SCRIPT = REPO_ROOT / "scripts" / "run-jaeger-webui.sh"
 
@@ -166,16 +167,7 @@ def _webui_log_path(layout: Any) -> Path:
     return _webui_run_dir(layout) / "webui.log"
 
 
-def _pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+from jaeger_os.core.process import pid_alive as _pid_alive  # single owner
 
 
 def _read_pid(path: Path) -> int | None:

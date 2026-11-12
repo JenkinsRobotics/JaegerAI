@@ -67,16 +67,7 @@ def locate_binary(root: Path | None = None) -> Path | None:
     return None
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-    return True
+from jaeger_os.core.process import pid_alive as _pid_alive  # single owner
 
 
 def read_pid(root: Path | None = None) -> int | None:

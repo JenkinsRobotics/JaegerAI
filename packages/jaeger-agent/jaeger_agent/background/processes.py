@@ -40,18 +40,7 @@ def _proc_dir(layout: Any, proc_id: str) -> Path:
     return _processes_root(layout) / proc_id
 
 
-def _pid_alive(pid: int) -> bool:
-    """True when ``pid`` names a live process. ``os.kill(pid, 0)`` is a
-    no-op signal that raises if the process is gone."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # exists, just not ours to signal
-    return True
+from jaeger_os.core.process import pid_alive as _pid_alive  # single owner
 
 
 def _read_meta(proc_dir: Path) -> dict[str, Any] | None:
@@ -279,15 +268,6 @@ def stop_all_background(layout: Any) -> dict[str, Any]:
         time.sleep(0.1)
     return {"stopped": stopped, "survivors": [p for p in pids if _pid_alive(p)]}
 
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def consume_pending_completions(layout: Any, *, persist=None) -> list[dict[str, Any]]:
