@@ -14,7 +14,6 @@ _MIME = {
     ".webmanifest": "application/manifest+json; charset=utf-8",
 }
 _NO_STORE = "no-cache, no-store"
-_STATIC_DEFAULT = Path(__file__).resolve().parents[1] / "static"
 
 #: Replaces the old shell's worker. It deletes every cache, unregisters itself
 #: and reloads open windows so they fetch the new UI from the network.

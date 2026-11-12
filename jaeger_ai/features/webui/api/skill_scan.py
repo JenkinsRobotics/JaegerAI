@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 from typing import Any, Iterator
 
-MAX_DESCRIPTION_LENGTH = 1024
 EXCLUDED_SKILL_DIRS = frozenset({".git", ".github", ".hub", "node_modules", "__pycache__", ".venv"})
 
 _PLATFORMS = {"mac": "macos", "macos": "macos", "osx": "macos", "darwin": "macos",
@@ -60,5 +59,3 @@ def skill_matches_platform(frontmatter: dict[str, Any]) -> bool:
     return here in names
 
 
-def sort_skills(skills: list[dict]) -> list[dict]:
-    return sorted(skills, key=lambda s: ((s.get("category") or ""), s.get("name", "").lower()))

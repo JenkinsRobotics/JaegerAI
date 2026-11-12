@@ -151,10 +151,3 @@ def test_gateway_archive_state_is_mirrored_both_ways_without_touching_updated_at
     gateway_mirror.mirror_all()
     assert models.get_session(sid).archived is False
 
-
-def test_webui_archive_is_pushed_to_the_gateway(monkeypatch):
-    calls = []
-    monkeypatch.setattr(gateway_mirror, "_request",
-                        lambda m, p, b=None: calls.append((m, p, b)) or {"session_id": "s1"})
-    assert gateway_mirror.push_archived("s 1", True) is True
-    assert calls == [("PATCH", "/v1/sessions/s%201", {"archived": True})]

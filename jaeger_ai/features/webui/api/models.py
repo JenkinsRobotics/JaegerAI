@@ -2163,17 +2163,6 @@ _INTERRUPTED_RECOVERED_WORDING = (
     'The partial output above was recovered from the run journal, '
     'but the interrupted agent process could not continue.'
 )
-_INTERRUPTED_NO_OUTPUT_WORDING = (
-    '**Response interrupted.**\n\n'
-    'The live response stream stopped before this turn finished. '
-    'The user message above was preserved, but no agent output was recovered.'
-)
-_INTERRUPTED_PENDING_RETRY_WORDING = (
-    '**Response interrupted.**\n\n'
-    'The live response stream stopped before this turn finished. '
-    'Recovering the partial output from the run journal — '
-    'reload this session to retry.'
-)
 # Neutral wording used when the lazy retry path gives up (max attempts reached
 # or the marker has been pending longer than _JOURNAL_RETRY_GIVEUP_SECONDS).
 _INTERRUPTED_NEUTRAL_WORDING = (
@@ -6977,10 +6966,6 @@ def _parse_claude_code_jsonl_cached(
     return list(messages), summary_title, first_ts, last_ts
 
 
-def clear_claude_code_parse_cache() -> None:
-    """Drop all memoized Claude Code transcript parses (test/lifecycle hook)."""
-    with _CLAUDE_CODE_PARSE_CACHE_LOCK:
-        _CLAUDE_CODE_PARSE_CACHE.clear()
 
 
 def _iter_claude_code_jsonl_files(projects_dir: Path | str | None = None, *, max_files: int = CLAUDE_CODE_MAX_FILES, max_file_bytes: int = CLAUDE_CODE_MAX_FILE_BYTES):
@@ -9080,10 +9065,6 @@ def _state_db_row_identity_details(message: dict | None) -> tuple[str | None, bo
     return (next(iter(values)) if values else None), True
 
 
-def _state_db_row_identity(message: dict | None):
-    """Return durable state.db provenance without treating WebUI ``id`` as it."""
-    identity, valid = _state_db_row_identity_details(message)
-    return identity if valid else None
 
 
 def _stable_message_identity_details(message: dict | None) -> tuple[str | None, bool]:
@@ -10859,93 +10840,8 @@ def get_cli_session_messages(sid, *, profile=None) -> list:
     return get_state_db_session_messages(sid, stitch_continuations=True, profile=profile)
 
 
-def count_conversation_rounds(sid: str, since: float | None = None) -> int:
-    """Count conversation rounds for a session from state.db.
-
-    A "round" = one user message + one agent reply.  Consecutive user
-    messages are merged into a single round so that multi-part questions
-    don't inflate the count.
-
-    Parameters
-    ----------
-    sid : str
-        Gateway session ID (e.g. ``20260430_151231_7209a0``).
-    since : float | None
-        Unix timestamp.  If provided, only messages **after** this
-        timestamp are counted.
-
-    Returns
-    -------
-    int
-        Number of complete conversation rounds.
-    """
-    import os, sqlite3, datetime
-
-    try:
-        from api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
-    except Exception:
-        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.jaeger' / 'hermes'))).expanduser().resolve()
-    db_path = hermes_home / 'state.db'
-    if not db_path.exists():
-        return 0
-
-    try:
-        with closing(open_state_db_readonly(db_path)) as conn:
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT role, timestamp FROM messages WHERE session_id = ? ORDER BY timestamp ASC",
-                (sid,),
-            )
-            rows = cur.fetchall()
-    except Exception:
-        return 0
-
-    rounds = 0
-    seen_user = False          # have we seen a user msg in the current round?
-    seen_agent_after_user = False  # have we seen an agent reply after that user msg?
-
-    for row in rows:
-        role = (row['role'] or '').strip().lower()
-        ts_raw = row['timestamp']
-
-        # Parse timestamp and apply the ``since`` filter.
-        if since is not None and ts_raw is not None:
-            try:
-                if isinstance(ts_raw, (int, float)):
-                    ts_val = float(ts_raw)
-                else:
-                    # ISO-8601 string
-                    ts_val = datetime.datetime.fromisoformat(
-                        str(ts_raw).replace('Z', '+00:00')
-                    ).timestamp()
-                if ts_val <= since:
-                    continue
-            except Exception:
-                pass
-
-        if role == 'user':
-            if seen_user and not seen_agent_after_user:
-                # Consecutive user message — merge into current round.
-                pass
-            elif seen_user and seen_agent_after_user:
-                # Previous round completed, starting a new one.
-                rounds += 1
-                seen_agent_after_user = False
-            seen_user = True
-        elif role == 'assistant':
-            if seen_user:
-                seen_agent_after_user = True
-
-    # Close the last round if it was completed.
-    if seen_user and seen_agent_after_user:
-        rounds += 1
-
-    return rounds
 
 
-CONVERSATION_ROUND_THRESHOLD = 10
 
 
 @contextmanager

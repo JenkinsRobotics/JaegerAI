@@ -196,18 +196,6 @@ def _gw_archived(gw: dict) -> bool:
     return bool((gw.get("metadata") or {}).get("archived"))
 
 
-def push_archived(session_id: str, archived: bool) -> bool:
-    """Archive/unarchive on the Gateway. True when it accepted (False: not Gateway-backed)."""
-    result = _request(
-        "PATCH", f"/v1/sessions/{urllib.parse.quote(session_id, safe='')}", {"archived": bool(archived)},
-    )
-    if isinstance(result, dict) and not result.get("error"):
-        with _lock:
-            seen = _fingerprints.get(session_id)
-            if seen:
-                _fingerprints[session_id] = (seen[0], seen[1], bool(archived))
-        return True
-    return False
 
 
 def push_title(session_id: str, title: str) -> bool:
@@ -229,28 +217,3 @@ def is_mirrored_gateway_session(session_id: str) -> bool:
         return sid in _fingerprints
 
 
-def ensure_gateway_session(session: Any) -> bool:
-    """Register a newly created WebUI session on the Gateway so both stores share its ID."""
-    sid = str(getattr(session, "session_id", "") or "").strip()
-    if not sid:
-        return False
-    title = str(getattr(session, "title", "") or "Untitled")
-    workspace = str(getattr(session, "workspace", "") or "")
-    profile = str(getattr(session, "profile", "") or "jaeger")
-    result = _request(
-        "POST",
-        "/v1/sessions",
-        {
-            "session_id": sid,
-            "title": title,
-            "workspace": workspace,
-            "profile": profile,
-            "source": "webui",
-            "metadata": {"source": "webui"},
-        },
-    )
-    if isinstance(result, dict) and not result.get("error"):
-        with _lock:
-            _fingerprints[sid] = (result.get("updated_at"), 0, False)
-        return True
-    return False

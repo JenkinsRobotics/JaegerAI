@@ -230,45 +230,6 @@ def get_session_channel(session_id: str) -> Optional[SessionChannel]:
         return SESSION_CHANNELS.get(session_id)
 
 
-def subscribe_to_session_channel(
-    session_id: str, maxsize: int = 16
-) -> tuple["SessionChannel", "queue.Queue"]:
-    """Atomically get-or-create the channel for ``session_id`` AND register a
-    subscriber on it, both under ``SESSION_CHANNELS_LOCK``.
-
-    Closes a TOCTOU race flagged on PR #2971: callers that did
-    ``ch = get_or_create_session_channel(sid); q = ch.subscribe()`` released
-    ``SESSION_CHANNELS_LOCK`` between the two steps. The reaper acquires that
-    same lock and evaluates+collects channels entirely within it
-    (``_reaper_loop``), so a previously-idle channel with 0 subscribers past
-    the grace/TTL window could be collected in the gap — leaving the SSE
-    handler subscribed to a channel no longer in ``SESSION_CHANNELS``. Future
-    ``bg_task_complete`` emits resolve the session via ``get_session_channel``
-    and reach a different (or absent) channel, so the orphaned subscriber's
-    queue never fills: keepalives keep flowing, ``onerror`` never fires, no
-    auto-reconnect, and only a manual refresh recovers.
-
-    Holding ``SESSION_CHANNELS_LOCK`` across both the get-or-create and the
-    ``subscribe`` makes the two steps indivisible w.r.t. the reaper: the reaper
-    cannot run its critical section concurrently, and the next time it does the
-    channel already has ``sub_count >= 1`` so ``reaper_should_collect`` refuses
-    to collect it.
-
-    Lock order is ``SESSION_CHANNELS_LOCK`` → ``SessionChannel._lock`` (taken
-    inside ``subscribe``), identical to the order the reaper uses
-    (``SESSION_CHANNELS_LOCK`` → ``reaper_should_collect`` → ``_lock``), so no
-    new lock-ordering hazard is introduced. ``emit`` only takes ``_lock``.
-
-    Returns ``(channel, queue)``. The caller still owns the subscriber slot and
-    MUST ``channel.unsubscribe(queue)`` on every exit path.
-    """
-    with SESSION_CHANNELS_LOCK:
-        ch = SESSION_CHANNELS.get(session_id)
-        if ch is None:
-            ch = SessionChannel(session_id)
-            SESSION_CHANNELS[session_id] = ch
-        q = ch.subscribe(maxsize=maxsize)
-        return ch, q
 
 
 # Bounded window a cancelling worker may stay lifecycle-busy before an entry
@@ -342,96 +303,10 @@ def _active_run_ids_for_session(
         return []
 
 
-def active_stream_id_for_session(session_id: str) -> Optional[str]:
-    """Return the stream_id of the live run for *session_id*, or None.
-
-    Used by the per-session SSE handler's on-subscribe recovery: the
-    ``server_turn_started`` fan-out in ``routes.start_session_turn`` is a
-    fire-and-forget broadcast with NO replay buffer (SessionChannel.emit
-    drops to whoever is subscribed *at that instant*). A tab whose
-    ``/api/session/stream`` EventSource is momentarily absent at the emit
-    instant — a transient SSE drop, a reverse-proxy idle-timeout, or browser
-    connection-pool starvation — misses the frame permanently and the
-    server-initiated wakeup turn never renders live (the user must hard-
-    refresh). The server-side wakeup itself still ran and persisted; only the
-    live-view was lost. The handler replays a synthetic ``server_turn_started``
-    to a freshly-subscribed tab using this lookup so the open tab self-heals.
-
-    Keys on ACTIVE_RUNS (worker-lifecycle registry) — the same source
-    ``_session_has_active_turn`` / ``_emit_to_session_streams`` already trust
-    to map a stream back to its owning session — but returns only rows that
-    are still ATTACHABLE. A ``phase="cancelling"`` row stays lifecycle-busy
-    while its worker unwinds, yet the client already reached a terminal state
-    for that run, so replaying ``server_turn_started`` for it makes the tab
-    attach, receive the terminal event, resubscribe, and loop forever.
-    """
-    matches = _active_run_ids_for_session(session_id, attachable_only=True)
-    return matches[0] if matches else None
 
 
-def persisted_message_count_for_session(session_id: str) -> Optional[int]:
-    """Cheap, metadata-only persisted ``message_count`` for *session_id*, or None.
-
-    Companion to ``active_stream_id_for_session`` for the per-session SSE
-    on-subscribe self-heal. ``active_stream_id_for_session`` recovers a turn
-    that is live RIGHT NOW (replay ``server_turn_started``). But a
-    SERVER-initiated turn (self-wake / cron / restart hook) can start AND
-    finish entirely inside an SSE gap: the fire-and-forget
-    ``server_turn_started`` reached no subscriber AND the run already cleared
-    from ``ACTIVE_RUNS`` by the time the tab reconnects, so the replay finds
-    nothing (returns None) and the tab's transcript stays stale until a hard
-    refresh — the reported visible-tab defect. To detect that case the handler
-    compares the freshly-(re)subscribed tab's last-known count against this
-    persisted count; a server that is AHEAD means a turn landed during the gap.
-
-    Reads via ``metadata_only=True`` so it never parses the full transcript
-    (this runs on every per-session SSE (re)connect). The persisted count is
-    written by ``Session.save`` as ``meta['message_count'] = len(messages)`` —
-    the SAME basis the frontend's ``S.session.message_count`` is built from —
-    so the comparison is apples-to-apples. Returns None when the count is
-    unknown (legacy sidecars without a persisted count); the caller treats
-    None as "cannot tell, do nothing", never as a trigger.
-    """
-    try:
-        from api.models import get_session
-
-        s = get_session(session_id, metadata_only=True)
-        count = getattr(s, "_metadata_message_count", None)
-        if count is None:
-            msgs = getattr(s, "messages", None)
-            count = len(msgs) if isinstance(msgs, list) and msgs else None
-        return int(count) if count is not None else None
-    except Exception:
-        logger.debug(
-            "persisted_message_count_for_session lookup failed for %s",
-            session_id,
-            exc_info=True,
-        )
-        return None
 
 
-def should_emit_session_updated(
-    subscriber_known_count: Optional[int],
-    persisted_count: Optional[int],
-) -> bool:
-    """Gate for the per-session SSE "finished during the gap" self-heal emit.
-
-    Single source of truth shared by the SSE handler and its tests so the two
-    cannot drift (the handler MUST call this, not inline the comparison).
-    Emit a ``session-updated`` frame ONLY when:
-      * the (re)subscribing tab reported a last-known count (``?known_count``),
-        AND
-      * the persisted server-side count is known, AND
-      * the server is STRICTLY ahead (a turn landed during the gap).
-    A missing known count (tab didn't report), an unknown persisted count
-    (legacy sidecar), or an equal/behind count all return False — never a
-    spurious reload.
-    """
-    if subscriber_known_count is None:
-        return False
-    if persisted_count is None:
-        return False
-    return persisted_count > subscriber_known_count
 
 
 def _reaper_loop() -> None:
@@ -1776,28 +1651,8 @@ def register_process_session(session_key: str, session_id: str) -> None:
         _cfg.PROCESS_SESSION_INDEX[str(session_key)] = str(session_id)
 
 
-def unregister_process_session(session_key: str) -> None:
-    if not session_key:
-        return
-    from api import config as _cfg
-
-    with _cfg.PROCESS_SESSION_INDEX_LOCK:
-        _cfg.PROCESS_SESSION_INDEX.pop(str(session_key), None)
 
 
-def forget_bg_task_completion_dedup(session_id: str) -> None:
-    """Drop a session's ``BG_TASK_COMPLETE_EVENTS_SEEN`` entry.
-
-    Called on session deletion so a session deleted while a completion is still
-    pending (undelivered) — which the reaper's delivery-gated sweep deliberately
-    keeps — can't leak its dedup set forever. Safe for unknown ids (no-op).
-    """
-    if not session_id:
-        return
-    from api import config as _cfg
-
-    with _cfg.BG_TASK_COMPLETE_EVENTS_SEEN_LOCK:
-        _cfg.BG_TASK_COMPLETE_EVENTS_SEEN.pop(str(session_id), None)
 
 
 def start_drain_thread() -> bool:

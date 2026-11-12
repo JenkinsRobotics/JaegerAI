@@ -1183,26 +1183,8 @@ def _redact_nested_message_containers(value, *, _enabled: bool):
     return result
 
 
-def public_session_projection(session_dict: dict) -> dict:
-    """Return a public session payload with redaction and alias stripping.
-
-    Callers use this for every response/export/SSE session payload.  It never
-    mutates the in-memory session or the caller's dictionary.
-    """
-    return redact_session_data(session_dict)
 
 
-def strip_public_internal_fields(value, *, message_records: bool = False):
-    """Deep-copy imported records through the shared schema scrubber.
-
-    JSON import uses this before constructing or saving a ``Session``.  The
-    Five replay aliases belong to a message/content-part/tool-call/function
-    record itself; matching names inside user content or tool arguments are
-    ordinary JSON and must be preserved.  This is intentionally independent of
-    the credential-redaction setting: caller-supplied provider sidecars must
-    never become durable WebUI session state.
-    """
-    return scrub_internal_replay_fields(value, message_records=message_records)
 
 
 def _copy_json_value(value):

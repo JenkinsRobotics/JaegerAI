@@ -337,9 +337,6 @@ def _cancel_async_delegation_claim_retry(_delegation_id: str) -> None:
     return None
 
 
-def async_delivery_retry_timer_count() -> int:
-    with _ASYNC_DELIVERY_RETRY_LOCK:
-        return 1 if _ASYNC_DELIVERY_RETRY_TIMER is not None else 0
 
 
 def claim_async_delegation_delivery(
@@ -471,25 +468,5 @@ def release_async_delegation_delivery(
         _release_bounded_local(claim.delegation_id)
 
 
-def legacy_async_delivery_dedupe_size() -> int:
-    """Return bounded compatibility-dedupe size for regression coverage."""
-    with _LEGACY_ASYNC_DELIVERY_LOCK:
-        return len(_LEGACY_ASYNC_DELIVERY_IDS)
 
 
-def _reset_legacy_async_delivery_dedupe_for_tests() -> None:
-    global _ASYNC_DELIVERY_RETRY_TIMER
-    global _ASYNC_DELIVERY_RETRY_DEADLINE
-    global _ASYNC_DELIVERY_RETRY_QUEUE
-    global _ASYNC_DELIVERY_RETRY_GENERATION
-
-    with _LEGACY_ASYNC_DELIVERY_LOCK:
-        _LEGACY_ASYNC_DELIVERY_IDS.clear()
-    with _ASYNC_DELIVERY_RETRY_LOCK:
-        timer = _ASYNC_DELIVERY_RETRY_TIMER
-        _ASYNC_DELIVERY_RETRY_TIMER = None
-        _ASYNC_DELIVERY_RETRY_DEADLINE = 0.0
-        _ASYNC_DELIVERY_RETRY_QUEUE = None
-        _ASYNC_DELIVERY_RETRY_GENERATION += 1
-    if timer is not None:
-        timer.cancel()

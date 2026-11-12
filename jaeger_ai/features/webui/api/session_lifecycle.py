@@ -69,11 +69,6 @@ def _register_background_commit_thread(t: threading.Thread) -> bool:
         return True
 
 
-def _unregister_background_commit_thread(t: threading.Thread) -> None:
-    # A completed worker removes itself so the registry does not grow without
-    # bound over the process lifetime; drain only needs threads still running.
-    with _background_commit_threads_lock:
-        _background_commit_threads.discard(t)
 
 
 def _drain_background_commit_threads(timeout: float = 5.0, deadline_fn=None) -> None:

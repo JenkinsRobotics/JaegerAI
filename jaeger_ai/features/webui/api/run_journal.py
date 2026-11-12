@@ -36,15 +36,11 @@ _SEQ_CACHE_LOCK = threading.Lock()
 _SUMMARY_CACHE_MAX_ENTRIES = 128
 _SUMMARY_CACHE: OrderedDict[str, tuple[tuple[int, int, int, int, int], dict]] = OrderedDict()
 _SUMMARY_CACHE_LOCK = threading.Lock()
-# Events that mark a run terminal in the journal / summary sense.
-TERMINAL_SSE_EVENTS = frozenset({"done", "cancel", "apperror", "error", "stream_end"})
 # Events that should close an SSE relay drain loop. `done` is intentionally
 # excluded: background title generation and `stream_end` are emitted after
 # `done`, and breaking early would drop them. `apperror` is included because
 # it terminates with no trailing `stream_end`.
 SSE_RELAY_CLOSE_EVENTS = frozenset({"stream_end", "cancel", "apperror", "error"})
-# Back-compat alias used by older call sites / tests.
-_TERMINAL_SSE_EVENTS = TERMINAL_SSE_EVENTS
 _FSYNC_MODE_ENV = "HERMES_WEBUI_RUN_JOURNAL_FSYNC"
 _FSYNC_MODE_EAGER = "eager"
 _FSYNC_MODE_TERMINAL_ONLY = "terminal-only"
@@ -757,33 +753,3 @@ def delete_run_journal(session_id: str, *, session_dir: Path | None = None) -> b
     return removed
 
 
-def stale_interrupted_event(session_id: str, run_id: str, *, after_seq: int | None = None) -> dict | None:
-    summary = latest_run_summary(session_id, run_id)
-    if summary.get("terminal") or not summary.get("event_count"):
-        return None
-    seq = int(summary.get("last_seq") or 0) + 1
-    if after_seq is not None and seq <= int(after_seq):
-        return None
-    payload = {
-        "type": "interrupted",
-        "recovery_control": True,
-        "message": "The live worker stopped before this run finished.",
-        "hint": "The transcript was restored to the last journaled event. Start a new turn if you still need the task to continue.",
-        "session_id": session_id,
-        "stream_id": run_id,
-        "journal_last_seq": summary.get("last_seq"),
-    }
-    return {
-        "version": 1,
-        "event_id": f"{run_id}:{seq}",
-        "seq": seq,
-        "run_id": run_id,
-        "session_id": session_id,
-        "event": "apperror",
-        "type": "apperror",
-        "created_at": time.time(),
-        "terminal": True,
-        "terminal_state": "lost-worker-bookkeeping",
-        "payload": payload,
-        "synthetic": True,
-    }

@@ -407,23 +407,8 @@ def _watcher_registry_key(profile_name: str | None = None, hermes_home: Path | N
     return str(profile_name or "").strip() or "__default__"
 
 
-def _watcher_has_subscribers(watcher: GatewayWatcher) -> bool:
-    subscribers = getattr(watcher, "_subscribers", None)
-    sub_lock = getattr(watcher, "_sub_lock", None)
-    if subscribers is None or sub_lock is None:
-        return False
-    with sub_lock:
-        return bool(subscribers)
 
 
-def _pop_idle_watchers_locked(*, exclude_key: str) -> list[GatewayWatcher]:
-    stale: list[GatewayWatcher] = []
-    for key, watcher in list(_watchers.items()):
-        if key == exclude_key or _watcher_has_subscribers(watcher):
-            continue
-        if _watchers.get(key) is watcher:
-            stale.append(_watchers.pop(key))
-    return stale
 
 
 def start_watcher(*, profile_name: str | None = None, hermes_home: Path | None = None):
@@ -462,21 +447,6 @@ def stop_watcher(*, profile_name: str | None = None, hermes_home: Path | None = 
         watcher.stop()
 
 
-def restart_watcher_for_profile(name: str):
-    """Restart only the watcher pinned to the target profile home."""
-    from api.profiles import get_hermes_home_for_profile
-
-    hermes_home = Path(get_hermes_home_for_profile(name)).expanduser().resolve()
-    key = _watcher_registry_key(name, hermes_home)
-    watcher = GatewayWatcher(profile_name=name, hermes_home=hermes_home)
-    watcher.start()
-    with _watcher_lock:
-        existing = _watchers.pop(key, None)
-        stale_watchers = [] if existing is not None else _pop_idle_watchers_locked(exclude_key=key)
-        _watchers[key] = watcher
-    for old_watcher in ([existing] if existing is not None else stale_watchers):
-        old_watcher.stop()
-    return watcher
 
 
 def get_watcher(*, profile_name: str | None = None, hermes_home: Path | None = None) -> GatewayWatcher | None:

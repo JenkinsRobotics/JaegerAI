@@ -534,17 +534,6 @@ def get_webui_session_save_mode(config_data: dict | None = None) -> str:
     return _DEFAULT_WEBUI_SESSION_SAVE_MODE
 
 
-def is_unified_session_db_enabled(config_data: dict | None = None) -> bool:
-    """Return the dormant unified-session-db feature flag.
-
-    The default is intentionally false so adding the JSON adapter cannot change
-    runtime persistence until a later migration PR switches call sites.
-    """
-    active_cfg = config_data if isinstance(config_data, dict) else cfg
-    experimental = active_cfg.get("experimental", {}) if isinstance(active_cfg, dict) else {}
-    if not isinstance(experimental, dict):
-        return False
-    return experimental.get("unified_session_db") is True
 
 
 def _refresh_config_cache(config_path: Path | None = None) -> None:
@@ -1002,36 +991,6 @@ def verify_hermes_imports() -> tuple:
 MAX_FILE_BYTES = 400_000
 MAX_UPLOAD_BYTES = _env_mb_bytes("HERMES_WEBUI_MAX_UPLOAD_MB", 20)
 
-# ── File type maps ───────────────────────────────────────────────────────────
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp"}
-MD_EXTS = {".md", ".markdown", ".mdown"}
-CODE_EXTS = {
-    ".py",
-    ".js",
-    ".ts",
-    ".jsx",
-    ".tsx",
-    ".css",
-    ".html",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".sh",
-    ".bash",
-    ".txt",
-    ".log",
-    ".env",
-    ".csv",
-    ".xml",
-    ".sql",
-    ".rs",
-    ".go",
-    ".java",
-    ".c",
-    ".cpp",
-    ".h",
-}
 MIME_MAP = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -1119,7 +1078,6 @@ def _resolve_cli_toolsets(cfg=None):
         # Fallback: read raw list from config (MCP toolsets will be missing)
         return _normalize_cli_toolsets(cfg.get("platform_toolsets", {}).get("cli", _DEFAULT_TOOLSETS))
 
-CLI_TOOLSETS = _resolve_cli_toolsets()
 
 # ── Model / provider discovery ───────────────────────────────────────────────
 
@@ -4604,89 +4562,10 @@ def set_max_tokens(max_tokens) -> dict[str, int | None]:
     return get_max_tokens_status()
 
 
-def set_reasoning_display(show: bool) -> dict:
-    """Persist ``display.show_reasoning`` to the active profile's config.yaml.
-
-    Mirrors CLI ``/reasoning show|hide``: writes the same key that the CLI
-    writes, so the preference is shared across the WebUI and the terminal
-    REPL for the same profile.
-    """
-    config_path = _get_config_path()
-    with _cfg_lock:
-        config_data = _load_yaml_config_file(config_path)
-        display_cfg = config_data.get("display")
-        if not isinstance(display_cfg, dict):
-            display_cfg = {}
-        display_cfg["show_reasoning"] = bool(show)
-        config_data["display"] = display_cfg
-        _save_yaml_config_file(config_path, config_data)
-    reload_config()
-    return get_reasoning_status()
 
 
-def set_reasoning_effort(
-    effort: str,
-    *,
-    model_id: str | None = None,
-    provider_id: str | None = None,
-    base_url: str | None = None,
-) -> dict:
-    """Persist ``agent.reasoning_effort`` to the active profile's config.yaml.
-
-    Mirrors CLI ``/reasoning <level>``: same key, same valid values
-    (``none`` | ``minimal`` | ``low`` | ``medium`` | ``high`` | ``xhigh`` | ``max``).
-
-    An empty string is accepted as "clear the override" — it removes the
-    ``agent.reasoning_effort`` key so the provider default takes effect. This is
-    the re-enable path for thinking-toggle-only models (GLM-4.5–5.1 on native
-    zai): the dropdown's "Default"/"On" option POSTs ``effort:''`` to switch
-    thinking back on after the user selected "None". Without this, the toggle
-    would be one-way (off-only) for those models. (#6219 round-3)
-
-    Raises ``ValueError`` on any other unrecognised level so callers can 400.
-    """
-    raw = str(effort or "").strip().lower()
-    if raw and raw != "none" and raw not in VALID_REASONING_EFFORTS:
-        raise ValueError(
-            f"Unknown reasoning effort '{effort}'. "
-            f"Valid: none, {', '.join(VALID_REASONING_EFFORTS)}."
-        )
-    config_path = _get_config_path()
-    with _cfg_lock:
-        config_data = _load_yaml_config_file(config_path)
-        agent_cfg = config_data.get("agent")
-        if not isinstance(agent_cfg, dict):
-            agent_cfg = {}
-        if raw:
-            agent_cfg["reasoning_effort"] = raw
-        else:
-            # Clear the override so the provider default takes effect (the
-            # "Default"/"On" re-enable path for thinking-toggle-only models).
-            # Drop the key entirely rather than writing an empty string so the
-            # CLI's "is reasoning_effort configured?" check stays simple.
-            agent_cfg.pop("reasoning_effort", None)
-        config_data["agent"] = agent_cfg
-        _save_yaml_config_file(config_path, config_data)
-    reload_config()
-    return get_reasoning_status(
-        model_id=model_id,
-        provider_id=provider_id,
-        base_url=base_url,
-    )
 
 
-def _public_advanced_model_options(model_cfg: dict) -> dict:
-    """Return write-only-safe advanced options from a model config block."""
-    if not isinstance(model_cfg, dict):
-        model_cfg = {}
-    return {
-        "base_url": str(model_cfg.get("base_url") or "").strip(),
-        "timeout": model_cfg.get("timeout", ""),
-        "download_timeout": model_cfg.get("download_timeout", ""),
-        "max_concurrency": model_cfg.get("max_concurrency", ""),
-        "extra_body": model_cfg.get("extra_body") if isinstance(model_cfg.get("extra_body"), dict) else {},
-        "api_key_set": bool(str(model_cfg.get("api_key") or "").strip()),
-    }
 
 
 def _is_openai_family_provider(provider: str | None) -> bool:
@@ -4809,18 +4688,6 @@ def _annotate_fast_tier_model_groups(payload: dict | None) -> dict | None:
     return payload
 
 
-def _public_main_service_tier(model_cfg: dict) -> str:
-    """Return the saved main-model service tier only for OpenAI-family providers."""
-    if not isinstance(model_cfg, dict):
-        return ""
-    model_id = str(model_cfg.get("default") or model_cfg.get("name") or "").strip()
-    provider = str(model_cfg.get("provider") or "").strip().lower()
-    if not provider:
-        _, provider, _ = resolve_model_provider(model_id)
-    if not _main_model_supports_service_tier(model_id, provider):
-        return ""
-    service_tier = str(model_cfg.get("service_tier") or "").strip().lower()
-    return "priority" if service_tier == "priority" else ""
 
 
 def _main_model_request_overrides(
@@ -4986,98 +4853,14 @@ def set_hermes_default_model(model_id: str, provider: str | None = None, advance
 
 # ── Auxiliary model configuration ──────────────────────────────────────────
 
-# Canonical auxiliary task catalog.
-# Keep in sync with hermes_cli/config.py DEFAULT_CONFIG["auxiliary"] and
-# hermes_cli/web_server.py _AUX_TASK_SLOTS.
-AUXILIARY_TASK_CATALOG: tuple[dict[str, str], ...] = (
-    {"key": "vision", "label": "Vision", "description": "image/screenshot analysis"},
-    {"key": "web_extract", "label": "Web extract", "description": "web page summarization"},
-    {"key": "compression", "label": "Compression", "description": "context summarization"},
-    {"key": "approval", "label": "Approval", "description": "smart command approval"},
-    {"key": "mcp", "label": "MCP", "description": "MCP tool reasoning"},
-    {"key": "title_generation", "label": "Title generation", "description": "session titles"},
-    {"key": "skills_hub", "label": "Skills hub", "description": "skills search/install"},
-    {"key": "curator", "label": "Curator", "description": "skill-usage review pass"},
-    {"key": "kanban_decomposer", "label": "Kanban decomposer", "description": "task decomposition"},
-    {"key": "profile_describer", "label": "Profile describer", "description": "profile summaries"},
-    {"key": "triage_specifier", "label": "Triage specifier", "description": "issue/task triage specs"},
-)
-
-AUX_TASK_SLOTS: tuple[str, ...] = tuple(item["key"] for item in AUXILIARY_TASK_CATALOG)
-
-# Slots removed from the WebUI catalog whose persisted assignments should be
-# discarded when the user explicitly resets all auxiliary-model routing.
-RETIRED_AUX_TASK_SLOTS: tuple[str, ...] = ("session_search",)
 
 
-def _aux_task_payload(task_key: str, entry: dict, fallback_label: str = "", fallback_description: str = "") -> dict:
-    """Build the API payload row for a single auxiliary task."""
-    if not isinstance(entry, dict):
-        entry = {}
-    return {
-        "task": task_key,
-        "provider": str(entry.get("provider") or "auto").strip() or "auto",
-        "model": str(entry.get("model") or "").strip(),
-        "base_url": str(entry.get("base_url") or "").strip(),
-        "timeout": entry.get("timeout", ""),
-        "download_timeout": entry.get("download_timeout", ""),
-        "max_concurrency": entry.get("max_concurrency", ""),
-        "extra_body": entry.get("extra_body") if isinstance(entry.get("extra_body"), dict) else {},
-        "api_key_set": bool(str(entry.get("api_key") or "").strip()),
-        "label": fallback_label,
-        "description": fallback_description,
-    }
 
 
-def _iter_auxiliary_task_rows() -> list[dict]:
-    """Return canonical auxiliary task payload rows."""
-    aux_cfg = cfg.get("auxiliary", {})
-    if not isinstance(aux_cfg, dict):
-        aux_cfg = {}
-
-    rows: list[dict] = []
-
-    # Canonical, first-class tasks from WebUI's catalog.
-    for slot in AUXILIARY_TASK_CATALOG:
-        key = str(slot["key"]).strip()
-        if not key:
-            continue
-        rows.append(_aux_task_payload(key, aux_cfg.get(key, {}), slot["label"], slot["description"]))
-
-    return rows
 
 
-def get_auxiliary_models() -> dict:
-    """Return current auxiliary task assignments from config.yaml.
 
-    Shape:
-    {
-        "tasks": [
-            {"task": "vision", "provider": "auto", "model": "", "base_url": ""},
-            ...
-        ],
-        "main": {"provider": "openrouter", "model": "anthropic/claude-opus-4.7", "service_tier": ""},
-    }
-    """
-    reload_config()
-    model_cfg = cfg.get("model", {})
-    if not isinstance(model_cfg, dict):
-        model_cfg = {}
-    main_provider = str(model_cfg.get("provider") or "").strip()
-    main_model = str(model_cfg.get("default") or model_cfg.get("name") or "").strip()
 
-    tasks = _iter_auxiliary_task_rows()
-
-    return {
-        "tasks": tasks,
-        "main": {
-            "provider": main_provider,
-            "model": main_model,
-            "supports_fast_tier": _main_model_supports_service_tier(main_model, main_provider),
-            "service_tier": _public_main_service_tier(model_cfg),
-            **_public_advanced_model_options(model_cfg),
-        },
-    }
 
 
 def _coerce_optional_positive_int(value, field: str):
@@ -5096,103 +4879,6 @@ def _coerce_optional_positive_int(value, field: str):
     return number
 
 
-def set_auxiliary_model(task: str, provider: str, model: str, advanced: dict | None = None) -> dict:
-    """Persist an auxiliary model assignment in config.yaml.
-
-    Special case: task='__reset__' clears all auxiliary slots.
-    ``advanced`` may update per-slot fields surfaced behind the WebUI gear menu.
-    Sensitive api_key values are write-only: get_auxiliary_models() only reports
-    whether one is set.
-    """
-    config_path = _get_config_path()
-    with _cfg_lock:
-        config_data = _load_yaml_config_file(config_path)
-        if task != "__reset__" and task not in AUX_TASK_SLOTS:
-            raise ValueError(f"Unknown auxiliary task slot: {task!r}. Valid: {list(AUX_TASK_SLOTS)}")
-        if task == "__reset__":
-            # Per-slot reset: set each slot to auto, preserving extra fields
-            # (timeout, extra_body, api_key, base_url, download_timeout, etc.)
-            aux_cfg = config_data.get("auxiliary", {})
-            if not isinstance(aux_cfg, dict):
-                aux_cfg = {}
-            for retired_slot in RETIRED_AUX_TASK_SLOTS:
-                aux_cfg.pop(retired_slot, None)
-            for slot in AUX_TASK_SLOTS:
-                slot_cfg = aux_cfg.get(slot, {})
-                if not isinstance(slot_cfg, dict):
-                    slot_cfg = {}
-                slot_cfg["provider"] = "auto"
-                slot_cfg["model"] = ""
-                aux_cfg[slot] = slot_cfg
-            config_data["auxiliary"] = aux_cfg
-        else:
-            aux_cfg = config_data.get("auxiliary", {})
-            if not isinstance(aux_cfg, dict):
-                aux_cfg = {}
-            slot_cfg = aux_cfg.get(task, {})
-            if not isinstance(slot_cfg, dict):
-                slot_cfg = {}
-            slot_cfg["provider"] = provider or "auto"
-            slot_cfg["model"] = model or ""
-            if provider and (provider.startswith("custom:") or provider == "custom"):
-                # Resolve the auxiliary slot's base_url against the SELECTED
-                # provider, not the active main provider. A bare
-                # resolve_model_provider(model) ignores `provider` and routes the
-                # model through whatever main provider is active — so when the
-                # selected auxiliary provider (custom:A) and the active main
-                # provider (custom:B) both list the same model id, the slot was
-                # persisted with provider=custom:A but base_url=B's endpoint
-                # (overlapping-id misroute, sibling of the resolve_model_provider
-                # fix). For a named custom:<slug> selection, look up that
-                # provider's OWN custom_providers[] entry directly. Note we do
-                # NOT route through model_with_provider_context here: the
-                # @custom:<slug>:model form resolves base_url to None (the
-                # @provider path doesn't carry a custom entry's base_url), which
-                # would drop the base_url entirely. Fall back to the bare resolve
-                # only for the unnamed `custom` case, which has no own entry.
-                resolved_base_url = None
-                if provider.startswith("custom:"):
-                    # Resolve the selected provider's base_url from the
-                    # config_data already loaded under _cfg_lock above. Do NOT
-                    # call resolve_custom_provider_connection() / get_config()
-                    # here: they re-acquire the non-reentrant _cfg_lock we
-                    # already hold, self-deadlocking whenever the cache is stale
-                    # or the profile path changed. Use the shared uniqueness
-                    # helper on the in-scope dict so this slug-only save fails
-                    # closed on a collision (raises AmbiguousCustomProviderError)
-                    # exactly like every other path — otherwise the ambiguity
-                    # would be swallowed and the wrong endpoint persisted.
-                    _cp_match = _unique_custom_provider_entry(
-                        config_data.get("custom_providers", []),
-                        _custom_provider_slug_key(provider),
-                    )
-                    if _cp_match is not None:
-                        resolved_base_url = str(_cp_match.get("base_url") or "").strip() or None
-                if not resolved_base_url:
-                    # Best-effort fallback for the unnamed `custom` case (no own
-                    # entry). Keep it non-fatal for unexpected errors, but let a
-                    # genuine ambiguity propagate so the save fails closed.
-                    try:
-                        _, _, resolved_base_url = resolve_model_provider(model)
-                    except AmbiguousCustomProviderError:
-                        raise
-                    except Exception:
-                        resolved_base_url = None
-                if resolved_base_url:
-                    slot_cfg["base_url"] = str(resolved_base_url).strip().rstrip("/")
-            if advanced is not None:
-                try:
-                    _apply_advanced_model_options(slot_cfg, advanced)
-                except ValueError as exc:
-                    msg = str(exc).replace("advanced model options", "advanced auxiliary options")
-                    raise ValueError(msg) from exc
-            aux_cfg[task] = slot_cfg
-            config_data["auxiliary"] = aux_cfg
-
-        _save_yaml_config_file(config_path, config_data)
-
-    reload_config()
-    return {"ok": True, "task": task, "provider": provider, "model": model}
 
 
 # ── TTL cache for get_available_models() ─────────────────────────────────────
@@ -6093,7 +5779,6 @@ def _has_explicit_pool_credentials(provider_id: str) -> bool:
     cost more than once per TTL window.
     """
     return bool(_pool_entry_payloads(provider_id))
-_provider_models_invalidated_ts: dict[str, float] = {}  # provider_id -> timestamp of last invalidation
 
 # Disk-backed in-memory cache for get_available_models().
 # Written to disk on every cache population so the cache survives server restarts.
@@ -6699,35 +6384,6 @@ def invalidate_credential_pool_cache(provider_id: str):
         logger.debug("Failed to invalidate account usage status cache", exc_info=True)
 
 
-def invalidate_provider_models_cache(provider_id: str):
-    """Invalidate cached models for a single provider.
-
-    Also invalidates the full cache so that the next get_available_models()
-    call rebuilds all groups cleanly (the rebuilt provider is merged with any
-    other cached groups from the 24h TTL window).  After the next
-    get_available_models() call, _provider_models_invalidated_ts[provider_id]
-    is cleared so the provider's fresh models are used.
-
-    Args:
-        provider_id: canonical provider id (e.g. 'openai', 'anthropic', 'custom:my-key')
-    """
-    global _available_models_cache, _available_models_cache_ts
-    global _available_models_live_rebuild_ts, _available_models_cache_source_fingerprint, _CREDENTIAL_POOL_CACHE
-    with _available_models_cache_lock:
-        _available_models_cache = None
-        _available_models_cache_ts = 0.0
-        _available_models_live_rebuild_ts = 0.0
-        _available_models_cache_source_fingerprint = None
-        _sync_models_cache_provenance()
-        _provider_models_invalidated_ts[provider_id] = time.time()
-        # Also evict the credential pool so the next cold path re-loads it.
-        # Must evict both the original key and its canonical form (load_pool
-        # may be called with either, and both paths cache under their own key),
-        # scoped to the active profile's cache key.
-        _cp_tag = _credential_pool_profile_tag()
-        _CREDENTIAL_POOL_CACHE.pop((_cp_tag, provider_id), None)
-        _CREDENTIAL_POOL_CACHE.pop((_cp_tag, _resolve_provider_alias(provider_id)), None)
-    _delete_models_cache_on_disk()
 
 
 def _get_label_for_model(model_id: str, existing_groups: list) -> str:
@@ -9128,7 +8784,6 @@ def get_sessions_cache_max(config_data: dict | None = None) -> int:
 # dict mode, which reads no file and takes no lock, so the value is right before
 # the first eviction pass instead of after it.
 _LAST_APPLIED_SESSIONS_CACHE_MAX: int = get_sessions_cache_max(cfg)
-CHAT_LOCK = threading.Lock()
 
 
 class StreamChannel:
@@ -9568,15 +9223,6 @@ def gateway_supports_approval_identity_v1(base_url: str, api_key: str = "") -> b
     return bool(get_gateway_caps(base_url, api_key).get("approval_identity_v1"))
 
 
-def invalidate_gateway_caps(base_url: str | None = None) -> None:
-    """Evict capability cache for base_url, or all entries when base_url is None."""
-    with _GATEWAY_CAPS_LOCK:
-        if base_url is None:
-            _GATEWAY_CAPS_CACHE.clear()
-        else:
-            normalized = str(base_url or "").rstrip("/")
-            for cache_key in [key for key in _GATEWAY_CAPS_CACHE if key[0] == normalized]:
-                _GATEWAY_CAPS_CACHE.pop(cache_key, None)
 
 
 # ── notify_on_complete agent-wakeup wiring ─────────────────────────────────
@@ -10559,68 +10205,6 @@ if _settings_file_exists:
 SESSIONS: collections.OrderedDict = collections.OrderedDict()
 
 
-def get_runtime_diagnostics_snapshot() -> dict[str, dict[str, object]]:
-    """Return nonblocking scalar observations owned by the config module."""
-    result = {
-        "sessions": {"available": False, "resident": 0, "cap": 0},
-        "models_cache": {
-            "available": False,
-            "groups": 0,
-            "models": 0,
-            "age_seconds": None,
-        },
-    }
-    try:
-        if LOCK.acquire(blocking=False):
-            try:
-                # Held-section discipline: len(), arithmetic, and owner-held
-                # scalars only. Never call anything here that can resolve config
-                # or a profile, touch the filesystem, import a module, or wait on
-                # another lock — the cap is the scalar _evict_sessions_over_cap()
-                # published, precisely so this section stays leaf-nonblocking.
-                result["sessions"] = {
-                    "available": True,
-                    "resident": max(0, int(len(SESSIONS))),
-                    "cap": max(0, int(_LAST_APPLIED_SESSIONS_CACHE_MAX)),
-                }
-            finally:
-                LOCK.release()
-    except Exception:
-        pass
-    try:
-        if _available_models_cache_lock.acquire(blocking=False):
-            try:
-                # Same held-section discipline: len(), isinstance, float(), and
-                # time.monotonic() only. _available_models_cache_lock is an RLock
-                # (see its definition), so a nonblocking acquire from a thread
-                # that already holds it would report available mid-build; safe
-                # here because health collection is never nested inside a
-                # catalog build, and nothing may be added that changes that.
-                snapshot = _available_models_cache
-                groups = snapshot.get("groups") if isinstance(snapshot, dict) else None
-                group_count = len(groups) if isinstance(groups, list) else 0
-                model_count = 0
-                if isinstance(groups, list):
-                    for group in groups:
-                        if isinstance(group, dict):
-                            for bucket in ("models", "extra_models"):
-                                models = group.get(bucket)
-                                if isinstance(models, list):
-                                    model_count += len(models)
-                age = None
-                if snapshot is not None and _available_models_cache_ts:
-                    age = max(0.0, time.monotonic() - float(_available_models_cache_ts))
-                result["models_cache"] = {
-                    "available": True,
-                    "groups": max(0, int(group_count)),
-                    "models": max(0, int(model_count)),
-                    "age_seconds": age,
-                }
-            finally:
-                _available_models_cache_lock.release()
-    except Exception:
-        pass
-    return result
 
 # ── Profile state initialisation ────────────────────────────────────────────
 # Must run after all imports are resolved to correctly patch module-level caches
