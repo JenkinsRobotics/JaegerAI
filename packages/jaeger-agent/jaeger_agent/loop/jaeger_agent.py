@@ -2199,17 +2199,18 @@ class JaegerAgent:
 
         started = time.perf_counter()
         from jaeger_agent import live as _live
-        with _live.tool_call(call_id):
+        _sub = _live.current_subagent()
+        live_call = f"{_sub}:{call_id}" if _sub else call_id
+        with _live.tool_call(live_call):
             self.callbacks.on_tool_progress(name, "start", args)
-            if _live.current_subagent():
-                _live.emit("subagent.tool.started", {"subagent_id": _live.current_subagent(),
-                                                     "call_id": f"{_live.current_subagent()}:{call_id}", "tool": name})
+            if _sub:
+                _live.emit("subagent.tool.started", {"subagent_id": _sub, "call_id": live_call, "tool": name})
         # Pre-dispatch hook — guardrail returns optional guidance text.
         guidance = self.callbacks.on_before_tool_call(name, args)
         return {
             "name": name,
             "args": args,
-            "call_id": call_id,
+            "call_id": call_id, "live_call": live_call,
             "sig": sig,
             "tool_def": tool_def,
             "is_read": is_read_tool,
@@ -2248,7 +2249,7 @@ class JaegerAgent:
                 from jaeger_agent import live as _live
                 # The call id rides a ContextVar so delegates, progress and
                 # hooks inside the tool report under THIS call's span.
-                with turn_cancellation(self._interrupt_event), _live.tool_call(prep.get("call_id")):
+                with turn_cancellation(self._interrupt_event), _live.tool_call(prep.get("live_call") or prep.get("call_id")):
                     content = self._tool_executor.execute(tool_def, args)
         except Exception as exc:  # noqa: BLE001 — surfaced to the model
             # Tag safety/permission failures distinctly so the model
@@ -2344,7 +2345,8 @@ class JaegerAgent:
 
         elapsed = time.perf_counter() - started
         from jaeger_agent import live as _live
-        _call_scope = _live.tool_call(call_id)
+        _sub = _live.current_subagent()
+        _call_scope = _live.tool_call(f"{_sub}:{call_id}" if _sub else call_id)
         _call_scope.__enter__()
         self.callbacks.on_tool_progress(
             name, "done", {"elapsed_s": round(elapsed, 3)},
@@ -2376,9 +2378,9 @@ class JaegerAgent:
                 name, dict(args) if isinstance(args, dict) else {},
                 content, _ok, _err, round(elapsed, 6),
             )
-            if _live.current_subagent():
-                _live.emit("subagent.tool.finished", {"subagent_id": _live.current_subagent(),
-                                                      "call_id": f"{_live.current_subagent()}:{call_id}", "tool": name,
+            if _sub:
+                _live.emit("subagent.tool.finished", {"subagent_id": _sub,
+                                                      "call_id": f"{_sub}:{call_id}", "tool": name,
                                                       "ok": bool(_ok), "elapsed_s": round(elapsed, 3)})
         finally:
             _call_scope.__exit__(None, None, None)
