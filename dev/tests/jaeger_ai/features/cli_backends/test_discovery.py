@@ -23,11 +23,11 @@ def _fake_which(installed: dict[str, str]):
     return which
 
 
-def test_known_catalog_covers_the_five_brains_and_ollama():
+def test_known_catalog_covers_the_cli_brains_and_ollama():
     ids = {spec.id for spec in KNOWN_BACKENDS}
-    assert ids == {"claude", "codex", "grok", "gemini", "hermes", "ollama"}
+    assert ids == {"claude", "codex", "grok", "gemini", "agy", "hermes", "ollama"}
     catalogued = {spec.id for spec in KNOWN_BACKENDS if spec.catalog}
-    assert catalogued == {"claude", "codex", "grok", "gemini", "hermes"}
+    assert catalogued == {"claude", "codex", "grok", "gemini", "agy", "hermes"}
     assert resolve_backend("cli:claude").id == "claude"
     assert resolve_backend("codex-cli").id == "codex"
 
@@ -71,7 +71,8 @@ def test_missing_binary_is_not_catalogued(monkeypatch):
     assert [r.id for r in list_installed()] == ["claude"]
     assert [r["name"] for r in to_model_rows()] == ["cli:claude"]
     missing = [r for r in list_all() if not r.installed]
-    assert {r.id for r in missing} == {"codex", "grok", "gemini", "hermes", "ollama"}
+    # Every catalogue entry except the one installed CLI is reported missing.
+    assert {r.id for r in missing} == {spec.id for spec in KNOWN_BACKENDS} - {"claude"}
 
 
 def test_list_registered_models_includes_a_fake_installed_cli(monkeypatch):
