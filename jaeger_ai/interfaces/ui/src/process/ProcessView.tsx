@@ -138,11 +138,14 @@ function Canvas({ state, runId, now, selected, onSelect }: { state: ProcessState
   const fit = useCallback(() => void flow.fitView({ padding: 0.15, duration: 250, maxZoom: 1.1 }), [flow]);
   useEffect(() => {
     const key = `${runId}:${count}`;
-    if (!count || !measured || key === lastFit.current) return;
+    if (!count || key === lastFit.current) return;
     lastFit.current = key;
-    const t = setTimeout(fit, 0);
-    return () => clearTimeout(t);
-  }, [fit, runId, count, measured]);
+    // New cards are measured a frame or two after they mount; fit once they
+    // are (when React Flow reports them initialised) and once more shortly after.
+    const timers = [setTimeout(fit, 120), setTimeout(fit, 600)];
+    return () => timers.forEach(clearTimeout);
+  }, [fit, runId, count]);
+  useEffect(() => { if (measured && count) fit(); }, [measured, count, fit]);
   // Refit when the canvas itself resizes (inspector opens/closes, window resize).
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
