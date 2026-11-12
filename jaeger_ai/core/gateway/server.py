@@ -285,6 +285,10 @@ def _tool_event_args(args: Any) -> dict[str, Any]:
     return shown
 
 
+#: Seconds between ``tool.progress`` heartbeats on a running tool (0 = off).
+TOOL_HEARTBEAT_S = float(os.environ.get("JAEGER_TOOL_HEARTBEAT_S", "5") or 0)
+
+
 def _live_activity_id(request_id: str, call_id: str) -> str:
     """Durable activity id for one model tool call: namespaced by request so a
     provider that reuses ids (``call_0``) across turns stays unique."""
@@ -4848,7 +4852,8 @@ class JaegerGatewayApp:
             chosen.append(row)
         return chosen
 
-    def _turn_stream_callbacks(self, session_id: str, request_id: str) -> tuple[Any, Callable[[], None]]:
+    def _turn_stream_callbacks(self, session_id: str, request_id: str, *, model: str | None = None,
+                               lane: str | None = None) -> tuple[Any, Callable[[], None]]:
         """Agent callbacks that stream this turn to clients as durable events.
 
         ``turn.delta`` carries answer text (what Swift's voice loop and the
@@ -4875,6 +4880,30 @@ class JaegerGatewayApp:
         # hooks and progress land on the same span. A FIFO per raw name remains
         # only as the fallback for callers that do not set it.
         active_tools: dict[str, list[str]] = {}
+
+        heartbeats: dict[str, threading.Event] = {}
+        cb_holder: list[Any] = [None]
+
+        def heartbeat(activity_id: str, tool: str) -> None:
+            # A long tool is not silent: every TOOL_HEARTBEAT_S the span gets a
+            # tool.progress tick (elapsed time) until it finishes or the turn ends.
+            stop = heartbeats[activity_id]
+            t0 = time.monotonic()
+            step_at_start = step_ref()
+            while not stop.wait(TOOL_HEARTBEAT_S):
+                elapsed = time.monotonic() - t0
+                try:
+                    status = (self.store.get_request(request_id) or {}).get("status")
+                    if elapsed > 3600 or (status and status not in {
+                            "running", "approved", "admitted", "cancelling", "queued"}):
+                        break
+                    self.event_bus.publish(session_id, "tool.progress", {
+                        **ids, **step_at_start, "call_id": activity_id, "activity_id": activity_id, "tool": tool,
+                        "heartbeat": True, "elapsed_s": round(elapsed, 1),
+                        "message": f"still running · {int(elapsed)} s"})
+                except Exception:  # noqa: BLE001 — a store going away ends the heartbeat
+                    break
+            heartbeats.pop(activity_id, None)
 
         def live_activity() -> str | None:
             from jaeger_agent import live as _live
@@ -4978,6 +5007,10 @@ class JaegerGatewayApp:
                 except Exception:
                     logger.debug("File change checkpoint unavailable for %s", raw_name)
             self._active_tool_call[request_id] = activity_id
+            if TOOL_HEARTBEAT_S > 0:
+                heartbeats[activity_id] = threading.Event()
+                threading.Thread(target=heartbeat, args=(activity_id, _safe_tool_event_name(name)),
+                                 name="tool-heartbeat", daemon=True).start()
             self.event_bus.publish(session_id, "tool.started", {
                 **ids, **step_ref(),
                 "session_id": session_id,
@@ -5039,6 +5072,9 @@ class JaegerGatewayApp:
                     activity_id = queued.pop(0) if queued else (real or f"tool_{uuid.uuid4().hex}")
                 if queued == []:
                     active_tools.pop(raw_name, None)
+            beat = heartbeats.get(activity_id)
+            if beat is not None:
+                beat.set()
             snapshots = file_snapshots.pop(activity_id, [])
             if snapshots:
                 try:
@@ -5096,9 +5132,13 @@ class JaegerGatewayApp:
             step["index"] += 1
             step["id"] = f"{request_id}:{step['index']}"
             step["t0"] = time.monotonic()
+            ident = getattr(cb_holder[0], "model_identity", None) if cb_holder else None
+            ident = {k: str(v)[:120] for k, v in (ident or {}).items() if isinstance(v, str) and v}
             self.event_bus.publish(session_id, "model.started", {
-                **ids, "step_id": step["id"], "index": step["index"],
-                "model": str((self.store.get_request(request_id) or {}).get("model") or "") or None,
+                **ids, "step_id": step["id"], "index": step["index"], **ident,
+                "model": ident.get("model") or model
+                or str((self.store.get_request(request_id) or {}).get("model") or "") or None,
+                "lane": lane or None,
             })
 
         def on_model_done(usage: dict[str, int]) -> None:
@@ -5109,11 +5149,19 @@ class JaegerGatewayApp:
             if step["id"] is None:
                 return
             ok = not (isinstance(usage, dict) and usage.get("failed"))
-            tokens = {k: int(v) for k, v in (usage or {}).items()
+            usage = usage if isinstance(usage, dict) else {}
+            tokens = {k: int(v) for k, v in usage.items()
                       if k in {"prompt_tokens", "completion_tokens"} and isinstance(v, int)}
+            # A lane that does not report usage (e.g. a CLI brain) says so
+            # rather than showing zeros as if they were measured.
+            reported = any(tokens.values())
+            identity = {k: str(usage[k])[:120] for k in ("model", "provider", "actual_model", "error")
+                        if isinstance(usage.get(k), str) and usage.get(k)}
             self.event_bus.publish(session_id, "model.finished", {
                 **ids, "step_id": step["id"], "index": step["index"], "ok": ok,
-                "usage": tokens,
+                "usage": tokens if reported else {}, "usage_reported": reported,
+                **identity, **({"model": model} if model and "model" not in identity else {}),
+                "lane": lane or None,
                 "duration_ms": int((time.monotonic() - (step["t0"] or time.monotonic())) * 1000),
             })
 
@@ -5122,7 +5170,7 @@ class JaegerGatewayApp:
                 **ids, "outline": outline,
             })
 
-        return AgentCallbacks(
+        cb_holder[0] = AgentCallbacks(
             model_input=on_model_input,
             thinking=on_thinking,
             tool_selection=lambda receipt: self.event_bus.publish(session_id, "tools.selected", {**ids, "receipt": receipt}),
@@ -5132,7 +5180,8 @@ class JaegerGatewayApp:
             reasoning=on_reasoning,
             tool_progress=on_tool_progress,
             tool_done=on_tool_done,
-        ), finish
+        )
+        return cb_holder[0], finish
 
     def _owner_react_turn(
         self, prompt: str, *, session_key: str, request_id: str,
@@ -5160,7 +5209,8 @@ class JaegerGatewayApp:
             session = self.store.get_session(session_key) or {}
             selection = session.get("metadata") or {}
             lane, selected_model = split_routed_model_id(str(selection.get("model") or session.get("model") or ""))
-        callbacks, flush = self._turn_stream_callbacks(session_key, request_id)
+        callbacks, flush = self._turn_stream_callbacks(session_key, request_id,
+                                                       model=selected_model or None, lane=lane or None)
         callbacks.context_references = context_references
         from jaeger_agent.tool_executor import tool_allowlist
         from jaeger_agent.core.workspace import read_confinement

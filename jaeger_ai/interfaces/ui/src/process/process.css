@@ -78,3 +78,7 @@
 @keyframes jg-proc-flow { to { background-position: 24px 0; } }
 @keyframes jg-proc-flow-down { to { background-position: 0 24px; } }
 @media (prefers-reduced-motion: reduce) { .jg-proc * { animation: none !important; } }
+
+.jg-proc-node__detail { font-size: 11px; opacity: .8; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.jg-proc-node__bar { height: 4px; margin-top: 4px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--jg-proc-running); overflow: hidden; }
+.jg-proc-node__bar > i { display: block; height: 100%; background: var(--jg-proc-running); transition: width .2s ease; }

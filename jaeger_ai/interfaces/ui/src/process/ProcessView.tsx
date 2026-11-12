@@ -28,6 +28,8 @@ function Node({ span, now }: { span: Span; now: number }) {
       <div className="jg-proc-node__kind">{KIND_LABEL[span.kind] ?? span.kind}</div>
       <div className="jg-proc-node__name">{span.name}</div>
       <div className="jg-proc-node__meta"><span className="jg-proc-node__state">{span.state}</span>{dur != null && <span>{fmtMs(dur)}</span>}</div>
+      {(live || span.kind === "model" || span.kind === "hook") && span.detail && <div className="jg-proc-node__detail">{span.detail}</div>}
+      {span.progress != null && <div className="jg-proc-node__bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(span.progress * 100)}><i style={{ width: `${Math.round(span.progress * 100)}%` }} /></div>}
     </div>
   );
 }

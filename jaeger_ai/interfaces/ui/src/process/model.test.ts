@@ -38,4 +38,19 @@ describe("process model", () => {
   it("ignores events without a trace", () => {
     expect(foldAll([{ event: "backlog.updated" }]).spans.size).toBe(0);
   });
+  it("tool progress annotates the open tool without changing its state", () => {
+    const tr = (span_id: string, kind: string, state: string | null, parent: string | null = null) =>
+      ({ v: 1, run_id: "r", turn_id: "r", span_id, parent_span_id: parent, kind, name: "read_file", state, seq: 0, ts: 1, duration_ms: null, agui: "CUSTOM" });
+    const ev = (event: string, trace: unknown, payload: Record<string, unknown> = {}, id = 1) =>
+      ({ event_id: id, event, session_id: "s", timestamp: 1, payload, trace } as never);
+    const s = foldAll([
+      ev("turn.start", tr("run:r", "run", "running"), {}, 1),
+      ev("tool.started", tr("tool:a", "tool", "running", "run:r"), {}, 2),
+      ev("tool.progress", tr("tool:a", "tool", null, "run:r"), { message: "still running · 10 s", fraction: 0.4 }, 3),
+    ], 2);
+    const tool = s.spans.get("tool:a")!;
+    expect(tool.state).toBe("running");
+    expect(tool.detail).toBe("still running · 10 s");
+    expect(tool.progress).toBeCloseTo(0.4);
+  });
 });
