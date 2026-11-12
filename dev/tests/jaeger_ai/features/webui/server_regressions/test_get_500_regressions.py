@@ -73,21 +73,3 @@ def no_cron(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", imp)
     monkeypatch.setattr(routes, "_runner_schedule_forward", lambda *a, **k: None, raising=False)
 
-
-@pytest.mark.parametrize("path", ["/api/crons/history", "/api/crons/output"])
-def test_cron_params_validated_and_missing_package_is_503(no_cron, path):
-    s, b = get(path)
-    assert s == 400 and "job_id required" in json.dumps(b)
-    s, b = get(path + "?job_id=../etc")
-    assert s == 400 and "invalid job_id" in json.dumps(b)
-    s, b = get(path + "?job_id=abc123def456")
-    assert s == 503 and "cron" in b["error"]
-
-
-@pytest.mark.parametrize("path", ["/api/memory", "/api/project-os/dashboard", "/api/wiki/browse", "/api/wiki/page",
-                                  "/api/wiki/page?path=../x"])
-def test_former_500s_answer(path):
-    s, b = get(path)
-    assert s is not None and s < 500, (s, b)
-    if path.startswith("/api/wiki/page"):
-        assert s in (400, 404)

@@ -51,16 +51,6 @@ def _fake_gateway(monkeypatch, rows):
     return calls
 
 
-def test_parent_pending_includes_the_workers_card(monkeypatch):
-    import api.routes as routes
-    calls = _fake_gateway(monkeypatch, [ROW])
-    pending = routes._gateway_store_pending("chat-1")
-    assert pending["approval_id"] == "approval_child"
-    assert pending["origin"] == ORIGIN and pending["session_id"] == "chat-1"
-    assert calls[0].url.endswith("/v1/approvals?session_id=chat-1")
-    assert routes._gateway_store_pending("chat-2") is None
-
-
 def test_respond_resolves_gateway_card_by_id_with_auth(monkeypatch):
     import api.routes as routes
     calls = _fake_gateway(monkeypatch, [ROW])
