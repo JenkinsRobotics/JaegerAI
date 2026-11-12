@@ -19,6 +19,7 @@ import logging
 import threading
 from typing import Any, Callable, Iterator
 
+from jaeger_ai.contract import trace as _trace
 from jaeger_ai.core.gateway import agent_activity as _agent_activity
 from jaeger_ai.core.gateway import handoff_outputs as _handoff_outputs
 from jaeger_ai.core.sqlite_connection import ClosingConnection
@@ -1967,9 +1968,15 @@ class GatewaySessionStore:
         timestamp: float | None = None,
     ) -> dict[str, Any]:
         now = timestamp or time.time()
+        # The one canonical envelope (contract/trace.py), stamped on the single
+        # durable write path so live and replayed frames are identical.
+        # Stored inside data_json["trace"]; surfaced as a top-level ``trace``
+        # field on read so payload ``data`` stays exactly what the producer sent.
+        annotated = _trace.annotate(session_id, event, data, now)
+        trace_block = annotated.get("trace") if annotated is not data else None
         cursor = conn.execute(
             "INSERT INTO events(session_id, event, data_json, timestamp) VALUES (?, ?, ?, ?)",
-            (session_id, event, json.dumps(data), now),
+            (session_id, event, json.dumps(annotated), now),
         )
         event_id = int(cursor.lastrowid or 0)
         if session_id != "*":
@@ -2001,6 +2008,7 @@ class GatewaySessionStore:
             "event": event,
             "data": data,
             "timestamp": now,
+            **({"trace": trace_block} if trace_block else {}),
         }
 
     def receive_background(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2200,7 +2208,14 @@ class GatewaySessionStore:
         since_event_id: int = 0,
         *,
         limit: int = 500,
+        session_only: bool = False,
     ) -> dict[str, Any]:
+        # session_only: this session's rows plus global ("*") rows that name
+        # this session (approval.resolved, message.created twins) — not every
+        # global board/backlog broadcast.
+        scope_sql = ("(session_id = ? OR (session_id = '*' AND json_extract(data_json, '$.session_id') = ?))"
+                     if session_only else "session_id IN (?, '*')")
+        scope_args: tuple[Any, ...] = (session_id, session_id) if session_only else (session_id,)
         with self._get_conn() as conn:
             bounds = conn.execute(
                 "SELECT MIN(event_id) AS lo, MAX(event_id) AS hi FROM events WHERE session_id IN (?, '*')",
@@ -2213,20 +2228,17 @@ class GatewaySessionStore:
             ).fetchone()[0]
             cursor_expired = bool(since_event_id > 0 and discarded and since_event_id < discarded)
             rows = conn.execute(
-                "SELECT * FROM events WHERE session_id IN (?, '*') AND event_id > ? "
+                f"SELECT * FROM events WHERE {scope_sql} AND event_id > ? "
                 "ORDER BY event_id ASC LIMIT ?",
-                (session_id, since_event_id, max(1, min(limit, MAX_RETAINED_EVENTS))),
+                (*scope_args, since_event_id, max(1, min(limit, MAX_RETAINED_EVENTS))),
             ).fetchall()
-            events = [
-                {
+            events = [_trace.split_record({
                     "event_id": r["event_id"],
                     "session_id": r["session_id"],
                     "event": r["event"],
                     "data": json.loads(r["data_json"] or "{}"),
                     "timestamp": r["timestamp"],
-                }
-                for r in rows
-            ]
+                }) for r in rows]
             return {
                 "events": events,
                 "cursor_expired": cursor_expired,

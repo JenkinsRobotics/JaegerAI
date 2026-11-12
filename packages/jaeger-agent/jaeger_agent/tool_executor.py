@@ -363,6 +363,20 @@ class HookedToolExecutor:
                     "retryable": False,
                 }
 
+        # In-process pre_tool hooks (jaeger_agent.hooks): deny or rewrite
+        # before any effect. Confinement below re-applies to rewritten args.
+        from jaeger_agent.hooks import registry as _hooks
+        pre = _hooks.pre_tool(tool.name, args)
+        if pre.action == "deny":
+            logger.info("tool %r denied by pre_tool hook: %s", tool.name, pre.reason)
+            return {
+                "ok": False, "success": False,
+                "error": pre.reason or "denied by pre_tool hook",
+                "error_type": "blocked_by_hook", "retryable": False,
+            }
+        if pre.action == "modify" and pre.args is not None:
+            args = dict(pre.args)
+
         # Approval can take arbitrarily long; recheck symlinks, kill switch and
         # operator-hook rewrites immediately before real dispatch.
         confine = _goal_confinement
@@ -450,7 +464,7 @@ class HookedToolExecutor:
                 "post_tool_call", tool_name=tool.name, tool_input=args,
                 extra={"result_type": type(result).__name__},
             )
-        return result
+        return _hooks.post_tool(tool.name, args, result)
 
 
 #: Tools whose bodies can change files on disk. A snapshot is taken before

@@ -751,6 +751,8 @@ class _GatewayToolConfirmationProvider:
         aid = f"approval_{uuid.uuid4().hex[:12]}"
         box: dict[str, Any] = {"done": threading.Event(), "approved": False}
         origin = self.app._approval_origin(self.session_id)
+        # The tool call this card blocks, so the process view nests it.
+        call_id = getattr(self.app, "_active_tool_call", {}).get(self.request_id)
 
         def _arm() -> None:
             fut = loop.create_future()
@@ -767,6 +769,7 @@ class _GatewayToolConfirmationProvider:
                     "target": target,
                     "summary": summary,
                     "reason": tier_name,
+                    **({"call_id": call_id} if call_id else {}),
                     **({"origin": origin} if origin else {}),
                 },
             )
@@ -781,6 +784,7 @@ class _GatewayToolConfirmationProvider:
                 "options": APPROVAL_OPTIONS,
                 "session_id": self.session_id,
                 "request_id": self.request_id,
+                **({"call_id": call_id} if call_id else {}),
             })
 
             def _done(f: asyncio.Future) -> None:
@@ -907,6 +911,11 @@ class JaegerGatewayApp:
         self._organization_ai_lock = asyncio.Lock()
         self._summarizing: dict[str, asyncio.Task] = {}
         self.event_bus = event_bus or GatewayEventBus(store=self.store)
+        try:  # on_approval / on_error / on_turn_end hooks ride the one stream
+            from jaeger_ai.core.gateway.hooks_bridge import install as _install_hooks
+            _install_hooks(self.event_bus)
+        except Exception:  # noqa: BLE001 — hooks never block startup
+            logger.warning("lifecycle hooks bridge unavailable", exc_info=True)
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
         self.store.event_sink = self.event_bus.fanout  # unknown-outcome acknowledgements reach live clients
@@ -922,6 +931,7 @@ class JaegerGatewayApp:
         self._owner_declined: set[str] = set()
         # Tool names each live request has run, in order (for the owner's check step).
         self._request_tools: dict[str, list[str]] = {}
+        self._active_tool_call: dict[str, str] = {}
         self._turn_timings: dict[str, Any] = {}
         # Requests whose approval the owner never answered. That is needs_owner, not blocked.
         self._owner_unanswered: set[str] = set()
@@ -1464,7 +1474,15 @@ class JaegerGatewayApp:
                 if store is not None:
                     repaired = await asyncio.to_thread(reconcile, store, self.store, apply=True)
                     flagged = await asyncio.to_thread(sweep, store, time.time(), 86400)
-                    for item in flagged:
+                    # Publish a flag only when it is new or its reasons changed:
+                    # re-announcing every flagged item every 5 minutes filled
+                    # ~95% of the 5,000-event replay window (events audit 2026-11-11).
+                    seen = self.__dict__.setdefault("_backlog_flags_seen", {})
+                    current = {str(i["task"]["id"]): repr(i.get("reasons")) for i in flagged}
+                    fresh = [i for i in flagged if seen.get(str(i["task"]["id"])) != current[str(i["task"]["id"])]]
+                    seen.clear()
+                    seen.update(current)
+                    for item in fresh:
                         task = item["task"]
                         self.event_bus.publish("*", "backlog.updated", {
                             "caller": {"caller_id": "jaegerd", "caller_kind": "owner"},
@@ -4850,6 +4868,12 @@ class JaegerGatewayApp:
         # raw name. UUIDs remain stable because the event payload is durable.
         active_tools: dict[str, list[str]] = {}
         file_snapshots: dict[str, list[dict]] = {}
+        # One model call = one step span (contract/trace.py). Text/reasoning
+        # carry the step that produced them; tools carry the step that asked.
+        step: dict[str, Any] = {"id": None, "index": 0, "t0": None}
+
+        def step_ref() -> dict[str, Any]:
+            return {"step_id": step["id"]} if step["id"] else {}
 
         def flush() -> None:
             with lock:
@@ -4860,7 +4884,7 @@ class JaegerGatewayApp:
                 if text_item[0] is None:
                     text_item[0] = f"text_{uuid.uuid4().hex}"
                 self.event_bus.publish(session_id, "turn.delta", {
-                    **ids, "delta": text, "channel": "provisional",
+                    **ids, **step_ref(), "delta": text, "channel": "provisional",
                     "content_type": "provisional", "item_id": text_item[0],
                 })
 
@@ -4877,7 +4901,7 @@ class JaegerGatewayApp:
                 reasoning_pending.clear()
                 reasoning_last[0] = time.monotonic()
             if text:
-                self.event_bus.publish(session_id, "turn.reasoning", {**ids, "text": text})
+                self.event_bus.publish(session_id, "turn.reasoning", {**ids, **step_ref(), "text": text})
 
         def end_reasoning() -> None:
             # One ``turn.reasoning.done`` per reasoning run, when the answer,
@@ -4887,7 +4911,7 @@ class JaegerGatewayApp:
                 started, reasoning_started[0] = reasoning_started[0], None
             if started is not None:
                 self.event_bus.publish(session_id, "turn.reasoning.done", {
-                    **ids, "started_at": started,
+                    **ids, **step_ref(), "started_at": started,
                     "duration_ms": max(0, int((time.time() - started) * 1000))})
 
         def on_delta(piece: str) -> None:
@@ -4940,8 +4964,9 @@ class JaegerGatewayApp:
                     file_snapshots[activity_id] = [self.file_changes.begin(_resolve_write(str(data[key]))) for key in keys]
                 except Exception:
                     logger.debug("File change checkpoint unavailable for %s", raw_name)
+            self._active_tool_call[request_id] = activity_id
             self.event_bus.publish(session_id, "tool.started", {
-                **ids,
+                **ids, **step_ref(),
                 "session_id": session_id,
                 "activity_id": activity_id,
                 "call_id": activity_id,
@@ -5008,8 +5033,10 @@ class JaegerGatewayApp:
             duration = _safe_tool_duration(elapsed_s)
             phase = "completed" if succeeded else "failed"
             detail = public_summary
+            if self._active_tool_call.get(request_id) == activity_id:
+                self._active_tool_call.pop(request_id, None)
             self.event_bus.publish(session_id, f"tool.{phase}", {
-                **ids,
+                **ids, **step_ref(),
                 "session_id": session_id,
                 "activity_id": activity_id,
                 "call_id": activity_id,
@@ -5042,6 +5069,36 @@ class JaegerGatewayApp:
                 "message": str(message)[:2000],
             })
 
+        def on_model_start() -> None:
+            if timing is not None:
+                timing.model_start()
+            flush()
+            end_reasoning()
+            text_item[0] = None
+            step["index"] += 1
+            step["id"] = f"{request_id}:{step['index']}"
+            step["t0"] = time.monotonic()
+            self.event_bus.publish(session_id, "model.started", {
+                **ids, "step_id": step["id"], "index": step["index"],
+                "model": str((self.store.get_request(request_id) or {}).get("model") or "") or None,
+            })
+
+        def on_model_done(usage: dict[str, int]) -> None:
+            if timing is not None:
+                timing.model_done(usage)
+            flush()
+            end_reasoning()
+            if step["id"] is None:
+                return
+            ok = not (isinstance(usage, dict) and usage.get("failed"))
+            tokens = {k: int(v) for k, v in (usage or {}).items()
+                      if k in {"prompt_tokens", "completion_tokens"} and isinstance(v, int)}
+            self.event_bus.publish(session_id, "model.finished", {
+                **ids, "step_id": step["id"], "index": step["index"], "ok": ok,
+                "usage": tokens,
+                "duration_ms": int((time.monotonic() - (step["t0"] or time.monotonic())) * 1000),
+            })
+
         def on_model_input(outline: dict[str, Any]) -> None:
             self.event_bus.publish(session_id, "turn.context", {
                 **ids, "outline": outline,
@@ -5051,8 +5108,8 @@ class JaegerGatewayApp:
             model_input=on_model_input,
             thinking=on_thinking,
             tool_selection=lambda receipt: self.event_bus.publish(session_id, "tools.selected", {**ids, "receipt": receipt}),
-            model_call_start=timing.model_start if timing is not None else None,
-            model_call_done=timing.model_done if timing is not None else None,
+            model_call_start=on_model_start,
+            model_call_done=on_model_done,
             stream_delta=on_delta,
             reasoning=on_reasoning,
             tool_progress=on_tool_progress,
@@ -6389,6 +6446,7 @@ class JaegerGatewayApp:
             last_event_id = int(request.query.get("last_event_id") or request.headers.get("Last-Event-ID") or 0)
         except ValueError:
             return web.json_response({"error": "last_event_id must be an integer"}, status=400)
+        session_only = session_id != "*" and request.query.get("scope") == "session"
         window = self.event_bus.replay_window(session_id, last_event_id)
         if live_without_cursor and "last_event_id" not in request.query and "Last-Event-ID" not in request.headers:
             # J-087: a fresh global subscriber gets live events only; replaying the whole retained
@@ -6417,7 +6475,8 @@ class JaegerGatewayApp:
         )
         await response.prepare(request)
 
-        events = self.event_bus.subscribe(session_id, since_event_id=last_event_id)
+        events = (self.event_bus.subscribe(session_id, since_event_id=last_event_id, session_only=True)
+                  if session_only else self.event_bus.subscribe(session_id, since_event_id=last_event_id))
         pending = asyncio.create_task(anext(events))
         try:
             while True:
@@ -6433,6 +6492,7 @@ class JaegerGatewayApp:
                     "event": evt.event,
                     "data": evt.data,
                     "timestamp": evt.timestamp,
+                    **({"trace": evt.trace} if evt.trace else {}),
                 })
                 chunk = f"id: {evt.event_id}\nevent: {evt.event}\ndata: {payload}\n\n"
                 await response.write(chunk.encode("utf-8"))
@@ -7045,6 +7105,9 @@ class JaegerGatewayApp:
         if resolved is not None:
             payload["session_id"] = resolved.get("session_id")
             payload["request_id"] = resolved.get("request_id")
+            call_id = ((resolved or {}).get("metadata") or {}).get("call_id")
+            if call_id:
+                payload["call_id"] = call_id
         if row_origin:
             payload["origin"] = row_origin
         for key, value in (extra or {}).items():
