@@ -33,6 +33,7 @@ import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
 import { PostMessage, SummaryCard } from "./HomeEntries";
 import { ChatHome } from "./ChatHome";
+import { navigate } from "../shell/router";
 import { stageSavedMedia, addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepsSummary, type ToolPart } from "./activity";
@@ -166,6 +167,7 @@ function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onD
 /** Preserve interactive cards and notices outside the shared work disclosure. */
 export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete") {
   const out: Array<{ guidance: Extract<ChatPart,{kind:"userGuidance"}> } | { marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { activity: ChatPart[] } | { diagnostic: ChatPart[] }> = [];
+  parts = parts.filter(p => p.kind !== "step"); // shown on the live progress line only
   const {work,visible} = partitionChatParts(parts);
   // Reuse shared classification while preserving the original event order.
   // Commentary is always readable, even when more tool rounds follow it.
@@ -233,10 +235,22 @@ export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boo
 }
 
 /** A text-only activity bubble; avatar motion belongs in the conversation header. */
-export function ProgressLine({ phrase }: { phrase: string }) {
+type StepPart = Extract<ChatPart, { kind: "step" }>;
+/** "Step N" names where the loop is (model.started/finished), not a guess. */
+export function stepLabel(step: StepPart | undefined): string {
+  if (!step) return "";
+  const what = step.state === "running" ? `${step.model ? step.model + " " : ""}thinking` : step.state === "failed" ? "model call failed" : "acting";
+  return `Step ${step.index} · ${what}`;
+}
+
+export function ProgressLine({ phrase, step, sessionId }: { phrase: string; step?: StepPart; sessionId?: string }) {
+  const label = stepLabel(step);
   return (
     <div className="jg-progress-line" role="status" aria-live="polite" data-sender="assistant">
+      {label && <span className="jg-progress-step">{label} · </span>}
       <span className="jg-progress-text">{phrase}</span>
+      {sessionId && <a className="jg-progress-watch" href={`/work/process?session=${encodeURIComponent(sessionId)}`}
+        onClick={(e) => { e.preventDefault(); navigate(`/work/process?session=${encodeURIComponent(sessionId)}`); }}>Watch in Process view</a>}
     </div>
   );
 }
@@ -244,7 +258,7 @@ export function ProgressLine({ phrase }: { phrase: string }) {
 /** Text is its own streaming indicator. Keep activity only before text or for live tools. */
 export function showsProgress(turn: ChatTurn): boolean {
   if (turn.state !== "pending") return false;
-  const last = turn.parts.filter(p => p.kind !== "toolSelection" && p.kind !== "modelContext" && p.kind !== "modelIdentity" && p.kind !== "knowledgeContext").at(-1);
+  const last = turn.parts.filter(p => p.kind !== "toolSelection" && p.kind !== "step" && p.kind !== "modelContext" && p.kind !== "modelIdentity" && p.kind !== "knowledgeContext").at(-1);
   return !(last?.kind === "markdownContent" && last.text);
 }
 
@@ -1003,7 +1017,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 : "diagnostic" in seg ? <div key={`diagnostic:${i}`} className="jg-turn-diagnostic" data-stream-role="diagnostic">{seg.diagnostic.map((p,j)=><BubblePart key={j} part={p} links={links} live={false} style={streamStyle}/>)}</div>
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant" tabIndex={0} aria-haspopup="menu">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
-              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} />}
+              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} step={[...turn.parts].reverse().find((p): p is StepPart => p.kind === "step")} sessionId={session?.id} />}
             </section>
           ))}
           {busyMessages.map(message => (

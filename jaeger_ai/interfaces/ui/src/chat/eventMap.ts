@@ -54,6 +54,13 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
     }
     case "turn.progress":
       return { parts: [{ kind: "progress", message: str(p.message ?? p.text ?? p.summary) }] };
+    case "model.started":
+    case "model.finished": {
+      const index = typeof p.index === "number" ? p.index : Number(p.index) || 0;
+      const model = str(p.actual_model ?? p.model) || undefined;
+      const state = event.event === "model.started" ? "running" as const : p.ok === false ? "failed" as const : "done" as const;
+      return index > 0 ? { parts: [{ kind: "step", index, state, ...(model ? { model } : {}) }] } : null;
+    }
     case "tool.started":
       return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "executing" }] };
     case "tool.done":
