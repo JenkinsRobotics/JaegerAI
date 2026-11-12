@@ -2,15 +2,15 @@
   "schema_version": 1,
   "scope": "jaeger_ai/features/webui/api/routes.py named HTTP dispatchers",
   "evidence": "Python AST only",
-  "route_count": 271,
+  "route_count": 71,
   "method_counts": {
-    "DELETE": 3,
-    "GET": 113,
-    "PATCH": 2,
-    "POST": 151,
-    "PUT": 2
+    "DELETE": 0,
+    "GET": 31,
+    "PATCH": 0,
+    "POST": 39,
+    "PUT": 1
   },
-  "route_fingerprint_sha256": "6e13faab6000ecef125903ca9b106216fed77ef28ee395e4826227a066a55ed0",
+  "route_fingerprint_sha256": "ff4a3f04612428370f4bd0e6617ff8a47348124ac7dd272284d53827106886d3",
   "required_routes": [
     [
       "GET",
@@ -31,40 +31,10 @@
       "handle_get"
     ],
     [
-      "GET",
-      "reference",
-      "/api/profiles",
-      "handle_get"
-    ],
-    [
-      "GET",
-      "reference",
-      "/api/sessions",
-      "handle_get"
-    ],
-    [
       "POST",
       "reference",
       "/api/auth/login",
       "handle_post"
-    ],
-    [
-      "POST",
-      "reference",
-      "/api/chat/start",
-      "handle_post"
-    ],
-    [
-      "POST",
-      "reference",
-      "/api/upload",
-      "handle_post"
-    ],
-    [
-      "DELETE",
-      "prefix",
-      "/api/mcp/servers/",
-      "handle_delete"
     ]
   ],
   "unverified": [

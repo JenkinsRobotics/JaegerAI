@@ -585,17 +585,6 @@ def test_background_turn_cannot_borrow_ui_sinks():
     assert mine == ["mine", "my progress"]
 
 
-def test_roundtable_smoke_does_not_accept_an_echoed_question():
-    import runpy
-    from pathlib import Path
-    path = Path(__file__).resolve().parents[4] / "scripts/verify-agent-webui.py"
-    check = runpy.run_path(str(path))["check_roundtable_answers"]
-    with pytest.raises(RuntimeError):
-        check("## Your Question\nRemember CHECKWORD\n## Round 1\n### Jaeger\n[Agent error: timed out]", "CHECKWORD", True)
-    text = "\n".join(f"### {name}\nCHECKWORD\n" for name in ("Jaeger", "Hermes", "OpenClaw"))
-    check(text, "CHECKWORD", True)
-
-
 def test_native_cancel_selects_session_agent_not_global_background_pointer(monkeypatch):
     from types import SimpleNamespace
     from jaeger_ai import main

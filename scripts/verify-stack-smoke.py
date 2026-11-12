@@ -515,47 +515,26 @@ def check_agent_reachability(matrix: Matrix, chat_url: str, *, live: bool) -> No
         matrix.add(
             "reach.live_llm_toolcall",
             True,
-            "SKIPPED (pass --live to run scripts/verify-agent-webui.py / verify-native-webui.py)",
+            "SKIPPED (pass --live to run scripts/verify-chat.py)",
             required=False,
         )
         return
 
-    # Live path: reuse existing opt-in scripts (creates sessions; uses model tokens)
-    agent_script = REPO_ROOT / "scripts" / "verify-agent-webui.py"
-    native_script = REPO_ROOT / "scripts" / "verify-native-webui.py"
-    if agent_script.is_file():
-        print("  --live: running verify-agent-webui.py (uses model tokens)...")
-        r = subprocess.run(
-            [_python(), str(agent_script), "--url", base + "/"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=900,
-        )
-        matrix.add(
-            "reach.live_agent_webui",
-            r.returncode == 0,
-            (r.stdout or r.stderr or "")[-300:].replace("\n", " | "),
-        )
-    else:
-        matrix.add("reach.live_agent_webui", False, "script missing")
-
-    if native_script.is_file():
-        print("  --live: running verify-native-webui.py (uses model tokens; denies approvals)...")
-        r = subprocess.run(
-            [_python(), str(native_script), "--url", base + "/", "--profile", "jaeger"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            timeout=900,
-        )
-        matrix.add(
-            "reach.live_native_tools",
-            r.returncode == 0,
-            (r.stdout or r.stderr or "")[-300:].replace("\n", " | "),
-        )
-    else:
-        matrix.add("reach.live_native_tools", False, "script missing", required=False)
+    # Live path: one real chat turn through WebUI -> Gateway /v1 (uses model tokens).
+    chat_script = REPO_ROOT / "scripts" / "verify-chat.py"
+    print("  --live: running verify-chat.py (uses model tokens)...")
+    r = subprocess.run(
+        [_python(), str(chat_script), "--url", base],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    matrix.add(
+        "reach.live_chat",
+        r.returncode == 0,
+        (r.stdout or r.stderr or "")[-300:].replace("\n", " | "),
+    )
 
 
 def print_ui_checklist_section() -> None:
