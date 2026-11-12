@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PendingApproval } from "../api/source";
 import { ApprovalCard } from "./ApprovalCard";
+import { APPROVAL_PUSH_EVENT } from "../api/gateway";
 
 type Host = {
   pendingApprovals(sessionId: string): Promise<PendingApproval[]>;
@@ -27,8 +28,12 @@ export function SessionApprovals({ sessionId, host, excludeIds = [] }: { session
       finally { reading = false; }
     };
     void read();
-    const timer = setInterval(() => void read(), 1500);
-    return () => { active = false; clearInterval(timer); };
+    // Push first: any approval.* frame on an open stream re-reads at once. The
+    // slow poll only covers a closed stream (it was a 1.5 s poll before).
+    const onPush = () => void read();
+    window.addEventListener(APPROVAL_PUSH_EVENT, onPush);
+    const timer = setInterval(() => void read(), 15_000);
+    return () => { active = false; clearInterval(timer); window.removeEventListener(APPROVAL_PUSH_EVENT, onPush); };
   }, [host, sessionId]);
   const decide = async (id: string, decision: "approve" | "deny") => {
     if (deciding.current) return;

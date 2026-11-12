@@ -42,7 +42,16 @@ export function normalizeFrame(frame: SSEFrame): GatewayEvent {
     turn_id: (inner.turn_id ?? envelope.turn_id) as string | undefined,
     created_at: typeof envelope.timestamp === "number" ? envelope.timestamp : undefined,
     payload: inner,
+    ...(envelope.trace && typeof envelope.trace === "object" ? { trace: envelope.trace as import("./types").TraceEnvelope } : {}),
   };
+}
+
+/** Window event fired for every approval.* frame on any open stream, so approval
+ *  surfaces refresh on push instead of polling (they keep a slow poll as a net). */
+export const APPROVAL_PUSH_EVENT = "jaeger:approval-event";
+function announce(event: GatewayEvent) {
+  if (typeof window === "undefined" || !event.event.startsWith("approval.")) return;
+  try { window.dispatchEvent(new CustomEvent(APPROVAL_PUSH_EVENT, { detail: { event: event.event, session_id: event.session_id, payload: event.payload } })); } catch { /* no DOM */ }
 }
 
 export class GatewayClient implements JaegerSource {
@@ -415,7 +424,7 @@ export class GatewayClient implements JaegerSource {
     const response = await fetch(`${this.base}/v1/events/stream`, { headers: { Accept: "text/event-stream" }, credentials: "same-origin", signal });
     if (!response.ok || !response.body) throw new GatewayError(`events ${response.status}`, response.status, undefined);
     for await (const frame of decodeSSE(response.body, signal,undefined,(code,id)=>this.reportDiagnostic(code,undefined,id))) {
-      const event=normalizeFrame(frame);try{onEvent(event);}catch(error){this.reportDiagnostic('subscriber_error',event.session_id&&event.session_id!=='*'?event.session_id:undefined,frame.id,typeof event.request_id==='string'?event.request_id:undefined);throw error;}
+      const event=normalizeFrame(frame);announce(event);try{onEvent(event);}catch(error){this.reportDiagnostic('subscriber_error',event.session_id&&event.session_id!=='*'?event.session_id:undefined,frame.id,typeof event.request_id==='string'?event.request_id:undefined);throw error;}
     }
   }
 
@@ -430,7 +439,19 @@ export class GatewayClient implements JaegerSource {
       throw new GatewayError((body as { error?: string })?.error ?? `stream ${response.status}`, response.status, body);
     }
     for await (const frame of decodeSSE(response.body, signal,undefined,(code,id)=>this.reportDiagnostic(code,sessionId,id))) {
-      const event=normalizeFrame(frame);try{onEvent(event);}catch(error){this.reportDiagnostic('subscriber_error',sessionId,frame.id,typeof event.request_id==='string'?event.request_id:undefined);throw error;}
+      const event=normalizeFrame(frame);announce(event);try{onEvent(event);}catch(error){this.reportDiagnostic('subscriber_error',sessionId,frame.id,typeof event.request_id==='string'?event.request_id:undefined);throw error;}
+    }
+  }
+
+  /** Session-scoped live trace (?scope=session): this session's spans only, replayed
+   *  from `cursor` then live. Feeds the Process view. */
+  async processStream(sessionId: string, cursor: number, onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {
+    const response = await fetch(`${this.base}/v1/sessions/${encodeURIComponent(sessionId)}/stream?scope=session&last_event_id=${Math.max(0, cursor)}`, {
+      headers: { Accept: "text/event-stream" }, credentials: "same-origin", signal,
+    });
+    if (!response.ok || !response.body) throw new GatewayError(`process stream ${response.status}`, response.status, undefined);
+    for await (const frame of decodeSSE(response.body, signal)) {
+      const event = normalizeFrame(frame); announce(event); onEvent(event);
     }
   }
 }

@@ -168,6 +168,22 @@ export interface HandoffExchange {
 }
 
 /** One frame of the gateway SSE stream: `id:` / `event:` / `data:` lines. */
+/** Canonical envelope on every turn-related event (jaeger_ai/contract/trace.py). */
+export interface TraceEnvelope {
+  v: number;
+  run_id: string | null;
+  turn_id: string | null;
+  span_id: string;
+  parent_span_id: string | null;
+  kind: "run" | "model" | "tool" | "approval" | "input" | "subagent" | "message" | "hook" | "info" | "presence";
+  name: string;
+  state: "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "denied" | "unknown" | null;
+  seq: number | null;
+  ts: number;
+  duration_ms: number | null;
+  agui: string;
+}
+
 export interface GatewayEvent {
   event: string;
   event_id?: number;
@@ -175,6 +191,7 @@ export interface GatewayEvent {
   request_id?: string;
   created_at?: number;
   payload?: Record<string, unknown>;
+  trace?: TraceEnvelope;
   [key: string]: unknown;
 }
 
