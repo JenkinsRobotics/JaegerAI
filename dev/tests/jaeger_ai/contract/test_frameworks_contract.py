@@ -85,23 +85,6 @@ def test_agent_ids_use_a_known_origin_prefix() -> None:
 
 # ── every former copy still agrees ───────────────────────────────────────
 
-def test_webui_profile_list_matches_the_contract() -> None:
-    from jaeger_ai.features.webui.adapter.profile_catalog import PROFILES
-    assert PROFILES == tuple(
-        (f.profile, f.runtime, f.display_name) for f in fw.FRAMEWORKS
-    )
-
-
-def test_webui_normaliser_matches_the_contract() -> None:
-    from jaeger_ai.features.webui.adapter.profile_runner import canonical_profile
-    for f in fw.FRAMEWORKS:
-        assert canonical_profile(f.profile) == f.runtime
-        assert canonical_profile(f.runtime) == f.runtime
-    assert canonical_profile(None) == "jaeger", "empty profile defaults to Jaeger"
-    with pytest.raises(ValueError):
-        canonical_profile("not-a-framework")
-
-
 def test_roundtable_members_match_the_contract() -> None:
     from jaeger_ai.features.roundtable.policy import MEMBERS
     assert tuple(MEMBERS) == fw.DEBATE_MEMBERS
@@ -117,22 +100,6 @@ def test_managed_container_names_match_the_contract() -> None:
     assert MANAGED_CONTAINERS == {
         f.runtime: f.container for f in fw.FRAMEWORKS if f.container
     }
-
-
-def test_profile_payload_carries_agent_id() -> None:
-    from jaeger_ai.features.webui.adapter.profile_catalog import ProfileCatalog
-    rows = ProfileCatalog(lambda _name: True).list()
-    assert {r["agent_id"] for r in rows} == {f.agent_id for f in fw.FRAMEWORKS}
-
-
-def test_a_debate_is_unavailable_when_a_member_is_down() -> None:
-    """Readiness cascade, derived rather than hardcoded to 'roundtable'."""
-    from jaeger_ai.features.webui.adapter.profile_catalog import ProfileCatalog
-    rows = {r["runtime"]: r for r in
-            ProfileCatalog(lambda name: name != "openclaw").list()}
-    assert rows["openclaw"]["runtime_status"] == "Unavailable"
-    assert rows["roundtable"]["runtime_status"] == "Unavailable: OpenClaw"
-    assert rows["jaeger"]["runtime_status"] == "Ready"
 
 
 def test_incomplete_backend_registration_is_rejected() -> None:

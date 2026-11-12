@@ -348,8 +348,7 @@ Port map (defaults chosen to avoid clashes):
 | Surface | Default | Notes |
 | --- | ---: | --- |
 | Jaeger WebUI | **8790** | `./scripts/run-jaeger-webui.sh` |
-| Jaeger WebUI adapter | **8791** | `jaeger hermes-webui-adapter` / runner-local |
-| Instance webhooks | **8793** | Moved off 8791 so adapter and webhooks do not collide |
+| Instance webhooks | **8793** | |
 | Jaeger MCP HTTP | **8792** | Native framework endpoint: `http://127.0.0.1:8792/mcp` |
 | Jaeger A2A | **8796** | Native AgentCard and JSON-RPC endpoint |
 | Agentgateway MCP | **8811** | Optional compatibility proxy to native MCP |
@@ -378,21 +377,15 @@ Agentgateway configuration.
 
 The ARES Agentgateway plist and `~/.ares/gateway` config are archive. Do not start them.
 
-Remote access stays disabled by default. Start both services on loopback and
+Remote access stays disabled by default. Start the WebUI on loopback and
 publish only Jaeger WebUI through Tailscale Serve with:
 
 ```bash
 ./jaeger webui start --instance <agent-name> --tailscale
 ```
 
-Jaeger WebUI continues to call the runtime adapter on loopback, so the adapter
-is not exposed to the tailnet. To expose the adapter API itself, set a strong
-bearer token and explicitly opt in:
-
-```bash
-export JAEGER_REMOTE_ACCESS_TOKEN="$(openssl rand -hex 32)"
-./jaeger hermes-webui-adapter --host 0.0.0.0 --port 8791 --allow-remote
-```
+The WebUI proxies turns to the loopback Gateway, which is never exposed to the
+tailnet. Set a strong `JAEGER_REMOTE_ACCESS_TOKEN` for remote API clients.
 
 Remote requests must originate from Tailscale's `100.64.0.0/10` or
 `fd7a:115c:a1e0::/48` ranges and send `Authorization: Bearer
@@ -405,8 +398,9 @@ settings are present: `JAEGER_OIDC_ISSUER`, `JAEGER_OIDC_CLIENT_ID`,
 `JAEGER_OIDC_ALLOW_CLAIM`, and `JAEGER_OIDC_ALLOW_VALUES`. Set
 `JAEGER_PUBLIC_BASE_URL` to the external HTTPS URL. Passkeys are instance
 scoped, use WebAuthn origin/RP validation, and are bootstrapped from an already
-authenticated session. The authentication implementation lives in separate
-`features/oidc`, `features/passkeys`, and `features/remote_access` folders.
+authenticated session. The authentication implementation lives in
+`features/webui/api/auth_oidc.py`, `features/webui/api/passkeys.py`, and
+`features/remote_access`.
 
 ### External agent delegates
 

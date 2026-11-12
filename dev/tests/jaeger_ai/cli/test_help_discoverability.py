@@ -29,7 +29,6 @@ DISPATCHER_COMMANDS = (
     "mcp",
     "a2a",
     "gateway",
-    "hermes-webui-adapter",
     "doctor",
     "update",
     "dev",

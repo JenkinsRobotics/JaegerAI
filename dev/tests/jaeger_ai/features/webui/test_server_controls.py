@@ -35,8 +35,8 @@ def test_start_unloaded_job_bootstraps_configured_plist(controls, monkeypatch):
 
 
 def test_stop_unloads_keepalive_job_instead_of_respawning_it(controls):
-    assert controls.change('runner', 'stop')['ok']
-    assert controls.calls[-1] == ['/bin/launchctl', 'bootout', controls.domain + '/' + SERVICES['runner'][1]]
+    assert controls.change('mcp', 'stop')['ok']
+    assert controls.calls[-1] == ['/bin/launchctl', 'bootout', controls.domain + '/' + SERVICES['mcp'][1]]
 
 
 def test_start_running_job_does_not_kill_it(controls):
@@ -49,14 +49,6 @@ def test_stop_all_reverses_dependency_order(controls, monkeypatch):
     monkeypatch.setattr(controls, 'change_one', lambda service, action: seen.append(service))
     assert controls.change('all', 'stop')['ok']
     assert seen == list(reversed(DEFAULT_SERVICES))
-
-
-def test_hermes_agent_uses_native_launch_agent_only(controls):
-    assert controls.change('hermes', 'start')['ok']
-    assert controls.calls == [
-        ['/bin/launchctl', 'print', controls.domain + '/' + SERVICES['hermes'][1]],
-        ['/bin/launchctl', 'kickstart', controls.domain + '/' + SERVICES['hermes'][1]]
-    ]
 
 
 def test_container_daemon_start_and_stop(controls):

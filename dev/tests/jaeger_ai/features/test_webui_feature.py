@@ -6,7 +6,6 @@ from jaeger_ai.features.webui import (
     WebUIService,
     webui_urls,
     profile_display_name,
-    HermesWebUIAdapterServer,
     BridgeClient,
 )
 from jaeger_ai.features.webui.service.service import (
@@ -22,14 +21,12 @@ def test_webui_feature_exports():
     # "Jaeger" for weeks after the shipped name became "Jaeger AI".
     for f in FRAMEWORKS:
         assert profile_display_name(f.runtime) == f.display_name
-    assert HermesWebUIAdapterServer is not None
     assert BridgeClient is not None
 
 
 def test_webui_urls_helper():
     urls = webui_urls(webui_port=8642)
     assert "8642" in urls.web_ui
-    assert "8791" in urls.adapter
 
 
 def test_identity_ok_when_bundle_matches_settings():

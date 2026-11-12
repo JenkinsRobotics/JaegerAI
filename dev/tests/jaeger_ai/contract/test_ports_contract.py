@@ -120,7 +120,6 @@ def test_the_chat_spine_ports_are_what_the_docs_promise() -> None:
     """AGENTS.md's topology table is the first thing a newcomer reads."""
     assert ports.GATEWAY_PORT == 33418  # JAEGER_GATEWAY_PORT unset in tests
     assert ports.WEBUI_PORT == 8790
-    assert ports.WEBUI_ADAPTER_PORT == 8791
     topology = (REPO / "AGENTS.md").read_text(encoding="utf-8")
     for port in (ports.GATEWAY_PORT, ports.WEBUI_PORT):
         assert str(port) in topology, f"port {port} is not in AGENTS.md's topology"

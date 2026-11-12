@@ -44,15 +44,7 @@ esac
 export HERMES_WEBUI_PORT="${JAEGER_WEBUI_PORT:-8790}"
 export HERMES_WEBUI_BOT_NAME="${JAEGER_WEBUI_BOT_NAME:-JaegerAI}"
 export HERMES_WEBUI_DEFAULT_WORKSPACE="${JAEGER_WEBUI_WORKSPACE:-${HOME}/workspace}"
-# One execution path: the WebUI talks to the Jaeger Gateway. The :8791 runner is
-# an isolated legacy path and is wired only when JAEGER_LEGACY_PATHS is on.
-case "$(printf '%s' "${JAEGER_LEGACY_PATHS:-}" | tr '[:upper:]' '[:lower:]')" in
-  1|true|yes|on)
-    export HERMES_WEBUI_RUNTIME_ADAPTER=runner-local
-    export HERMES_WEBUI_RUNNER_PROFILES=1
-    export HERMES_WEBUI_RUNNER_BASE_URL="${JAEGER_RUNNER_BASE_URL:-http://127.0.0.1:8791}"
-    ;;
-esac
+# One execution path: the WebUI talks to the Jaeger Gateway.
 # Health uses JAEGER_GATEWAY_URL. Do not synthesize a global chat gateway
 # override: named profiles own their individual native gateway addresses.
 # Without an explicit URL, resolve it from the port contract at launch: the

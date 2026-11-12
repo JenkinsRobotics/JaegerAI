@@ -9,7 +9,7 @@ from .native_runs import Run, TERMINAL
 
 def local_connection(layout):
     import yaml
-    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+    from jaeger_ai.interfaces.bridge_client import jaeger_bridge
     try:
         expected = jaeger_bridge().layout
     except Exception:

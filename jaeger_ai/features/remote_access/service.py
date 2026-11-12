@@ -287,7 +287,6 @@ def _apply_webui_launchagent(password: str) -> dict[str, Any]:
         "HERMES_WEBUI_SECURE": "1",
         "HERMES_WEBUI_TRUST_FORWARDED_PROTO": "1",
         "HERMES_WEBUI_PASSKEY": "1",
-        "JAEGER_RUNNER_BASE_URL": "http://127.0.0.1:8791",
     })
     # No JAEGER_GATEWAY_URL default: an explicit URL disables the WebUI's
     # contract.ports.resolve_gateway_url.
@@ -440,7 +439,6 @@ def doctor() -> dict[str, Any]:
     serve = serve_status()
     gw = _listener(GATEWAY_PORT)
     webui = _listener(WEBUI_LOOPBACK_PORT)
-    adapter = _listener(8791)
     mcp = _listener(MCP_HTTP_PORT)
     origin = phone_url(state)
     https = _http_ok(origin + "/") if origin.startswith("https://") else {"ok": False, "error": "no https origin"}
@@ -481,7 +479,6 @@ def doctor() -> dict[str, Any]:
         "unauthenticated_sessions_denied": bool(sessions_denied) if auth_healthy else False,
         "webui_listening": bool(webui.get("listening")),
         "gateway_private": gateway_private,
-        "adapter_loopback": bool(adapter.get("loopback_only") or not adapter.get("listening")),
         "mcp_loopback": bool(mcp.get("loopback_only") or not mcp.get("listening")),
         "funnel_off": not bool(serve.get("funnel")),
         "enabled": bool(state.get("enabled")),

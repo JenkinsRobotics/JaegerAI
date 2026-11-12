@@ -1218,8 +1218,8 @@ class ContainersConfig(BaseModel):
         le=65535,
         json_schema_extra=_setting("containers", advanced=True),
         description=(
-            "Loopback port for `jaeger hermes-webui-adapter` "
-            "(HERMES_WEBUI_RUNNER_BASE_URL). Kept at 8791; webhooks use 8793."
+            "Retired: the :8791 runner was removed on 2026-11-11. Accepted "
+            "so existing config.yaml files still load; nothing reads it."
         ),
     )
     jaeger_webui_port: int = Field(

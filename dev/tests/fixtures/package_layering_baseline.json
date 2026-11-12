@@ -8,31 +8,11 @@
     "jaeger_ai/core/diagnostics/doctor.py": [
       "jaeger_ai.features.webui.service.service"
     ],
-    "jaeger_ai/core/frameworks/conversation.py": [
-      "jaeger_ai.features.webui.adapter.bridge_client"
-    ],
-    "jaeger_ai/core/frameworks/jaeger.py": [
-      "jaeger_ai.features.webui.adapter.bridge_client"
-    ],
     "jaeger_ai/core/frameworks/native_runs.py": [
-      "jaeger_ai.features.webui.adapter.bridge_client",
       "jaeger_ai.features.webui.service.session_unify"
     ],
     "jaeger_ai/core/frameworks/recovery.py": [
       "jaeger_ai.features.webui.service.session_unify"
-    ],
-    "jaeger_ai/core/gateway/server.py": [
-      "jaeger_ai.features.webui.adapter.bridge_client"
-    ],
-    "jaeger_ai/core/runtime/fabric_supervisor.py": [
-      "jaeger_ai.features.webui.adapter.bridge_client"
-    ],
-    "jaeger_ai/core/runtime/stack.py": [
-      "jaeger_ai.features.webui.adapter.bridge_client"
-    ],
-    "jaeger_ai/core/runtime/truth.py": [
-      "jaeger_ai.features.webui.adapter.bridge_client",
-      "jaeger_ai.features.webui.adapter.profile_catalog"
     ],
     "jaeger_ai/core/sessions.py": [
       "jaeger_ai.features.webui.service.session_unify"

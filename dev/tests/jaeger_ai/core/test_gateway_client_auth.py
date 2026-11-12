@@ -112,11 +112,11 @@ def test_call_agent_presents_jaegerd_and_the_bound_turn_actor():
 def test_bridge_client_refuses_to_relay_without_the_caller_token(monkeypatch):
     """An MCP/A2A turn over the bridge socket must carry that caller's token;
     without it the client fails instead of borrowing the bridge identity."""
-    from jaeger_ai.features.webui.adapter import bridge_client
+    from jaeger_ai.interfaces import bridge_client
 
     monkeypatch.setattr(caller_auth, "client_token", lambda name: None)
     client = bridge_client.BridgeClient.__new__(bridge_client.BridgeClient)
-    with pytest.raises(bridge_client.HermesWebUIAdapterBridgeError, match="caller token"):
+    with pytest.raises(bridge_client.BridgeClientError, match="caller token"):
         client.turn("hi", session="mcp:x", gateway_caller="mcp")
 
 

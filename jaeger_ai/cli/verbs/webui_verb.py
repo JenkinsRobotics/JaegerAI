@@ -18,16 +18,15 @@ def _cmd_webui_argv(argv: Sequence[str]) -> int:
             "Jaeger WebUI with optional private Tailscale publishing.\n"
             "\n"
             "verbs:\n"
-            "  start [--tailscale] [-i NAME]       start Jaeger WebUI + adapter\n"
-            "  stop [-i NAME]                      stop Jaeger WebUI + adapter\n"
+            "  start [--tailscale] [-i NAME]       start Jaeger WebUI\n"
+            "  stop [-i NAME]                      stop Jaeger WebUI\n"
             "  status [--json] [-i NAME]           ports and health\n"
             "  url [-i NAME]                       print browser URL\n"
             "  servers [status|start|stop|restart] [all|NAME]  local server controls\n"
             "\n"
             "ports:\n"
             "  Jaeger WebUI     Tailscale IPv4:8790      (canonical chat URL; jaeger webui url)\n"
-            "  adapter          http://127.0.0.1:8791/   (runner-local)\n"
-            "  webhooks         127.0.0.1:8793           (no longer clashes with adapter)\n",
+            "  webhooks         127.0.0.1:8793\n",
             file=sys.stderr,
         )
         return 0 if argv else 2
@@ -103,11 +102,6 @@ def _webui_status(argv: list[str]) -> int:
         print(json.dumps(status, indent=2, default=str))
         return 0
     print(f"Instance:            {status['instance']}")
-    ad = status["adapter"]
-    ad_s = c.green("running") if ad.get("running") else c.dim("stopped")
-    print(f"Adapter:             {ad_s}  pid={ad.get('pid')}")
-    print(f"  URL:               {ad['url']}")
-    print(f"  Health:            {ad['health']}")
     vd = status["webui"]
     vd_s = c.green("running") if vd.get("running") else c.dim("stopped")
     print(f"Jaeger WebUI:         {vd_s}  pid={vd.get('pid')}")
@@ -127,7 +121,6 @@ def _webui_status(argv: list[str]) -> int:
     ports = status["ports"]
     print(
         "Ports:               "
-        f"adapter={ports['adapter']}  "
         f"webui={ports['webui']}  "
         f"webhooks={ports['webhooks']}"
     )

@@ -78,8 +78,6 @@ def _route(argv: list[str], py: str) -> list[str]:
         return [py, "-m", "jaeger_ai.features.agentgateway", *rest]
     if cmd == "runs":
         return [py, "-m", "jaeger_ai.core.frameworks.recovery", *rest]
-    if cmd == "hermes-webui-adapter":
-        return [py, "-m", "jaeger_ai.features.webui.adapter", *rest]
     if cmd == "doctor":
         return [py, "-m", "jaeger_ai.cli.run", "--doctor", *rest]
     if cmd == "finance":

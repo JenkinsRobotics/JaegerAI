@@ -1,16 +1,15 @@
 """Jaeger WebUI feature package.
 
-Unified home for Web UI services, adapters, branding assets, and runners.
+Backend for the first-party React UI (jaeger_ai/interfaces/ui): HTTP server,
+service management and branding assets. Turns execute on the Gateway.
 """
 from .service.service import WebUIService, webui_urls
 from .service.profile_layout import profile_display_name
-from .adapter.server import HermesWebUIAdapterServer
-from .adapter.bridge_client import BridgeClient
+from jaeger_ai.interfaces.bridge_client import BridgeClient
 
 __all__ = [
     "WebUIService",
     "webui_urls",
     "profile_display_name",
-    "HermesWebUIAdapterServer",
     "BridgeClient",
 ]

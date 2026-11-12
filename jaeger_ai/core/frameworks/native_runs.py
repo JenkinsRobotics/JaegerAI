@@ -466,7 +466,7 @@ class RunsHTTP(ProfileIngress):
 
 
 def jaeger_reconcile(native):
-    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+    from jaeger_ai.interfaces.bridge_client import jaeger_bridge
     receipt = jaeger_bridge().query('turn_status', {
         'turn_id': native['run_id'], 'session_id': native['session_id']}, timeout_s=10)
     if not isinstance(receipt, dict):
@@ -584,8 +584,8 @@ def jaeger_turn(run, workspace=None):
     """
     native_session = getattr(run, 'native_session', run.session)
     run.execution_unknown = False
-    from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
-    is_mocked_bridge = getattr(BridgeClient, "__module__", "") != "jaeger_ai.features.webui.adapter.bridge_client"
+    from jaeger_ai.interfaces.bridge_client import BridgeClient
+    is_mocked_bridge = getattr(BridgeClient, "__module__", "") != "jaeger_ai.interfaces.bridge_client"
     if not is_mocked_bridge and str(native_session).startswith("roundtable-"):
         gateway_result = _jaeger_gateway_turn(run, native_session)
         if gateway_result is not None:
@@ -595,7 +595,7 @@ def jaeger_turn(run, workspace=None):
                 raise RuntimeError(gateway_result["error"])
             return gateway_result.get("text") or ""
 
-    from jaeger_ai.features.webui.adapter.bridge_client import HermesWebUIAdapterBridgeError, jaeger_bridge
+    from jaeger_ai.interfaces.bridge_client import BridgeClientError, jaeger_bridge
     native_session = getattr(run, 'native_session', run.session)
     run.dispatch(session_id=native_session, run_id=run.id)
     try:
@@ -658,7 +658,7 @@ def jaeger_turn(run, workspace=None):
                 raise RuntimeError(result["error"])
         raw_out = result.get("text") or ""
         return clean_transcript_text(raw_out)
-    except (HermesWebUIAdapterBridgeError, ConnectionError, OSError) as exc:
+    except (BridgeClientError, ConnectionError, OSError) as exc:
         # Fallback to direct in-process ReAct execution when external bridge socket is offline
         try:
             from jaeger_ai.core.entity.runtime import EntityRuntime

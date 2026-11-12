@@ -32,7 +32,6 @@ from jaeger_ai.contract.ports import (
     GATEWAY_PORT,
     LOOPBACK,
     OLLAMA_URL as LOCKED_OLLAMA_URL,
-    WEBUI_ADAPTER_PORT,
     WEBUI_PORT,
 )
 from jaeger_ai.contract.sessions import normalise_surface
@@ -59,9 +58,6 @@ DEFAULT_GATEWAY_PORT = GATEWAY_PORT
 DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST") or LOOPBACK
 
 # Locked spine endpoints (docs/spine-acceptance.md M10). Chat does not use :8813.
-LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
-    "JAEGER_BRIDGE_HEALTH_URL", f"http://{LOOPBACK}:{WEBUI_ADAPTER_PORT}/health"
-).rstrip("/")
 LOCKED_WEBUI_URL = os.environ.get(
     "JAEGER_WEBUI_URL", f"http://{LOOPBACK}:{WEBUI_PORT}"
 ).rstrip("/")
@@ -895,7 +891,7 @@ class JaegerGatewayApp:
         # Explicit stores are used by embedded/test gateways and never attach
         # to the operator's running bridge unless a client is supplied.
         if background_client is None and store is None:
-            from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+            from jaeger_ai.interfaces.bridge_client import jaeger_bridge
             background_client = jaeger_bridge()
         self._background_client = background_client
         self._background_task: asyncio.Task | None = None
@@ -1741,6 +1737,18 @@ class JaegerGatewayApp:
             "protocol_version": "1",
         })
 
+    async def _probe_bridge(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
+        """Probe the agent bridge over its Unix socket; never raises."""
+        client = self._background_client
+        if client is None:
+            from jaeger_ai.interfaces.bridge_client import jaeger_bridge
+            client = jaeger_bridge()
+        try:
+            res = await asyncio.wait_for(asyncio.to_thread(client.health), timeout=timeout_s)
+            return {"ok": bool((res or {}).get("ok")), "transport": "unix-socket"}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "transport": "unix-socket", "error": type(exc).__name__}
+
     async def _probe_http(self, url: str, *, timeout_s: float = 2.0) -> dict[str, Any]:
         """Probe a dependency; never raises — fail-closed callers inspect ok=False.
 
@@ -2037,7 +2045,7 @@ class JaegerGatewayApp:
         """Backend readiness is independent of optional HTTP adapters and UIs."""
         owner = self._probe_owner_runtime()
         bridge, ollama, webui_chat, native_mcp = await asyncio.gather(
-            self._probe_http(LOCKED_BRIDGE_HEALTH_URL),
+            self._probe_bridge(),
             self._probe_http(f"{LOCKED_OLLAMA_URL}/api/tags"),
             self._probe_http(LOCKED_WEBUI_URL),
             self._probe_native_mcp(),

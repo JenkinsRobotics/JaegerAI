@@ -41,9 +41,6 @@ GATEWAY_URL: Final = f"http://{LOOPBACK}:{GATEWAY_PORT}"
 WEBUI_PORT: Final = 8790
 """The first-party Jaeger WebUI. What a person opens."""
 
-WEBUI_ADAPTER_PORT: Final = 8791
-"""Loopback runner the WebUI calls to execute a turn. Not browser-facing."""
-
 # ── external protocol surfaces ───────────────────────────────────────────
 
 MCP_GATEWAY_PORT: Final = 8811
@@ -153,7 +150,6 @@ __all__ = [
     "OLLAMA_OPENAI_URL",
     "OLLAMA_PORT",
     "OLLAMA_URL",
-    "WEBUI_ADAPTER_PORT",
     "WEBUI_PORT",
     "is_gateway_port",
     "resolve_gateway_url",

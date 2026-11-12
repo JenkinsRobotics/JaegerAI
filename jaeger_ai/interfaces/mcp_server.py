@@ -736,7 +736,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.http:
         from jaeger_ai.core.instance.instance import default_instance_name
-        from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
+        from jaeger_ai.interfaces.bridge_client import BridgeClient
 
         instance = instance or default_instance_name()
         bridge = BridgeClient(instance=instance)
@@ -787,7 +787,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     from jaeger_ai.core.instance.instance import default_instance_name
-    from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
+    from jaeger_ai.interfaces.bridge_client import BridgeClient
 
     instance = instance or default_instance_name()
     bridge = BridgeClient(instance=instance)

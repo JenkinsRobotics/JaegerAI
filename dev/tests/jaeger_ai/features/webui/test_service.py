@@ -38,8 +38,7 @@ def test_webhook_default_no_longer_collides_with_adapter():
 
 
 def test_webui_urls():
-    urls = webui_urls(webui_port=8787, adapter_port=8791)
-    assert urls.adapter == "http://127.0.0.1:8791/"
+    urls = webui_urls(webui_port=8787)
     assert urls.web_ui == "http://127.0.0.1:8787/"
 
 
@@ -49,7 +48,7 @@ def test_webui_dispatch_registered():
     assert "webui" in SUBCOMMANDS
 
 
-def test_start_runs_adapter_then_webui_and_can_publish(tmp_path):
+def test_start_runs_webui_and_can_publish(tmp_path):
     layout = MagicMock()
     layout.root = tmp_path
     calls = []
@@ -61,8 +60,6 @@ def test_start_runs_adapter_then_webui_and_can_publish(tmp_path):
     ):
         svc = WebUIService("jaeger")
         with patch.object(
-            svc, "_start_adapter", side_effect=lambda: calls.append("adapter") or {"ok": True}
-        ), patch.object(
             svc, "_start_webui", side_effect=lambda: calls.append("webui") or {"ok": True}
         ), patch.object(
             svc, "publish_tailscale", return_value={"ok": True, "output": "https://jaeger.tailnet/"}
@@ -70,7 +67,7 @@ def test_start_runs_adapter_then_webui_and_can_publish(tmp_path):
             result = svc.start(publish_tailscale=True)
     assert result["ok"] is True
     assert result["open"] == "http://127.0.0.1:8790/"
-    assert calls == ["adapter", "webui"]
+    assert calls == ["webui"]
     publish.assert_called_once_with()
 
 
