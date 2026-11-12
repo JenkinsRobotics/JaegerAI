@@ -29,7 +29,6 @@ REQUIRED_FLAGS = (
 )
 
 PRODUCTION_PATH_FILES = (
-    "dev/tests/jaeger_ai/core/test_execution_lifecycle.py",
     "dev/tests/jaeger_ai/core/test_control_plane_consolidation.py",
     "dev/tests/jaeger_ai/core/test_runtime_truth.py",
     "dev/tests/jaeger_ai/core/test_policy_kernel.py",
@@ -50,7 +49,6 @@ NOT_PRODUCTION_PATH = (
 )
 
 SECURITY_PATHS = (
-    "dev/tests/jaeger_ai/core/test_security_hardening.py",
     "dev/tests/jaeger_ai/core/test_skills_guard.py",
     "dev/tests/jaeger_ai/interfaces/test_legacy_adapters_security.py",
     "packages/jaeger-agent/tests/security/",
@@ -92,7 +90,6 @@ def test_production_path_is_not_only_unit_kernel_files():
     # Honesty: two PolicyKernel/effects files alone are not a production path.
     assert "test_control_plane_consolidation.py" in case
     assert "test_runtime_truth.py" in case
-    assert "test_execution_lifecycle.py" in case
 
 
 def test_security_tier_covers_agent_shell_hooks_and_webui_adapters():

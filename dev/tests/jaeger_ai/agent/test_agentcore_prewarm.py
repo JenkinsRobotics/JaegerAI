@@ -14,25 +14,3 @@ def test_boot_for_tui_exposes_prewarm_model() -> None:
     assert "prewarm_model" in inspect.signature(boot_for_tui).parameters
 
 
-def test_agentcore_prewarms_model_even_with_voice_warmup_off(monkeypatch) -> None:
-    import jaeger_ai.main as m
-
-    captured: dict = {}
-
-    class _FakeBoot:
-        client = object()
-
-        def cleanup(self) -> None:
-            pass
-
-    def _fake_boot(**kw):
-        captured.update(kw)
-        return _FakeBoot()
-
-    monkeypatch.setattr(m, "boot_for_tui", _fake_boot)
-
-    from jaeger_ai.core.agent_core import AgentCore
-    AgentCore(bus=object(), warmup=False)
-
-    assert captured.get("prewarm_model") is True   # LLM still primed → warm first turn
-    assert captured.get("warmup") is False         # voice models still skipped

@@ -75,7 +75,7 @@ PERSISTENT ENTITY RUNTIME   EntityRuntime (OWNER, resident=true)
 | Gateway sessions / SSE | **IMPLEMENTED** | Gateway daemon + WebUI proxy | Conversation projection, not identity |
 | Product-default runtime = Jaeger | **IMPLEMENTED / VERIFIED** | `dev/tests/jaeger_ai/core/test_runtime_truth.py`; live WebUI acceptance | Hermes remains explicit |
 | Attachments upload → cognition | **IMPLEMENTED / VERIFIED** | Gateway schema 5 + `inline_webui_text_attachments`; isolated document token `ATTACHMENT-TOKEN-9981` | WebUI does not write Gateway SQLite |
-| Canonical WorkState lifecycle | **IMPLEMENTED** (module) | `jaeger_ai.core.runtime.lifecycle` + `test_execution_lifecycle.py` | jaeger-agent RunStore mapped; residual Gateway helpers remain |
+| Canonical WorkState lifecycle | **IMPLEMENTED** (module) | (removed 2026-11-11 cleanup; module was unwired) | jaeger-agent RunStore mapped; residual Gateway helpers remain |
 | Control-plane vs runtime split | **IMPLEMENTED** (partial) | `run_subordinate_react` + `test_control_plane_consolidation.py` | Historical `_native_lead_turn` / `_sync_react` still in `server.py` |
 | Typed contracts | **IMPLEMENTED** (schemas) | `jaeger_ai.contract.schemas` | Not every wire frame validates yet |
 | State ownership map | **IMPLEMENTED** (doc + coordinator) | STATE_OWNERSHIP_MAP.md | Duplicate files may still exist; owner is the map |

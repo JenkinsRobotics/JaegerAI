@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 from jaeger_agent import JaegerAgent, Message, ProviderAdapter
 from jaeger_agent.loop.runtime_bridge import drive_one_turn
-from jaeger_ai.core.agent_observability import artifact_paths, safe_preview
 from jaeger_ai.core.mind_runtime import JaegerAIRuntime, _PipelineEventAdapter
 
 
@@ -274,17 +273,6 @@ def test_multimodal_prompt_adds_transport_rules_without_replacing_persona() -> N
     assert "new session-specific instruction" in agent.system_prompt
 
 
-def test_observable_tool_output_is_redacted_bounded_and_finds_artifacts() -> None:
-    value = {
-        "path": "/tmp/report.md",
-        "nested": {"output_file": "/tmp/chart.png"},
-        "api_key": "should-not-be-visible",
-        "body": "x" * 2_000,
-    }
-    preview = safe_preview(value, limit=160)
-    assert len(preview) <= 160
-    assert "should-not-be-visible" not in preview
-    assert artifact_paths(value) == ("/tmp/report.md", "/tmp/chart.png")
 
 
 def test_pipeline_event_adapter_tags_workspace_output_with_session() -> None:

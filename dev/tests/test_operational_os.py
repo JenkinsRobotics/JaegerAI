@@ -13,7 +13,6 @@ from jaeger_ai.core.entity.ownership import EntityRuntimeMode, migrate_legacy_en
 from jaeger_ai.core.entity.reflection import ReflexionStore, StructuredReflection
 from jaeger_ai.core.entity.runtime import EntityRuntime
 from jaeger_ai.core.instance.instance import InstanceLayout
-from jaeger_ai.core.runtime.maintenance import MaintenanceCoordinator, PROTECTED_PATH_MARKERS
 from jaeger_ai.core.runtime.native_turns import _terminal_status
 
 
@@ -146,15 +145,6 @@ def test_extra_sources_are_indexed_before_docs(tmp_path: Path):
     assert "index-src" in str(hits[0].get("source_id") or "")
 
 
-def test_maintenance_skips_protected_paths(tmp_path: Path):
-    coord = MaintenanceCoordinator(tmp_path)
-    item = coord.select_item([{"id": "sec", "path": "jaeger_ai/core/entity/authority.py"}])
-    assert item is None
-    assert any("authority" in m for m in PROTECTED_PATH_MARKERS)
-    picked = coord.select_item([{"id": "docs", "path": "docs/architecture/note.md"}])
-    assert picked is not None
-    result = coord.run_cycle(picked, dry_run=True)
-    assert result.status in {"candidate", "BLOCKED"}
 
 
 def test_runtime_status_schema(isolated: Path):

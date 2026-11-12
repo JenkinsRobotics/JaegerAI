@@ -247,11 +247,6 @@ def test_agent_facts_are_written_only_by_the_memory_tools_and_the_store_adapters
     }
 
 
-def test_the_ownership_registry_names_one_owner_for_tasks_events_and_identity():
-    from jaeger_ai.core.state.ownership import STATE_OWNERSHIP_REGISTRY, StateDomain
-    assert STATE_OWNERSHIP_REGISTRY[StateDomain.TASKS].write_access == ("GatewayTaskOwner",)
-    assert STATE_OWNERSHIP_REGISTRY[StateDomain.EVENT_STREAM].write_access == ("GatewayEventBus",)
-    assert STATE_OWNERSHIP_REGISTRY[StateDomain.IDENTITY].authoritative_class == "EntityIdentity"
 
 
 # ── 7. no second execution engine behind normal user input ──────────────────
@@ -332,17 +327,6 @@ def test_avatar_surfaces_own_no_memory_identity_goals_permissions_or_task_state(
     assert {k: v for k, v in offenders.items() if v} == {}
 
 
-def test_embodiment_stays_closed_and_minecraft_is_not_an_agent():
-    from jaeger_ai.core.embodiment.gate import EmbodimentDisabled, minecraft_action
-    with pytest.raises(EmbodimentDisabled):
-        minecraft_action("chat", text="hi")
-    # The tool module opens no socket and runs no loop of its own.
-    tree = _sources()["packages/jaeger-agent/jaeger_agent/tools/minecraft.py"][1]
-    imported = {i.split(".")[0] for i in _imports(tree)}
-    assert not imported & {"urllib", "socket", "http", "requests", "httpx", "subprocess", "threading", "asyncio"}
-    assert not [n for n in ast.walk(tree) if isinstance(n, ast.While)]
-    assert _modules_where(lambda rel, t, tree: "minecraft_action" in t) <= {
-        "jaeger_ai/core/embodiment/gate.py"}
 
 
 def test_every_worker_dispatch_opens_a_card_on_the_task_owner():

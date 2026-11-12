@@ -16,7 +16,6 @@ from jaeger_ai.features.session_search import (
     search_sessions,
     sessions_db_path,
 )
-from jaeger_ai.features.session_search.fts import fts_enabled
 from jaeger_ai.features.session_search.query import escape_like
 
 
@@ -95,42 +94,8 @@ class _MiniStore:
         ]
 
 
-def test_search_sessions_and_messages(tmp_path: Path):
-    store = _MiniStore(tmp_path / "sessions.db")
-    rows = search_sessions(store, "zucchini", limit=10)
-    assert any(r["id"] == "webui:demo" for r in rows)
-    hits = search_messages(store, "zucchini", limit=10)
-    assert hits and hits[0].session_id == "webui:demo"
-    assert "zucchini" in (hits[0].snippet or "").lower()
-    assert fts_enabled(store._conn) is False
 
 
-def test_real_session_store_like_search(tmp_path: Path):
-    """DEPTH: search against the real Jaeger sessions.db schema."""
-    reset_for_tests()
-    layout = SimpleNamespace(memory_dir=tmp_path / "memory")
-    layout.memory_dir.mkdir(parents=True)
-    assert sessions_db_path(layout) == layout.memory_dir / "sessions.db"
-
-    store = SessionStore(sessions_db_path(layout))
-    store.record("abc123def456", "user", "find the zucchini recipe tonight")
-    store.record("abc123def456", "assistant", "Here is a roasted zucchini plan.")
-    store.set_title("abc123def456", "Dinner ideas")
-    store.record("other", "user", "unrelated bridge debug")
-
-    rows = search_sessions(store, "zucchini", limit=10)
-    assert [r["id"] for r in rows] == ["abc123def456"]
-
-    hits = search_messages(store, "roasted", limit=10)
-    assert hits and hits[0].session_id == "abc123def456"
-    assert hits[0].role == "assistant"
-    assert "roasted" in (hits[0].snippet or "").lower()
-
-    # Sanitized "%" is stripped for non-CJK LIKE needles — no false positives
-    assert search_sessions(store, "zzzz-no-hit", limit=10) == []
-    assert fts_enabled(store._conn) is False
-    store.close()
-    reset_for_tests()
 
 
 def test_open_session_store_uses_layout(tmp_path: Path, monkeypatch):

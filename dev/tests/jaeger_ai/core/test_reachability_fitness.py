@@ -134,8 +134,6 @@ KNOWN_ORPHANS = {
     # is precisely why neither the import graph nor the CLI route table found
     # it. "Unreachable by analysis" and "not running" are different claims.
     # Runnable entry points with no caller and no CLI route.
-    "jaeger_ai.plugins.messaging_daemon",
-    "jaeger_ai.core.runtime._shakedown",
     # Consumers (interfaces/studio, interfaces/v4) were deleted.
     # Engine capability with no client surface.
     "jaeger_ai.features.skill_tree.xp_emitter",

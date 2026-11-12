@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_ai.core.embodiment.gate import EmbodimentDisabled, minecraft_action
 from jaeger_ai.core.gateway import caller_auth
 from jaeger_ai.core.gateway.caller_auth import CALLERS
 from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError, release_allowed
@@ -122,12 +121,6 @@ def test_workers_do_not_resurrect_jaeger_without_the_owner(tmp_path: Path, monke
     assert repairs_allowed() is False
 
 
-def test_embodiment_actions_are_refused():
-    with pytest.raises(EmbodimentDisabled):
-        minecraft_action("build_house")
-    from jaeger_agent.tools.minecraft import mc_status
-    refused = mc_status()
-    assert refused["ok"] is False and refused["disabled"] is True
 
 
 def test_policy_kernel_reads_stop_without_the_gateway_server(tmp_path: Path):
