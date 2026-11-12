@@ -25,6 +25,8 @@ export type ChatPart =
   | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string }
   | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny" }
   | { kind: "progress"; message: string }
+  /** Live loop position (model.started/finished); one per turn, replaced in place. */
+  | { kind: "step"; index: number; state: "running" | "done" | "failed"; model?: string }
   | { kind: "error"; message: string }
   /** `noticeId`: a status notice that a later notice with the same id replaces in place (e.g. Stop). */
   | { kind: "warning"; message: string; noticeId?: string }
@@ -176,7 +178,7 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
     const index = parts.findIndex((p) => p.kind === "handoff" && p.handoffId === part.handoffId && p.direction === part.direction);
     if (index >= 0) return parts.map((p, i) => i === index && !(p.kind === "handoff" && p.status === "delivered" && part.status !== "delivered") ? part : p);
   }
-  if (["plan","searchCount","followUps","toolSelection"].includes(part.kind)) {
+  if (["plan","searchCount","followUps","toolSelection","step"].includes(part.kind)) {
     const index=parts.findIndex(p=>p.kind===part.kind);
     if(index>=0)return parts.map((p,i)=>i===index?part:p);
   }

@@ -104,6 +104,9 @@
 /* Compact text-only progress bubble. Motion lives in the header avatar. */
 .jg-progress-line { align-self: flex-start; display: inline-flex; width: fit-content; max-width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 18px; background: color-mix(in srgb,var(--jg-color-text) 8%,var(--jg-color-pane)); font-size: var(--jg-font-body); line-height: var(--jg-line-height-base); overflow-wrap: anywhere; }
 .jg-progress-text { color: var(--jg-color-text-secondary); }
+.jg-progress-step { color: var(--jg-color-text-secondary); font-variant-numeric: tabular-nums; font-weight: 500; }
+.jg-progress-watch { margin-left: var(--jg-space-2, 8px); font-size: 0.9em; color: var(--jg-color-accent, currentColor); text-decoration: none; }
+.jg-progress-watch:hover { text-decoration: underline; }
 
 /* Tool steps: one elevated summary row, "Show steps" expands the list. */
 .jg-steps {
