@@ -443,6 +443,25 @@ export class GatewayClient implements JaegerSource {
     }
   }
 
+  async processHistory(sessionId: string, before?: number, limit = 2000) {
+    const qs = new URLSearchParams({ limit: String(limit), ...(before ? { before: String(before) } : {}) });
+    const response = await fetch(`${this.base}/v1/sessions/${encodeURIComponent(sessionId)}/trace-history?${qs}`, {
+      headers: { Accept: "application/json" }, credentials: "same-origin",
+    });
+    if (!response.ok) throw new GatewayError(`trace history ${response.status}`, response.status, undefined);
+    const body = await response.json() as { events?: Array<Record<string, unknown>>; has_more?: boolean };
+    const events = (body.events ?? []).map((row) => {
+      const data = (row.data && typeof row.data === "object" ? row.data : {}) as Record<string, unknown>;
+      return {
+        event: String(row.event), event_id: Number(row.event_id), session_id: String(row.session_id ?? sessionId),
+        request_id: data.request_id as string | undefined, turn_id: data.turn_id as string | undefined,
+        created_at: typeof row.timestamp === "number" ? row.timestamp : undefined, payload: data,
+        ...(row.trace && typeof row.trace === "object" ? { trace: row.trace as import("./types").TraceEnvelope } : {}),
+      } as GatewayEvent;
+    });
+    return { events, hasMore: Boolean(body.has_more) };
+  }
+
   /** Session-scoped live trace (?scope=session): this session's spans only, replayed
    *  from `cursor` then live. Feeds the Process view. */
   async processStream(sessionId: string, cursor: number, onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {

@@ -34,6 +34,7 @@ from typing import Any
 
 VERSION = 1
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "denied", "unknown"})
+ACTIVE_STATES = frozenset({"running", "waiting"})
 
 _lock = threading.Lock()
 _seq: "OrderedDict[str, int]" = OrderedDict()
@@ -196,6 +197,35 @@ def annotate(session_id: str, event: str, data: dict[str, Any], ts: float | None
     trace = {"v": VERSION, "run_id": rid or None, "turn_id": _s(data.get("turn_id")) or None,
              **info, "seq": _bump(rid) if rid else None, "ts": now, "duration_ms": duration}
     return {**data, "trace": trace}
+
+
+def history_trace(event: str, data: dict[str, Any], ts: float,
+                  starts: dict[str, float]) -> dict[str, Any] | None:
+    """Trace for a durable history row (pure: no global counters).
+
+    ``starts`` is the caller's span-start map for the page being rebuilt, so
+    replaying older turns yields the same spans and durations as live.
+    """
+    try:
+        info = classify(event, data)
+    except Exception:  # noqa: BLE001
+        return None
+    if not info or not info.get("span_id"):
+        return None
+    span, state = info["span_id"], info["state"]
+    duration = None
+    if state in ACTIVE_STATES:
+        starts.setdefault(span, ts)
+    elif state in TERMINAL_STATES:
+        if span in starts:
+            duration = int((ts - starts.pop(span)) * 1000)
+        elif isinstance(data.get("duration_ms"), (int, float)):
+            duration = int(data["duration_ms"])
+        elif isinstance(data.get("elapsed_s"), (int, float)):
+            duration = int(float(data["elapsed_s"]) * 1000)
+    rid = _s(data.get("request_id") or data.get("run_id"))
+    return {"v": VERSION, "run_id": rid or None, "turn_id": _s(data.get("turn_id")) or None,
+            **info, "seq": None, "ts": ts, "duration_ms": duration}
 
 
 def split_record(record: dict[str, Any]) -> dict[str, Any]:

@@ -1687,6 +1687,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/presence", self.handle_presence)
         self.app.router.add_get("/v1/requests/{request_id}", self.handle_get_request_any_session)
         self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
+        self.app.router.add_get("/v1/sessions/{id}/trace-history", self.handle_trace_history)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_get("/v1/handoffs/{id}/messages", self.handle_handoff_messages)
         self.app.router.add_post("/v1/handoffs/{id}/reply", self.handle_handoff_reply)
@@ -3775,6 +3776,18 @@ class JaegerGatewayApp:
         except ValueError:
             return web.json_response({"error": "Invalid cursor"}, status=400)
         return web.json_response(self.store.activity_history(session_id, after))
+
+    async def handle_trace_history(self, request: web.Request) -> web.Response:
+        """Per-session durable history with traces (Process view: older turns)."""
+        session_id = request.match_info["id"]
+        if not self.store.get_session(session_id):
+            return web.json_response({"error": "Session not found"}, status=404)
+        try:
+            before = int(request.query["before"]) if request.query.get("before") else None
+            limit = int(request.query.get("limit", "2000"))
+        except ValueError:
+            return web.json_response({"error": "Invalid cursor"}, status=400)
+        return web.json_response(await asyncio.to_thread(self.store.trace_history, session_id, before, limit))
 
     def _session_model_choice(self, model_id: str) -> dict[str, Any] | None:
         """``{model, provider}`` if ``model_id`` is a reachable /v1/runtime/models entry.

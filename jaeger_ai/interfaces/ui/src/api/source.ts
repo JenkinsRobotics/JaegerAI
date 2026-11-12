@@ -384,6 +384,8 @@ export interface JaegerSource {
   stream(sessionId: string, cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void>;
   /** Session-scoped trace stream for the Process view (live Gateway only). */
   processStream?(sessionId: string, cursor: number, onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void>;
+  /** Durable per-session history with traces, newest page before `before` (oldest-first rows). */
+  processHistory?(sessionId: string, before?: number, limit?: number): Promise<{ events: GatewayEvent[]; hasMore: boolean }>;
 }
 
 export interface TurnReceipt {

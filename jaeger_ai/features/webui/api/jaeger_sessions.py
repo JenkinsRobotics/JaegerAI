@@ -558,7 +558,7 @@ def route(handler, parsed, method: str) -> bool:
         return False
 
     # /v1/sessions/{id}/{messages|events} — read routes, query string relayed
-    if len(parts) == 2 and method == "GET" and parts[1] in {"messages", "events", "feedback"}:
+    if len(parts) == 2 and method == "GET" and parts[1] in {"messages", "events", "feedback", "trace-history"}:
         return _proxy(handler, "GET", f"/v1/sessions/{session_id}/{parts[1]}{query}")
 
     if len(parts)==2 and parts[1]=='uploads' and method in {'GET','POST'}:

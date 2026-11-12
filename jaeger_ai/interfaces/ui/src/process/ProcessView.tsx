@@ -5,12 +5,11 @@
  * event stream (trace envelope, contract/trace.py); nothing is polled. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "../api/source";
-import type { GatewayEvent, SessionRow } from "../api/types";
+import type { SessionRow } from "../api/types";
 import { columns, foldAll, isActive, lamps, type Span } from "./model";
+import { useProcessEvents } from "./useProcessEvents";
 import "./process.css";
 
-const MAX_EVENTS = 5000;
-const BACKOFF = [250, 500, 1000, 2000, 4000];
 
 const fmtMs = (ms: number | null | undefined) =>
   ms == null ? "" : ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
@@ -37,10 +36,8 @@ function Node({ span, now }: { span: Span; now: number }) {
 export function ProcessView({ source, params }: { source: JaegerSource; params?: URLSearchParams }) {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(params?.get("session") ?? null);
-  const [events, setEvents] = useState<GatewayEvent[]>([]);
   const [scrub, setScrub] = useState<number | null>(null); // null = live
   const [runPick, setRunPick] = useState<string | null>(null);
-  const [link, setLink] = useState<"connecting" | "live" | "retrying" | "unsupported">("connecting");
   const [clock, setClock] = useState(() => Date.now() / 1000);
   const playing = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -55,42 +52,9 @@ export function ProcessView({ source, params }: { source: JaegerSource; params?:
     return () => { live = false; };
   }, [source]);
 
-  // One live, resumable subscription per session (cursor = last seen event_id).
-  useEffect(() => {
-    if (!sessionId) return;
-    if (!source.processStream) { setLink("unsupported"); return; }
-    const abort = new AbortController();
-    let cursor = 0, attempt = 0;
-    setEvents([]); setScrub(null); setRunPick(null); setLink("connecting");
-    const batch: GatewayEvent[] = [];
-    let flush: ReturnType<typeof setTimeout> | undefined;
-    const push = (e: GatewayEvent) => {
-      if (typeof e.event_id === "number") { if (e.event_id <= cursor) return; cursor = e.event_id; }
-      batch.push(e);
-      if (!flush) flush = setTimeout(() => {
-        flush = undefined;
-        const add = batch.splice(0);
-        setEvents((cur) => { const next = cur.concat(add); return next.length > MAX_EVENTS ? next.slice(next.length - MAX_EVENTS) : next; });
-      }, 50); // ≤20 renders/s however fast tokens arrive
-    };
-    void (async () => {
-      while (!abort.signal.aborted) {
-        try {
-          setLink(attempt ? "retrying" : "connecting");
-          const opened = source.processStream!(sessionId, cursor, (e) => { attempt = 0; setLink("live"); push(e); }, abort.signal);
-          setTimeout(() => { if (!abort.signal.aborted) setLink((l) => (l === "connecting" ? "live" : l)); }, 400);
-          await opened;
-        } catch (err) {
-          if (abort.signal.aborted) return;
-          if ((err as { status?: number }).status === 410) cursor = 0; // cursor aged out: restart
-        }
-        if (abort.signal.aborted) return;
-        setLink("retrying");
-        await new Promise((r) => setTimeout(r, BACKOFF[Math.min(attempt++, BACKOFF.length - 1)]));
-      }
-    })();
-    return () => { abort.abort(); clearTimeout(flush); };
-  }, [source, sessionId]);
+  const { events, health, hasOlder, loadOlder } = useProcessEvents(source, sessionId);
+  const link = health.link;
+  useEffect(() => { setScrub(null); setRunPick(null); }, [sessionId]);
 
   useEffect(() => { const t = setInterval(() => setClock(Date.now() / 1000), 250); return () => clearInterval(t); }, []);
   useEffect(() => () => { if (playing.current) clearInterval(playing.current); }, []);
@@ -140,7 +104,8 @@ export function ProcessView({ source, params }: { source: JaegerSource; params?:
           <Lamp on={lamp.waiting} label="WAITING ON YOU" tone="wait" />
           <Lamp on={lamp.fault} label="FAULT" tone="fault" />
         </div>
-        <span className={`jg-proc__link is-${link}`}>{link === "live" ? "● live" : link}</span>
+        {hasOlder && <button type="button" onClick={() => void loadOlder()}>Load older turns</button>}
+        <span className={`jg-proc__link is-${link}`} title={`replayed ${health.replayed} · reconnects ${health.reconnects} · seq gaps ${health.gaps}`}>{link === "live" ? "● live" : link}</span>
       </header>
 
       {link === "unsupported" && <p className="jg-proc__empty">The process view needs the live Gateway.</p>}

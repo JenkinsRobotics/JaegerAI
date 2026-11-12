@@ -318,3 +318,26 @@ def test_model_steps_carry_name_provider_and_honest_usage(tmp_path, monkeypatch)
     assert first["provider"] == "xai" and first["actual_model"] == "grok-4-0709"
     assert first["usage_reported"] is False and first["usage"] == {}
     assert second["usage"] == {"prompt_tokens": 120, "completion_tokens": 7} and second["duration_ms"] >= 0
+
+
+def test_older_turns_replay_from_per_session_history_past_the_window(tmp_path, monkeypatch):
+    import jaeger_ai.core.gateway.session_store as module
+    from jaeger_ai.core.gateway.event_bus import GatewayEventBus
+    monkeypatch.setattr(module, "MAX_RETAINED_EVENTS", 5)
+    store = module.GatewaySessionStore(tmp_path / "s.db")
+    bus = GatewayEventBus(store=store)
+    bus.publish("s", "turn.start", {"request_id": "old", "turn_id": "old"})
+    bus.publish("s", "tool.started", {"request_id": "old", "call_id": "c1", "tool": "read_file"})
+    bus.publish("s", "tool.completed", {"request_id": "old", "call_id": "c1", "tool": "read_file"})
+    bus.publish("s", "turn.finish", {"request_id": "old", "turn_id": "old"})
+    for i in range(8):  # another session floods the global window
+        bus.publish("other", "turn.delta", {"request_id": "x", "delta": str(i)})
+    assert not any(e["event"] == "turn.start" for e in store.replay_events("s")["events"])
+    page = store.trace_history("s")
+    names = [e["event"] for e in page["events"]]
+    assert names[:4] == ["turn.start", "tool.started", "tool.completed", "turn.finish"]
+    tool_done = page["events"][2]["trace"]
+    assert tool_done["span_id"] == "tool:c1" and tool_done["state"] == "succeeded" and tool_done["duration_ms"] >= 0
+    assert "trace" not in page["events"][2]["data"]
+    older = store.trace_history("s", before=page["events"][1]["event_id"], limit=10)
+    assert [e["event"] for e in older["events"]] == ["turn.start"]
