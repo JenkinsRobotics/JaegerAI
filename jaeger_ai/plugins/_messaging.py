@@ -53,7 +53,7 @@ def reply_as_approval(channel: str, recipient: str, text: str,
     rid = awaiting.pop(recipient, None)
     if rid is None or bus is None:
         return False
-    from jaeger_ai.core.messages import AgentResponse
+    from jaeger_agent.core.messages import AgentResponse
     bus.publish(AgentResponse(id=rid, answer=text, session=session_for(channel, recipient)))
     return True
 

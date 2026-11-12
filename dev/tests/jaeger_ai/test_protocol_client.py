@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 
 from jaeger_os.contract import protocol
-from jaeger_ai.core.messages import AgentState, ChatReply, ToolEvent
+from jaeger_agent.core.messages import AgentState, ChatReply, ToolEvent
 
 
 def test_protocol_roundtrip_and_parse():

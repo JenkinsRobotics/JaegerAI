@@ -32,7 +32,7 @@ def _now() -> str:
 def _path() -> Any:
     """The usage.json path for the bound instance, or None."""
     try:
-        from jaeger_ai.core.context import get_layout
+        from jaeger_agent.core.workspace import get_layout
         layout = get_layout()
         layout.logs_dir.mkdir(parents=True, exist_ok=True)
         return layout.logs_dir / "usage.json"

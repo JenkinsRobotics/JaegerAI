@@ -382,7 +382,7 @@ def _run_scenario(client: Any, case: Any, layout: Any,
 
 def _workspace_dir(layout: Any) -> pathlib.Path:
     with contextlib.suppress(Exception):
-        from jaeger_ai.core.context import get_effective_workspace_dir
+        from jaeger_agent.core.workspace import get_effective_workspace_dir
         return get_effective_workspace_dir()
     return pathlib.Path(layout.workspace_dir)
 

@@ -218,7 +218,7 @@ def _apply_autonomy(previous: str, target: str) -> str:
 def _publish() -> None:
     """Best-effort status broadcast so tray / chat header follow along."""
     try:
-        from jaeger_ai.core.messages import ModeState
+        from jaeger_agent.core.messages import ModeState
         from jaeger_ai.core.runtime import modes
         from jaeger_ai.core.runtime.autonomy import current_autonomy
         from jaeger_ai.main import _pipeline

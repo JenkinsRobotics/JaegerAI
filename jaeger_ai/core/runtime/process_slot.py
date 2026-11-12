@@ -38,18 +38,7 @@ def _slot_path(run_dir: Path, slot_name: str) -> Path:
     return run_dir / f"{slot_name}.pid"
 
 
-def _pid_alive(pid: int) -> bool:
-    """True when ``pid`` names a live process. ``os.kill(pid, 0)`` is
-    a no-op signal that raises if the process is gone."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True  # exists, just not ours to signal
-    return True
+from jaeger_os.core.process import pid_alive as _pid_alive  # single owner
 
 
 def existing_slot_pid(run_dir: Path, slot_name: str) -> int | None:

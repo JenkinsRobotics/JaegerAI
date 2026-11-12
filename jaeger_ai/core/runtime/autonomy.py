@@ -102,7 +102,7 @@ def autonomy_info() -> dict:
 
 def _publish(mode: str) -> None:
     try:
-        from jaeger_ai.core.messages import ModeState
+        from jaeger_agent.core.messages import ModeState
         from jaeger_ai.core.runtime import modes
         from jaeger_ai.main import _pipeline
         bus = _pipeline.get("chassis_bus")

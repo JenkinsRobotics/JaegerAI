@@ -16,6 +16,7 @@ Flow (native runs):
 
 from __future__ import annotations
 
+from jaeger_ai.contract.ports import WEBUI_PORT
 import threading
 import time
 import uuid
@@ -138,7 +139,7 @@ def describe_wire() -> dict[str, Any]:
         "mode": "wire",
         "authority": "jaeger_ai/features/webui/api/clarify.py",
         "native_broker": "jaeger_ai.features.webui.clarify_wire.ClarifyBroker",
-        "chat_port": 8790,
+        "chat_port": WEBUI_PORT,
         "adapter_port": 8791,
         "routes": {
             "pending": CLARIFY_PENDING_PATH,

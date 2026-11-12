@@ -55,7 +55,7 @@ def _layout_or_none() -> Any:
     """The bound instance layout, or None when tools aren't bound yet
     (bare imports, unit tests). Seam for tests."""
     try:
-        from jaeger_ai.core.context import get_layout
+        from jaeger_agent.core.workspace import get_layout
         return get_layout()
     except Exception:  # noqa: BLE001 — unbound → env fallback only
         return None

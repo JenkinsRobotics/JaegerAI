@@ -8,7 +8,7 @@ import pytest
 
 
 def test_classify_private_keyword():
-    from jaeger_ai.core.models.sensitivity_gate import classify
+    from jaeger_ai.core.models.router import classify
 
     klass, reason = classify("please rotate the password on the NAS")
     assert klass == "private"
@@ -16,7 +16,7 @@ def test_classify_private_keyword():
 
 
 def test_classify_public_weather():
-    from jaeger_ai.core.models.sensitivity_gate import classify
+    from jaeger_ai.core.models.router import classify
 
     klass, reason = classify("what's the weather")
     assert klass == "public"
@@ -25,7 +25,7 @@ def test_classify_public_weather():
 
 def test_decide_routes_and_logs(tmp_path, monkeypatch):
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
-    from jaeger_ai.core.models import sensitivity_gate as gate
+    from jaeger_ai.core.models import router as gate
 
     # Reload helpers pick up env via operator_state_root
     model, provider, decision = gate.apply_sensitivity_routing(
@@ -58,7 +58,7 @@ def test_decide_routes_and_logs(tmp_path, monkeypatch):
 
 
 def test_normalize_ollama_provider_lanes():
-    from jaeger_ai.core.models.ollama_endpoint import normalize_ollama_provider
+    from jaeger_ai.core.models.router import normalize_ollama_provider
 
     assert normalize_ollama_provider("ollama-cloud") == "ollama"
     assert normalize_ollama_provider("ollama-local") == "ollama"
@@ -103,7 +103,7 @@ def test_private_uses_config_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
     from types import SimpleNamespace
 
-    from jaeger_ai.core.models.sensitivity_gate import decide
+    from jaeger_ai.core.models.router import decide
 
     config = SimpleNamespace(
         external_model=SimpleNamespace(

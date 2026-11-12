@@ -50,17 +50,7 @@ def pid_path(layout: Any) -> Path:
     return Path(layout.root) / "run" / "jaeger.pid"
 
 
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Alive, just owned by another user.
-        return True
-    except OSError:
-        return False
-    return True
+from jaeger_os.core.process import pid_alive as _pid_alive  # single owner
 
 
 def _is_live_bridge(pid: int) -> bool:

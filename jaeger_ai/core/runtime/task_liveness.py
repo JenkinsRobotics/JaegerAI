@@ -125,20 +125,7 @@ def _modify_claims(layout: Any, mutate) -> dict[str, dict[str, Any]]:
                 pass
 
 
-def _pid_alive(pid: int) -> bool:
-    """Whether ``pid`` names a live process on THIS host."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Alive, owned by someone else — still alive for our purposes.
-        return True
-    except OSError:
-        return False
-    return True
+from jaeger_os.core.process import pid_alive as _pid_alive  # single owner
 
 
 # ── claiming ────────────────────────────────────────────────────────

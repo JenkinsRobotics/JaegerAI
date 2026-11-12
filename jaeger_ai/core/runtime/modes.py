@@ -110,7 +110,7 @@ def _resident_model() -> str:
 
 def _publish(mode: str) -> None:
     try:
-        from jaeger_ai.core.messages import ModeState
+        from jaeger_agent.core.messages import ModeState
         from jaeger_ai.core.runtime.autonomy import current_autonomy
         from jaeger_ai.main import _pipeline
         bus = _pipeline.get("chassis_bus")

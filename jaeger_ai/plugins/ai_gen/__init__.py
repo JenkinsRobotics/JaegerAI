@@ -28,8 +28,8 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_ai.core.context import SandboxError, _require_layout, _resolve_under
-from jaeger_ai.core.runtime.tool_interrupt import is_interrupted
+from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_under
+from jaeger_agent.util.tool_interrupt import is_interrupted
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 FAL_QUEUE_ORIGIN = "https://queue.fal.run"
@@ -66,7 +66,7 @@ def _fal_key() -> str:
     same names. Returns ``""`` when unconfigured — never raises."""
     layout = None
     try:
-        from jaeger_ai.core.context import get_layout
+        from jaeger_agent.core.workspace import get_layout
         layout = get_layout()
     except Exception:  # noqa: BLE001 — no instance bound yet
         layout = None

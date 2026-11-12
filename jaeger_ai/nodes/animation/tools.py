@@ -30,7 +30,7 @@ import uuid
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_ai.core.context import SandboxError, _require_layout, _resolve_under
+from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_under
 
 
 # ── default emotion → adapter+asset mapping ─────────────────────────

@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from jaeger_ai.core.instance.schemas import Config
-from jaeger_ai.core.models.session_selection import select_client
+from jaeger_ai.core.models.router import select_client
 
 
 def test_external_pick_preserves_instance_config_and_other_client(monkeypatch):
@@ -46,7 +46,7 @@ def test_same_named_model_can_switch_provider_without_mutating_default(monkeypat
 def test_conversation_pick_preserves_history_and_does_not_change_another_session(monkeypatch, legacy_local_runtime):
     from jaeger_ai import main
     from jaeger_ai.core import sessions
-    from jaeger_ai.core.models import session_selection
+    from jaeger_ai.core.models import router as session_selection
     default=SimpleNamespace(model_name='default-model')
     picks=[]
     monkeypatch.setattr(main,'_session_model_clients',{})
@@ -78,7 +78,7 @@ def test_conversation_pick_preserves_history_and_does_not_change_another_session
 def test_local_only_voice_turn_cannot_enter_dynamic_model_routing(monkeypatch, legacy_local_runtime):
     from jaeger_ai import main
     from jaeger_ai.core import sessions
-    from jaeger_ai.core.models import sensitivity_gate, session_selection
+    from jaeger_ai.core.models import router as sensitivity_gate, router as session_selection
 
     default = SimpleNamespace(model_name="local-model", provider="in-process")
     selected = []

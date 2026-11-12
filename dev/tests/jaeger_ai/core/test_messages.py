@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from jaeger_ai.core.messages import (
+from jaeger_agent.core.messages import (
     AgentState,
     ChatMessage,
     ChatReply,

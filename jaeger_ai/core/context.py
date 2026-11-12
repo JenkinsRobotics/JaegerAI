@@ -1,4 +1,9 @@
-"""Compatibility alias — the workspace moved to ``jaeger_agent``.
+"""Mind contract module: ``<mind>.core.context`` IS the agent workspace.
+
+KEEP: jaeger-os resolves this path dynamically
+(``resolve_mind_module("core.context")`` in ``jaeger_os.core.safety.command_guard``
+and ``jaeger_os.nodes.runtime``) to read the bound instance layout. App code
+should import :mod:`jaeger_agent.core.workspace` directly.
 
 0.11: this file WAS the agent's sandbox (path resolution, the read/write
 gates, the audit trail, git autocommit). It lived under ``core/``
