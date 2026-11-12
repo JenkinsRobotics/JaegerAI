@@ -326,6 +326,10 @@ class HookedToolExecutor:
                         auth_decision.policy_name,
                         auth_decision.reason,
                     )
+                    from jaeger_agent import live as _live
+                    _live.emit("hook.decision", {"hook": f"authority:{auth_decision.policy_name or 'policy'}",
+                                                 "action": "deny", "tool": tool.name,
+                                                 "reason": str(auth_decision.reason or "")[:300]})
                     return {
                         "ok": False,
                         "success": False,
@@ -355,6 +359,9 @@ class HookedToolExecutor:
                     tool.name,
                     hook_decision.reason,
                 )
+                from jaeger_agent import live as _live
+                _live.emit("hook.decision", {"hook": "shell:pre_tool_call", "action": "deny", "tool": tool.name,
+                                             "reason": str(hook_decision.reason or "")[:300]})
                 return {
                     "ok": False,
                     "success": False,

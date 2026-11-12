@@ -21,6 +21,16 @@ Hook points::
     on_approval(event)                    observing  (approval.request / .resolved)
     on_error(event)                       observing  (tool.failed / turn.failed / model failure)
     on_turn_end(event)                    observing  (turn.finish / failed / cancelled / unknown)
+    on_turn_start(event)                  observing  (turn.start)
+    on_session_start(event)               observing  (session.created)
+
+Every deny/modify (and a post_tool replacement) is reported on the host's
+live stream as ``hook.decision`` (jaeger_agent.live), so the interface shows
+it as a node under the tool call it changed.
+
+Legacy plugin hooks (``jaeger_ai.plugins``: pre_tool/post_tool/turn_start/
+turn_end/session_start) are bridged in as observers, so there is one
+dispatch path, not two.
 
 The Gateway feeds ``on_approval``/``on_error``/``on_turn_end`` from its single
 event stream (see ``core/gateway/hooks_bridge.py``), so hooks see exactly what
@@ -38,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 HOOK_POINTS: tuple[str, ...] = (
     "pre_tool", "post_tool", "pre_model", "post_model",
-    "on_approval", "on_error", "on_turn_end",
+    "on_approval", "on_error", "on_turn_end", "on_turn_start", "on_session_start",
 )
 BLOCKING_POINTS: frozenset[str] = frozenset({"pre_tool"})
 
@@ -48,6 +58,7 @@ class HookDecision:
     action: str = "allow"  # allow | deny | modify
     reason: str = ""
     args: dict[str, Any] | None = None
+    hook: str = ""  # which hook(s) decided
 
     @classmethod
     def allow(cls) -> "HookDecision":
@@ -107,25 +118,29 @@ class HookRegistry:
         current = dict(args)
         modified = False
         reasons: list[str] = []
+        names: list[str] = []
         for hook in self.hooks("pre_tool", tool):
             try:
                 answer = hook.fn(tool, dict(current))
             except Exception as exc:  # noqa: BLE001 — cannot answer => deny
                 logger.warning("pre_tool hook %s failed; denying %s", hook.name, tool, exc_info=True)
-                return HookDecision.deny(f"hook {hook.name} failed: {type(exc).__name__}")
+                return _report(tool, HookDecision("deny", f"hook {hook.name} failed: {type(exc).__name__}",
+                                                  None, hook.name))
             if answer is None or answer is True:
                 continue
             if answer is False:
-                return HookDecision.deny(f"denied by hook {hook.name}")
+                return _report(tool, HookDecision("deny", f"denied by hook {hook.name}", None, hook.name))
             if isinstance(answer, HookDecision):
                 if answer.action == "deny":
-                    return HookDecision.deny(answer.reason or f"denied by hook {hook.name}")
+                    return _report(tool, HookDecision("deny", answer.reason or f"denied by hook {hook.name}",
+                                                      None, hook.name))
                 if answer.action == "modify" and answer.args is not None:
                     current, modified = dict(answer.args), True
+                    names.append(hook.name)
                     if answer.reason:
                         reasons.append(answer.reason)
         if modified:
-            return HookDecision.modify(current, "; ".join(reasons))
+            return _report(tool, HookDecision("modify", "; ".join(reasons), current, ",".join(names)))
         return HookDecision.allow()
 
     # ── observing ────────────────────────────────────────────────────
@@ -138,6 +153,7 @@ class HookRegistry:
                 continue
             if replacement is not None:
                 result = replacement
+                _report(tool, HookDecision("replace", "result replaced", None, hook.name))
         return result
 
     def fire(self, point: str, payload: dict[str, Any]) -> None:
@@ -148,6 +164,15 @@ class HookRegistry:
                 hook.fn(dict(payload))
             except Exception:  # noqa: BLE001
                 logger.warning("%s hook %s failed", point, hook.name, exc_info=True)
+
+
+def _report(tool: str, decision: HookDecision) -> HookDecision:
+    """Show a hook's decision on the live stream (no-op without a host).
+    Never includes the rewritten arguments — they can hold secrets."""
+    from jaeger_agent import live
+    live.emit("hook.decision", {"hook": decision.hook or "hook", "action": decision.action,
+                                "reason": str(decision.reason or "")[:300], "tool": tool})
+    return decision
 
 
 #: The process-wide registry. Hosts and plugins register here.

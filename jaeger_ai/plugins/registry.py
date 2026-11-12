@@ -414,3 +414,44 @@ def reset_for_tests() -> None:
     _CONTEXT = PluginContext()
     _LOADED.clear()
     _HOOK_OWNERS.clear()
+
+
+_AGENT_BRIDGE: list[Callable[[], None]] = []
+
+
+def install_agent_hook_bridge() -> None:
+    """Route plugin hooks through the one hook registry (jaeger_agent.hooks).
+
+    Plugin handlers keep their ``**kwargs`` signature and stay observers: a
+    plugin ``pre_tool`` handler cannot deny (it never could), and a failing
+    one is swallowed by :func:`fire_hook`, so the bridge never fails closed
+    on a buggy plugin. Idempotent.
+    """
+    from jaeger_agent.hooks import registry as agent_hooks
+    with _LOCK:
+        if _AGENT_BRIDGE:
+            return
+
+        def _pre(tool: str, args: dict[str, Any]) -> None:
+            fire_hook("pre_tool", name=tool, data=args)
+            return None
+
+        def _post(tool: str, args: dict[str, Any], result: Any) -> None:
+            fire_hook("post_tool", name=tool, phase="done",
+                      data=result if isinstance(result, dict) else {"result": result})
+            return None
+
+        def _event(legacy: str) -> Callable[[dict[str, Any]], None]:
+            def handler(payload: dict[str, Any]) -> None:
+                data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+                fire_hook(legacy, event=payload.get("event"), session_id=payload.get("session_id"),
+                          request_id=data.get("request_id"), data=data)
+            return handler
+
+        _AGENT_BRIDGE.extend([
+            agent_hooks.register("pre_tool", _pre, name="plugins"),
+            agent_hooks.register("post_tool", _post, name="plugins"),
+            agent_hooks.register("on_turn_start", _event("turn_start"), name="plugins"),
+            agent_hooks.register("on_turn_end", _event("turn_end"), name="plugins"),
+            agent_hooks.register("on_session_start", _event("session_start"), name="plugins"),
+        ])

@@ -151,8 +151,10 @@ def classify(event: str, d: dict[str, Any]) -> dict[str, Any] | None:
         return node("subagent", f"agent:{hid}", f"tool:{call}" if call else run, name, st,
                     "STEP_FINISHED" if done else "STEP_STARTED")
     if event == "hook.decision":
-        return node("hook", f"hook:{_s(d.get('hook'))}:{call}", f"tool:{call}" if call else run,
-                    _s(d.get("hook")) or "hook", "denied" if d.get("action") == "deny" else "succeeded", "CUSTOM")
+        action = _s(d.get("action")) or "allow"
+        return node("hook", f"hook:{_s(d.get('hook'))}:{action}:{call}", f"tool:{call}" if call else run,
+                    f"{_s(d.get('hook')) or 'hook'} · {action}", "denied" if action == "deny" else "succeeded",
+                    "CUSTOM")
     if event in {"turn.progress", "tools.selected", "turn.context", "turn.plan", "turn.model",
                  "sources", "files.changed", "search.count", "follow_ups", "turn.steer", "turn.cancel"} and run:
         return node("info", step or run, run if step else None, event, None,

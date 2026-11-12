@@ -215,3 +215,42 @@ def test_gateway_tool_events_use_the_loops_real_call_id(tmp_path, monkeypatch):
     done = {cid: ok for ev, cid, ok in rows if ev != "tool.started"}
     assert done[b] is True and done[a] is False
     assert _live_activity_id("req-2", "call_A") != a  # reused provider ids stay unique per turn
+
+
+def test_hook_decisions_are_reported_as_nodes_under_the_tool():
+    from jaeger_agent import live
+    from jaeger_agent.hooks import HookDecision, HookRegistry
+    from jaeger_ai.contract import trace
+    reg = HookRegistry()
+    reg.register("pre_tool", lambda t, a: HookDecision.modify({**a, "safe": True}, "sanitised"), name="sanitiser")
+    reg.register("post_tool", lambda t, a, r: {"ok": True, "redacted": True}, name="redactor")
+    got = []
+    with live.bind(lambda e, d: got.append((e, d))), live.tool_call("c9"):
+        d = reg.pre_tool("write_file", {"path": "x", "token": "secret"})
+        reg.post_tool("write_file", {}, {"ok": True})
+    assert d.action == "modify" and d.hook == "sanitiser"
+    assert [x[1]["action"] for x in got] == ["modify", "replace"]
+    assert all("secret" not in str(x[1]) for x in got)  # rewritten args never published
+    node = trace.classify(*got[0])
+    assert node["kind"] == "hook" and node["parent_span_id"] == "tool:c9" and "sanitiser" in node["name"]
+    reg.register("pre_tool", lambda t, a: HookDecision.deny("no"), name="guard")
+    got.clear()
+    with live.bind(lambda e, d: got.append((e, d))), live.tool_call("c10"):
+        assert reg.pre_tool("write_file", {}).action == "deny"
+    assert trace.classify(*got[0])["state"] == "denied"
+
+
+def test_plugin_hooks_ride_the_agent_hook_registry(monkeypatch):
+    from jaeger_agent import hooks as agent_hooks
+    from jaeger_ai.plugins import registry as plugins
+    fresh = agent_hooks.HookRegistry()
+    monkeypatch.setattr(agent_hooks, "registry", fresh)
+    monkeypatch.setattr(plugins, "_AGENT_BRIDGE", [])
+    calls = []
+    monkeypatch.setattr(plugins, "fire_hook", lambda ev, **kw: calls.append((ev, kw.get("name"))))
+    plugins.install_agent_hook_bridge()
+    plugins.install_agent_hook_bridge()  # idempotent
+    assert fresh.pre_tool("read_file", {}).action == "allow"
+    fresh.post_tool("read_file", {}, {"ok": True})
+    fresh.fire("on_turn_end", {"event": "turn.finish", "session_id": "s", "data": {"request_id": "r"}})
+    assert calls == [("pre_tool", "read_file"), ("post_tool", "read_file"), ("turn_end", None)]

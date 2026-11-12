@@ -2967,14 +2967,16 @@ def _ensure_session_agent(client: Any, session_key: str, *, scope_tools: bool | 
         # immediately after.
         _pipeline.setdefault("turn_tool_time", 0.0)
 
+        # Plugin pre_tool/post_tool now fire once, from the tool executor via
+        # jaeger_agent.hooks (bridged here and in the Gateway).
+        from jaeger_ai.plugins.registry import install_agent_hook_bridge
+        install_agent_hook_bridge()
+
         def _tool_progress(name: str, phase: str, data: Any) -> None:
-            from jaeger_ai.plugins.registry import fire_hook
             if phase == "start":
                 set_agent_status("tool", detail=name)
-                fire_hook("pre_tool", name=name, data=data)
             else:
                 set_agent_status("thinking", detail="")
-                fire_hook("post_tool", name=name, phase=phase, data=data)
                 if phase == "done" and isinstance(data, dict):
                     try:
                         _pipeline["turn_tool_time"] = (
