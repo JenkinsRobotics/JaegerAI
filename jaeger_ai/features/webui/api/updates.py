@@ -240,50 +240,6 @@ def _is_git_lock_error(output: str) -> bool:
     return any(sig in lower_out for sig in _GIT_LOCK_SIGNATURES)
 
 
-def _inventory_locks(path: Path) -> dict:
-    """Return a snapshot of lock files currently present under ``path/.git``.
-
-    v2.2: replaced v2's `_is_lock_held` + `_try_remove_lock` machinery with
-    pure inventory. Round-2 cert (gate-fail) proved that `fcntl.flock`
-    cannot detect a live git lock, because git uses `O_CREAT|O_EXCL` and
-    `rename(2)`, NOT advisory locking. Any auto-delete path can therefore
-    race against a running `git add` and corrupt the index. v2.2 stops
-    deleting locks from the server entirely: the only thing that removes
-    a lock is the user, on the host, via the manual command surfaced in
-    the response. Once the lock is gone, the user re-clicks Update Now
-    and the normal non-destructive apply path runs.
-    """
-    git_dir = path / '.git'
-    out = {
-        'well_known_lock_present': False,  # ``.git/index.lock`` exists?
-        'well_known_lock_path': None,      # absolute path of ``.git/index.lock``
-        'other_locks': [],                  # any other lock files, by relative path
-    }
-    if not git_dir.exists():
-        return out
-    well_known = git_dir / 'index.lock'
-    try:
-        out['well_known_lock_present'] = well_known.exists()
-    except OSError:
-        # Permission problem reading the directory -- treat conservatively.
-        out['well_known_lock_present'] = True
-    out['well_known_lock_path'] = str(well_known)
-
-    # Enumerate every other lock file under .git/ for diagnostic reporting.
-    # We never touch them; this is purely an inventory.
-    try:
-        for entry in sorted(git_dir.rglob('*.lock')):
-            try:
-                rel = entry.relative_to(git_dir).as_posix()
-            except ValueError:
-                continue
-            if rel == 'index.lock':
-                continue
-            out['other_locks'].append(rel)
-    except OSError:
-        # rglob can fail on unreadable subtrees; skip quietly.
-        pass
-    return out
 
 
 

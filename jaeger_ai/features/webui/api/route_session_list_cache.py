@@ -13,32 +13,11 @@ from api.models import _active_state_db_path, _active_stream_ids
 from api.profiles import _profiles_match
 
 
-# Cron session ids are ``cron_{job_id}_{run_timestamp}`` where the run
-# timestamp is ``YYYYMMDD_HHMMSS`` (e.g. cron_job6728_20260803_100000). Used to
-# validate that the text after a matched ``cron_{jid}_`` prefix is EXACTLY a run
-# timestamp, so a shorter job id (backup) cannot claim a longer job id's session
-# (backup_full) when the longer job is not itself running (#6728 gate fix).
-_CRON_RUN_TS_RE = re.compile(r"\d{8}_\d{6}")
 
 
 _SESSIONS_CACHE_TTL_SECONDS = 2.5
-# #4808: while a turn is actively streaming the frontend polls /api/sessions on a
-# fixed cadence (static/sessions.js `_streamingPollMs`). With the idle TTL of
-# 2.5s, the entry expires between streaming polls, so each poll can find it stale
-# and force a full all_sessions() rebuild on the hot path under the global store
-# LOCK — pinning CPU and starving token rendering on large stores (recurrence of
-# #4672). Hold the sidebar cache steady for longer than one poll interval while
-# streaming; live runtime state (active stream, sort order, pending flags) is
-# overlaid on every response regardless of cache, and structural/settings changes
-# still invalidate immediately. Keep this strictly greater than
-# `_streamingPollMs`/1000 (see tests/test_streaming_cache_ttl_vs_poll.py).
-_SESSIONS_CACHE_STREAMING_TTL_SECONDS = 45.0
-_SESSIONS_CACHE_MAX_ENTRIES = 64
-_SESSIONS_CACHE_WAIT_SECONDS = 0.25
-_SESSIONS_CACHE_STALE_WAIT_SECONDS = 0.10
 _SESSIONS_CACHE: OrderedDict[tuple, tuple[float, tuple, dict]] = OrderedDict()
 _SESSIONS_CACHE_LOCK = threading.RLock()
-_SESSIONS_CACHE_INFLIGHT: dict[tuple, threading.Event] = {}
 _SESSIONS_CACHE_GLOBAL_INVALIDATION_VERSION = 0
 _SESSIONS_CACHE_ALL_PROFILES_INVALIDATION_VERSION = 0
 _SESSIONS_CACHE_PROFILE_INVALIDATION_VERSION: dict[str, int] = {}
@@ -109,37 +88,8 @@ def _session_list_cache_active_stream_ids():
     return _active_stream_ids()
 
 
-def _session_list_cache_running_cron_jobs() -> dict[str, float]:
-    """Return {job_id: start_epoch} for cron jobs currently tracked as running.
-
-    Cron liveness lives only in the in-memory ``_RUNNING_CRON_JOBS`` dict in
-    api.routes (#6728): the sidebar polls /api/sessions (not /api/crons/status),
-    so without this overlay a still-running cron job's session row looks
-    completed the moment it appends a message. Fail closed to an empty dict.
-    """
-    try:
-        import api.routes as _routes
-
-        jobs = getattr(_routes, "_RUNNING_CRON_JOBS", None)
-        lock = getattr(_routes, "_RUNNING_CRON_LOCK", None)
-        if jobs is None or lock is None:
-            return {}
-        with lock:
-            return dict(jobs)
-    except Exception:
-        return {}
 
 
-def _session_list_cache_resolved_source_stamp(key: tuple):
-    try:
-        import api.routes as _routes
-
-        override = getattr(_routes, "_session_list_cache_source_stamp", None)
-        if callable(override) and override is not _session_list_cache_source_stamp:
-            return override(key)
-    except Exception:
-        pass
-    return _session_list_cache_source_stamp(key)
 
 
 def _session_list_cache_profile_scope(profile: str | None) -> str:
@@ -149,111 +99,12 @@ def _session_list_cache_profile_scope(profile: str | None) -> str:
     return normalized
 
 
-def _session_list_cache_key(
-    active_profile: str | None,
-    all_profiles: bool,
-    show_cli_sessions: bool,
-    show_previous_messaging_sessions: bool,
-    show_cron_sessions: bool,
-    include_archived: bool = False,
-    exclude_hidden: bool = False,
-    visible_only: bool = False,
-    show_webhook_sessions: bool = False,
-    show_kanban_sessions: bool = False,
-    source_filter: str | None = None,
-    sidebar_source: str | None = None,
-    archived_limit: int | None = None,
-    archived_offset: int = 0,
-) -> tuple:
-    normalized_archived_limit = None
-    if archived_limit is not None:
-        try:
-            normalized_archived_limit = max(0, int(archived_limit))
-        except (TypeError, ValueError):
-            normalized_archived_limit = None
-    try:
-        normalized_archived_offset = max(0, int(archived_offset or 0))
-    except (TypeError, ValueError):
-        normalized_archived_offset = 0
-    return (
-        _session_list_cache_profile_scope(active_profile),
-        bool(all_profiles),
-        bool(show_cli_sessions),
-        bool(show_previous_messaging_sessions),
-        bool(show_cron_sessions),
-        bool(include_archived),
-        bool(exclude_hidden),
-        bool(visible_only),
-        bool(show_webhook_sessions),
-        bool(show_kanban_sessions),
-        source_filter,
-        sidebar_source,
-        normalized_archived_limit,
-        normalized_archived_offset,
-    )
 
 
-def _session_list_cache_get(
-    key: tuple,
-    allow_stale: bool = False,
-) -> tuple[dict | None, bool]:
-    now = time.monotonic()
-    current_stamp = _session_list_cache_resolved_source_stamp(key)
-    with _SESSIONS_CACHE_LOCK:
-        entry = _SESSIONS_CACHE.get(key)
-        if not entry:
-            return None, False
-        ts, stamp, payload = entry
-        if stamp != current_stamp:
-            if allow_stale:
-                _SESSIONS_CACHE.move_to_end(key)
-                return copy.deepcopy(payload), False
-            _SESSIONS_CACHE.pop(key, None)
-            return None, False
-        # #4808: widen the freshness window while a turn is streaming so the fixed
-        # streaming poll cadence doesn't force a full rebuild on every poll.
-        ttl = _SESSIONS_CACHE_TTL_SECONDS
-        if _session_list_cache_streaming_freeze_marker() is not None:
-            ttl = _SESSIONS_CACHE_STREAMING_TTL_SECONDS
-        fresh = (now - ts) < ttl
-        if fresh:
-            _SESSIONS_CACHE.move_to_end(key)
-            return copy.deepcopy(payload), True
-        if allow_stale:
-            _SESSIONS_CACHE.move_to_end(key)
-            return copy.deepcopy(payload), False
-        _SESSIONS_CACHE.pop(key, None)
-        return None, False
 
 
-def _session_list_cache_stale_reason(key: tuple) -> str | None:
-    """Return why an existing cache entry is stale, if it is stale."""
-    now = time.monotonic()
-    current_stamp = _session_list_cache_resolved_source_stamp(key)
-    with _SESSIONS_CACHE_LOCK:
-        entry = _SESSIONS_CACHE.get(key)
-        if not entry:
-            return None
-        ts, stamp, _payload = entry
-        if stamp != current_stamp:
-            return "source"
-        ttl = _SESSIONS_CACHE_TTL_SECONDS
-        if _session_list_cache_streaming_freeze_marker() is not None:
-            ttl = _SESSIONS_CACHE_STREAMING_TTL_SECONDS
-        if (now - ts) >= ttl:
-            return "age"
-        return None
 
 
-def _session_list_cache_set(key: tuple, payload: dict) -> None:
-    if not isinstance(payload, dict):
-        return
-    stamp = _session_list_cache_resolved_source_stamp(key)
-    with _SESSIONS_CACHE_LOCK:
-        _SESSIONS_CACHE[key] = (time.monotonic(), stamp, copy.deepcopy(payload))
-        _SESSIONS_CACHE.move_to_end(key)
-        while len(_SESSIONS_CACHE) > _SESSIONS_CACHE_MAX_ENTRIES:
-            _SESSIONS_CACHE.popitem(last=False)
 
 
 def _session_list_cache_clear(profile: str | None = None) -> None:
@@ -284,19 +135,6 @@ def _clear_session_list_cache(profile: str | None = None) -> None:
     _session_list_cache_clear(profile=profile)
 
 
-def _session_list_cache_invalidation_stamp(key: tuple) -> tuple[int, int]:
-    cache_profile, cache_all_profiles, *_rest = key
-    with _SESSIONS_CACHE_LOCK:
-        global_version = _SESSIONS_CACHE_GLOBAL_INVALIDATION_VERSION
-        if cache_all_profiles:
-            return (
-                global_version,
-                _SESSIONS_CACHE_ALL_PROFILES_INVALIDATION_VERSION,
-            )
-        return (
-            global_version,
-            _SESSIONS_CACHE_PROFILE_INVALIDATION_VERSION.get(cache_profile, 0),
-        )
 
 
 def _session_list_cache_path_stamp(path: Path | None) -> tuple[int, int]:
@@ -451,148 +289,17 @@ def _session_list_cache_settings_write_version() -> int:
         return 0
 
 
-def _session_list_cache_overlay_runtime_rows(rows: list[dict]) -> list[dict]:
-    if not rows:
-        return []
-    try:
-        active_stream_ids = _session_list_cache_active_stream_ids()
-    except Exception:
-        active_stream_ids = set()
-    try:
-        running_cron_jobs = _session_list_cache_running_cron_jobs()
-    except Exception:
-        running_cron_jobs = {}
-    cron_job_prefixes = [(jid, f"cron_{jid}_", started_at) for jid, started_at in running_cron_jobs.items()]
-    session_ids = [
-        str(row.get("session_id") or "").strip()
-        for row in rows
-        if isinstance(row, dict) and str(row.get("session_id") or "").strip()
-    ]
-    live_sessions = {}
-    if session_ids:
-        with LOCK:
-            for sid in session_ids:
-                live = SESSIONS.get(sid)
-                if live is not None:
-                    live_sessions[sid] = live
-    overlaid = []
-    for row in rows:
-        item = dict(row) if isinstance(row, dict) else {}
-        sid = str(item.get("session_id") or "").strip()
-        live = live_sessions.get(sid)
-        if live is not None:
-            live_stream_id = getattr(live, "active_stream_id", None)
-            item["active_stream_id"] = live_stream_id or None
-            item["has_pending_user_message"] = bool(
-                getattr(live, "pending_user_message", None)
-            )
-            for key in ("pending_started_at", "updated_at", "last_message_at"):
-                current = _session_list_row_numeric_value(item.get(key))
-                raw_live_value = getattr(live, key, None)
-                live_value = _session_list_row_numeric_value(raw_live_value)
-                if live_value > current:
-                    item[key] = raw_live_value
-        stream_id = item.get("active_stream_id")
-        item["is_streaming"] = bool(stream_id and stream_id in active_stream_ids)
-        # #6728: a still-running cron job's session row must not look completed
-        # in the sidebar. Cron liveness is only exposed via /api/crons/status,
-        # which the sidebar never polls — stamp the flag here so the client can
-        # defer its completion/unread transition until the job actually ends.
-        # Session ids are cron_{job_id}_{run_timestamp}: only the run started at
-        # (or after) the tracked start belongs to the live execution — older runs
-        # of the same job stay completed.
-        item["cron_running"] = _session_list_row_cron_running(
-            sid, item, cron_job_prefixes
-        )
-        overlaid.append(item)
-    overlaid.sort(key=_session_list_runtime_sort_key, reverse=True)
-    return overlaid
 
 
-def _session_list_row_cron_running(
-    sid: str, row: dict, cron_job_prefixes: list[tuple[str, str, float]]
-) -> bool:
-    if not cron_job_prefixes or not sid:
-        return False
-    created_at = _session_list_row_numeric_value(row.get("created_at"))
-    # Longest prefix first, no fall-through: job ids may nest (backup vs
-    # backup_full), and the shorter prefix is a valid prefix of the longer one.
-    # A session belongs to the longest matching job id — first-match in
-    # insertion order, or falling through to a shorter prefix after a time-miss,
-    # would let a running shorter-prefix job claim a completed longer-prefix
-    # session. Mirrors the max(matches, key=len) convention in
-    # api.routes._latest_cron_session_info_for_jobs.
-    #
-    # #6728 (gate fix): prefixes are built ONLY from RUNNING jobs, so if the
-    # true longer owner (backup_full) is not running, longest-prefix sorting
-    # never sees it and a running `backup` would otherwise swallow a
-    # `cron_backup_full_YYYYMMDD_HHMMSS` session (the leftover `full_...` still
-    # starts with nothing it should match). Require the text AFTER the prefix to
-    # be exactly a run-timestamp (YYYYMMDD_HHMMSS) so a shorter job id cannot
-    # claim a longer job id's session regardless of which jobs are running.
-    for _jid, prefix, started_at in sorted(
-        cron_job_prefixes, key=lambda item: len(item[1]), reverse=True
-    ):
-        if sid.startswith(prefix) and _CRON_RUN_TS_RE.fullmatch(sid[len(prefix):]):
-            return created_at >= started_at
-    return False
 
 
-def _session_list_row_numeric_value(value) -> float:
-    try:
-        numeric = float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
-    return numeric if numeric > 0 else 0.0
 
 
-def _session_list_row_timestamp(row: dict) -> float:
-    if not isinstance(row, dict):
-        return 0.0
-    # Match the frontend `_sessionSortTimestampMs` semantics exactly (#4688 review):
-    # the idle base is the FIRST truthy of last_message_at -> updated_at -> created_at
-    # (NOT a flat max over all of them — a renamed/metadata-touched idle chat bumps
-    # updated_at without new messages and must not outrank a newer chatted session),
-    # then pending_started_at is overlaid only as the runtime promotion.
-    base = 0.0
-    for key in ("last_message_at", "updated_at", "created_at"):
-        base = _session_list_row_numeric_value(row.get(key))
-        if base > 0:
-            break
-    pending = _session_list_row_numeric_value(row.get("pending_started_at"))
-    return max(base, pending)
 
 
-def _session_list_row_is_runtime_active(row: dict) -> bool:
-    if not isinstance(row, dict):
-        return False
-    if row.get("is_streaming"):
-        return True
-    return bool(row.get("active_stream_id") and row.get("has_pending_user_message"))
 
 
-def _session_list_runtime_sort_key(row: dict) -> tuple[int, float]:
-    return (
-        1 if _session_list_row_is_runtime_active(row) else 0,
-        _session_list_row_timestamp(row),
-    )
 
 
-def _session_list_cache_claim_rebuild(key: tuple) -> tuple[threading.Event, bool]:
-    with _SESSIONS_CACHE_LOCK:
-        current = _SESSIONS_CACHE_INFLIGHT.get(key)
-        if current is not None:
-            return current, False
-        event = threading.Event()
-        _SESSIONS_CACHE_INFLIGHT[key] = event
-        return event, True
 
 
-def _session_list_cache_done(key: tuple, event: threading.Event | None) -> None:
-    with _SESSIONS_CACHE_LOCK:
-        if event is None:
-            return
-        if _SESSIONS_CACHE_INFLIGHT.get(key) is event:
-            _SESSIONS_CACHE_INFLIGHT.pop(key, None)
-    if event is not None:
-        event.set()

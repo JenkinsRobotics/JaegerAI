@@ -60,24 +60,6 @@ def resolve_runtime_provider_with_anthropic_env_lock(resolver, *args, **kwargs):
 
 
 
-def _get_active_hermes_home() -> Path:
-    """Return the active Hermes profile home directory, falling back to ~/.hermes when profile resolution fails."""
-    try:
-        from api.profiles import get_active_hermes_home
-
-        return Path(get_active_hermes_home())
-    except Exception as exc:
-        # Per Opus advisor on stage-296: log the silent fallback so a corrupt
-        # profile state ending up writing tokens to ~/.hermes (instead of the
-        # active profile) is observable in logs rather than failing silently.
-        logger.warning(
-            "Falling back to ~/.hermes for OAuth credential storage: "
-            "active-profile resolution failed: %s",
-            exc,
-        )
-        from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
-
-        return hermes_profile_root()
 
 
 # ── legacy auth.json helpers ────────────────────────────────────────────────
