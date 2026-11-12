@@ -44,7 +44,6 @@ logger = logging.getLogger(__name__)
 _STREAM_RUN_IDS: dict[str, str] = {}
 _STREAM_RUN_LIFECYCLE: dict[str, dict[str, Any]] = {}
 _STREAM_RUN_STARTING_CONDITION = threading.Condition()
-GATEWAY_RUN_ID_WAIT_TIMEOUT = 5.0
 
 
 def _mark_gateway_run_starting(stream_id: str) -> None:
@@ -113,39 +112,6 @@ def gateway_run_id_pending(stream_id: str) -> bool:
         return str((_STREAM_RUN_LIFECYCLE.get(stream_id) or {}).get("phase") or "").strip().lower() == "pending"
 
 
-def wait_for_gateway_run_id(stream_id: str, timeout: float) -> tuple[bool, str | None]:
-    deadline = time.monotonic() + max(0.0, float(timeout))
-    with _STREAM_RUN_STARTING_CONDITION:
-        state = _STREAM_RUN_LIFECYCLE.get(stream_id)
-        if state:
-            state["waiters"] = int(state.get("waiters") or 0) + 1
-        try:
-            while True:
-                state = _STREAM_RUN_LIFECYCLE.get(stream_id)
-                phase = str((state or {}).get("phase") or "").strip().lower()
-                if phase == "fallback":
-                    return False, None
-                if phase == "failed":
-                    return True, None
-                run_id = str(_STREAM_RUN_IDS.get(stream_id) or "").strip()
-                if phase == "ready":
-                    stored_run_id = str((state or {}).get("run_id") or "").strip()
-                    return True, run_id or stored_run_id or None
-                if run_id:
-                    return True, run_id
-                if not state:
-                    return False, None
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return True, None
-                _STREAM_RUN_STARTING_CONDITION.wait(timeout=remaining)
-        finally:
-            state = _STREAM_RUN_LIFECYCLE.get(stream_id)
-            if state:
-                waiters = max(0, int(state.get("waiters") or 0) - 1)
-                state["waiters"] = waiters
-                if _retire_gateway_run_starting_if_done(stream_id):
-                    _STREAM_RUN_STARTING_CONDITION.notify_all()
 
 _WEBUI_CHAT_BACKEND_ENV = "HERMES_WEBUI_CHAT_BACKEND"
 _WEBUI_GATEWAY_BASE_URL_ENV = "HERMES_WEBUI_GATEWAY_BASE_URL"
@@ -445,16 +411,6 @@ def _auto_approve_gateway_run(
     )
 
 
-def gateway_chat_config_status(config_data=None, environ: dict[str, str] | None = None) -> dict:
-    """Return redacted Gateway-backed chat configuration status."""
-    mode = webui_chat_backend_mode(config_data, environ)
-    base_url = _gateway_base_url(config_data, environ)
-    return {
-        "enabled": mode == "gateway",
-        "backend": mode,
-        "base_url_configured": bool(base_url),
-        "api_key_configured": bool(_gateway_api_key(environ)),
-    }
 
 
 def _gateway_http_error_event(exc: urllib.error.HTTPError, err_body: str, *, api_key_configured: bool) -> dict:
@@ -827,99 +783,6 @@ def _run_gateway_runs_api_streaming(
     return final_text, usage
 
 
-def stop_gateway_run(run_id: str) -> bool:
-    """Request interruption; confirm the canonical owner's terminal outcome.
-
-    Jaeger's cancel endpoint acknowledges delivery before execution settles.
-    The caller must not tear down SSE or admit another turn on that receipt.
-    """
-    run_id = str(run_id or "").strip()
-    if not run_id:
-        return False
-    from api.config import get_config, stream_owner_session_id
-
-    cfg = get_config()
-    base_url = _gateway_base_url(cfg)
-    api_key = _gateway_api_key()
-    from api.jaeger_gateway_routes import lookup
-    pinned_route = lookup(run_id)
-    if pinned_route:
-        base_url, api_key = pinned_route
-
-    owner_sid = stream_owner_session_id(run_id)
-    if _is_jaeger_gateway(base_url) and owner_sid:
-        cancel_url = f"{base_url.rstrip('/')}/v1/sessions/{urllib.parse.quote(owner_sid, safe='')}/cancel"
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        api_key = _jaeger_gateway_token(api_key)
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        req = urllib.request.Request(
-            cancel_url,
-            data=json.dumps({"request_id": run_id}).encode("utf-8"),
-            headers=headers,
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=10) as response:
-                status = int(getattr(response, "status", getattr(response, "code", 0)) or 0)
-                if not 200 <= status < 300:
-                    return False
-                payload = json.loads(response.read() or b"{}")
-            status_req = urllib.request.Request(
-                f"{base_url.rstrip('/')}/v1/sessions/{urllib.parse.quote(owner_sid, safe='')}/requests/"
-                f"{urllib.parse.quote(run_id, safe='')}",
-                headers=headers, method="GET",
-            )
-            deadline = time.monotonic() + 5.0
-            while isinstance(payload, dict):
-                if payload.get("execution_unknown") is True:
-                    return False
-                if payload.get("status") in {"cancelled", "completed", "failed"}:
-                    return True
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return False
-                with urllib.request.urlopen(status_req, timeout=remaining) as response:
-                    payload = json.loads(response.read() or b"{}")
-                if isinstance(payload, dict) and payload.get("status") in {"running", "cancelling", "queued"}:
-                    time.sleep(0.05)
-            return False
-        except urllib.error.HTTPError as http_err:
-            logger.debug("Jaeger Gateway cancel failed for run %s: %s", run_id, http_err, exc_info=True)
-            return False
-        except Exception:
-            logger.debug("Jaeger Gateway cancel failed for run %s", run_id, exc_info=True)
-            return False
-
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    req = urllib.request.Request(
-        f"{base_url.rstrip('/')}/v1/runs/{urllib.parse.quote(run_id, safe='')}/stop",
-        data=b"{}",
-        headers=headers,
-        method="POST",
-    )
-    class _NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None
-
-    try:
-        opener = urllib.request.build_opener(_NoRedirect)
-        with opener.open(req, timeout=10) as response:
-            final_url = str(getattr(response, "geturl", lambda: req.full_url)() or "")
-            status = int(getattr(response, "status", getattr(response, "code", 0)) or 0)
-            if not (200 <= status < 300 and final_url == req.full_url):
-                return False
-            payload = json.loads(response.read() or b"{}")
-            if "cancellation_confirmed" in payload:
-                return (payload.get("status") == "cancelled"
-                        and payload.get("cancellation_confirmed") is True
-                        and payload.get("execution_unknown") is False)
-            return True
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError, ValueError):
-        logger.debug("Gateway stop failed for run %s", run_id, exc_info=True)
-        return False
 
 
 def _settle_gateway_terminal_error(session_id, stream_id, workspace, model, model_provider, terminal_error):

@@ -155,31 +155,3 @@ def serve_plugin_static(plugin_name: str, rel_path: str) -> tuple[bytes, str] | 
     return data, content_type
 
 
-def get_plugin_metadata() -> list[dict]:
-    """
-    Return a list of plugin metadata suitable for the Settings → Plugins tab.
-    Each entry includes name, key, version, description, and tab info for linking.
-
-    Per-plugin enabled state is stored in settings.json under `dashboard_plugins`.
-    A plugin is enabled only if the user has explicitly toggled it on (default off).
-    """
-    from api.config import load_settings
-
-    plugin_settings = load_settings().get("dashboard_plugins", {})
-    plugins = []
-    for name, manifest in sorted(PLUGIN_MANIFESTS.items()):
-        tab = manifest.get("tab", {})
-        path = tab.get("path", f"/{name}")
-        plugins.append({
-            "name": manifest.get("label") or manifest.get("name") or name,
-            "key": name,
-            "version": manifest.get("version", "0.0.0"),
-            "description": manifest.get("description", ""),
-            "tab": {
-                "path": path,
-                "label": tab.get("label") or manifest.get("label") or name,
-            },
-            "enabled": bool(plugin_settings.get(name, False)),
-            "hooks": [],
-        })
-    return plugins

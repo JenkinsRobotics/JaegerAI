@@ -25,9 +25,6 @@ from pathlib import Path, PurePosixPath
 
 logger = logging.getLogger(__name__)
 
-_ESCAPE_AUTH_TTL_SECONDS = 300
-_ESCAPE_AUTH_LOCK = threading.Lock()
-_ESCAPE_AUTH_TOKENS: dict[str, dict[str, str | int | float]] = {}
 
 from api.config import (
     WORKSPACES_FILE as _GLOBAL_WS_FILE,
@@ -383,49 +380,8 @@ def load_workspaces() -> list:
     return [{'path': _profile_default_workspace(), 'name': 'Home'}]
 
 
-def save_workspaces(workspaces: list) -> None:
-    ws_file = _workspaces_file()
-    ws_file.parent.mkdir(parents=True, exist_ok=True)
-    ws_file.write_text(json.dumps(workspaces, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
-def get_profile_default_workspace() -> str:
-    """Resolve the ACTIVE PROFILE's default workspace, never the global file.
-
-    Like get_last_workspace() but WITHOUT the global ``_GLOBAL_LW_FILE``
-    fallback: for a named profile that has not yet written its own
-    profile-scoped ``last_workspace.txt``, that global fallback would leak the
-    *global* last-workspace instead of the profile's configured workspace —
-    which is exactly the #5169 bug (the composer chip on a blank new-chat page
-    showing the wrong/global workspace for a named profile). Used by
-    ``GET /api/profile/active`` so a cold boot under a profile cookie reflects
-    the profile's own configured working directory.
-
-    Priority: profile-scoped ``last_workspace.txt`` -> profile ``config.yaml``
-    ``workspace``/``default_workspace`` -> ``terminal.cwd`` -> process default.
-    """
-    remote_cwd = _remote_terminal_cwd()
-
-    def _valid(raw: str) -> str | None:
-        if not raw:
-            return None
-        if remote_cwd:
-            if _remote_terminal_workspace_candidate(raw) is not None:
-                return raw
-            return None
-        if Path(raw).is_dir():
-            return raw
-        return None
-
-    lw_file = _last_workspace_file()
-    if lw_file.exists():
-        try:
-            p = _valid(lw_file.read_text(encoding='utf-8').strip())
-            if p:
-                return p
-        except Exception:
-            logger.debug("Failed to read profile last workspace from %s", lw_file)
-    return _profile_default_workspace()
 
 
 def get_last_workspace() -> str:
@@ -683,136 +639,8 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
-def _trusted_workspace_roots() -> list[Path]:
-    roots: list[Path] = []
-
-    def add(candidate: str | Path | None) -> None:
-        if candidate in (None, ""):
-            return
-        try:
-            p = _resolve_path(candidate)
-        except Exception:
-            return
-        if not p.exists() or not p.is_dir():
-            return
-        if _is_blocked_workspace_path(p, candidate):
-            return
-        if p not in roots:
-            roots.append(p)
-
-    add(_home_path())
-    add(_BOOT_DEFAULT_WORKSPACE)
-    for w in load_workspaces():
-        add(w.get("path"))
-    roots.sort(key=lambda p: len(str(p)))
-    return roots
 
 
-def list_workspace_suggestions(prefix: str = "", limit: int = 12) -> list[str]:
-    """Return workspace path suggestions under trusted roots only.
-
-    Suggestions are limited to directories under one of:
-      - Path.home()
-      - the boot default workspace
-      - already-saved workspace roots
-
-    Arbitrary system prefixes return an empty list rather than an error so the
-    UI can safely autocomplete while the user types.
-    """
-    roots = _trusted_workspace_roots()
-    if not roots:
-        return []
-
-    raw = (prefix or "").strip()
-    if not raw:
-        return [str(p) for p in roots[:limit]]
-
-    if raw.startswith("~"):
-        target = _expanduser_path(raw)
-    elif Path(raw).is_absolute():
-        target = Path(raw)
-    else:
-        target = _home_path() / raw
-
-    try:
-        match_target = _resolve_path(target)
-    except Exception:
-        match_target = target
-
-    normalized = str(match_target)
-    normalized_lower = normalized.lower()
-    preserve_tilde = raw.startswith("~")
-    home_root: Path | None = None
-    if preserve_tilde:
-        try:
-            home_root = _home_path()
-        except Exception:
-            home_root = None
-    suggestions: list[str] = []
-
-    def format_suggestion(path: Path) -> str:
-        if preserve_tilde and home_root is not None:
-            try:
-                rel = path.resolve().relative_to(home_root)
-                if str(rel) == ".":
-                    return "~"
-                return "~/" + rel.as_posix()
-            except (OSError, ValueError):
-                pass
-        return str(path)
-
-    def add(path: Path) -> None:
-        value = format_suggestion(path)
-        if value not in suggestions:
-            suggestions.append(value)
-
-    # If the user is typing a partial trusted root below their home, suggest
-    # the matching trusted roots without scanning arbitrary system parents.
-    for root in roots:
-        if str(root).lower().startswith(normalized_lower):
-            add(root)
-
-    in_root = [
-        root
-        for root in roots
-        if normalized == str(root) or normalized.startswith(str(root) + os.sep)
-    ]
-    if not in_root:
-        return suggestions[:limit]
-
-    anchor_root = max(in_root, key=lambda p: len(str(p)))
-    ends_with_sep = raw.endswith(os.sep) or raw.endswith('/')
-    parent = target if ends_with_sep else target.parent
-    leaf = '' if ends_with_sep else target.name
-    show_hidden = leaf.startswith('.')
-
-    try:
-        parent_resolved = _resolve_path(parent)
-    except Exception:
-        return suggestions[:limit]
-
-    if not parent_resolved.exists() or not parent_resolved.is_dir():
-        return suggestions[:limit]
-    if not _is_within(parent_resolved, anchor_root):
-        return suggestions[:limit]
-
-    leaf_lower = leaf.lower()
-    try:
-        children = sorted(parent_resolved.iterdir(), key=lambda p: p.name.lower())
-    except OSError:
-        return suggestions[:limit]
-
-    for child in children:
-        if not child.is_dir():
-            continue
-        if child.name.startswith('.') and not show_hidden:
-            continue
-        if leaf_lower and not child.name.lower().startswith(leaf_lower):
-            continue
-        add(child.resolve())
-        if len(suggestions) >= limit:
-            break
-    return suggestions[:limit]
 
 
 def resolve_trusted_workspace(path: str | Path | None = None) -> Path:
@@ -957,45 +785,6 @@ def _strip_surrounding_quotes(path: str) -> str:
     return s
 
 
-def validate_workspace_to_add(path: str) -> Path:
-    """Validate a path for *adding* to the workspace list (less restrictive than resolve_trusted_workspace).
-
-    When a user explicitly adds a new workspace path, we trust their intent — they
-    have console or filesystem access to that path and are consciously registering it.
-    We only block: non-existent paths, non-directories, and known system roots.
-
-    The stricter ``resolve_trusted_workspace`` is used when *using* an existing workspace
-    (file reads/writes) to prevent path traversal after the list is built.
-
-    Surrounding quotes (single or double) are stripped before validation —
-    macOS Finder's "Copy as Pathname" wraps paths in single quotes by default,
-    and users routinely paste those into the Add Space input.
-    """
-    path = _strip_surrounding_quotes(path)
-    candidate = _resolve_path(path)
-
-    access_error = _workspace_access_error(candidate)
-    remote_candidate = _remote_terminal_workspace_candidate(path)
-    if access_error:
-        # Remote terminal profiles validate workspace existence on the target
-        # machine, not on the WebUI server. Permit target-side paths under
-        # terminal.cwd.
-        if remote_candidate is None:
-            raise ValueError(access_error)
-
-    if remote_candidate is not None:
-        return remote_candidate
-
-    # Home directory is always trusted regardless of where it lives on disk
-    # (for example, a systemd-homed directory on Fedora/RHEL).
-    _home = _home_path()
-    if _home != Path("/") and _is_within(candidate, _home):
-        return candidate
-
-    if _is_blocked_workspace_path(candidate, path):
-        raise ValueError(f"Path points to a system directory: {candidate}")
-
-    return candidate
 
 def safe_resolve_ws(root: Path, requested: str) -> Path:
     """Resolve a relative path inside a workspace root, raising ValueError on traversal.
@@ -1187,26 +976,6 @@ def make_anchored_dir(root: Path, dest: Path) -> None:
             pass
 
 
-def open_anchored_write_fd(root: Path, target: Path) -> int:
-    """Open existing ``target`` for truncating writes anchored under ``root``."""
-    root_resolved = root.resolve()
-    target_resolved = target.resolve()
-    try:
-        rel_parts = target_resolved.relative_to(root_resolved).parts
-    except ValueError:
-        raise ValueError(f"Path traversal blocked: {target}") from None
-    if not rel_parts:
-        raise ValueError(f"Invalid target: {target}")
-
-    flags = os.O_WRONLY | os.O_TRUNC | _O_NOFOLLOW
-    if not _DIR_FD_OK:
-        return os.open(str(target_resolved), flags)
-
-    parent_fd = open_anchored_fd(root_resolved, target_resolved.parent, want_dir=True)
-    try:
-        return os.open(rel_parts[-1], flags, dir_fd=parent_fd)
-    finally:
-        os.close(parent_fd)
 
 
 def unlink_anchored(root: Path, target: Path) -> None:
@@ -1253,48 +1022,6 @@ def rmtree_anchored(root: Path, target: Path) -> None:
         os.close(parent_fd)
 
 
-def rename_anchored(root: Path, source: Path, dest: Path) -> None:
-    """Rename ``source`` to ``dest`` using anchored parent directory fds."""
-    root_resolved = root.resolve()
-    source_resolved = source.resolve()
-    dest_parent_resolved = dest.parent.resolve()
-    try:
-        source_parts = source_resolved.relative_to(root_resolved).parts
-    except ValueError:
-        raise ValueError(f"Path traversal blocked: {source}") from None
-    try:
-        dest_parent_resolved.relative_to(root_resolved)
-    except ValueError:
-        raise ValueError(f"Path traversal blocked: {dest}") from None
-    if not source_parts:
-        raise ValueError(f"Invalid source: {source}")
-    dest_leaf = dest.name
-    if not dest_leaf:
-        raise ValueError(f"Invalid destination: {dest}")
-
-    if not _DIR_FD_OK:
-        source_resolved.rename(dest)
-        return
-
-    src_parent_fd = open_anchored_fd(root_resolved, source_resolved.parent, want_dir=True)
-    try:
-        dst_parent_fd = open_anchored_fd(root_resolved, dest_parent_resolved, want_dir=True)
-        try:
-            try:
-                os.stat(dest_leaf, dir_fd=dst_parent_fd, follow_symlinks=False)
-                raise FileExistsError(dest_leaf)
-            except FileNotFoundError:
-                pass
-            os.rename(
-                source_parts[-1],
-                dest_leaf,
-                src_dir_fd=src_parent_fd,
-                dst_dir_fd=dst_parent_fd,
-            )
-        finally:
-            os.close(dst_parent_fd)
-    finally:
-        os.close(src_parent_fd)
 
 
 def _birthtime_ns(lst) -> int | None:
@@ -1589,200 +1316,28 @@ def read_file_content(workspace: Path, rel: str) -> dict:
     return {'path': rel, 'content': content, 'size': len(raw), 'lines': content.count('\n') + 1}
 
 
-def _normalize_workspace_rel_path(rel: str | Path) -> str:
-    raw = _strip_surrounding_quotes(str(rel or "")).strip().replace("\\", "/")
-    if not raw or raw == ".":
-        return "."
-    norm = posixpath.normpath(raw)
-    if not norm or norm == ".":
-        return "."
-    if norm == ".." or norm.startswith("../") or norm.startswith("/"):
-        raise ValueError(f"Path traversal blocked: {rel}")
-    return norm
 
 
-def _escape_virtual_path(root: str, rel: str) -> str:
-    root_norm = _normalize_workspace_rel_path(root)
-    rel_norm = _normalize_workspace_rel_path(rel)
-    if root_norm == ".":
-        return rel_norm
-    if rel_norm == ".":
-        return root_norm
-    return f"{root_norm}/{rel_norm}"
 
 
-def _escape_surface_target(workspace: Path, rel: str) -> tuple[Path, Path]:
-    workspace_root = workspace.resolve()
-    surface_rel = _normalize_workspace_rel_path(rel)
-    surface_posix = PurePosixPath(surface_rel)
-    parent_rel = str(surface_posix.parent)
-    if parent_rel in ("", "."):
-        parent_path = workspace_root
-    else:
-        parent_path = safe_resolve_ws(workspace_root, parent_rel)
-    surface_path = parent_path / surface_posix.name
-    if not surface_path.is_symlink():
-        raise ValueError(f"Path is not an escape-target symlink: {rel}")
-    target = surface_path.resolve()
-    if not target.exists():
-        raise ValueError(f"Path is no longer reachable: {rel}")
-    try:
-        target.relative_to(workspace_root)
-    except ValueError:
-        pass
-    else:
-        raise ValueError(f"Path does not escape workspace: {rel}")
-    if _is_blocked_system_path(target):
-        raise ValueError(f"Path points to a system directory: {target}")
-    return surface_path, target
 
 
-def _escape_authorized_root(target: Path) -> tuple[Path, str]:
-    resolved_target = target.resolve()
-    if resolved_target.is_dir():
-        return resolved_target, "."
-    return resolved_target.parent, resolved_target.name
 
 
-class EscapeAuthorizationExpiredError(ValueError):
-    pass
 
 
-def _escape_prune_tokens(now: float | None = None) -> None:
-    cutoff = time.time() if now is None else now
-    expired = [token for token, record in _ESCAPE_AUTH_TOKENS.items() if float(record.get("expires_at") or 0.0) <= cutoff]
-    for token in expired:
-        _ESCAPE_AUTH_TOKENS.pop(token, None)
 
 
-def authorize_escape_target(workspace: Path, session_id: str, rel: str) -> dict:
-    """Mint a short-lived browser-only grant for one surfaced escape-target symlink."""
-    workspace_root = workspace.resolve()
-    _surface_path, target = _escape_surface_target(workspace_root, rel)
-    external_root, external_entry_rel = _escape_authorized_root(target)
-    token = secrets.token_urlsafe(24)
-    expires_at = time.time() + _ESCAPE_AUTH_TTL_SECONDS
-    record = {
-        "session_id": str(session_id or ""),
-        "workspace_root": str(workspace_root),
-        "surface_path": _normalize_workspace_rel_path(rel),
-        "external_root": str(external_root),
-        "external_entry_rel": external_entry_rel,
-        "surface_target": str(target),
-        "expires_at": expires_at,
-    }
-    with _ESCAPE_AUTH_LOCK:
-        _escape_prune_tokens()
-        _ESCAPE_AUTH_TOKENS[token] = record
-    return {
-        "token": token,
-        "path": record["surface_path"],
-        "is_dir": target.is_dir(),
-        "expires_at": expires_at,
-        "expires_in": _ESCAPE_AUTH_TTL_SECONDS,
-        "read_only": True,
-    }
 
 
-def _escape_authorization_record(workspace: Path, session_id: str, token: str) -> dict:
-    workspace_root = str(workspace.resolve())
-    token = str(token or "").strip()
-    if not token:
-        raise ValueError("Escape authorization token is required")
-    now = time.time()
-    with _ESCAPE_AUTH_LOCK:
-        _escape_prune_tokens(now)
-        record = dict(_ESCAPE_AUTH_TOKENS.get(token) or {})
-    if not record:
-        raise EscapeAuthorizationExpiredError("Escape authorization expired")
-    if str(record.get("session_id") or "") != str(session_id or ""):
-        raise EscapeAuthorizationExpiredError("Escape authorization expired")
-    if str(record.get("workspace_root") or "") != workspace_root:
-        raise EscapeAuthorizationExpiredError("Escape authorization expired")
-    surface_path = _normalize_workspace_rel_path(record.get("surface_path") or ".")
-    surface_target = str(record.get("surface_target") or "")
-    try:
-        _surface, current_target = _escape_surface_target(Path(workspace_root), surface_path)
-    except ValueError:
-        raise EscapeAuthorizationExpiredError("Escape authorization expired") from None
-    if str(current_target.resolve()) != surface_target:
-        raise EscapeAuthorizationExpiredError("Escape authorization expired")
-    if not current_target.exists() or _is_blocked_system_path(current_target):
-        raise EscapeAuthorizationExpiredError("Escape authorization expired")
-    return record
 
 
-def resolve_authorized_escape_request(workspace: Path, session_id: str, token: str, rel: str) -> dict:
-    record = _escape_authorization_record(workspace, session_id, token)
-    surface_path = _normalize_workspace_rel_path(record["surface_path"])
-    request_path = _normalize_workspace_rel_path(rel)
-    try:
-        requested_rel = str(PurePosixPath(request_path).relative_to(PurePosixPath(surface_path)))
-    except ValueError:
-        raise ValueError(f"Path traversal blocked: {rel}") from None
-    if not requested_rel:
-        requested_rel = "."
-    external_root = Path(str(record["external_root"]))
-    external_entry_rel = _normalize_workspace_rel_path(record.get("external_entry_rel") or ".")
-    if external_entry_rel == ".":
-        external_rel = requested_rel
-    elif requested_rel == ".":
-        external_rel = external_entry_rel
-    else:
-        external_rel = str(PurePosixPath(external_entry_rel) / PurePosixPath(requested_rel))
-    target = external_root / external_rel
-    return {
-        "record": record,
-        "workspace_root": Path(str(record["workspace_root"])),
-        "surface_path": surface_path,
-        "request_path": request_path,
-        "external_rel": external_rel,
-        "external_root": external_root,
-        "target": target,
-    }
 
 
-def list_authorized_escape_dir(workspace: Path, session_id: str, token: str, rel: str) -> dict:
-    resolved = resolve_authorized_escape_request(workspace, session_id, token, rel)
-    external_root = resolved["external_root"]
-    external_rel = resolved["external_rel"]
-    entries = list_dir(external_root, external_rel)
-    surface_path = resolved["surface_path"]
-    external_root_resolved = external_root.resolve()
-    for entry in entries:
-        entry["path"] = _escape_virtual_path(surface_path, entry.get("path") or ".")
-        entry["escape_read_only"] = True
-        target = entry.get("target")
-        if not target:
-            continue
-        try:
-            target_path = Path(str(target)).resolve()
-            target_rel = target_path.relative_to(external_root_resolved).as_posix()
-        except Exception:
-            entry.pop("target", None)
-            continue
-        entry["target"] = _escape_virtual_path(surface_path, target_rel)
-    return {
-        "path": resolved["request_path"],
-        "entries": entries,
-        "signature": dir_signature(external_root, external_rel, entries),
-        "virtual_root": surface_path,
-        "read_only": True,
-    }
 
 
-def read_authorized_escape_file_content(workspace: Path, session_id: str, token: str, rel: str) -> dict:
-    resolved = resolve_authorized_escape_request(workspace, session_id, token, rel)
-    payload = read_file_content(resolved["external_root"], resolved["external_rel"])
-    payload["path"] = resolved["request_path"]
-    payload["escape_read_only"] = True
-    return payload
 
 
-def raw_authorized_escape_target(workspace: Path, session_id: str, token: str, rel: str) -> tuple[Path, Path]:
-    resolved = resolve_authorized_escape_request(workspace, session_id, token, rel)
-    target = safe_resolve_ws(resolved["external_root"], resolved["external_rel"])
-    return resolved["external_root"], target
 
 
 # ── Git detection ──────────────────────────────────────────────────────────
@@ -1800,42 +1355,3 @@ def _run_git(args, cwd, timeout=3):
         return None
 
 
-def git_info_for_workspace(workspace: Path) -> dict:
-    """Return git info for a workspace directory, or None if not a git repo."""
-    if not (workspace / '.git').exists():
-        return None
-    branch = _run_git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace)
-    if branch is None:
-        return None
-    # Run the remaining git commands in parallel via threads — they are
-    # independent subprocess calls and together can take 50-200ms when run
-    # serially.  Threading is safe here because each call blocks only on the
-    # subprocess pipe, not on the GIL.
-    def _ahead():
-        r = _run_git(['rev-list', '--count', '@{u}..HEAD'], workspace)
-        return int(r) if r and r.isdigit() else 0
-    def _behind():
-        r = _run_git(['rev-list', '--count', 'HEAD..@{u}'], workspace)
-        return int(r) if r and r.isdigit() else 0
-    def _status():
-        out = _run_git(['status', '--porcelain'], workspace) or ''
-        lines = [l for l in out.splitlines() if l]
-        modified = sum(1 for l in lines if len(l) >= 2 and (l[0] in 'MAR' or l[1] in 'MAR'))
-        untracked = sum(1 for l in lines if l.startswith('??'))
-        return len(lines), modified, untracked
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        f_status = pool.submit(_status)
-        f_ahead  = pool.submit(_ahead)
-        f_behind = pool.submit(_behind)
-        dirty, modified, untracked = f_status.result()
-        ahead  = f_ahead.result()
-        behind = f_behind.result()
-    return {
-        'branch': branch,
-        'dirty': dirty,
-        'modified': modified,
-        'untracked': untracked,
-        'ahead': ahead,
-        'behind': behind,
-        'is_git': True,
-    }

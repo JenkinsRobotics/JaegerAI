@@ -132,19 +132,7 @@ def add_session_list_changed_listener(listener) -> None:
         _SESSION_LIST_CHANGED_LISTENERS.add(listener)
 
 
-def remove_session_list_changed_listener(listener) -> None:
-    """Unregister a callback previously added for session cache invalidation."""
-    with _SESSION_EVENTS_LOCK:
-        _SESSION_LIST_CHANGED_LISTENERS.discard(listener)
 
 
-def subscribe_session_events() -> queue.Queue:
-    q: queue.Queue = queue.Queue(maxsize=1)
-    with _SESSION_EVENTS_LOCK:
-        _SESSION_EVENTS_SUBSCRIBERS.add(q)
-    return q
 
 
-def unsubscribe_session_events(q: queue.Queue) -> None:
-    with _SESSION_EVENTS_LOCK:
-        _SESSION_EVENTS_SUBSCRIBERS.discard(q)

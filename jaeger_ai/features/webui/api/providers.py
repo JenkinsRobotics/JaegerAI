@@ -75,21 +75,9 @@ def _custom_provider_name_matches(provider_id: str, name: object) -> bool:
         candidates.add(slug)
     return pid in candidates
 
-_OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
-_PROVIDER_QUOTA_TIMEOUT_SECONDS = 3.0
 _ACCOUNT_USAGE_SUBPROCESS_TIMEOUT_SECONDS = 35.0
-_ACCOUNT_USAGE_CACHE_TTL_SECONDS = 45.0
 _PROVIDERS_CACHE_TTL_SECONDS = 30.0
-_ACCOUNT_USAGE_CACHE_MAX_ENTRIES = 64
-_ACCOUNT_USAGE_WORKER_IDLE_SECONDS = 5 * 60
-_ACCOUNT_USAGE_PROVIDERS = frozenset({"openai-codex", "anthropic"})
 
-# Upper bound on simultaneous profile-isolated quota probe subprocesses.
-# Each probe runs a Python child for up to 35 s; capping concurrency prevents
-# resource exhaustion when the UI polls all providers rapidly. The limit is
-# deliberately low (2) since _ACCOUNT_USAGE_SUBPROCESS_TIMEOUT_SECONDS is
-# already 35 s and probe I/O is lightweight HTTP calls.
-_MAX_CONCURRENT_ACCOUNT_USAGE_PROBES = 2
 
 # Parent-death-signal setup: on Linux, arrange for the quota-probe child to
 # receive SIGTERM when the WebUI parent dies (e.g. systemctl restart, OOM kill).
@@ -123,9 +111,6 @@ _ACCOUNT_USAGE_PARENT_DEATHSIG_BOOTSTRAP = (
 )
 
 
-# Module-level cap on concurrent quota-probe subprocesses.
-# Lazily created so this module compiles even when threading isn't ready.
-_account_usage_probe_semaphore: threading.BoundedSemaphore | None = None
 
 # Short-lived account-usage cache. The Codex pooled probe may check multiple
 # credentials, so cache sanitized snapshots briefly to avoid re-querying the
@@ -141,17 +126,8 @@ _providers_cache_lock = threading.Lock()
 _account_usage_worker_pool: dict[str, list["_AccountUsageProbeWorker"]] = {}
 _account_usage_worker_pool_lock = threading.Lock()
 
-# Per-home worker pool configuration for probe tail-latency reduction (#3787)
-_ACCOUNT_USAGE_WORKERS_PER_HOME = 2
 
 
-def _get_account_usage_probe_semaphore() -> threading.BoundedSemaphore:
-    global _account_usage_probe_semaphore
-    if _account_usage_probe_semaphore is None:
-        _account_usage_probe_semaphore = threading.BoundedSemaphore(
-            _MAX_CONCURRENT_ACCOUNT_USAGE_PROBES
-        )
-    return _account_usage_probe_semaphore
 
 
 # ── preexec_fn: parent-death signal for the probe subprocess ─────────────────
@@ -894,98 +870,6 @@ def _entry_pool_exhausted_reason(entry):
     return reason + "."
 
 
-def _local_pool_snapshot(provider):
-    """Probe-free pool snapshot from local auth.json entries.
-
-    Returns a SimpleNamespace compatible with _serialize_account_usage_snapshot,
-    or None if the provider has no pool or no entries.
-    """
-    try:
-        entries = [SimpleNamespace(**payload) for payload in _pool_entry_payloads(provider)]
-    except Exception:
-        return None
-    if not entries:
-        return None
-
-    rows = []
-    available_count = 0
-    exhausted_count = 0
-    dead_count = 0
-    for index, entry in enumerate(entries, start=1):
-        label = _safe_entry_label(entry, index)
-        entry_status = str(_entry_value(entry, "last_status") or "").strip().lower()
-        if entry_status == "dead":
-            dead_count += 1
-            rows.append({
-                "label": label,
-                "status": "dead",
-                "plan": None,
-                "windows": [],
-                "details": [],
-                "unavailable_reason": "Credential permanently revoked or invalid.",
-                "retry_after": None,
-                "fetched_at": None,
-            })
-        elif _entry_is_pool_exhausted(entry):
-            exhausted_count += 1
-            rows.append({
-                "label": label,
-                "status": "exhausted",
-                "plan": None,
-                "windows": [],
-                "details": [],
-                "unavailable_reason": _entry_pool_exhausted_reason(entry),
-                "retry_after": _entry_pool_retry_after(entry),
-                "fetched_at": None,
-            })
-        else:
-            available_count += 1
-            rows.append({
-                "label": label,
-                "status": "available",
-                "plan": None,
-                "windows": [],
-                "details": [],
-                "unavailable_reason": None,
-                "retry_after": None,
-                "fetched_at": None,
-            })
-
-    if not rows:
-        return None
-
-    total = available_count + exhausted_count + dead_count
-    pool_dict = {
-        "total_credentials": total,
-        "queried_credentials": 0,
-        "available_credentials": available_count,
-        "exhausted_credentials": exhausted_count,
-        "dead_credentials": dead_count,
-        "failed_credentials": 0,
-        "plans": [],
-        "next_reset_at": None,
-        "best_remaining_by_window": [],
-        "credentials": rows,
-    }
-
-    details = [str(available_count) + "/" + str(total) + " credentials available"]
-    if exhausted_count:
-        details.append(str(exhausted_count) + " exhausted")
-    if dead_count:
-        details.append(str(dead_count) + " dead")
-
-    return SimpleNamespace(
-        provider=provider,
-        source="local_pool",
-        title="Credential pool",
-        plan=None,
-        windows=(),
-        details=tuple(details),
-        available=available_count > 0,
-        unavailable_reason=None if available_count > 0 else "All pool credentials are unavailable.",
-        fetched_at=datetime.now(timezone.utc),
-        pool=pool_dict,
-    )
 
 
 def _get_hermes_home() -> Path:
@@ -1403,19 +1287,6 @@ def _get_provider_api_key(provider_id: str) -> str | None:
     return None
 
 
-def provider_has_usable_credential(provider_id: str, *, refresh: bool = False) -> bool:
-    """Return True when a provider has a currently usable configured credential."""
-    provider = str(provider_id or "").strip().lower()
-    if not provider:
-        return False
-    if refresh:
-        try:
-            from api.config import invalidate_credential_pool_cache
-
-            invalidate_credential_pool_cache(provider)
-        except Exception:
-            logger.debug("Failed to refresh credential pool before provider availability check", exc_info=True)
-    return _get_provider_api_key(provider) is not None
 
 
 def provider_has_usable_pool_credential(provider_id: str, *, refresh: bool = False) -> bool:
@@ -1507,100 +1378,16 @@ def provider_has_process_wakeup_recovery_credential(provider_id: str, *, refresh
     return has_unusable_pool_entry and not has_unknown_unusable_pool_entry
 
 
-def _active_provider_id() -> str | None:
-    cfg = get_config()
-    model_cfg = cfg.get("model", {})
-    if not isinstance(model_cfg, dict):
-        return None
-    provider = str(model_cfg.get("provider") or "").strip().lower()
-    return provider or None
 
 
-def _quota_number(value: Any) -> int | float | None:
-    if isinstance(value, bool) or value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return value
-    try:
-        text = str(value).strip()
-        if not text:
-            return None
-        number = float(text)
-        return int(number) if number.is_integer() else number
-    except (TypeError, ValueError):
-        return None
 
 
-def _sanitize_openrouter_quota(payload: Any) -> dict[str, int | float | None]:
-    if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
-        payload = payload["data"]
-    if not isinstance(payload, dict):
-        payload = {}
-    return {
-        "limit_remaining": _quota_number(payload.get("limit_remaining")),
-        "usage": _quota_number(payload.get("usage")),
-        "limit": _quota_number(payload.get("limit")),
-    }
 
 
-def _isoformat_utc(value: Any) -> str | None:
-    if value in (None, ""):
-        return None
-    if isinstance(value, datetime):
-        dt = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    text = str(value).strip()
-    return text or None
 
 
-def _serialize_account_usage_snapshot(snapshot: Any) -> dict[str, Any] | None:
-    if snapshot is None:
-        return None
-    windows: list[dict[str, Any]] = []
-    for window in getattr(snapshot, "windows", ()) or ():
-        label = str(getattr(window, "label", "") or "").strip()
-        if not label:
-            continue
-        used_percent = _quota_number(getattr(window, "used_percent", None))
-        remaining_percent = None
-        if used_percent is not None:
-            remaining_percent = max(0.0, min(100.0, 100.0 - float(used_percent)))
-        windows.append({
-            "label": label,
-            "used_percent": used_percent,
-            "remaining_percent": remaining_percent,
-            "reset_at": _isoformat_utc(getattr(window, "reset_at", None)),
-            "detail": str(getattr(window, "detail", "") or "").strip() or None,
-        })
-
-    details = [
-        str(detail).strip()
-        for detail in (getattr(snapshot, "details", ()) or ())
-        if str(detail).strip()
-    ]
-    plan = str(getattr(snapshot, "plan", "") or "").strip() or None
-    unavailable_reason = str(getattr(snapshot, "unavailable_reason", "") or "").strip() or None
-    result = {
-        "provider": str(getattr(snapshot, "provider", "") or "").strip() or None,
-        "source": str(getattr(snapshot, "source", "") or "").strip() or None,
-        "title": str(getattr(snapshot, "title", "") or "").strip() or "Account limits",
-        "plan": plan,
-        "windows": windows,
-        "details": details,
-        "available": bool(getattr(snapshot, "available", bool(windows or details))) and not unavailable_reason,
-        "unavailable_reason": unavailable_reason,
-        "fetched_at": _isoformat_utc(getattr(snapshot, "fetched_at", None)),
-    }
-    pool = getattr(snapshot, "pool", None)
-    if isinstance(pool, dict):
-        result["pool"] = pool
-    return result
 
 
-def _agent_fetch_account_usage(provider: str, *, base_url: str | None = None, api_key: str | None = None) -> Any:
-    from agent.account_usage import fetch_account_usage
-
-    return fetch_account_usage(provider, base_url=base_url, api_key=api_key)
 
 
 def _account_usage_subprocess_env(home: Path, provider: str, api_key: str | None) -> dict[str, str]:
@@ -1881,64 +1668,8 @@ def _fetch_account_usage_once_for_home(provider: str, home: Path, *, api_key: st
     return _account_usage_payload_to_snapshot(payload)
 
 
-def _get_account_usage_probe_worker(home: Path) -> "_AccountUsageProbeWorker | None":
-    """Return a worker with its lock already held, or None if saturated.
-
-    The caller MUST release worker._lock after use (typically via try/finally).
-    Holding the lock across the handoff eliminates the TOCTOU window that would
-    let two concurrent probes both observe the same worker as free.
-    """
-    key = str(Path(home))
-    stale: list[_AccountUsageProbeWorker] = []
-    claimed: _AccountUsageProbeWorker | None = None
-    with _account_usage_worker_pool_lock:
-        existing_workers = _account_usage_worker_pool.get(key)
-        workers: list[_AccountUsageProbeWorker]
-        if not existing_workers:
-            workers = [_AccountUsageProbeWorker(Path(home)) for _ in range(_ACCOUNT_USAGE_WORKERS_PER_HOME)]
-        else:
-            stale = [worker for worker in existing_workers if worker._closed]
-            workers = [worker for worker in existing_workers if not worker._closed]
-            while len(workers) < _ACCOUNT_USAGE_WORKERS_PER_HOME:
-                workers.append(_AccountUsageProbeWorker(Path(home)))
-        _account_usage_worker_pool[key] = workers
-        for worker in workers:
-            if worker._lock.acquire(blocking=False):
-                claimed = worker
-                break
-    for worker in stale:
-        worker.close()
-    return claimed
 
 
-def _cleanup_account_usage_probe_workers(
-    *,
-    now: float | None = None,
-    idle_seconds: float = _ACCOUNT_USAGE_WORKER_IDLE_SECONDS,
-) -> None:
-    cutoff = time.monotonic() if now is None else now
-    stale: list[tuple[str, _AccountUsageProbeWorker]] = []
-    with _account_usage_worker_pool_lock:
-        for key, workers in list(_account_usage_worker_pool.items()):
-            for worker in workers:
-                if worker._lock.acquire(blocking=False):
-                    try:
-                        proc = worker._proc
-                        is_dead = worker._closed or (proc is not None and proc.poll() is not None)
-                        if is_dead or cutoff - worker.last_used >= idle_seconds:
-                            stale.append((key, worker))
-                    finally:
-                        worker._lock.release()
-            remaining_workers = [w for w in workers if not any(k == key and w == sw for k, sw in stale)]
-            if not remaining_workers:
-                _account_usage_worker_pool.pop(key, None)
-            else:
-                # Replenish to N so partial cleanup doesn't permanently shrink the pool
-                while len(remaining_workers) < _ACCOUNT_USAGE_WORKERS_PER_HOME:
-                    remaining_workers.append(_AccountUsageProbeWorker(Path(key)))
-                _account_usage_worker_pool[key] = remaining_workers
-    for _key, worker in stale:
-        worker.close()
 
 
 def _close_account_usage_probe_workers() -> None:
@@ -1979,24 +1710,8 @@ def _close_account_usage_probe_workers_async(*, provider_id: str | None = None) 
 atexit.register(_close_account_usage_probe_workers)
 
 
-def _account_usage_cache_key(provider: str, home: Path, api_key: str | None) -> tuple[str, str, str]:
-    key_fingerprint = ""
-    if api_key:
-        key_fingerprint = hashlib.sha256(api_key.encode("utf-8", "ignore")).hexdigest()
-    return ((provider or "").strip().lower(), str(Path(home)), key_fingerprint)
 
 
-def _get_cached_account_usage(cache_key: tuple[str, str, str]) -> tuple[bool, Any]:
-    now = time.monotonic()
-    with _account_usage_status_cache_lock:
-        cached = _account_usage_status_cache.get(cache_key)
-        if cached is None:
-            return False, None
-        fetched_at, snapshot = cached
-        if now - fetched_at <= _ACCOUNT_USAGE_CACHE_TTL_SECONDS:
-            return True, snapshot
-        _account_usage_status_cache.pop(cache_key, None)
-    return False, None
 
 
 def invalidate_account_usage_status_cache(provider_id: str | None = None) -> None:
@@ -2011,237 +1726,14 @@ def invalidate_account_usage_status_cache(provider_id: str | None = None) -> Non
     _close_account_usage_probe_workers_async(provider_id=normalized or None)
 
 
-def _set_cached_account_usage(
-    cache_key: tuple[str, str, str],
-    snapshot: Any,
-) -> None:
-    now = time.monotonic()
-    with _account_usage_status_cache_lock:
-        if snapshot is None:
-            cached = _account_usage_status_cache.get(cache_key)
-            if cached is not None and cached[1] is not None:
-                return
-            _account_usage_status_cache.pop(cache_key, None)
-            return
-        _account_usage_status_cache[cache_key] = (now, snapshot)
-        expired = [
-            key for key, (fetched_at, _snapshot) in _account_usage_status_cache.items()
-            if now - fetched_at > _ACCOUNT_USAGE_CACHE_TTL_SECONDS
-        ]
-        for key in expired:
-            _account_usage_status_cache.pop(key, None)
-        while len(_account_usage_status_cache) > _ACCOUNT_USAGE_CACHE_MAX_ENTRIES:
-            oldest_key = min(
-                _account_usage_status_cache,
-                key=lambda key: _account_usage_status_cache[key][0],
-            )
-            _account_usage_status_cache.pop(oldest_key, None)
 
 
-def _agent_fetch_account_usage_for_home(provider: str, home: Path, *, api_key: str | None = None) -> Any:
-    try:
-        _cleanup_account_usage_probe_workers()
-        worker = _get_account_usage_probe_worker(home)
-        if worker is not None:
-            try:
-                return worker._fetch_locked(provider, api_key=api_key)
-            finally:
-                worker._lock.release()
-        return _fetch_account_usage_once_for_home(provider, home, api_key=api_key)
-    except Exception:
-        logger.debug("Account usage probe for %s failed", provider, exc_info=True)
-        return None
 
 
-def _fetch_account_usage_with_profile_context(provider: str, *, refresh: bool = False) -> Any:
-    """Fetch account usage for a provider within the active profile context.
-
-    Concurrency is capped by the module-level BoundedSemaphore so that rapid
-    UI polls (e.g. Settings page refresh) cannot exhaust file-descriptors or
-    memory by spawning more than _MAX_CONCURRENT_ACCOUNT_USAGE_PROBES probe
-    subprocesses simultaneously.  Each probe runs up to 35 s.
-
-    Warm per-profile worker processes handle the actual probe requests.
-    """
-    home = _get_hermes_home()
-    api_key = _get_provider_api_key(provider)
-    cache_key = _account_usage_cache_key(provider, home, api_key)
-    if not refresh:
-        cache_hit, cached = _get_cached_account_usage(cache_key)
-        if cache_hit:
-            return cached
-    sem = _get_account_usage_probe_semaphore()
-    try:
-        with sem:
-            snapshot = _agent_fetch_account_usage_for_home(
-                provider,
-                home,
-                api_key=api_key,
-            )
-            _set_cached_account_usage(cache_key, snapshot)
-            return snapshot
-    except Exception:
-        logger.debug("Failed to fetch account usage for %s", provider, exc_info=True)
-        _set_cached_account_usage(cache_key, None)
-        return None
 
 
-def _provider_account_usage_status(provider: str, display_name: str, *, refresh: bool = False) -> dict[str, Any]:
-    snapshot = _fetch_account_usage_with_profile_context(provider, refresh=refresh)
-    account_limits = _serialize_account_usage_snapshot(snapshot)
-    if account_limits and account_limits.get("available"):
-        return {
-            "ok": True,
-            "provider": provider,
-            "display_name": display_name,
-            "supported": True,
-            "status": "available",
-            "label": account_limits.get("title") or "Account limits",
-            "quota": None,
-            "account_limits": account_limits,
-            "message": f"{display_name} account limits loaded.",
-        }
-
-    reason = ""
-    if account_limits:
-        reason = str(account_limits.get("unavailable_reason") or "").strip()
-    message = (
-        f"{display_name} account limits are unavailable. {reason}"
-        if reason
-        else f"{display_name} account limits are unavailable. Confirm provider authentication and try again."
-    )
-    return {
-        "ok": False,
-        "provider": provider,
-        "display_name": display_name,
-        "supported": True,
-        "status": "unavailable",
-        "quota": None,
-        "account_limits": account_limits,
-        "message": message,
-    }
 
 
-def get_provider_quota(provider_id: str | None = None, *, refresh: bool = False) -> dict[str, Any]:
-    """Return sanitized quota/rate-limit status for the active provider.
-
-    OpenRouter keeps its documented key endpoint. OAuth-backed account usage
-    providers reuse Hermes Agent's /usage account-limits abstraction so WebUI
-    stays aligned with CLI/Gateway provider semantics.
-    """
-    provider = (provider_id or _active_provider_id() or "").strip().lower()
-    if not provider:
-        return {
-            "ok": False,
-            "provider": None,
-            "display_name": None,
-            "supported": False,
-            "status": "unavailable",
-            "quota": None,
-            "message": "No active provider is configured.",
-        }
-
-    display_name = _PROVIDER_DISPLAY.get(provider, provider.replace("-", " ").title())
-    if provider in _ACCOUNT_USAGE_PROVIDERS:
-        return _provider_account_usage_status(provider, display_name, refresh=refresh)
-
-    if provider == "openrouter":
-        api_key = _get_provider_api_key("openrouter")
-        if not api_key:
-            return {
-                "ok": False,
-                "provider": "openrouter",
-                "display_name": display_name,
-                "supported": True,
-                "status": "no_key",
-                "quota": None,
-                "message": "OpenRouter quota status needs an OPENROUTER_API_KEY configured on the server.",
-            }
-        req = urllib.request.Request(
-            _OPENROUTER_KEY_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Accept": "application/json",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=_PROVIDER_QUOTA_TIMEOUT_SECONDS) as resp:
-                raw = resp.read()
-            payload = json.loads(raw.decode("utf-8")) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
-            quota = _sanitize_openrouter_quota(payload)
-            return {
-                "ok": True,
-                "provider": "openrouter",
-                "display_name": display_name,
-                "supported": True,
-                "status": "available",
-                "label": "OpenRouter credits",
-                "quota": quota,
-                "message": "OpenRouter quota status loaded.",
-            }
-        except urllib.error.HTTPError as exc:
-            status = "invalid_key" if exc.code in (401, 403) else "unavailable"
-            message = (
-                "OpenRouter rejected the configured API key."
-                if status == "invalid_key"
-                else "OpenRouter quota status is temporarily unavailable."
-            )
-            return {
-                "ok": False,
-                "provider": "openrouter",
-                "display_name": display_name,
-                "supported": True,
-                "status": status,
-                "quota": None,
-                "message": message,
-            }
-        except (TimeoutError, urllib.error.URLError, json.JSONDecodeError, OSError, ValueError):
-            return {
-                "ok": False,
-                "provider": "openrouter",
-                "display_name": display_name,
-                "supported": True,
-                "status": "unavailable",
-                "quota": None,
-                "message": "OpenRouter quota status is temporarily unavailable.",
-            }
-
-    local_snapshot = _local_pool_snapshot(provider)
-    if local_snapshot is not None:
-        account_limits = _serialize_account_usage_snapshot(local_snapshot)
-        if account_limits and account_limits.get("available"):
-            return {
-                "ok": True,
-                "provider": provider,
-                "display_name": display_name,
-                "supported": True,
-                "status": "available",
-                "label": account_limits.get("title") or "Credential pool",
-                "quota": None,
-                "account_limits": account_limits,
-                "message": f"{display_name} credential pool status loaded.",
-            }
-        return {
-            "ok": False,
-            "provider": provider,
-            "display_name": display_name,
-            "supported": True,
-            "status": "unavailable",
-            "quota": None,
-            "account_limits": account_limits,
-            "message": f"{display_name} credential pool: all credentials are unavailable.",
-        }
-
-    detail = "OpenAI/Anthropic rate-limit headers are a follow-up once WebUI captures provider response metadata."
-    return {
-        "ok": False,
-        "provider": provider,
-        "display_name": display_name,
-        "supported": False,
-        "status": "unsupported",
-        "quota": None,
-        "message": f"Quota status is not available for {display_name}. {detail}",
-    }
 
 
 def _provider_is_oauth(provider_id: str) -> bool:
@@ -2251,295 +1743,24 @@ def _provider_is_oauth(provider_id: str) -> bool:
 
 # ── OpenRouter cost-history snapshot helpers (#692) ──────────────────────────
 
-_COST_SNAPSHOTS_DIR_NAME = "cost-snapshots"
-_COST_SNAPSHOT_MAX_DAYS = 365  # hard cap to prevent unbounded growth
-_COST_SNAPSHOT_LOCK = threading.Lock()
 
 
-def _get_provider_cost_budget() -> float | None:
-    """Return the user-configured monthly spend budget, or None if unset."""
-    try:
-        from api.config import load_settings
-        raw = load_settings().get("provider_cost_budget")
-        return _coerce_provider_cost_budget(raw)
-    except Exception:
-        return None
 
 
-def _cost_snapshots_dir() -> Path:
-    """Return the directory for cost-snapshot JSON files.
-
-    Uses the Hermes home directory (profile-aware) so snapshots are
-    isolated per profile, matching the existing STATE_DIR convention.
-    """
-    return _get_hermes_home() / _COST_SNAPSHOTS_DIR_NAME
 
 
-@contextmanager
-def _cost_snapshot_file_lock(provider: str):
-    """Serialize cost snapshot read-modify-write across worker processes."""
-    if fcntl is None:
-        with nullcontext():
-            yield
-        return
-
-    snap_dir = _cost_snapshots_dir()
-    snap_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = snap_dir / f"{provider}.lock"
-    with lock_path.open("a", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        yield
 
 
-def _fetch_openrouter_key_usage(api_key: str) -> dict[str, Any] | None:
-    """Fetch current usage/limit from the OpenRouter ``/auth/key`` endpoint.
-
-    Returns a dict with ``usage``, ``limit``, ``label`` on success, or
-    ``None`` on any failure.  Never raises; callers handle the None case.
-    """
-    req = urllib.request.Request(
-        _OPENROUTER_KEY_URL,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=_PROVIDER_QUOTA_TIMEOUT_SECONDS) as resp:
-            raw = resp.read()
-        payload = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
-        sanitized = _sanitize_openrouter_quota(payload)
-        label = None
-        if isinstance(payload, dict):
-            data = payload.get("data", payload)
-            if isinstance(data, dict):
-                label = str(data.get("label") or "").strip() or None
-        return {
-            "usage": sanitized.get("usage"),
-            "limit": sanitized.get("limit"),
-            "label": label,
-        }
-    except Exception:
-        logger.debug("OpenRouter key usage fetch failed for cost-history", exc_info=True)
-        return None
 
 
-def _read_cost_snapshots(provider: str) -> list[dict[str, Any]]:
-    """Read persisted daily snapshots for *provider* from disk.
-
-    Returns a list of ``{date, used, limit}`` dicts sorted by date
-    ascending.  Returns an empty list if the file does not exist or is
-    corrupt.
-    """
-    path = _cost_snapshots_dir() / f"{provider}.json"
-    if not path.exists():
-        return []
-    try:
-        raw = path.read_text(encoding="utf-8")
-        data = json.loads(raw)
-    except (OSError, json.JSONDecodeError, ValueError):
-        return []
-    if not isinstance(data, dict):
-        return []
-    snapshots = data.get("snapshots")
-    if not isinstance(snapshots, list):
-        return []
-    # Validate and sort
-    valid = []
-    for entry in snapshots:
-        if not isinstance(entry, dict):
-            continue
-        date = str(entry.get("date") or "").strip()
-        if not date:
-            continue
-        valid.append({
-            "date": date,
-            "used": _quota_number(entry.get("used")),
-            "limit": _quota_number(entry.get("limit")),
-        })
-    valid.sort(key=lambda e: e["date"])
-    return valid
 
 
-def _write_cost_snapshots(provider: str, snapshots: list[dict[str, Any]]) -> None:
-    """Persist daily snapshots for *provider* to disk atomically."""
-    snap_dir = _cost_snapshots_dir()
-    snap_dir.mkdir(parents=True, exist_ok=True)
-    path = snap_dir / f"{provider}.json"
-    payload = {"provider": provider, "snapshots": snapshots}
-    body = json.dumps(payload, ensure_ascii=False, indent=2)
-    import tempfile as _tempfile
-    _tmp_fd, _tmp_path = _tempfile.mkstemp(
-        dir=str(snap_dir), prefix=f".{provider}_", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(_tmp_fd, "w", encoding="utf-8") as _f:
-            _f.write(body)
-            _f.flush()
-            os.fsync(_f.fileno())
-        os.replace(_tmp_path, path)
-    except BaseException:
-        try:
-            os.unlink(_tmp_path)
-        except OSError:
-            pass
-        raise
 
 
-def _append_cost_snapshot(provider: str, usage: int | float | None, limit: int | float | None) -> list[dict[str, Any]]:
-    """Append today's snapshot and return the updated list.
-
-    If a snapshot for today already exists it is updated in-place so
-    repeated calls within the same day are idempotent.
-    """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    # Serialize the read-modify-write cycle.  The atomic os.replace in
-    # _write_cost_snapshots protects the file write itself, but without these
-    # locks two concurrent requests can both read the same old snapshot list and
-    # race to replace it with stale data.  The threading lock covers current
-    # single-process deployments; the file lock covers future multi-worker
-    # deployments that share one Hermes home/state directory.
-    with _COST_SNAPSHOT_LOCK:
-        with _cost_snapshot_file_lock(provider):
-            snapshots = _read_cost_snapshots(provider)
-            # Update or append today's entry
-            updated = False
-            for entry in snapshots:
-                if entry["date"] == today:
-                    entry["used"] = usage
-                    entry["limit"] = limit
-                    updated = True
-                    break
-            if not updated:
-                snapshots.append({"date": today, "used": usage, "limit": limit})
-            snapshots.sort(key=lambda e: e["date"])
-            # Cap to _COST_SNAPSHOT_MAX_DAYS entries (keep most recent)
-            if len(snapshots) > _COST_SNAPSHOT_MAX_DAYS:
-                snapshots = snapshots[-_COST_SNAPSHOT_MAX_DAYS:]
-            _write_cost_snapshots(provider, snapshots)
-            return snapshots
 
 
-def _compute_deltas(snapshots: list[dict[str, Any]], window_days: int) -> list[dict[str, Any]]:
-    """Compute daily deltas from cumulative usage snapshots.
-
-    Each snapshot carries cumulative ``used``; the delta for a day is
-    the difference between that day's cumulative value and the previous
-    day's.  The oldest day in the window has ``delta=None`` (no
-    previous baseline).  If the cumulative value drops, treat that day
-    as the start of a fresh series (for example after an API-key rotation)
-    and use the current value as that day's delta instead of emitting a
-    negative spend bar.
-    """
-    # Take only the last *window_days* entries
-    window = snapshots[-window_days:] if len(snapshots) > window_days else list(snapshots)
-    result: list[dict[str, Any]] = []
-    for i, entry in enumerate(window):
-        delta = None
-        if i > 0 and entry.get("used") is not None and window[i - 1].get("used") is not None:
-            delta = float(entry["used"]) - float(window[i - 1]["used"])
-            if delta < 0:
-                delta = float(entry["used"])
-            # Rounding: avoid -0.0 and tiny floating-point noise
-            if abs(delta) < 1e-9:
-                delta = 0.0
-            else:
-                delta = round(delta, 6)
-        result.append({
-            "date": entry["date"],
-            "used": entry.get("used"),
-            "delta": delta,
-        })
-    return result
 
 
-def get_provider_cost_history(provider_id: str | None = None, days: int = 7) -> dict[str, Any]:
-    """Return daily cost-history snapshots with deltas for a provider.
-
-    Currently only ``openrouter`` is supported.  On each call the
-    endpoint fetches the current cumulative usage from the OpenRouter
-    ``/auth/key`` endpoint, appends/updates today's snapshot, and
-    returns the last *days* snapshots with per-day deltas.
-
-    Returns a dict matching the existing API style (``ok``, ``provider``,
-    ``status``, ``message``, …).
-    """
-    provider = (provider_id or "").strip().lower()
-    if not provider:
-        return {
-            "ok": False,
-            "provider": None,
-            "status": "missing_provider",
-            "message": "Provider parameter is required.  Use ?provider=openrouter",
-        }
-
-    if provider != "openrouter":
-        display_name = _PROVIDER_DISPLAY.get(provider, provider.replace("-", " ").title())
-        return {
-            "ok": False,
-            "provider": provider,
-            "display_name": display_name,
-            "supported": False,
-            "status": "unsupported",
-            "message": f"Cost history is not available for {display_name}. Only openrouter is supported in this release.",
-        }
-
-    display_name = _PROVIDER_DISPLAY.get("openrouter", "OpenRouter")
-    monthly_budget = _get_provider_cost_budget()
-    api_key = _get_provider_api_key("openrouter")
-    if not api_key:
-        return {
-            "ok": False,
-            "provider": "openrouter",
-            "display_name": display_name,
-            "supported": True,
-            "status": "no_key",
-            "monthly_budget": monthly_budget,
-            "message": "OpenRouter cost history needs an OPENROUTER_API_KEY configured on the server.",
-        }
-
-    # Fetch current cumulative usage from OpenRouter
-    key_info = _fetch_openrouter_key_usage(api_key)
-    if key_info is None:
-        # Upstream failure — still return any previously persisted snapshots
-        # so the chart degrades gracefully instead of going blank.
-        snapshots = _read_cost_snapshots("openrouter")
-        deltas = _compute_deltas(snapshots, days)
-        return {
-            "ok": False,
-            "provider": "openrouter",
-            "display_name": display_name,
-            "supported": True,
-            "status": "unavailable",
-            "window_days": days,
-            "snapshots": deltas,
-            "limit": None,
-            "label": None,
-            "monthly_budget": monthly_budget,
-            "message": "OpenRouter cost history is temporarily unavailable. Showing last known data.",
-        }
-
-    # Persist today's snapshot
-    try:
-        snapshots = _append_cost_snapshot("openrouter", key_info["usage"], key_info["limit"])
-    except Exception:
-        logger.debug("Failed to persist cost snapshot for openrouter", exc_info=True)
-        snapshots = _read_cost_snapshots("openrouter")
-
-    deltas = _compute_deltas(snapshots, days)
-    return {
-        "ok": True,
-        "provider": "openrouter",
-        "display_name": display_name,
-        "supported": True,
-        "status": "available",
-        "window_days": days,
-        "snapshots": deltas,
-        "limit": key_info.get("limit"),
-        "label": key_info.get("label") or "OpenRouter credits",
-        "monthly_budget": monthly_budget,
-        "message": "OpenRouter cost history loaded.",
-    }
 
 
 # SECTION: Public API
@@ -2960,99 +2181,5 @@ def set_provider_key(provider_id: str, api_key: str | None) -> dict[str, Any]:
     }
 
 
-def remove_provider_key(provider_id: str) -> dict[str, Any]:
-    """Remove the API key for a provider.
-
-    Removes the key from ``~/.hermes/.env`` (via ``set_provider_key``)
-    and also cleans up ``config.yaml`` if the key is stored there
-    (``providers.<id>.api_key`` or top-level ``model.api_key`` when this
-    provider is the active one).
-
-    Returns a status dict with the operation result.
-    """
-    result = set_provider_key(provider_id, None)
-
-    # Even if the .env removal succeeded, the key might also live in
-    # config.yaml (e.g. providers.<id>.api_key or model.api_key).
-    # Clean those up so _provider_has_key() returns False after removal.
-    if result.get("ok"):
-        _clean_provider_key_from_config(provider_id)
-
-    return result
 
 
-def _clean_provider_key_from_config(provider_id: str) -> None:
-    """Remove provider API key entries from config.yaml.
-
-    Handles three storage locations:
-    1. ``providers.<id>.api_key`` — per-provider key
-    2. ``model.api_key`` — top-level key (only if provider is active)
-    3. ``custom_providers[].api_key`` — custom provider entries
-
-    Writes back to config.yaml only if something was actually removed.
-    Uses ``_cfg_lock`` to prevent TOCTOU races.
-    """
-    from api.config import _cfg_lock
-
-    try:
-        # Resolve through api.config at call time instead of the function imported
-        # at module load. Several tests (and some profile flows) monkeypatch the
-        # config module's path resolver after api.providers has already been
-        # imported; using the stale imported reference can clean the wrong
-        # config.yaml.
-        import api.config as _config
-        config_path = _config._get_config_path()
-    except Exception:
-        return
-
-    if not config_path.exists():
-        return
-
-    try:
-        import yaml as _yaml
-
-        changed = False
-
-        with _cfg_lock:
-            raw = config_path.read_text(encoding="utf-8")
-            cfg = _yaml.safe_load(raw)
-            if not isinstance(cfg, dict):
-                return
-
-            # 1. Clean providers.<id>.api_key
-            providers_cfg = cfg.get("providers") or {}
-            if isinstance(providers_cfg, dict):
-                provider_cfg = providers_cfg.get(provider_id, {})
-                if isinstance(provider_cfg, dict) and provider_cfg.get("api_key"):
-                    del provider_cfg["api_key"]
-                    changed = True
-
-            # 2. Clean model.api_key — only if this provider is the active one
-            model_cfg = cfg.get("model", {})
-            if isinstance(model_cfg, dict) and model_cfg.get("api_key"):
-                active_provider = model_cfg.get("provider")
-                if active_provider and str(active_provider).strip().lower() == provider_id.lower():
-                    del model_cfg["api_key"]
-                    changed = True
-
-            # 3. Clean custom_providers[].api_key
-            custom_providers = cfg.get("custom_providers", [])
-            if isinstance(custom_providers, list):
-                for cp in custom_providers:
-                    if isinstance(cp, dict):
-                        if _custom_provider_name_matches(provider_id, cp.get("name")):
-                            if cp.get("api_key"):
-                                del cp["api_key"]
-                                changed = True
-
-            if changed:
-                _save_yaml_config_file(config_path, cfg)
-        # Sync in-memory cache and bust model TTL cache
-        # MUST be called outside _cfg_lock to avoid deadlock:
-        # _cfg_lock is a threading.Lock (non-reentrant) and
-        # reload_config() also acquires _cfg_lock internally.
-        if changed:
-            reload_config()
-            invalidate_providers_cache()
-    except Exception:
-        logger.exception("Failed to clean provider key from config.yaml for %s", provider_id)

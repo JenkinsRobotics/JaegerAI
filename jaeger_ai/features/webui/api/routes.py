@@ -1342,17 +1342,6 @@ from api.helpers import (require, bad, safe_resolve, j, t, read_body, MAX_BODY_B
 from api.request_diagnostics import RequestDiagnostics
 
 
-def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
-    """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
-    return bad(
-        handler,
-        (
-            f"unknown Kanban endpoint: {method} {parsed.path}. "
-            "If this appeared after a WebUI update, your browser may be running "
-            "a stale cached bundle; use Hard refresh now, then reopen Kanban."
-        ),
-        status=404,
-    ) or True
 
 
 # A cancelled worker that stays in ACTIVE_RUNS longer than this is treated as
@@ -5843,7 +5832,7 @@ from api.streaming import (
     _strip_compact_echo_suffix,
 )
 from api.gateway_chat import _run_gateway_chat_streaming, webui_gateway_chat_enabled
-from api.run_journal import (_parse_run_journal_event_id as _shared_parse_run_journal_event_id, find_run_summary, read_run_events, read_session_run_events, session_journal_fingerprint, SSE_RELAY_CLOSE_EVENTS)
+from api.run_journal import (_parse_run_journal_event_id as _shared_parse_run_journal_event_id, read_run_events, read_session_run_events, session_journal_fingerprint, SSE_RELAY_CLOSE_EVENTS)
 from api.todo_state import attach_todo_state
 from api.providers import (get_providers, provider_has_process_wakeup_recovery_credential, set_provider_key)
 

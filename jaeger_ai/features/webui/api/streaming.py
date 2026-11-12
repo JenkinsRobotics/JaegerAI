@@ -84,59 +84,6 @@ from api.process_event_utils import (
 )
 
 
-def get_stream_runtime_snapshot() -> dict[str, object]:
-    """Return aggregate stream observations without waiting on the registry.
-
-    The registry is copied under a nonblocking ``STREAMS_LOCK`` acquire and the
-    lock is released before any channel lock is touched, so registry and channel
-    locks are never nested. Each channel is then read through its nonblocking
-    owner method: a channel busy with its own producer or subscriber work counts
-    as one unavailable channel and the loop keeps summing its siblings.
-    """
-    result = {
-        "available": False,
-        "active": 0,
-        "agent_instances": 0,
-        "subscribers": 0,
-        "offline_buffered_events": 0,
-        "offline_dropped_events": 0,
-        "subscriber_dropped_events": 0,
-        "unavailable_channels": 0,
-    }
-    try:
-        if not STREAMS_LOCK.acquire(blocking=False):
-            return result
-        try:
-            channels = list(STREAMS.values())
-            agent_count = len(AGENT_INSTANCES)
-        finally:
-            STREAMS_LOCK.release()
-        result["available"] = True
-        result["active"] = len(channels)
-        result["agent_instances"] = agent_count
-        for channel in channels:
-            try:
-                snapshot = channel.try_diagnostic_snapshot()
-                if snapshot is None:
-                    result["unavailable_channels"] += 1
-                    continue
-                result["subscribers"] += max(0, int(snapshot.get("subscriber_count", 0)))
-                result["offline_buffered_events"] += max(
-                    0, int(snapshot.get("offline_buffered_events", 0))
-                )
-                result["offline_dropped_events"] += max(
-                    0, int(snapshot.get("offline_dropped_events", 0))
-                )
-                result["subscriber_dropped_events"] += max(
-                    0, int(snapshot.get("subscriber_dropped_events", 0))
-                )
-            except Exception:
-                result["unavailable_channels"] += 1
-    except Exception:
-        # Keep the aggregates already summed from channels that read cleanly; a
-        # late unexpected failure must not discard successful sibling counts.
-        return result
-    return result
 
 
 def _session_payload_with_full_messages(session, *, tool_calls=None):
@@ -385,16 +332,6 @@ def _install_streaming_cronjob_profile_wrapper() -> None:
     _STREAMING_CRONJOB_WRAPPER_INSTALLED = True
 
 
-def _supports_kwarg(func, kwarg_name: str) -> bool:
-    """Return True if callable `func` accepts `kwarg_name` (explicitly or via **kwargs)."""
-    try:
-        sig = inspect.signature(func)
-        for param in sig.parameters.values():
-            if param.kind == param.VAR_KEYWORD or param.name == kwarg_name:
-                return True
-        return False
-    except Exception:
-        return True
 
 
 
@@ -1298,35 +1235,6 @@ def _normalize_prefill_messages_before_user_turn(prefill_messages: list[dict]) -
     return sanitized
 
 
-def _has_new_assistant_reply(all_messages: list, prev_count: int) -> bool:
-    """Return True if *new* messages (beyond ``prev_count``) contain an
-    assistant message with non-empty content.
-
-    ``all_messages`` is ``result.get('messages')`` which includes the full
-    conversation history.  ``prev_count`` is ``len(_previous_context_messages)``
-    — the number of messages present before the current turn started.  Only
-    messages at index >= prev_count are inspected so that historical assistant
-    replies don't mask a silent failure on the current turn.
-
-    If ``len(all_messages) < prev_count`` (an edge-case shrink), there is no
-    reliable new-message slice to inspect. Treat that as "no new assistant
-    reply" so stale historical assistant replies cannot mask a silent failure.
-    When ``len == prev_count``, there are no new messages and we return False.
-    """
-    if len(all_messages) > prev_count:
-        # Normal case: new messages appended beyond the pre-turn history.
-        candidates = all_messages[prev_count:]
-    elif len(all_messages) < prev_count:
-        return False
-    else:
-        # Same length. In production this means no new messages were appended.
-        # However, some test fixtures replace the entire message list rather
-        # than appending, so check whether the tail changed.
-        return False
-    return any(
-        m.get('role') == 'assistant' and str(m.get('content') or '').strip()
-        for m in candidates
-    )
 
 
 def _preferred_agent_display_name() -> str:
@@ -2821,21 +2729,6 @@ def _reset_turn_session_identity(tokens) -> None:
             logger.debug("per-turn approval session-key reset failed", exc_info=True)
 
 
-@contextlib.contextmanager
-def _bind_turn_session_identity(session_id: str):
-    """Context-manager form of the per-turn session-identity binding.
-
-    The ``_run_agent_streaming`` worker uses the explicit ``_set``/``_reset``
-    pair directly because its single ``try/finally`` already spans the whole
-    turn (~2k lines) and the binding must cover every mid-turn background
-    spawn; this wrapper is the canonical single-call API for other callers and
-    for tests, and shares the exact same code path.
-    """
-    tokens = _set_turn_session_identity(session_id)
-    try:
-        yield
-    finally:
-        _reset_turn_session_identity(tokens)
 
 
 def _stale_completion_max_age_seconds() -> float:
@@ -6009,12 +5902,6 @@ def _restore_display_reasoning_metadata(previous_messages, updated_messages):
     return updated_messages
 
 
-def _session_context_messages(session):
-    """Return model-facing history without assuming it matches the UI transcript."""
-    context_messages = getattr(session, 'context_messages', None)
-    if isinstance(context_messages, list) and context_messages:
-        return context_messages
-    return session.messages or []
 
 
 def _message_identity(msg):
@@ -6273,9 +6160,6 @@ def _dedupe_replayed_context_messages(previous_context, result_messages, msg_tex
     return previous_context + candidates
 
 
-def _dedupe_replayed_active_context(previous_context, result_messages, msg_text=None):
-    """Keep model context append-only without re-appending a replayed tail."""
-    return _dedupe_replayed_context_messages(previous_context, result_messages, msg_text)
 
 
 def _is_context_compression_marker(msg):
@@ -6719,14 +6603,6 @@ def _new_turn_context_from_messages(messages, msg_text):
     return history
 
 
-def _context_messages_for_new_turn(session, msg_text):
-    """Return provider-facing history for a new user turn.
-
-    Compacted agent sessions can carry a hidden "resume the active task" summary
-    in context_messages. If the user starts a fresh casual greeting in that old
-    session, do not feed that stale active-task summary back to the model.
-    """
-    return _new_turn_context_from_messages(_session_context_messages(session), msg_text)
 
 
 def _stream_writeback_is_current(session, stream_id):
@@ -12945,131 +12821,6 @@ def _run_agent_streaming(
 # ============================================================
 
 
-def _handle_chat_steer(handler, body: dict) -> bool:
-    """Inject a /steer payload into the active agent for a session.
-
-    Mirrors the CLI's `/steer <text>` command (cli.py:6140-6155):
-      - Look up the cached AIAgent for the session (PR #1051's
-        SESSION_AGENT_CACHE).
-      - Verify a stream is currently active for this session.
-      - Call agent.steer(text) — thread-safe, stashes text in
-        _pending_steer for application at the next tool-result boundary.
-
-    The agent's loop calls _apply_pending_steer_to_tool_results() at the
-    end of every tool batch and appends the steer text to the last tool
-    result's content with a marker, so the model sees the steer as part
-    of the tool output on its next iteration. The user's stream is NOT
-    interrupted.
-
-    If no agent is cached, the agent is too old to support steer, or no
-    stream is active, return {"accepted": False, "fallback": "<reason>"}.
-    The frontend must surface that failure without cancelling the active run;
-    Steer is active-run guidance, not implicit permission to Queue, Interrupt,
-    or Stop-and-send.
-
-    Returns 200 with {"accepted": bool, "fallback": str|None,
-    "stream_id": str|None}.
-    """
-    from api.helpers import j, bad
-    from api import config as _cfg
-
-    sid = str((body or {}).get("session_id", "") or "").strip()
-    text = str((body or {}).get("text", "") or "").strip()
-    if not sid:
-        return bad(handler, "session_id required")
-    if not text:
-        return bad(handler, "text required")
-
-    evicted_cached_entry = None
-    with _cfg.SESSION_AGENT_CACHE_LOCK:
-        cached = _cfg.SESSION_AGENT_CACHE.get(sid)
-        if cached:
-            agent = cached[0]
-            if not _cached_agent_matches_session(agent, sid):
-                evicted_cached_entry = _cfg.SESSION_AGENT_CACHE.pop(sid, None)
-                logger.warning(
-                    '[webui] Evicted cached agent before steer due to mismatched session identity: cache_key=%s agent_session_id=%s',
-                    sid,
-                    _cached_agent_session_identity(agent),
-                )
-                cached = None
-    if evicted_cached_entry is not None:
-        try:
-            _close_cached_agent_entry_at_session_boundary(sid, evicted_cached_entry)
-        except Exception:
-            logger.debug("Failed to close steer identity-mismatched cached agent for session %s", sid, exc_info=True)
-    if not cached:
-        try:
-            s = get_session(sid)
-            active_stream_id = getattr(s, "active_stream_id", None) or None
-        except KeyError:
-            active_stream_id = None
-        if active_stream_id:
-            # A runner-owned run (Jaeger, Hermes, OpenClaw, Roundtable over
-            # :8791) has no in-process agent to steer and is not in STREAMS.
-            # Answer "queued" so the browser holds the message and sends it
-            # when the run ends, exactly as for a gateway run. Before this,
-            # every message typed during a Jaeger turn failed with
-            # "no_cached_agent" and bounced back into the composer.
-            with _cfg.ACTIVE_RUNS_LOCK:
-                runner_run = bool(((_cfg.ACTIVE_RUNS or {}).get(str(active_stream_id)) or {}).get("runner"))
-            if runner_run:
-                return j(handler, {"accepted": False, "fallback": "gateway_steer_queued",
-                                   "stream_id": active_stream_id})
-            with _cfg.STREAMS_LOCK:
-                stream_alive = active_stream_id in _cfg.STREAMS
-            if stream_alive:
-                try:
-                    with _cfg.ACTIVE_RUNS_LOCK:
-                        active_run = dict((_cfg.ACTIVE_RUNS or {}).get(str(active_stream_id)) or {})
-                    if active_run.get("backend") == "gateway":
-                        return j(handler, {"accepted": False, "fallback": "gateway_steer_queued",
-                                           "stream_id": active_stream_id})
-                except Exception:
-                    logger.warning(
-                        "Gateway ownership lookup failed before steer fallback for session=%s stream_id=%s",
-                        sid,
-                        active_stream_id,
-                        exc_info=True,
-                    )
-        # No active local agent for this session — caller surfaces a steer failure
-        # without cancelling the active run.
-        return j(handler, {"accepted": False, "fallback": "no_cached_agent",
-                           "stream_id": None})
-    agent = cached[0]
-    if not hasattr(agent, "steer"):
-        # Older hermes-agent that pre-dates the steer() method
-        return j(handler, {"accepted": False, "fallback": "agent_lacks_steer",
-                           "stream_id": None})
-
-    # Verify the agent is currently running. Use the session's
-    # active_stream_id rather than calling load_session_locked() which
-    # would block on the streaming thread's lock.
-    try:
-        s = get_session(sid)
-    except KeyError:
-        return j(handler, {"accepted": False, "fallback": "session_not_found",
-                           "stream_id": None})
-    active_stream_id = getattr(s, "active_stream_id", None) or None
-    if not active_stream_id:
-        return j(handler, {"accepted": False, "fallback": "not_running",
-                           "stream_id": None})
-    with _cfg.STREAMS_LOCK:
-        stream_alive = active_stream_id in _cfg.STREAMS
-    if not stream_alive:
-        # Active stream id is stale — stream has ended; caller falls back
-        return j(handler, {"accepted": False, "fallback": "stream_dead",
-                           "stream_id": None})
-
-    try:
-        accepted = bool(agent.steer(text))
-    except Exception as exc:
-        logger.debug("agent.steer() raised for session=%s: %s", sid, exc)
-        return j(handler, {"accepted": False, "fallback": "steer_error",
-                           "stream_id": active_stream_id})
-
-    return j(handler, {"accepted": accepted, "fallback": None,
-                       "stream_id": active_stream_id})
 
 
 def cancel_stream(stream_id: str) -> bool:

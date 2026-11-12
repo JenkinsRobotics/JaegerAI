@@ -46,22 +46,3 @@ def route(handler, parsed, method):
     return True
 
 
-def project_session(raw, sid, load_messages, limit, before):
-    from api.profiles import get_active_profile_name
-    if get_active_profile_name() != 'jaeger':
-        return raw
-    try:
-        snapshot = native()
-    except (OSError, ValueError):
-        # Keep cached history available while explicitly showing loss of sync.
-        return {**raw, 'jaeger_sync_error': 'Jaeger is unreachable'}
-    if sid != snapshot.get('dispatcher_session'):
-        return raw
-    messages = [{'id': 'jaeger-' + m['id'], 'role': m['role'], 'content': m['text'],
-                 'timestamp': m['ts']} for m in snapshot['messages']]
-    end = min(len(messages), before) if before is not None else len(messages)
-    start = max(0, end - limit) if limit is not None else 0
-    return {**raw, 'messages': messages[start:end] if load_messages else [],
-            'message_count': len(messages), '_messages_offset': start,
-            '_messages_truncated': bool(start), 'jaeger_revision': snapshot['revision'],
-            'regeneration_revision': None, 'tool_calls': []}

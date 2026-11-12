@@ -23,7 +23,6 @@ from api.agent_sessions import normalize_agent_session_source
 
 logger = logging.getLogger(__name__)
 
-AUTO_TITLE_LABELS = {'untitled', 'new chat'}
 
 
 class RegenerationUnavailable(Exception):
@@ -205,16 +204,8 @@ def regeneration_revision_for(rows, *, session=None, context=None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def regeneration_transcript(session, *, state_messages=None):
-    """Return the state.db-reconciled transcript used by every authority consumer."""
-    if state_messages is None:
-        return regeneration_state(session)[0]
-    from api.models import reconciled_state_db_messages_for_session
-    return reconciled_state_db_messages_for_session(session, state_messages=state_messages)
 
 
-def regeneration_context(session):
-    return regeneration_state(session)[1]
 
 
 _REGENERATION_SIDECAR_ANCHOR_BUDGET = 200
@@ -558,21 +549,6 @@ def session_has_manual_title(session) -> bool:
     return getattr(session, 'manual_title', False) is True
 
 
-def apply_session_title_rename(session, raw_title) -> str:
-    """Apply user-driven rename semantics to a Session object.
-
-    Non-empty custom titles are protected from adaptive refresh. Clearing the
-    title, or resetting it to an automatic label, removes that protection so the
-    normal auto-title path can run again.
-    """
-    title = str(raw_title or '').strip()[:80]
-    if not title:
-        title = 'Untitled'
-    manual_title = title.strip().casefold() not in AUTO_TITLE_LABELS
-    session.title = title
-    session.manual_title = manual_title
-    session.llm_title_generated = False
-    return title
 
 
 def mark_session_title_generated(session) -> None:
@@ -1093,23 +1069,6 @@ def session_status(session_id: str) -> dict[str, Any]:
     }
 
 
-def session_usage(session_id: str) -> dict[str, Any]:
-    """Return token usage and cost for /usage.
-
-    Mirrors gateway/run.py:_handle_usage_command's basic counters. The
-    agent shows additional fields (rate-limit headroom etc.) that depend
-    on provider API responses we don't have in webui -- those are deferred.
-    """
-    s = get_session(session_id)
-    inp = int(s.input_tokens or 0)
-    out = int(s.output_tokens or 0)
-    return {
-        'input_tokens': inp,
-        'output_tokens': out,
-        'total_tokens': inp + out,
-        'estimated_cost': s.estimated_cost,
-        'model': s.model,
-    }
 
 
 def _extract_text(content: Any) -> str:

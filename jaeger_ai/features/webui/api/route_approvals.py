@@ -142,22 +142,8 @@ def set_session_yolo_enabled(session_key: str, enabled: bool) -> None:
             disable_session_yolo(session_key)
 
 
-def _approval_sse_subscribe(session_id: str) -> queue.Queue:
-    """Register an SSE subscriber for approval events on a given session."""
-    q = queue.Queue(maxsize=16)
-    with _lock:
-        _approval_sse_subscribers.setdefault(session_id, []).append(q)
-    return q
 
 
-def _approval_sse_unsubscribe(session_id: str, q: queue.Queue) -> None:
-    """Remove an SSE subscriber."""
-    with _lock:
-        subs = _approval_sse_subscribers.get(session_id)
-        if subs and q in subs:
-            subs.remove(q)
-            if not subs:
-                _approval_sse_subscribers.pop(session_id, None)
 
 
 def _approval_sse_notify_locked(session_id: str, head: dict | None, total: int) -> None:
@@ -186,17 +172,6 @@ def _approval_sse_notify_locked(session_id: str, head: dict | None, total: int) 
             pass  # drop if subscriber is slow (bounded queue prevents memory leak)
 
 
-def _approval_sse_notify(session_id: str, head: dict | None, total: int) -> None:
-    """Convenience wrapper that takes `_lock` itself.
-
-    Use only from contexts that don't already hold `_lock`. Production call
-    sites (submit_pending, _handle_approval_respond) MUST hold the lock and
-    call `_approval_sse_notify_locked` directly to avoid a notify-ordering
-    race where a later append's notify can fire before an earlier append's
-    notify (resulting in stale `pending_count`).
-    """
-    with _lock:
-        _approval_sse_notify_locked(session_id, head, total)
 
 
 def _gateway_mirror_entry_token(entry) -> str | None:
@@ -556,16 +531,6 @@ def retire_gateway_pending_mirror(
     return True
 
 
-def _gateway_mirrored_pending_run_id(session_key: str, approval_id: str) -> str | None:
-    """Compatibility wrapper for exact run-backed lookup."""
-    approval_id = str(approval_id or "").strip()
-    if not approval_id:
-        return None
-    with _lock:
-        entry = _gateway_pending_mirror_locked(session_key, approval_id=approval_id)
-        if entry:
-            return str(entry.get("run_id") or "").strip() or None
-    return None
 
 
 def submit_gateway_pending_mirror(session_key: str, approval: dict) -> tuple[dict | None, int]:

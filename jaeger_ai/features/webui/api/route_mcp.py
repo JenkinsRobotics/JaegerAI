@@ -284,144 +284,14 @@ def _mcp_tools_from_registry(server_summaries: dict) -> list[dict]:
     return tools
 
 
-def handle_mcp_tools_list(handler: Any) -> bool:
-    """List known MCP tools from already-available runtime inventory only."""
-    cfg = get_config_for_profile_home(_get_active_hermes_home())
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
-    runtime = _mcp_runtime_status_by_name()
-    server_summaries = {
-        str(name): _server_summary(str(name), scfg, runtime.get(str(name)))
-        for name, scfg in servers.items()
-    }
-    tools = _mcp_tools_from_runtime_status(runtime, server_summaries)
-    source = "mcp_runtime_status"
-    if not tools:
-        tools = _mcp_tools_from_registry(server_summaries)
-        source = "tool_registry" if tools else "none"
-    tools.sort(key=lambda row: (row.get("server", ""), row.get("name", "")))
-    unavailable_servers = [
-        summary["name"] for summary in server_summaries.values()
-        if summary.get("enabled") and not summary.get("active")
-    ]
-    return j(handler, {
-        "tools": tools,
-        "total": len(tools),
-        "source": source,
-        "inventory_scope": "already_known_runtime_only",
-        "unavailable_servers": unavailable_servers,
-    })
 
 
-def handle_mcp_servers_list(handler: Any) -> bool:
-    """List configured MCP servers with safe, read-only runtime visibility."""
-    cfg = get_config_for_profile_home(_get_active_hermes_home())
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
-    runtime = _mcp_runtime_status_by_name()
-    result = [
-        _server_summary(name, scfg, runtime.get(str(name)))
-        for name, scfg in servers.items()
-    ]
-    return j(handler, {
-        "servers": result,
-        "toggle_supported": True,
-        "reload_required": True,
-    })
 
 
-def handle_mcp_server_delete(handler: Any, name: str) -> bool:
-    """Delete an MCP server by name."""
-    name = unquote(name)
-    if not name:
-        return bad(handler, "name is required")
-    cfg = get_config()
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
-    if name not in servers:
-        return bad(handler, f"MCP server '{name}' not found", 404)
-    del servers[name]
-    cfg["mcp_servers"] = servers
-    _save_yaml_config_file(_get_config_path(), cfg)
-    reload_config()
-    return j(handler, {"ok": True, "deleted": name})
 
 
-def handle_mcp_server_toggle(handler: Any, name: str, body: dict) -> bool:
-    """Toggle enabled state for an MCP server (PATCH /api/mcp/servers/{name})."""
-    name = unquote(name)
-    if not name:
-        return bad(handler, "name is required")
-    if "enabled" not in body:
-        return bad(handler, "enabled field is required")
-    enabled = bool(body["enabled"])
-    cfg = get_config()
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
-    if name not in servers:
-        return bad(handler, f"MCP server '{name}' not found", 404)
-    if not isinstance(servers[name], dict):
-        return bad(handler, f"MCP server '{name}' has invalid config", 400)
-    servers[name]["enabled"] = enabled
-    cfg["mcp_servers"] = servers
-    _save_yaml_config_file(_get_config_path(), cfg)
-    reload_config()
-    return j(handler, {"ok": True, "name": name, "enabled": enabled})
 
 
-def _strip_masked_values(submitted: Any, existing: Any) -> Any:
-    """Remove masked placeholder values from submitted dict, keeping originals."""
-    if not isinstance(submitted, dict) or not isinstance(existing, dict):
-        return submitted
-    cleaned = {}
-    for k, v in submitted.items():
-        if isinstance(v, str) and v == _MASKED_PLACEHOLDER:
-            if k in existing and isinstance(existing[k], str):
-                cleaned[k] = existing[k]  # preserve original real value
-                continue
-        elif isinstance(v, dict) and k in existing and isinstance(existing[k], dict):
-            cleaned[k] = _strip_masked_values(v, existing[k])
-        else:
-            cleaned[k] = v
-    return cleaned
 
 
-def handle_mcp_server_update(handler: Any, name: str, body: dict) -> bool:
-    """Add or update an MCP server."""
-    name = unquote(name)
-    if not name:
-        return bad(handler, "name is required")
-    # Validate: must have url (http) or command (stdio)
-    server_cfg: dict[str, Any] = {}
-    cfg = get_config()
-    servers = cfg.get("mcp_servers", {})
-    if not isinstance(servers, dict):
-        servers = {}
-    existing_cfg = servers.get(name, {})
-    if body.get("url"):
-        server_cfg["url"] = body["url"].strip()
-        if body.get("headers"):
-            server_cfg["headers"] = _strip_masked_values(body["headers"], existing_cfg.get("headers", {}))
-    elif body.get("command"):
-        server_cfg["command"] = body["command"].strip()
-        if body.get("args"):
-            server_cfg["args"] = body["args"] if isinstance(body["args"], list) else [body["args"]]
-        if body.get("env"):
-            server_cfg["env"] = _strip_masked_values(body["env"], existing_cfg.get("env", {}))
-    else:
-        return bad(handler, "url or command is required")
-    if body.get("timeout") is not None:
-        try:
-            server_cfg["timeout"] = int(body["timeout"])
-        except (ValueError, TypeError):
-            pass
-    servers[name] = server_cfg
-    cfg["mcp_servers"] = servers
-    _save_yaml_config_file(_get_config_path(), cfg)
-    reload_config()
-    return j(handler, {"ok": True, "server": _server_summary(name, server_cfg)})
 
