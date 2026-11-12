@@ -2192,6 +2192,40 @@ class GatewaySessionStore:
             return {"events": events, "has_more": len(rows) > limit,
                     "next_cursor": events[-1]["event_id"] if events else after}
 
+    def trace_history(self, session_id: str, before: int | None = None, limit: int = 2000) -> dict[str, Any]:
+        """The session's own durable events, newest page first, each with a
+        rebuilt ``trace`` — so turns older than the bounded SSE window still
+        replay in the Process view. Rows are returned oldest-first."""
+        limit = max(1, min(int(limit), 5000))
+        cursor = int(before) if before else None
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT event_id, session_id, event, data_json, timestamp FROM activity_history "
+                "WHERE session_id=? AND (? IS NULL OR event_id<?) ORDER BY event_id DESC LIMIT ?",
+                (session_id, cursor, cursor, limit + 1),
+            ).fetchall()
+        more = len(rows) > limit
+        rows = list(reversed(rows[:limit]))
+        starts: dict[str, float] = {}
+        events = []
+        for row in rows:
+            try:
+                data = json.loads(row["data_json"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(data, dict):
+                data.pop("trace", None)
+            record = {"event_id": row["event_id"], "session_id": row["session_id"], "event": row["event"],
+                      "timestamp": row["timestamp"], "data": data}
+            trace = _trace.history_trace(row["event"], data, float(row["timestamp"] or 0), starts) \
+                if isinstance(data, dict) else None
+            if trace:
+                record["trace"] = trace
+            events.append(record)
+        return {"events": events, "has_more": more,
+                "oldest_event_id": events[0]["event_id"] if events else None,
+                "newest_event_id": events[-1]["event_id"] if events else None}
+
     def steering_record(self, session_id: str, request_id: str, steering_id: str) -> dict[str, Any] | None:
         """Read the original steering receipt from durable activity, even after event retention."""
         with self._get_conn() as conn:
