@@ -5156,7 +5156,13 @@ class JaegerGatewayApp:
             options = selection.get("options") or {}
             source = "background" if options.get("background") else "user"
             from jaeger_ai.main import interaction_request_sink
-            with task_scope(self.task_owner, session_id=session_key, request_id=request_id,
+            from jaeger_agent import live as _live
+            live_ids = {"turn_id": request_row.get("turn_id") or request_id, "request_id": request_id}
+
+            def _live_emit(name: str, data: dict[str, Any]) -> None:
+                self.event_bus.publish(session_key, name, {**live_ids, **data})
+
+            with _live.bind(_live_emit), task_scope(self.task_owner, session_id=session_key, request_id=request_id,
                             execution=selection, user_text=request_row.get("input_text", prompt), source=source), \
                     interaction_request_sink(self._clarify_sink(session_key, request_id)), \
                     tool_allowlist(list(grant) if grant is not None else None), \

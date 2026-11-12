@@ -153,3 +153,36 @@ def test_bridge_fires_turn_end_approval_error_once(store):
     assert got["on_turn_end"] == ["turn.finish"]
     assert got["on_approval"] == ["approval.request", "approval.resolved"]
     assert got["on_error"] == ["tool.failed"]
+
+
+def test_subagent_spans_nest_under_launching_tool():
+    from contextvars import copy_context
+    from concurrent.futures import ThreadPoolExecutor
+    from jaeger_agent import live
+    from jaeger_ai.contract import trace
+    from jaeger_ai.core.runtime import subagents
+
+    got: list[tuple[str, dict]] = []
+
+    def child():
+        live.emit("subagent.tool.started", {"subagent_id": live.current_subagent(),
+                                            "call_id": "kid1", "tool": "read_file"})
+        return {"delegated": True, "answer": "x"}
+
+    with live.bind(lambda e, d: got.append((e, d))), live.tool_call("call_parent"):
+        with ThreadPoolExecutor(1) as pool:  # copy_context carries emitter + call id
+            out = pool.submit(copy_context().run, subagents._reported, "internal", "sub", "t", child).result()
+    assert out["answer"] == "x"
+    names = [e for e, _ in got]
+    assert names == ["subagent.started", "subagent.tool.started", "subagent.finished"]
+    sid = got[0][1]["subagent_id"]
+    spans = [trace.classify(e, {**d, "turn_id": "r1"}) for e, d in got]
+    assert spans[0]["span_id"] == f"agent:{sid}" and spans[0]["parent_span_id"] == "tool:call_parent"
+    assert spans[1]["parent_span_id"] == f"agent:{sid}" and spans[1]["kind"] == "tool"
+    assert spans[2]["state"] == "succeeded"
+
+
+def test_live_emit_is_noop_without_host():
+    from jaeger_agent import live
+    live.emit("tool.progress", {"message": "x"})  # no emitter bound: nothing raises
+    assert live.current_tool_call() is None

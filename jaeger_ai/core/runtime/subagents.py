@@ -80,6 +80,20 @@ def _delegate_external(
     sensitivity: str = "personal",
     estimated_cost_usd: float = 0.0,
 ) -> dict[str, Any]:
+    """Live-reported wrapper; see :func:`_delegate_external_run`."""
+    return _reported("external", str(runtime_id or "external"), task, lambda: _delegate_external_run(
+        runtime_id, task, required_capabilities=required_capabilities,
+        sensitivity=sensitivity, estimated_cost_usd=estimated_cost_usd))
+
+
+def _delegate_external_run(
+    runtime_id: str,
+    task: str,
+    *,
+    required_capabilities: list[str] | None = None,
+    sensitivity: str = "personal",
+    estimated_cost_usd: float = 0.0,
+) -> dict[str, Any]:
     """Dispatch one task through a registered external runtime.
 
     Registration is plugin-owned. This function supplies durable Jaeger
@@ -247,7 +261,36 @@ def _wt_result(info: dict[str, Any] | None) -> dict[str, Any]:
     return {"worktree": result} if result else {}
 
 
+def _reported(kind: str, name: str, task: str, run: Any) -> dict[str, Any]:
+    """Run one delegate under a ``subagent.*`` span on the host's live stream
+    (jaeger_agent.live): started/finished nest under the launching tool call,
+    and the child's own tool calls nest under this span."""
+    import uuid as _uuid
+    from jaeger_agent import live as _live
+    sid = f"sub_{_uuid.uuid4().hex[:12]}"
+    t0 = time.perf_counter()
+    _live.emit("subagent.started", {"subagent_id": sid, "kind": kind, "name": name,
+                                     "task": str(task or "")[:200]})
+    out: dict[str, Any] | None = None
+    try:
+        with _live.subagent(sid):
+            out = run()
+        return out
+    finally:
+        ok = bool(out) and out.get("delegated", out.get("ok", True)) is not False and not out.get("error")
+        _live.emit("subagent.finished", {"subagent_id": sid, "kind": kind, "name": name,
+                                          "status": "succeeded" if ok else "failed",
+                                          "elapsed_s": round(time.perf_counter() - t0, 3)})
+
+
 def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
+    """Live-reported wrapper; see :func:`_delegate_internal_run`."""
+    role = getattr(_delegate_role, "value", None) or "leaf"
+    return _reported("internal", f"sub-agent ({role})", subtask,
+                     lambda: _delegate_internal_run(client, subtask))
+
+
+def _delegate_internal_run(client: Any, subtask: str) -> dict[str, Any]:
     """Run a subtask through the same agent loop with a fresh history.
 
     Same pattern python_pydantic_ai uses: bumps a thread-local depth
@@ -360,6 +403,9 @@ def _delegate_internal(client: Any, subtask: str) -> dict[str, Any]:
                 }
 
             def _on_progress(info: dict[str, Any]) -> None:
+                from jaeger_agent import live as _live
+                _live.progress(f"step {info.get('step')}: {str(info.get('state') or 'RUNNING').lower()}",
+                               step=info.get("step"))
                 bus = _main()._pipeline.get("event_bus")
                 if bus is None:
                     return
@@ -541,11 +587,13 @@ def _delegate_parallel(client: Any, subtasks: list[str], *, role: str = "leaf") 
     concurrency = min(_max_parallel_subagents(), len(clean))
 
     started = time.perf_counter()
+    from contextvars import copy_context
     with ThreadPoolExecutor(
         max_workers=concurrency,
         thread_name_prefix="subagent",
     ) as pool:
-        results = list(pool.map(_worker, clean))
+        # copy_context: each worker reports under the launching tool call.
+        results = list(pool.map(lambda task: copy_context().run(_worker, task), clean))
     elapsed = time.perf_counter() - started
 
     succeeded = sum(1 for r in results if r.get("delegated"))

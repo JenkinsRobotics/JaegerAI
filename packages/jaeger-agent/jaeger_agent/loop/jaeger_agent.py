@@ -2198,7 +2198,12 @@ class JaegerAgent:
             )
 
         started = time.perf_counter()
-        self.callbacks.on_tool_progress(name, "start", args)
+        from jaeger_agent import live as _live
+        with _live.tool_call(call_id):
+            self.callbacks.on_tool_progress(name, "start", args)
+            if _live.current_subagent():
+                _live.emit("subagent.tool.started", {"subagent_id": _live.current_subagent(),
+                                                     "call_id": f"{_live.current_subagent()}:{call_id}", "tool": name})
         # Pre-dispatch hook — guardrail returns optional guidance text.
         guidance = self.callbacks.on_before_tool_call(name, args)
         return {
@@ -2240,7 +2245,10 @@ class JaegerAgent:
                 # nodes: bind the turn's own event for the call so a cancel or Global Stop
                 # reaches a running command (tool_interrupt.is_interrupted reads it).
                 from jaeger_agent.core.cancellation import turn_cancellation
-                with turn_cancellation(self._interrupt_event):
+                from jaeger_agent import live as _live
+                # The call id rides a ContextVar so delegates, progress and
+                # hooks inside the tool report under THIS call's span.
+                with turn_cancellation(self._interrupt_event), _live.tool_call(prep.get("call_id")):
                     content = self._tool_executor.execute(tool_def, args)
         except Exception as exc:  # noqa: BLE001 — surfaced to the model
             # Tag safety/permission failures distinctly so the model
@@ -2335,6 +2343,9 @@ class JaegerAgent:
             content = {**content, "recovery": _recovery_hint(name, args, _err)}
 
         elapsed = time.perf_counter() - started
+        from jaeger_agent import live as _live
+        _call_scope = _live.tool_call(call_id)
+        _call_scope.__enter__()
         self.callbacks.on_tool_progress(
             name, "done", {"elapsed_s": round(elapsed, 3)},
         )
@@ -2360,10 +2371,17 @@ class JaegerAgent:
                 chosen = str(args.get("name") or "").strip()
                 if chosen:
                     self._turn_skill_names.add(chosen)
-        self.callbacks.on_tool_done(
-            name, dict(args) if isinstance(args, dict) else {},
-            content, _ok, _err, round(elapsed, 6),
-        )
+        try:
+            self.callbacks.on_tool_done(
+                name, dict(args) if isinstance(args, dict) else {},
+                content, _ok, _err, round(elapsed, 6),
+            )
+            if _live.current_subagent():
+                _live.emit("subagent.tool.finished", {"subagent_id": _live.current_subagent(),
+                                                      "call_id": f"{_live.current_subagent()}:{call_id}", "tool": name,
+                                                      "ok": bool(_ok), "elapsed_s": round(elapsed, 3)})
+        finally:
+            _call_scope.__exit__(None, None, None)
 
         # Usage counters (``logs/usage.json``). ``record_skill`` was wired
         # up from the skill tool, but its tool counterpart had no callers
