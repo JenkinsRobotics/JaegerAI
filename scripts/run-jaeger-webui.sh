@@ -29,21 +29,23 @@ else
     'from jaeger_ai.core.instance.instance import operator_state_root; print(operator_state_root())')" || exit 1
 fi
 
-# The vendored WebUI reads HERMES_HOME as its agent home; Jaeger owns that
-# directory under its own state root (never the legacy Hermes homes).
-export HERMES_HOME="${JAEGER_WEBUI_AGENT_STATE:-$jaeger_state_home/webui-agent}"
-export HERMES_WEBUI_STATE_DIR="${JAEGER_WEBUI_STATE_DIR:-$jaeger_state_home/hermes-webui-state}"
+# Jaeger names only. server.py maps these onto the internal names the
+# vendored WebUI code still reads (see _apply_jaeger_env there).
+# Agent home: Jaeger owns it under its own state root (never a Hermes home).
+export JAEGER_WEBUI_AGENT_STATE="${JAEGER_WEBUI_AGENT_STATE:-$jaeger_state_home/webui-agent}"
+# The on-disk folder name is historical; renaming it would orphan state.
+export JAEGER_WEBUI_STATE_DIR="${JAEGER_WEBUI_STATE_DIR:-$jaeger_state_home/hermes-webui-state}"
 # Loopback unless the owner explicitly re-opens LAN (JAEGER_WEBUI_ALLOW_LAN=1).
-# An inherited HERMES_WEBUI_HOST (e.g. 0.0.0.0 exported by a login shell) is
+# An inherited JAEGER_WEBUI_HOST (e.g. 0.0.0.0 exported by a login shell) is
 # ignored otherwise. Tailscale Serve proxies this port; a raw interface bind
 # is not the remote path.
 case "$(printf '%s' "${JAEGER_WEBUI_ALLOW_LAN:-0}" | tr '[:upper:]' '[:lower:]')" in
-  1|true|yes|on) export HERMES_WEBUI_HOST="${JAEGER_WEBUI_HOST:-${HERMES_WEBUI_HOST:-0.0.0.0}}" ;;
-  *) export HERMES_WEBUI_HOST="127.0.0.1" ;;
+  1|true|yes|on) export JAEGER_WEBUI_HOST="${JAEGER_WEBUI_HOST:-0.0.0.0}" ;;
+  *) export JAEGER_WEBUI_HOST="127.0.0.1" ;;
 esac
-export HERMES_WEBUI_PORT="${JAEGER_WEBUI_PORT:-8790}"
-export HERMES_WEBUI_BOT_NAME="${JAEGER_WEBUI_BOT_NAME:-JaegerAI}"
-export HERMES_WEBUI_DEFAULT_WORKSPACE="${JAEGER_WEBUI_WORKSPACE:-${HOME}/workspace}"
+export JAEGER_WEBUI_PORT="${JAEGER_WEBUI_PORT:-8790}"
+export JAEGER_WEBUI_BOT_NAME="${JAEGER_WEBUI_BOT_NAME:-JaegerAI}"
+export JAEGER_WEBUI_WORKSPACE="${JAEGER_WEBUI_WORKSPACE:-${HOME}/workspace}"
 # One execution path: the WebUI talks to the Jaeger Gateway.
 # Health uses JAEGER_GATEWAY_URL. Do not synthesize a global chat gateway
 # override: named profiles own their individual native gateway addresses.
@@ -55,13 +57,13 @@ if [[ -z "${JAEGER_GATEWAY_URL:-}" ]]; then
 fi
 export JAEGER_GATEWAY_URL
 export JAEGER_OLLAMA_URL="${JAEGER_OLLAMA_URL:-http://127.0.0.1:11434}"
-export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
+export JAEGER_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 
 export PYTHONPATH="${repo_root}:${repo_root}/packages/jaeger-agent:${repo_root}/packages/jaeger-os:${repo_root}/packages/jaeger-kokoro-tts:${repo_root}/packages/jaeger-whisper-stt${PYTHONPATH:+:$PYTHONPATH}"
 
 # The sidebar listing needs a current-schema state.db in the agent home.
 "$python_exe" -c \
-  "import os; from pathlib import Path; from jaeger_ai.features.webui.service.profile_layout import ensure_agent_state_schema; ensure_agent_state_schema(Path(os.environ['HERMES_HOME']))"
+  "import os; from pathlib import Path; from jaeger_ai.features.webui.service.profile_layout import ensure_agent_state_schema; ensure_agent_state_schema(Path(os.environ['JAEGER_WEBUI_AGENT_STATE']))"
 
 # Warm the model catalogue in the background before anyone opens the page.
 #
@@ -74,11 +76,11 @@ export PYTHONPATH="${repo_root}:${repo_root}/packages/jaeger-agent:${repo_root}/
 # the browser should never pay this startup cost on its first send.
 (
   for _ in $(seq 1 60); do
-    if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${HERMES_WEBUI_PORT}/" 2>/dev/null; then
-      curl -fsS -m 90 -o /dev/null "http://127.0.0.1:${HERMES_WEBUI_PORT}/api/models" 2>/dev/null || true
+    if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${JAEGER_WEBUI_PORT}/" 2>/dev/null; then
+      curl -fsS -m 90 -o /dev/null "http://127.0.0.1:${JAEGER_WEBUI_PORT}/api/models" 2>/dev/null || true
       # The release-check banner is the same shape: a ~4s network call the
       # stock UI fires on first load. Warmed here for the same reason.
-      curl -fsS -m 90 -o /dev/null -X POST "http://127.0.0.1:${HERMES_WEBUI_PORT}/api/updates/check" 2>/dev/null || true
+      curl -fsS -m 90 -o /dev/null -X POST "http://127.0.0.1:${JAEGER_WEBUI_PORT}/api/updates/check" 2>/dev/null || true
       break
     fi
     sleep 1

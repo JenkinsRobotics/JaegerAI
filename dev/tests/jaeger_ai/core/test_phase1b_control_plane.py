@@ -283,12 +283,12 @@ def test_webui_launcher_stays_on_loopback_unless_lan_is_explicit():
     start = text.index("case \"$(printf '%s' \"${JAEGER_WEBUI_ALLOW_LAN:-0}\"")
     snippet = text[start:text.index("\nesac", start) + len("\nesac")]
     blocked = subprocess.check_output(
-        ["bash", "-c", snippet + '\nprintf %s "$HERMES_WEBUI_HOST"'],
+        ["bash", "-c", snippet + '\nprintf %s "$JAEGER_WEBUI_HOST"'],
         env={"JAEGER_WEBUI_HOST": "0.0.0.0", "PATH": "/usr/bin:/bin"},
         text=True,
     )
     opened = subprocess.check_output(
-        ["bash", "-c", snippet + '\nprintf %s "$HERMES_WEBUI_HOST"'],
+        ["bash", "-c", snippet + '\nprintf %s "$JAEGER_WEBUI_HOST"'],
         env={"JAEGER_WEBUI_HOST": "0.0.0.0", "JAEGER_WEBUI_ALLOW_LAN": "1", "PATH": "/usr/bin:/bin"},
         text=True,
     )

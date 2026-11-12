@@ -1,4 +1,4 @@
-"""Hermes Web UI server entry point."""
+"""Jaeger WebUI server entry point (vendored from Hermes WebUI; see HERMES_WEBUI_LICENSE)."""
 import logging
 import os
 import re
@@ -10,6 +10,31 @@ import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+# Jaeger launcher names -> the internal names the vendored WebUI code reads.
+# scripts/run-jaeger-webui.sh exports only JAEGER_* names; a JAEGER_* value
+# always wins over an inherited legacy value (an inherited HERMES_WEBUI_HOST
+# must never re-open LAN behind the launcher's back).
+_JAEGER_ENV_ALIASES = {
+    "JAEGER_WEBUI_AGENT_STATE": "HERMES_HOME",
+    "JAEGER_WEBUI_STATE_DIR": "HERMES_WEBUI_STATE_DIR",
+    "JAEGER_WEBUI_HOST": "HERMES_WEBUI_HOST",
+    "JAEGER_WEBUI_PORT": "HERMES_WEBUI_PORT",
+    "JAEGER_WEBUI_BOT_NAME": "HERMES_WEBUI_BOT_NAME",
+    "JAEGER_WEBUI_WORKSPACE": "HERMES_WEBUI_DEFAULT_WORKSPACE",
+    "JAEGER_WEBUI_EXTENSION_DIR": "HERMES_WEBUI_EXTENSION_DIR",
+}
+
+
+def _apply_jaeger_env(environ=os.environ) -> None:
+    for jaeger_name, internal_name in _JAEGER_ENV_ALIASES.items():
+        value = environ.get(jaeger_name)
+        if value:
+            environ[internal_name] = value
+
+
+_apply_jaeger_env()
+
+
 def _ignore_sigpipe() -> None:
     """Keep broken client writes from terminating the server process."""
     if (sigpipe := getattr(signal, "SIGPIPE", None)) is not None:
