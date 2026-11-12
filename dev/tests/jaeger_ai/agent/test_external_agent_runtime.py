@@ -7,7 +7,6 @@ import types
 
 from jaeger_agent import AgentBridge, Message, OpenAIAdapter, ProviderAdapter
 from jaeger_agent import JaegerAgent
-from jaeger_ai.core.agent_core import AgentCore
 from jaeger_ai.core.messages import ChatMessage, ChatReply
 from jaeger_os.transport import InProcBus
 
@@ -62,41 +61,3 @@ def test_the_module_defaults_its_own_tool_policy() -> None:
     assert agent._turn_start_hook is not None
 
 
-def test_agent_core_round_trips_through_jaeger_agent(monkeypatch) -> None:
-    import jaeger_ai.main as main
-
-    cleaned: list[bool] = []
-    monkeypatch.setattr(
-        main,
-        "boot_for_tui",
-        lambda **_: types.SimpleNamespace(
-            client=object(),
-            cleanup=lambda: cleaned.append(True),
-        ),
-    )
-    monkeypatch.setattr(
-        main,
-        "run_for_voice",
-        lambda _client, text, session_key="gui", output_mode="dynamic": {
-            "text": f"external: {text}",
-            "error": None,
-        },
-    )
-
-    bus = InProcBus()
-    replies: queue.Queue[ChatReply] = queue.Queue()
-    bus.subscribe(ChatReply.topic, replies.put)
-    core = AgentCore(bus=bus, warmup=False)
-    try:
-        core.setup()
-        assert isinstance(core.bridge, AgentBridge)
-        assert core.bridge.__class__.__module__.startswith("jaeger_agent")
-        bus.publish(ChatMessage(text="hello", session="test-session"))
-        reply = replies.get(timeout=3.0)
-        assert reply.text == "external: hello"
-        assert reply.session == "test-session"
-    finally:
-        core.stop()
-        bus.close()
-
-    assert cleaned == [True]

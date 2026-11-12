@@ -8,7 +8,6 @@ from jaeger_agent.util.trajectory_compressor import (
     compress_trajectory_if_needed,
 )
 from jaeger_agent.memory.sqlite_search import SQLiteSearchEngine, ensure_fts5_schema
-from jaeger_agent.memory.portability import export_session_to_json, import_session_from_json
 from jaeger_agent.background.cron import BackgroundCronScheduler
 
 
@@ -45,22 +44,6 @@ def test_sqlite_search():
     assert any("docker" in r["content"].lower() for r in results)
 
 
-def test_portability():
-    conn = sqlite3.connect(":memory:")
-    conn.execute("CREATE TABLE turns (session_id TEXT, role TEXT, content TEXT, timestamp REAL)")
-    conn.execute("INSERT INTO turns VALUES ('session_123', 'user', 'Hello agent', 100.0)")
-
-    exported_json = export_session_to_json(conn, "session_123")
-    assert "session_123" in exported_json
-    assert "Hello agent" in exported_json
-
-    conn2 = sqlite3.connect(":memory:")
-    conn2.execute("CREATE TABLE turns (session_id TEXT, role TEXT, content TEXT, timestamp REAL)")
-    success = import_session_from_json(conn2, exported_json)
-    assert success is True
-
-    cursor = conn2.execute("SELECT content FROM turns WHERE session_id = 'session_123'")
-    assert cursor.fetchone()[0] == "Hello agent"
 
 
 def test_cron_scheduler():

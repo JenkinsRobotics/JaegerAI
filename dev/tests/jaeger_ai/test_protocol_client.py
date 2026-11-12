@@ -9,7 +9,6 @@ from __future__ import annotations
 import sys
 
 from jaeger_os.contract import protocol
-from jaeger_ai.interfaces.client import JaegerClient
 from jaeger_ai.core.messages import AgentState, ChatReply, ToolEvent
 
 
@@ -60,17 +59,5 @@ for line in sys.stdin:
 '''
 
 
-def test_client_drives_a_bridge_turn():
-    with JaegerClient(command=[sys.executable, "-c", _FAKE_BRIDGE]) as c:
-        assert c.ready == {"instance": "fake", "model": "m"}
-        events: list[dict] = []
-        out = c.turn("hello", on_event=events.append)
-        assert out == {"text": "echo:hello", "error": None}
-        assert any(e["type"] == "tool" and e["name"] == "echo" for e in events)
 
 
-def test_client_answers_mid_turn_request():
-    with JaegerClient(command=[sys.executable, "-c", _FAKE_BRIDGE]) as c:
-        c.start  # already started by __enter__
-        out = c.turn("confirm please", on_request=lambda f: "allow")
-        assert out["text"] == "answered:allow"

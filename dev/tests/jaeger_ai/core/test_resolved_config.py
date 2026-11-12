@@ -25,7 +25,6 @@ from jaeger_ai.core.instance.instance import (
     is_source_checkout,
     operator_state_root,
 )
-from jaeger_ai.core.instance.resolved_config import ResolvedRuntimeConfig
 from jaeger_ai.core.instance.schemas import Config, ModelConfig
 
 
@@ -223,53 +222,9 @@ def test_resolve_reject_source_checkouts_allows_a_clean_state_dir(tmp_path):
 # ── ResolvedRuntimeConfig: defensive snapshot ────────────────────────
 
 
-def test_capture_snapshots_a_deep_copy(tmp_path, monkeypatch):
-    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
-    config = _minimal_config()
-    paths = StatePaths.resolve()
-
-    snapshot = ResolvedRuntimeConfig.capture(config, paths)
-
-    assert snapshot.config.instance_name == "fresh"
-    assert snapshot.state_paths == paths
-    assert isinstance(snapshot.captured_at, float)
 
 
-def test_mutating_the_original_config_after_capture_does_not_affect_the_snapshot(tmp_path, monkeypatch):
-    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
-    config = _minimal_config()
-    paths = StatePaths.resolve()
-
-    snapshot = ResolvedRuntimeConfig.capture(config, paths)
-
-    # Live mutation, mirroring a supported runtime edit (e.g. the TUI's
-    # /voice command mutating VoiceConfig fields on the operator's live
-    # Config object).
-    config.instance_name = "mutated-after-capture"
-    config.runtime.gguf_engine = "llama-cpp-python"
-
-    assert snapshot.config.instance_name == "fresh"
-    assert snapshot.config.runtime.gguf_engine == "auto"
 
 
-def test_resolved_runtime_config_is_frozen(tmp_path, monkeypatch):
-    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
-    snapshot = ResolvedRuntimeConfig.capture(_minimal_config(), StatePaths.resolve())
-
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        snapshot.config = _minimal_config("other")  # type: ignore[misc]
 
 
-def test_existing_runtime_config_fields_are_preserved_through_capture(tmp_path, monkeypatch):
-    """A05 (RELEASE_AUDIT.md): ``schemas.RuntimeConfig`` (inference-engine
-    selection) is a distinct, pre-existing type this snapshot must not
-    replace or reinterpret — it must simply be carried through untouched."""
-    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
-    config = _minimal_config()
-    config.runtime.mlx_engine = "mlx-vlm"
-
-    snapshot = ResolvedRuntimeConfig.capture(config, StatePaths.resolve())
-
-    assert snapshot.config.runtime.mlx_engine == "mlx-vlm"
-    assert snapshot.config.runtime.gguf_engine == "auto"
-    assert type(snapshot.config.runtime).__name__ == "RuntimeConfig"

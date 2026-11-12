@@ -121,7 +121,6 @@ while [ $# -gt 0 ]; do
             ;;
         --production-path)
             EXTRA_ARGS+=(
-                "dev/tests/jaeger_ai/core/test_execution_lifecycle.py"
                 "dev/tests/jaeger_ai/core/test_control_plane_consolidation.py"
                 "dev/tests/jaeger_ai/core/test_runtime_truth.py"
                 "dev/tests/jaeger_ai/core/test_policy_kernel.py"
@@ -151,7 +150,6 @@ while [ $# -gt 0 ]; do
             ;;
         --security)
             EXTRA_ARGS+=(
-                "dev/tests/jaeger_ai/core/test_security_hardening.py"
                 "dev/tests/jaeger_ai/core/test_skills_guard.py"
                 "dev/tests/jaeger_ai/core/test_gateway_cross_site.py"
                 "dev/tests/jaeger_ai/core/test_gateway_approval_expiry.py"

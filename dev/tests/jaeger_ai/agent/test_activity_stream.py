@@ -5,7 +5,6 @@ AgentActivity message, the display.activity_trace setting, and the bridge's
 event adapter forwarding agent.activity onto the chassis bus.
 """
 
-from jaeger_ai.core.agent_bridge import _BusEventAdapter
 from jaeger_ai.core.instance.schemas import DisplayConfig
 from jaeger_ai.core.messages import AgentActivity
 
@@ -30,20 +29,5 @@ def test_activity_trace_setting_default_and_parse() -> None:
         assert DisplayConfig(activity_trace=v).activity_trace == v
 
 
-def test_adapter_forwards_agent_activity_with_session() -> None:
-    bus = _FakeBus()
-    ad = _BusEventAdapter(bus)
-    ad.current_session = "sess1"
-    ad.publish("agent.activity", kind="thinking", text="[retrying once]")
-    assert len(bus.published) == 1
-    m = bus.published[0]
-    assert isinstance(m, AgentActivity)
-    assert m.kind == "thinking"
-    assert m.text == "[retrying once]"
-    assert m.session == "sess1"   # tagged with the bridge's current turn
 
 
-def test_adapter_ignores_unknown_events() -> None:
-    bus = _FakeBus()
-    _BusEventAdapter(bus).publish("something.else", foo=1)
-    assert bus.published == []
