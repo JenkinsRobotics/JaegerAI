@@ -13,6 +13,7 @@ from jaeger_ai.core.gateway.session_store import (
     RequestConflict,
     SCHEMA_VERSION,
 )
+from jaeger_ai.contract.trace import RESPONSIBILITY_EVENTS  # additive live-status events
 
 
 class _Request:
@@ -166,7 +167,7 @@ def test_terminal_outcome_drains_the_next_queue_item_once(tmp_path: Path):
     assert started == ["q1"]
     assert app.store.get_request("q1")["status"] == "admitted"
     assert app.store.list_queue("session") == []
-    events = [event.event for event in app.event_bus.get_replay_events("session") if event.event != "message.created"]
+    events = [event.event for event in app.event_bus.get_replay_events("session") if event.event != "message.created" and event.event not in RESPONSIBILITY_EVENTS]
     assert events == ["turn.start", "turn.finish", "turn.start", "queue.updated"]
 
 

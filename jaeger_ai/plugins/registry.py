@@ -444,7 +444,7 @@ def install_agent_hook_bridge() -> None:
         def _event(legacy: str) -> Callable[[dict[str, Any]], None]:
             def handler(payload: dict[str, Any]) -> None:
                 data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-                fire_hook(legacy, event=payload.get("event"), session_id=payload.get("session_id"),
+                fire_hook(legacy, event_name=payload.get("event"), session_id=payload.get("session_id"),
                           request_id=data.get("request_id"), data=data)
             return handler
 

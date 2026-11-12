@@ -162,6 +162,20 @@ def _default_turn_start_hook() -> TurnStartHook | None:
 
 
 
+
+def _emit_fallback(adapters: list[Any], failed: Any, reason: str) -> None:
+    """Report walking the adapter chain (or running out of it)."""
+    from jaeger_agent import live as _live
+    try:
+        nxt = adapters[adapters.index(failed) + 1]
+    except (ValueError, IndexError):
+        nxt = None
+    _live.emit("reliability.fallback" if nxt is not None else "reliability.exhausted", {
+        "from": failed.describe() if hasattr(failed, "describe") else type(failed).__name__,
+        "to": (nxt.describe() if hasattr(nxt, "describe") else type(nxt).__name__) if nxt is not None else None,
+        "reason": reason,
+    })
+
 def _model_identity(adapter: Any, raw: Any) -> dict[str, str]:
     """Configured model/provider of ``adapter`` and, when the response says,
     the model that actually answered. Strings only; never prompt content."""
@@ -738,6 +752,14 @@ class JaegerAgent:
             # nudges. ``_one_model_step_with_length_retry`` returns the
             # final assistant message after the retry chain settles.
             assistant_msg = self._one_model_step_with_length_retry()
+            from jaeger_agent import live as _live
+            _calls = assistant_msg.get("tool_calls") if isinstance(assistant_msg, dict) else None
+            _live.emit("loop.iteration", {
+                "index": iteration, "max": self.max_iterations,
+                "decision": "continue" if _calls else "answer",
+                "reason": f"{len(_calls)} tool call(s) requested" if _calls else "model returned text without tool calls",
+                "tool_calls": len(_calls or []),
+            })
 
             # MODEL deliberation, if the adapter separated any out of the
             # visible answer. Fired here rather than inside the adapter so
@@ -1950,6 +1972,9 @@ class JaegerAgent:
                     # was the last adapter, the caller sees ``stalled``.
                     last_exc = exc
                     self.last_halt_reason = "stalled"
+                    from jaeger_agent import live as _live
+                    _live.emit("reliability.timeout", {"what": "model call", "adapter": adapter.describe(),
+                                                       "after_s": self.stale_call_timeout_s})
                     self.callbacks.on_thinking(
                         f"[adapter {adapter.describe()} stalled after "
                         f"{self.stale_call_timeout_s:.0f}s; "
@@ -1962,7 +1987,10 @@ class JaegerAgent:
                             f"[adapter {adapter.describe()} stalled — "
                             f"retry {attempt}/{self._STALE_RETRIES}]"
                         )
+                        _live.emit("reliability.retry", {"adapter": adapter.describe(), "kind": "stalled",
+                                                         "attempt": attempt, "of": self._STALE_RETRIES})
                         continue
+                    _emit_fallback(adapters, adapter, "stalled")
                     break  # next adapter
                 except Exception as exc:  # noqa: BLE001 — adapter chain absorbs
                     last_exc = exc
@@ -1988,6 +2016,10 @@ class JaegerAgent:
                     if attempt < cap and not self._interrupt_event.is_set():
                         attempt += 1
                         delay = _retry_delay(kind, attempt)
+                        from jaeger_agent import live as _live
+                        _live.emit("reliability.retry", {"adapter": adapter.describe(), "kind": str(kind).lower(),
+                                                         "attempt": attempt, "of": cap, "delay_s": round(delay, 2),
+                                                         "error": type(exc).__name__})
                         self.callbacks.on_thinking(
                             f"[adapter {adapter.describe()} "
                             f"{kind.lower().replace('_', ' ')} — retry "
@@ -2003,6 +2035,7 @@ class JaegerAgent:
                         f"[adapter {adapter.describe()} failed: "
                         f"{type(exc).__name__} ({kind.lower()})]"
                     )
+                    _emit_fallback(adapters, adapter, f"{type(exc).__name__} ({kind.lower()})")
                     break  # next adapter
         # Every adapter raised — surface the last exception so the
         # caller (REPL, daemon) can decide what to do.

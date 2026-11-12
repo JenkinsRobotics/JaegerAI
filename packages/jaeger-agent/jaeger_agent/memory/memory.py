@@ -1576,3 +1576,42 @@ def list_people() -> list[dict[str, Any]]:
 def forget_person(name: str) -> bool:
     """Drop a person from the index."""
     return forget(_PERSON_KEY, subject=(name or "").strip())
+
+
+
+# ── live observation (jaeger_agent.live) ───────────────────────────────
+# Every read/write of the memory store reports ``state.memory`` on the host's
+# stream: operation and outcome only — never keys' values or fact text.
+def _observe_memory() -> None:
+    import functools
+
+    def wrap(fn, op):
+        @functools.wraps(fn)
+        def inner(*args, **kwargs):
+            from jaeger_agent import live as _live
+            ok, out = False, None
+            try:
+                out = fn(*args, **kwargs)
+                ok = True
+                return out
+            finally:
+                if _live.active():
+                    data = {"op": op, "fn": fn.__name__, "ok": ok}
+                    if isinstance(out, (list, dict)):
+                        data["count"] = len(out)
+                    elif op == "read":
+                        data["hit"] = out is not None
+                    _live.emit("state.memory", data)
+        inner.__wrapped_memory__ = True  # type: ignore[attr-defined]
+        return inner
+
+    g = globals()
+    for name, op in (("remember", "write"), ("remember_if_absent", "write"), ("forget", "delete"),
+                     ("recall", "read"), ("recall_history", "read"), ("list_facts", "read"),
+                     ("search_memory", "recall"), ("append_episodic", "write"), ("load_recent_turns", "read")):
+        fn = g.get(name)
+        if callable(fn) and not getattr(fn, "__wrapped_memory__", False):
+            g[name] = wrap(fn, op)
+
+
+_observe_memory()

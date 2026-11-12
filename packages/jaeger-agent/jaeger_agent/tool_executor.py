@@ -301,6 +301,15 @@ class HookedToolExecutor:
                 # Evaluate through canonical authority boundary
                 auth_decision = authority.authorize(proposal)
                 authority_evaluated = True
+                from jaeger_agent import live as _live
+                _needs = (not auth_decision.is_authorized
+                          and auth_decision.status == AuthorizationStatus.REQUIRES_CONFIRMATION)
+                _live.emit("policy.decision", {
+                    "tool": tool.name,
+                    "decision": "allow" if auth_decision.is_authorized else ("needs_approval" if _needs else "deny"),
+                    "policy": str(getattr(auth_decision, "policy_name", "") or "policy"),
+                    "reason": str(auth_decision.reason or "")[:300],
+                })
 
                 if runtime is not None:
                     try:
