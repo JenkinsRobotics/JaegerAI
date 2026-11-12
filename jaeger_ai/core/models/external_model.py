@@ -691,3 +691,16 @@ def record_use(layout: Any, provider: str, model: str) -> None:
     except OSError:
         pass
 
+
+def _install_agent_seams() -> None:
+    """Give jaeger-agent's fallback builder this client without it importing us."""
+    from jaeger_agent.loop.runtime_bridge import install_fallback_client_factory
+    from jaeger_ai.core.models.configuration import _BASE_URLS, _CREDENTIALS
+    # Resolve the class at call time so a replaced module attribute is honoured.
+    install_fallback_client_factory(
+        lambda target, layout: globals()["ExternalModelClient"](target, layout),
+        _BASE_URLS, _CREDENTIALS,
+    )
+
+
+_install_agent_seams()
