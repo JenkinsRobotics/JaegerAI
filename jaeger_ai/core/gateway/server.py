@@ -5258,6 +5258,14 @@ class JaegerGatewayApp:
                     "local_only": bool(options.get("local_only")),
                     "tools": "none" if grant == [] else ("granted subset" if grant is not None else "owner catalog"),
                 })
+                if continuation_state is not None:
+                    passes = int(continuation_state.get("live_passes") or 0) + 1
+                    continuation_state["live_passes"] = passes
+                    if passes > 1:
+                        _live.emit("loop.continuation", {
+                            "pass": passes,
+                            "reason": "owner continuation: the turn's objective was not closed by the last inner loop",
+                        })
                 outcome = runtime.run_subordinate_react(
                     prompt,
                     session_key=session_key,

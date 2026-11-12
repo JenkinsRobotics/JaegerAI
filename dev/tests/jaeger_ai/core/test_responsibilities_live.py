@@ -174,3 +174,28 @@ async def test_responsibility_arrives_live_over_sse(turn, responsibility):
         status = frames[0]
         assert status["event"] == "stream.status" and status["id"] is None  # never moves a cursor
         assert status["data"]["state"] == "connected" and status["data"]["replaying"] > 0
+
+
+def test_loop_step_reads_continue_when_the_model_writes_its_tool_call_as_text(tmp_path, monkeypatch):
+    """CLI and local lanes often emit tool calls as plain text; the live step
+    status must be decided after recovery, or every step reads "answer"."""
+    from jaeger_agent import live
+
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    clear_registry()
+
+    @register_tool("look_up_notes", "Look up notes.", _Args, side_effect="read")
+    def _look_up_notes(topic: str = "x") -> dict:
+        return {"ok": True}
+
+    agent = JaegerAgent(adapter=_Scripted([
+        {"role": "assistant", "content": '<tool_call>{"name": "look_up_notes", "arguments": {"topic": "trip"}}</tool_call>'},
+        {"role": "assistant", "content": "Done."},
+    ]))
+    got = []
+    with live.bind(lambda e, d: got.append((e, d))):
+        agent.run_turn("check my notes")
+    steps = [d for e, d in got if e == "loop.iteration"]
+    clear_registry()
+    assert steps[0]["decision"] == "continue" and steps[0]["tool_calls"] == 1
+    assert steps[-1]["decision"] == "answer"
