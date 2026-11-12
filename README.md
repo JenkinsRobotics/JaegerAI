@@ -226,6 +226,16 @@ engines, and JaegerAI in dependency order. The environment defaults to
 updates to refresh installed code. Writable skills and operator state live
 under `~/.jaeger`, or the configured state directory.
 
+For development on a checkout, point the venv at the source instead of wheels
+so runtime code and repo code cannot drift (re-run after `./install.sh`, which
+reinstalls wheels):
+
+```bash
+~/.jaeger/venv/bin/pip install --no-deps --no-build-isolation \
+  -e . -e packages/jaeger-os -e packages/jaeger-agent \
+  -e packages/jaeger-whisper-stt -e packages/jaeger-kokoro-tts
+```
+
 For the MacBook development → Mac Studio test workflow, develop and verify on
 master, then select the exact tested commit on the Studio with
 `jaeger update --ref <commit>`. Quit the native app and stop Gateway/WebUI
