@@ -173,3 +173,28 @@ def test_page_routes_accept_agent_ids_but_not_dots():
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
     assert mod.is_page_route("/agents/native%3Ajaeger/avatar") and mod.is_page_route("/agents/native:jaeger/avatar")
     assert not mod.is_page_route("/agents/../etc") and not mod.is_page_route("/agents/a.html")
+
+
+def test_launcher_exports_only_jaeger_names():
+    script = (ROOT.parents[4] / "scripts/run-jaeger-webui.sh").read_text()
+    assert "export HERMES_" not in script
+
+
+def test_server_maps_jaeger_names_onto_internal_names():
+    import ast
+    import os
+    server = ROOT.parents[4] / "jaeger_ai/features/webui/server.py"
+    tree = ast.parse(server.read_text())
+    keep = [n for n in tree.body if (isinstance(n, ast.Assign) and any(
+        getattr(t, "id", "") == "_JAEGER_ENV_ALIASES" for t in n.targets))
+        or (isinstance(n, ast.FunctionDef) and n.name == "_apply_jaeger_env")]
+    assert len(keep) == 2
+    ns = {"os": os}
+    exec(compile(ast.Module(body=keep, type_ignores=[]), str(server), "exec"), ns)
+    mod = type("M", (), {"_apply_jaeger_env": staticmethod(ns["_apply_jaeger_env"])})
+    env = {"JAEGER_WEBUI_HOST": "127.0.0.1", "HERMES_WEBUI_HOST": "0.0.0.0",
+           "JAEGER_WEBUI_AGENT_STATE": "/tmp/agent", "JAEGER_WEBUI_PORT": "8790"}
+    mod._apply_jaeger_env(env)
+    assert env["HERMES_WEBUI_HOST"] == "127.0.0.1"  # inherited legacy value never wins
+    assert env["HERMES_HOME"] == "/tmp/agent"
+    assert env["HERMES_WEBUI_PORT"] == "8790"
