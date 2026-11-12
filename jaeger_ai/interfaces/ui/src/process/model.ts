@@ -21,6 +21,8 @@ export interface Span {
   detail?: string;
   /** 0..1 when the tool reports it (MCP-style progress/total). */
   progress?: number;
+  /** Indices (into the folded event list) of the events that touched this span (capped). */
+  events: number[];
 }
 export interface ProcessState {
   spans: Map<string, Span>;
@@ -60,7 +62,7 @@ export function apply(state: ProcessState, e: GatewayEvent, index: number): Proc
   let span = state.spans.get(t.span_id);
   if (!span) {
     span = { id: t.span_id, parent: t.parent_span_id, kind: t.kind, name: t.name, state: t.state ?? "idle",
-      runId: t.run_id, startTs: t.ts, endTs: null, durationMs: null, firstIndex: index, lastIndex: index, children: [] };
+      runId: t.run_id, startTs: t.ts, endTs: null, durationMs: null, firstIndex: index, lastIndex: index, children: [], events: [] };
     state.spans.set(span.id, span);
     if (t.kind === "run") state.runs.push(span.id);
     const parent = span.parent ? state.spans.get(span.parent) : undefined;
@@ -74,6 +76,7 @@ export function apply(state: ProcessState, e: GatewayEvent, index: number): Proc
     if (parent && !parent.children.includes(span.id)) parent.children.push(span.id);
   }
   span.lastIndex = index;
+  if (span.events.length < 60) span.events.push(index);
   span.detail = detailOf(e) ?? span.detail;
   const fraction = (e.payload as Record<string, unknown> | undefined)?.fraction;
   if (typeof fraction === "number" && Number.isFinite(fraction)) span.progress = Math.max(0, Math.min(1, fraction));
@@ -116,4 +119,17 @@ export function lamps(state: ProcessState) {
   const last = state.runs.length ? state.spans.get(state.runs[state.runs.length - 1]) : undefined;
   if (last?.state === "failed" || last?.state === "unknown") fault = true;
   return { run, model, tool, waiting, fault };
+}
+
+/** Every span under a run in depth-first order with its depth (waterfall rows). */
+export function tree(state: ProcessState, runId: string): { span: Span; depth: number }[] {
+  const out: { span: Span; depth: number }[] = [];
+  const walk = (id: string, depth: number) => {
+    const s = state.spans.get(id); if (!s) return;
+    out.push({ span: s, depth });
+    s.children.map((c) => state.spans.get(c)).filter((c): c is Span => !!c)
+      .sort((a, b) => a.firstIndex - b.firstIndex).forEach((c) => walk(c.id, depth + 1));
+  };
+  walk(runId, 0);
+  return out;
 }
