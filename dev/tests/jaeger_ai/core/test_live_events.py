@@ -186,3 +186,32 @@ def test_live_emit_is_noop_without_host():
     from jaeger_agent import live
     live.emit("tool.progress", {"message": "x"})  # no emitter bound: nothing raises
     assert live.current_tool_call() is None
+
+
+def test_gateway_tool_events_use_the_loops_real_call_id(tmp_path, monkeypatch):
+    from jaeger_agent import live
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp, _live_activity_id
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    store = GatewaySessionStore(tmp_path / "gateway.sqlite3")
+    app = JaegerGatewayApp(store=store)
+    store.admit_request("s", "q", request_id="req-1")
+    callbacks, flush = app._turn_stream_callbacks("s", "req-1")
+    # two concurrent calls of the same tool finish out of order: ids still pair
+    with live.tool_call("call_A"):
+        callbacks.on_tool_progress("read_file", "start", {"path": "a"})
+    with live.tool_call("call_B"):
+        callbacks.on_tool_progress("read_file", "start", {"path": "b"})
+    with live.tool_call("call_B"):
+        callbacks.on_tool_done("read_file", {}, {"ok": True}, True, None, 0.1)
+    with live.tool_call("call_A"):
+        callbacks.on_tool_done("read_file", {}, {"ok": False}, False, "x", 0.2)
+    flush()
+    rows = [(e.event, e.data.get("call_id"), e.data.get("ok")) for e in app.event_bus.get_replay_events("s")
+            if e.event.startswith("tool.")]
+    a, b = _live_activity_id("req-1", "call_A"), _live_activity_id("req-1", "call_B")
+    assert ("tool.started", a, None) in rows and ("tool.started", b, None) in rows
+    done = {cid: ok for ev, cid, ok in rows if ev != "tool.started"}
+    assert done[b] is True and done[a] is False
+    assert _live_activity_id("req-2", "call_A") != a  # reused provider ids stay unique per turn

@@ -285,6 +285,14 @@ def _tool_event_args(args: Any) -> dict[str, Any]:
     return shown
 
 
+def _live_activity_id(request_id: str, call_id: str) -> str:
+    """Durable activity id for one model tool call: namespaced by request so a
+    provider that reuses ids (``call_0``) across turns stays unique."""
+    import re as _re
+    safe = _re.sub(r"[^A-Za-z0-9_.-]", "", str(call_id))[:80] or uuid.uuid4().hex
+    return f"tool_{str(request_id).replace('-', '')[:12]}_{safe}"
+
+
 def _safe_tool_event_name(value: Any) -> str:
     """Return a bounded identifier, never arbitrary tool-supplied text.
 
@@ -4862,11 +4870,16 @@ class JaegerGatewayApp:
         pending: list[str] = []
         text_item: list[str | None] = [None]
         last = [time.monotonic()]
-        # ``AgentCallbacks`` predates call ids.  Starts and finishes are serial
-        # at the loop boundary (including parallel read batches), so a FIFO per
-        # raw catalog name pairs them without publishing either the args or the
-        # raw name. UUIDs remain stable because the event payload is durable.
+        # The loop publishes the model's real tool-call id on a ContextVar
+        # (jaeger_agent.live); the activity id is derived from it so delegates,
+        # hooks and progress land on the same span. A FIFO per raw name remains
+        # only as the fallback for callers that do not set it.
         active_tools: dict[str, list[str]] = {}
+
+        def live_activity() -> str | None:
+            from jaeger_agent import live as _live
+            call = _live.current_tool_call()
+            return _live_activity_id(request_id, call) if call else None
         file_snapshots: dict[str, list[dict]] = {}
         # One model call = one step span (contract/trace.py). Text/reasoning
         # carry the step that produced them; tools carry the step that asked.
@@ -4947,7 +4960,7 @@ class JaegerGatewayApp:
             flush()
             end_reasoning()
             raw_name = str(name or "")
-            activity_id = f"tool_{uuid.uuid4().hex}"
+            activity_id = live_activity() or f"tool_{uuid.uuid4().hex}"
             if timing is not None:
                 timing.tool_start(_safe_tool_event_name(name))
             self.event_bus.publish(session_id, "turn.progress", {
@@ -5016,9 +5029,14 @@ class JaegerGatewayApp:
             raw_name = str(name or "")
             if timing is not None:
                 timing.tool_done(_safe_tool_event_name(name))
+            real = live_activity()
             with lock:
                 queued = active_tools.get(raw_name)
-                activity_id = queued.pop(0) if queued else f"tool_{uuid.uuid4().hex}"
+                if real and queued and real in queued:
+                    queued.remove(real)
+                    activity_id = real
+                else:
+                    activity_id = queued.pop(0) if queued else (real or f"tool_{uuid.uuid4().hex}")
                 if queued == []:
                     active_tools.pop(raw_name, None)
             snapshots = file_snapshots.pop(activity_id, [])
@@ -5160,6 +5178,9 @@ class JaegerGatewayApp:
             live_ids = {"turn_id": request_row.get("turn_id") or request_id, "request_id": request_id}
 
             def _live_emit(name: str, data: dict[str, Any]) -> None:
+                call = str(data.get("call_id") or "")
+                if call and not call.startswith("sub_"):  # child-agent calls keep their own ids
+                    data = {**data, "call_id": _live_activity_id(request_id, call)}
                 self.event_bus.publish(session_key, name, {**live_ids, **data})
 
             with _live.bind(_live_emit), task_scope(self.task_owner, session_id=session_key, request_id=request_id,
