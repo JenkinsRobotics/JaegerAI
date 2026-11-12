@@ -77,6 +77,8 @@ EVENT_TYPES = frozenset({
     # that deny/rewrite a tool call; sub-agent runs started from a tool.
     "model.started", "model.finished", "hook.decision", "subagent.started", "subagent.finished",
     "subagent.tool.started", "subagent.tool.finished", "tool.progress",
+    "loop.iteration", "loop.stop", "state.memory", "state.saved", "policy.decision", "route.selected",
+    "reliability.retry", "reliability.fallback", "reliability.exhausted", "reliability.timeout", "stream.status",
     # Connect Apps panel: {id, state, audit?} on the global stream.
     "connect_app.updated",
     # Published by POST /v1/runtime/tier (was emitted but never registered).

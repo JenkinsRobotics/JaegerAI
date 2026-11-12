@@ -35,6 +35,13 @@ from typing import Any
 VERSION = 1
 TERMINAL_STATES = frozenset({"succeeded", "failed", "cancelled", "denied", "unknown"})
 ACTIVE_STATES = frozenset({"running", "waiting"})
+#: Framework-responsibility events (execution loop, state, permissions,
+#: orchestration, reliability): annotate their run, never become nodes.
+RESPONSIBILITY_EVENTS = frozenset({
+    "loop.iteration", "loop.stop", "state.memory", "state.saved", "policy.decision",
+    "route.selected", "reliability.retry", "reliability.fallback", "reliability.exhausted",
+    "reliability.timeout",
+})
 
 _lock = threading.Lock()
 _seq: "OrderedDict[str, int]" = OrderedDict()
@@ -159,6 +166,8 @@ def classify(event: str, d: dict[str, Any]) -> dict[str, Any] | None:
         return node("hook", f"hook:{_s(d.get('hook'))}:{action}:{call}", f"tool:{call}" if call else run,
                     f"{_s(d.get('hook')) or 'hook'} · {action}", "denied" if action == "deny" else "succeeded",
                     "CUSTOM")
+    if event in RESPONSIBILITY_EVENTS and run:
+        return node("info", step or run, run if step else None, event, None, "CUSTOM")
     if event in {"turn.progress", "tools.selected", "turn.context", "turn.plan", "turn.model",
                  "sources", "files.changed", "search.count", "follow_ups", "turn.steer", "turn.cancel"} and run:
         return node("info", step or run, run if step else None, event, None,

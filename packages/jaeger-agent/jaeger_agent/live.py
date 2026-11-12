@@ -63,7 +63,7 @@ def active() -> bool:
 
 
 def emit(event: str, data: dict[str, Any] | None = None) -> None:
-    """Publish ``event`` on the bound host stream; stamps the current tool call."""
+    """Publish ``event`` on the bound host stream; stamps the current tool call and sub-agent."""
     fn = _emitter.get()
     if fn is None:
         return
@@ -71,6 +71,9 @@ def emit(event: str, data: dict[str, Any] | None = None) -> None:
     call = _tool_call.get()
     if call and "call_id" not in payload:
         payload["call_id"] = call
+    sub = _subagent.get()
+    if sub and "subagent_id" not in payload:
+        payload["subagent_id"] = sub
     try:
         fn(event, payload)
     except Exception:  # noqa: BLE001 — reporting never breaks the work

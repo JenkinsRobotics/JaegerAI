@@ -5251,7 +5251,14 @@ class JaegerGatewayApp:
                     interaction_request_sink(self._clarify_sink(session_key, request_id)), \
                     tool_allowlist(list(grant) if grant is not None else None), \
                     read_confinement(self._read_roots(runtime, selection, self._staged_upload_dir(session_key))):
-                return runtime.run_subordinate_react(
+                _live.emit("route.selected", {
+                    "model": selected_model or None, "lane": lane or None,
+                    "provider": str(selection.get("provider") or lane or "") or None,
+                    "reason": "admitted request snapshot" if execution is not None else "session default (recovered request)",
+                    "local_only": bool(options.get("local_only")),
+                    "tools": "none" if grant == [] else ("granted subset" if grant is not None else "owner catalog"),
+                })
+                outcome = runtime.run_subordinate_react(
                     prompt,
                     session_key=session_key,
                     request_id=request_id,
@@ -5273,6 +5280,13 @@ class JaegerGatewayApp:
                         native_session=f"{OWNER_RUN_SESSION_PREFIX}{session_key}",
                     ),
                 )
+                halt = (outcome or {}).get("halt_reason") if isinstance(outcome, dict) else None
+                _live.emit("loop.stop", {
+                    "reason": str(halt) if halt else "final_answer",
+                    "iterations": (outcome or {}).get("iterations") if isinstance(outcome, dict) else None,
+                    "ok": not halt or str(halt) in {"final_answer", "skip_final"},
+                })
+                return outcome
         finally:
             flush()
 
@@ -6058,6 +6072,12 @@ class JaegerGatewayApp:
                 deliver_responses(self, request_id=request_id)
             except Exception:
                 logger.exception("Peer response delivery deferred to inbox/goal read recovery")
+            if not persisted.get("replayed"):
+                self.event_bus.publish(session_id, "state.saved", {
+                    "request_id": request_id, "turn_id": (self.store.get_request(request_id) or {}).get("turn_id") or request_id,
+                    "what": "session transcript + request receipt", "status": status,
+                    "messages": len((self.store.get_session(session_id) or {}).get("messages") or []),
+                })
             if persisted.get("event"):
                 self.event_bus.fanout(persisted["event"])
             if not persisted.get("replayed"):
@@ -6567,6 +6587,14 @@ class JaegerGatewayApp:
 
         events = (self.event_bus.subscribe(session_id, since_event_id=last_event_id, session_only=True)
                   if session_only else self.event_bus.subscribe(session_id, since_event_id=last_event_id))
+        if session_only:
+            # Transport health for the Process view's Events lamp. Not durable and
+            # carries no id, so it never moves a resume cursor.
+            status = {"event": "stream.status", "session_id": session_id, "timestamp": time.time(), "data": {
+                "state": "resumed" if last_event_id else "connected", "resumed_from": last_event_id,
+                "latest_event_id": window.get("latest_event_id"), "oldest_event_id": window.get("oldest_event_id"),
+                "replaying": max(0, int(window.get("latest_event_id") or 0) - int(last_event_id or 0))}}
+            await response.write(f"event: stream.status\ndata: {json.dumps(status)}\n\n".encode("utf-8"))
         pending = asyncio.create_task(anext(events))
         try:
             while True:
@@ -6587,7 +6615,15 @@ class JaegerGatewayApp:
                 chunk = f"id: {evt.event_id}\nevent: {evt.event}\ndata: {payload}\n\n"
                 await response.write(chunk.encode("utf-8"))
                 pending = asyncio.create_task(anext(events))
-        except (asyncio.CancelledError, ConnectionResetError, ReplayGap, StopAsyncIteration):
+        except ReplayGap:
+            if session_only:  # tell the client its cursor fell out of retention
+                gap = {"event": "stream.status", "session_id": session_id, "timestamp": time.time(),
+                       "data": {"state": "gap", "resumed_from": last_event_id}}
+                try:
+                    await response.write(f"event: stream.status\ndata: {json.dumps(gap)}\n\n".encode("utf-8"))
+                except Exception:  # noqa: BLE001
+                    pass
+        except (asyncio.CancelledError, ConnectionResetError, StopAsyncIteration):
             pass
         finally:
             pending.cancel()

@@ -7,6 +7,7 @@ import pytest
 from jaeger_ai.core.gateway.event_bus import GatewayEventBus, ReplayGap
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+from jaeger_ai.contract.trace import RESPONSIBILITY_EVENTS  # additive live-status events
 
 
 @pytest.fixture(autouse=True)
@@ -232,7 +233,7 @@ async def test_confirmed_native_halt_is_failed_not_unknown(tmp_path, monkeypatch
         "reply": {"halt_reason": "repeated_tool_failure"}})
     await app._execute_turn("s", row["turn_id"], "research", request_id="halt")
     assert store.get_request("halt")["status"] == "failed"
-    assert [e.event for e in app.event_bus.get_replay_events("s") if e.event not in {"jaeger.state", "message.created"}] == ["turn.start", "turn.failed"]
+    assert [e.event for e in app.event_bus.get_replay_events("s") if e.event not in {"jaeger.state", "message.created"} | RESPONSIBILITY_EVENTS] == ["turn.start", "turn.failed"]
 
 
 def test_handoff_terminal_result_is_immutable(tmp_path):

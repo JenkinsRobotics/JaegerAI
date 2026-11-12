@@ -7,6 +7,7 @@ import json
 from jaeger_ai.core.gateway.event_bus import GatewayEventBus
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+from jaeger_ai.contract.trace import RESPONSIBILITY_EVENTS  # additive live-status events
 
 
 def _admitted_app(tmp_path, *, session_id: str = "session", request_id: str = "request"):
@@ -193,7 +194,7 @@ def test_owner_react_path_installs_tool_callbacks_and_flushes_after_tool(monkeyp
     assert result["text"] == "alphaomega"
     replay = GatewaySessionStore(store.path).replay_events("session")["events"]
     request_events = [event for event in replay if event["data"].get("request_id") == "request"]
-    assert [event["event"] for event in request_events] == [
+    assert [event["event"] for event in request_events if event["event"] not in RESPONSIBILITY_EVENTS] == [
         "turn.start", "turn.delta", "turn.progress", "tool.started", "tool.completed", "turn.delta",
     ]
     serialized = json.dumps(request_events)

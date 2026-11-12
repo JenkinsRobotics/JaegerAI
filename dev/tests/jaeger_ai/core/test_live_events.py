@@ -341,3 +341,15 @@ def test_older_turns_replay_from_per_session_history_past_the_window(tmp_path, m
     assert "trace" not in page["events"][2]["data"]
     older = store.trace_history("s", before=page["events"][1]["event_id"], limit=10)
     assert [e["event"] for e in older["events"]] == ["turn.start"]
+
+
+def test_live_emit_stamps_the_running_subagent():
+    from jaeger_agent import live
+
+    got = []
+    with live.bind(lambda e, d: got.append((e, d))):
+        live.emit("loop.iteration", {"index": 1})
+        with live.subagent("sub_7"), live.tool_call("sub_7:c1"):
+            live.emit("loop.iteration", {"index": 2})
+    assert "subagent_id" not in got[0][1]
+    assert got[1][1]["subagent_id"] == "sub_7" and got[1][1]["call_id"] == "sub_7:c1"
