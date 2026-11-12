@@ -161,6 +161,34 @@ def _default_turn_start_hook() -> TurnStartHook | None:
     return getattr(module, "reset_read_tracker", None) if module else None
 
 
+
+def _model_identity(adapter: Any, raw: Any) -> dict[str, str]:
+    """Configured model/provider of ``adapter`` and, when the response says,
+    the model that actually answered. Strings only; never prompt content."""
+    out: dict[str, str] = {}
+    route = getattr(adapter, "route", None)
+    receipt = route.receipt() if callable(getattr(route, "receipt", None)) else None
+    if isinstance(receipt, dict):  # governed call: the routing decision itself
+        for key, name in (("model", "model"), ("provider", "provider"), ("location", "location"),
+                          ("reason", "route_reason")):
+            if receipt.get(key):
+                out[name] = str(receipt[key])[:120]
+    model = out.get("model") or next((v for a in ("model", "model_name", "model_id", "backend_id")
+                  if isinstance(v := getattr(adapter, a, None), str) and v), None)
+    if model:
+        out["model"] = str(model)[:120]
+    provider = next((v for a in ("provider", "provider_name", "provider_id")
+                     if isinstance(v := getattr(adapter, a, None), str) and v), None)
+    provider = out.get("provider") or provider
+    if not provider:
+        kind = type(adapter).__name__.replace("BackendAdapter", "").replace("Adapter", "")
+        provider = kind.lower() or "model"
+    out["provider"] = str(provider)[:80]
+    actual = raw.get("model") if isinstance(raw, dict) else getattr(raw, "model", None)
+    if isinstance(actual, str) and actual:
+        out["actual_model"] = actual[:120]
+    return out
+
 class JaegerAgent:
     """One agent — one adapter (with optional fallbacks), one
     conversation, one cancel flag. Build a fresh instance per logical
@@ -1838,6 +1866,10 @@ class JaegerAgent:
                     if not getattr(self, "_finalizing", False):
                         self.callbacks.on_tool_selection(self._selection_receipt())
                     self.callbacks.on_model_input(formatted)
+                    try:  # lets the host label the step before the call returns
+                        self.callbacks.model_identity = _model_identity(adapter, None)
+                    except Exception:  # noqa: BLE001
+                        pass
                     self.callbacks.on_model_call_start()
                     from jaeger_agent.hooks import registry as _hooks
                     _model_t0 = time.monotonic()
@@ -1872,7 +1904,8 @@ class JaegerAgent:
                         ),
                     )
                     except BaseException as _model_exc:
-                        self.callbacks.on_model_call_done({"failed": 1})
+                        self.callbacks.on_model_call_done({"failed": 1, **_model_identity(adapter, None),
+                                                           "error": type(_model_exc).__name__})  # type: ignore[dict-item]
                         _hooks.fire("post_model", {"ok": False, "error": type(_model_exc).__name__,
                                                    "duration_ms": int((time.monotonic() - _model_t0) * 1000)})
                         raise
@@ -1885,7 +1918,7 @@ class JaegerAgent:
                         "prompt_tokens": max(0, self.last_prompt_tokens - before_prompt_tokens),
                         "completion_tokens": max(0, self.last_completion_tokens - before_completion_tokens),
                     }
-                    self.callbacks.on_model_call_done(_usage)
+                    self.callbacks.on_model_call_done({**_usage, **_model_identity(adapter, raw)})  # type: ignore[dict-item]
                     _hooks.fire("post_model", {"ok": True, "usage": dict(_usage),
                                                "duration_ms": int((time.monotonic() - _model_t0) * 1000)})
                     if self.context_guard is not None and per_call_prompt:

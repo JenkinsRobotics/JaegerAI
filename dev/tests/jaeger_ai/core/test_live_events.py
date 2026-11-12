@@ -254,3 +254,67 @@ def test_plugin_hooks_ride_the_agent_hook_registry(monkeypatch):
     fresh.post_tool("read_file", {}, {"ok": True})
     fresh.fire("on_turn_end", {"event": "turn.finish", "session_id": "s", "data": {"request_id": "r"}})
     assert calls == [("pre_tool", "read_file"), ("post_tool", "read_file"), ("turn_end", None)]
+
+
+def test_long_tool_gets_heartbeats_until_it_finishes(tmp_path, monkeypatch):
+    import time as _t
+    from jaeger_agent import live
+    from jaeger_ai.contract import trace
+    from jaeger_ai.core.gateway import server as gw
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(gw, "TOOL_HEARTBEAT_S", 0.05)
+    store = GatewaySessionStore(tmp_path / "gateway.sqlite3")
+    app = gw.JaegerGatewayApp(store=store)
+    store.admit_request("s", "q", request_id="req-h")
+    callbacks, flush = app._turn_stream_callbacks("s", "req-h")
+    with live.tool_call("slow1"):
+        callbacks.on_tool_progress("terminal", "start", {})
+    _t.sleep(0.3)
+    with live.tool_call("slow1"):
+        callbacks.on_tool_done("terminal", {}, {"ok": True}, True, None, 0.3)
+    flush()
+    count = lambda: len([e for e in app.event_bus.get_replay_events("s") if e.event == "tool.progress"])
+    beats = count()
+    assert beats >= 2
+    _t.sleep(0.2)
+    assert count() == beats  # stopped with the tool
+    ev = next(e for e in app.event_bus.get_replay_events("s") if e.event == "tool.progress")
+    node = trace.classify("tool.progress", ev.data)
+    assert node["span_id"] == f"tool:{gw._live_activity_id('req-h', 'slow1')}" and node["state"] is None
+
+
+def test_live_progress_reports_on_the_current_tool():
+    from jaeger_agent import live
+    got = []
+    with live.bind(lambda e, d: got.append((e, d))), live.tool_call("t1"):
+        live.progress("halfway", fraction=1.7)
+    assert got == [("tool.progress", {"message": "halfway", "fraction": 1.0, "call_id": "t1"})]
+
+
+def test_model_steps_carry_name_provider_and_honest_usage(tmp_path, monkeypatch):
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    from jaeger_agent.loop.jaeger_agent import _model_identity
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    store = GatewaySessionStore(tmp_path / "gateway.sqlite3")
+    app = JaegerGatewayApp(store=store)
+    store.admit_request("s", "q", request_id="req-m")
+    cb, flush = app._turn_stream_callbacks("s", "req-m", model="grok-4", lane="cli")
+
+    class Adapter:
+        model = "grok-4"
+        provider = "xai"
+    cb.on_model_call_start()
+    cb.on_model_call_done({"prompt_tokens": 0, "completion_tokens": 0, **_model_identity(Adapter(), {"model": "grok-4-0709"})})
+    cb.on_model_call_start()
+    cb.on_model_call_done({"prompt_tokens": 120, "completion_tokens": 7, **_model_identity(Adapter(), None)})
+    flush()
+    evs = [e for e in app.event_bus.get_replay_events("s") if e.event.startswith("model.")]
+    assert evs[0].data["model"] == "grok-4" and evs[0].data["lane"] == "cli"
+    first, second = evs[1].data, evs[3].data
+    assert first["provider"] == "xai" and first["actual_model"] == "grok-4-0709"
+    assert first["usage_reported"] is False and first["usage"] == {}
+    assert second["usage"] == {"prompt_tokens": 120, "completion_tokens": 7} and second["duration_ms"] >= 0

@@ -121,6 +121,9 @@ def classify(event: str, d: dict[str, Any]) -> dict[str, Any] | None:
             state = "denied"
         return node("tool", f"tool:{call}", step or run, _s(d.get("tool")) or "tool", state,
                     "TOOL_CALL_START" if state == "running" else "TOOL_CALL_RESULT")
+    if event == "tool.progress" and call:
+        # Progress annotates the open tool span; it never changes its state.
+        return node("tool", f"tool:{call}", step or run, _s(d.get("tool")) or "tool", None, "CUSTOM")
     if event == "approval.request" and d.get("approval_id"):
         parent = f"tool:{d['call_id']}" if d.get("call_id") else run
         return node("approval", f"approval:{d['approval_id']}", parent,

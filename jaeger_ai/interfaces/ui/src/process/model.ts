@@ -19,6 +19,8 @@ export interface Span {
   lastIndex: number;
   children: string[];
   detail?: string;
+  /** 0..1 when the tool reports it (MCP-style progress/total). */
+  progress?: number;
 }
 export interface ProcessState {
   spans: Map<string, Span>;
@@ -39,6 +41,12 @@ export function emptyState(): ProcessState {
 
 function detailOf(e: GatewayEvent): string | undefined {
   const p = (e.payload ?? {}) as Record<string, unknown>;
+  if (e.event === "model.finished") {
+    const u = (p.usage ?? {}) as Record<string, number>;
+    const who = [p.provider, p.actual_model ?? p.model].filter((x) => typeof x === "string" && x).join(" · ");
+    const tok = p.usage_reported === false ? "usage not reported" : `${u.prompt_tokens ?? 0} in · ${u.completion_tokens ?? 0} out tokens`;
+    return [who, tok, typeof p.error === "string" ? p.error : ""].filter(Boolean).join(" · ").slice(0, 200);
+  }
   const text = p.summary ?? p.message ?? p.prompt ?? p.error;
   return typeof text === "string" && text ? text.slice(0, 200) : undefined;
 }
@@ -67,6 +75,8 @@ export function apply(state: ProcessState, e: GatewayEvent, index: number): Proc
   }
   span.lastIndex = index;
   span.detail = detailOf(e) ?? span.detail;
+  const fraction = (e.payload as Record<string, unknown> | undefined)?.fraction;
+  if (typeof fraction === "number" && Number.isFinite(fraction)) span.progress = Math.max(0, Math.min(1, fraction));
   if (t.state && !isActive(t.state)) {
     span.endTs = t.ts;
     span.durationMs = t.duration_ms ?? Math.round((t.ts - span.startTs) * 1000);
