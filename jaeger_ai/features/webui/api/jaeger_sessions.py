@@ -146,6 +146,10 @@ def _proxy_stream(handler, session_id: str, query: str, *, upstream_path: str | 
     req.add_header("Accept", "text/event-stream")
     _add_caller_auth(req)
     req.add_header("Cache-Control", "no-cache")
+    # Resume: an EventSource reconnect carries Last-Event-ID, not ?last_event_id.
+    last_id = (handler.headers.get("Last-Event-ID") or "").strip() if getattr(handler, "headers", None) else ""
+    if last_id.isdigit():
+        req.add_header("Last-Event-ID", last_id)
 
     try:
         upstream = urlopen(req, timeout=STREAM_CONNECT_TIMEOUT)

@@ -73,6 +73,9 @@ EVENT_TYPES = frozenset({
     # Durable task projection. The task owner is the authority; these are its
     # stream. ``jaeger.state`` is the presence projection (see contract/presence.py).
     "task.created", "task.updated", "jaeger.state",
+    # Canonical spans (contract/trace.py): one model call = one step; hooks
+    # that deny/rewrite a tool call; sub-agent runs started from a tool.
+    "model.started", "model.finished", "hook.decision", "subagent.started", "subagent.finished",
     # Connect Apps panel: {id, state, audit?} on the global stream.
     "connect_app.updated",
     # Published by POST /v1/runtime/tier (was emitted but never registered).
@@ -95,6 +98,8 @@ class GatewayEvent:
     event: str
     data: dict[str, Any]
     timestamp: float
+    #: Canonical envelope (contract/trace.py): run/span/parent/state/seq/duration.
+    trace: dict[str, Any] | None = None
 
 
 def _from_record(record: dict[str, Any]) -> GatewayEvent:
@@ -104,6 +109,7 @@ def _from_record(record: dict[str, Any]) -> GatewayEvent:
         event=str(record["event"]),
         data=dict(record.get("data") or {}),
         timestamp=float(record["timestamp"]),
+        trace=record.get("trace") if isinstance(record.get("trace"), dict) else None,
     )
 
 
@@ -134,6 +140,8 @@ class GatewayEventBus:
                 self._seq = max(self._seq, evt.event_id)
                 self._buffer.append(evt)
         else:
+            from jaeger_ai.contract.trace import annotate
+            annotated = annotate(session_id, event, data)
             with self._lock:
                 self._seq += 1
                 evt = GatewayEvent(
@@ -142,6 +150,7 @@ class GatewayEventBus:
                     event=event,
                     data=data,
                     timestamp=time.time(),
+                    trace=annotated.get("trace") if annotated is not data else None,
                 )
                 self._buffer.append(evt)
 
@@ -213,10 +222,16 @@ class GatewayEventBus:
                 if e.session_id in {session_id, "*"} and e.event_id > since_event_id
             ]
 
-    def replay_window(self, session_id: str, since_event_id: int = 0) -> dict[str, Any]:
+    def replay_window(self, session_id: str, since_event_id: int = 0, *,
+                      session_only: bool = False) -> dict[str, Any]:
         if self.store is not None:
+            if session_only:
+                return self.store.replay_events(session_id, since_event_id, session_only=True)
             return self.store.replay_events(session_id, since_event_id)
         events = self.get_replay_events(session_id, since_event_id)
+        if session_only:
+            events = [e for e in events if e.session_id == session_id
+                      or (e.data or {}).get("session_id") == session_id]
         return {
             "events": [
                 {
@@ -225,6 +240,7 @@ class GatewayEventBus:
                     "event": e.event,
                     "data": e.data,
                     "timestamp": e.timestamp,
+                    **({"trace": e.trace} if e.trace else {}),
                 }
                 for e in events
             ],
@@ -238,6 +254,8 @@ class GatewayEventBus:
         self,
         session_id: str,
         since_event_id: int = 0,
+        *,
+        session_only: bool = False,
     ) -> AsyncGenerator[GatewayEvent, None]:
         wake = asyncio.Event()
         with self._lock:
@@ -247,7 +265,8 @@ class GatewayEventBus:
             last_id = since_event_id
             while True:
                 wake.clear()
-                window = self.replay_window(session_id, last_id)
+                window = (self.replay_window(session_id, last_id, session_only=True)
+                          if session_only else self.replay_window(session_id, last_id))
                 if window["cursor_expired"]:
                     raise ReplayGap("Event cursor expired; reload session transcript")
                 records = window["events"]

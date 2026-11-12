@@ -1839,6 +1839,10 @@ class JaegerAgent:
                         self.callbacks.on_tool_selection(self._selection_receipt())
                     self.callbacks.on_model_input(formatted)
                     self.callbacks.on_model_call_start()
+                    from jaeger_agent.hooks import registry as _hooks
+                    _model_t0 = time.monotonic()
+                    _hooks.fire("pre_model", {"model": str(getattr(adapter, "model", "") or ""),
+                                              "messages": len(self.messages)})
                     before_prompt_tokens = self.last_prompt_tokens
                     before_completion_tokens = self.last_completion_tokens
                     try:
@@ -1867,18 +1871,23 @@ class JaegerAgent:
                             else None
                         ),
                     )
-                    except BaseException:
-                        self.callbacks.on_model_call_done({})
+                    except BaseException as _model_exc:
+                        self.callbacks.on_model_call_done({"failed": 1})
+                        _hooks.fire("post_model", {"ok": False, "error": type(_model_exc).__name__,
+                                                   "duration_ms": int((time.monotonic() - _model_t0) * 1000)})
                         raise
                     if self.last_ttft_s is None:
                         adapter_ttft = getattr(adapter, "last_ttft_s", None)
                         if adapter_ttft:
                             self.last_ttft_s = float(adapter_ttft)
                     per_call_prompt = self._accumulate_usage(raw, adapter)
-                    self.callbacks.on_model_call_done({
+                    _usage = {
                         "prompt_tokens": max(0, self.last_prompt_tokens - before_prompt_tokens),
                         "completion_tokens": max(0, self.last_completion_tokens - before_completion_tokens),
-                    })
+                    }
+                    self.callbacks.on_model_call_done(_usage)
+                    _hooks.fire("post_model", {"ok": True, "usage": dict(_usage),
+                                               "duration_ms": int((time.monotonic() - _model_t0) * 1000)})
                     if self.context_guard is not None and per_call_prompt:
                         try:
                             self.context_guard.observed_call(
