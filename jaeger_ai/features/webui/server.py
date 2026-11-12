@@ -407,6 +407,7 @@ class Handler(BaseHTTPRequestHandler):
             _legacy_hit(self.command, parsed.path)
             if not jaeger_signin_gate(self, parsed): return
             if not check_auth(self, parsed): return
+            if not _route_kept(self, parsed): return
             result = handle_get(self, parsed)
             if result is False:
                 return j(self, {'error': 'not found'}, status=404)
@@ -442,6 +443,7 @@ class Handler(BaseHTTPRequestHandler):
                 parsed.path == "/api/csp-report" and self.command == "POST"
             )
             if not _is_csp_report_post and not check_auth(self, parsed): return
+            if not _route_kept(self, parsed): return
             result = route_func(self, parsed)
             if result is False:
                 return j(self, {'error': 'not found'}, status=404)
@@ -488,6 +490,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         self._handle_write(handle_delete)
+
+
+def _route_kept(handler, parsed) -> bool:
+    """Answer 410 for retired Hermes ``/api/*`` routes (see api/kept_routes.py)."""
+    from api.kept_routes import is_kept
+    if is_kept(parsed.path):
+        return True
+    j(handler, {"error": "retired", "detail": "This legacy /api route was removed; use the Gateway /v1 API."}, status=410)
+    return False
 
 
 def _legacy_hit(method: str, path: str) -> None:

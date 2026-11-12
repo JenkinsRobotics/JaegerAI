@@ -78,9 +78,6 @@ export PYTHONPATH="${repo_root}:${repo_root}/packages/jaeger-agent:${repo_root}/
   for _ in $(seq 1 60); do
     if curl -fsS -m 2 -o /dev/null "http://127.0.0.1:${JAEGER_WEBUI_PORT}/" 2>/dev/null; then
       curl -fsS -m 90 -o /dev/null "http://127.0.0.1:${JAEGER_WEBUI_PORT}/api/models" 2>/dev/null || true
-      # The release-check banner is the same shape: a ~4s network call the
-      # stock UI fires on first load. Warmed here for the same reason.
-      curl -fsS -m 90 -o /dev/null -X POST "http://127.0.0.1:${JAEGER_WEBUI_PORT}/api/updates/check" 2>/dev/null || true
       break
     fi
     sleep 1
