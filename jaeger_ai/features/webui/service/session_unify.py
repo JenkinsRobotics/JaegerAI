@@ -47,10 +47,12 @@ ROLLBACK_MIN_KEEP = 6
 _PROFILE_BADGES = {
     "jaeger": PROFILE_DISPLAY_NAMES["jaeger"],
     "dispatcher": PROFILE_DISPLAY_NAMES["jaeger"],
-    "hermes": PROFILE_DISPLAY_NAMES["default"],
-    "default": PROFILE_DISPLAY_NAMES["default"],
-    "roundtable": PROFILE_DISPLAY_NAMES["roundtable"],
-    "openclaw": PROFILE_DISPLAY_NAMES["openclaw"],
+    # Historical badges only: these backends were removed 2026-11-11, but old
+    # stored sessions still carry their profile keys.
+    "hermes": "Hermes Agent",
+    "default": "Hermes Agent",
+    "roundtable": "Roundtable",
+    "openclaw": "OpenClaw",
     "ares": "ARES",
 }
 # Surface origins that must never become profile keys when falling back.

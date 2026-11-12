@@ -91,14 +91,6 @@ def _ollama_command() -> list[str]:
     return [exe, "serve"]
 
 
-def _ollama_bridge_command() -> list[str]:
-    return [_default_python(), "-u", "-B", "-m", "jaeger_ai.core.models.ollama_bridge"]
-
-
-def _ollama_bridge_env() -> dict[str, str]:
-    return _common_env()
-
-
 def _gateway_command() -> list[str]:
     return [_default_python(), "-u", "-B", "-m", "jaeger_ai.core.gateway.server"]
 
@@ -186,14 +178,11 @@ def _gateway_env() -> dict[str, str]:
 
 def _ollama_env() -> dict[str, str]:
     env = _common_env()
-    from jaeger_ai.core.models.ollama_bridge import daemon_listen
-    env["OLLAMA_HOST"] = daemon_listen()
+    env["OLLAMA_HOST"] = f"{LOOPBACK}:{OLLAMA_PORT}"
     return env
 
 
 # Authoritative service registry in boot order
-from jaeger_ai.core.models.ollama_bridge import PROXY_PORT as _OLLAMA_PROXY_PORT
-
 STACK_SERVICES: list[ServiceDef] = [
     ServiceDef(
         id="ollama",
@@ -203,15 +192,6 @@ STACK_SERVICES: list[ServiceDef] = [
         health_path="/api/tags",
         command_builder=_ollama_command,
         env_builder=_ollama_env,
-    ),
-    ServiceDef(
-        id="ollama-bridge",
-        name="Ollama bridge",
-        label="com.jenkinsrobotics.jaeger-ollama-bridge",
-        port=_OLLAMA_PROXY_PORT,
-        health_path="/api/tags",
-        command_builder=_ollama_bridge_command,
-        env_builder=_ollama_bridge_env,
     ),
     ServiceDef(
         id="gateway",
@@ -427,6 +407,7 @@ def migrate_legacy_launchagents() -> list[str]:
         # Retired 2026-11-11: the :8791 Hermes/OpenClaw runner and Hermes API.
         "com.jenkinsrobotics.jaeger-hermes-webui-adapter",
         "com.jenkinsrobotics.hermes-native-api",
+        "com.jenkinsrobotics.jaeger-ollama-bridge",
         "com.jenkinsrobotics.jaeger-hermes-adapter",
         "com.jenkinsrobotics.openclaw-hermes-adapter",
         "com.jenkinsrobotics.roundtable-hermes-adapter",
@@ -556,13 +537,6 @@ def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.
 
     # Step 1: Migrate legacy LaunchAgents
     migrate_legacy_launchagents()
-
-    # Step 2: Ensure agent models & container networks are configured
-    try:
-        from jaeger_ai.core.frameworks.setup import _configure_agent_models
-        _configure_agent_models()
-    except Exception:
-        pass
 
     # Step 3: Write plists to ~/.jaeger/launchd/
     sync_plists()

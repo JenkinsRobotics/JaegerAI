@@ -31,17 +31,7 @@ def _native_ready(name: str, bridge: Any) -> bool:
     """Bounded "is it up right now" probe for one framework runtime."""
     if name == "jaeger":
         return bool(bridge.health().get("ok"))
-    if name == "hermes":
-        from urllib.request import Request, urlopen
-
-        from jaeger_ai.core.frameworks.hermes_native import connection
-        base, key = connection()
-        with urlopen(Request(base + "/health", headers={"Authorization": "Bearer " + key}), timeout=3) as response:
-            return response.status == 200
-    from jaeger_ai.core.frameworks.openclaw_native import NativeGateway
-    from jaeger_ai.core.frameworks.openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
-    with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE):
-        return True
+    return False
 
 
 def framework_inventory(*, probe: Any | None = None) -> list[dict[str, Any]]:

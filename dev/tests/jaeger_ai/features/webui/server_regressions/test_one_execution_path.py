@@ -27,28 +27,6 @@ def test_in_process_backend_needs_the_explicit_switch():
     ) == "gateway"
 
 
-@pytest.mark.parametrize("profile", ["hermes", "openclaw", "roundtable"])
-def test_native_profile_runner_is_refused_without_the_switch(profile, monkeypatch):
-    called = []
-    monkeypatch.setattr(routes, "_start_native_profile_run", lambda *a, **k: called.append(1) or {})
-    result = routes._start_run(
-        SimpleNamespace(profile=profile), msg="hi", attachments=[], workspace="/w",
-        model="m", model_provider=None, normalized_model=None, source="webui", route="r",
-    )
-    assert result["_status"] == 409 and result["code"] == "legacy_path_isolated"
-    assert called == []
-
-
-def test_native_profile_runner_runs_when_reenabled(monkeypatch):
-    monkeypatch.setenv(ENV, "1")
-    monkeypatch.setattr(routes, "_start_native_profile_run", lambda *a, **k: {"stream_id": "s"})
-    result = routes._start_run(
-        SimpleNamespace(profile="hermes"), msg="hi", attachments=[], workspace="/w",
-        model="m", model_provider=None, normalized_model=None, source="webui", route="r",
-    )
-    assert result == {"stream_id": "s"}
-
-
 @pytest.mark.parametrize("path,handler", [
     ("/api/btw", "_handle_btw"),
     ("/api/background", "_handle_background"),

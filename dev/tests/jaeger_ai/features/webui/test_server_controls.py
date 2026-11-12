@@ -20,7 +20,6 @@ def controls(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0, stdout=json.dumps([{'status': {'state': 'stopped'}}]), stderr='')
     c = ServerControls(tmp_path, execute)
     monkeypatch.setattr(c, 'status', lambda: [])
-    monkeypatch.setattr(c, 'container', lambda role: 'test-' + role)
     for service, (_, label, _, _) in SERVICES.items():
         if label:
             p = c.plist(service); p.parent.mkdir(parents=True, exist_ok=True);p.write_text('test')

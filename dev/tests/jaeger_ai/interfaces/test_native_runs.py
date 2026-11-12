@@ -17,58 +17,8 @@ def wait_for(predicate):
     assert predicate()
 
 
-@pytest.mark.parametrize(
-    ("terminal", "expected"),
-    [
-        ({"status": "success", "aborted": False}, "completed"),
-        ({"status": "error", "aborted": False}, "failed"),
-        ({"status": "error", "aborted": True}, "cancelled"),
-    ],
-)
-def test_openclaw_reconcile_uses_durable_terminal_trajectory(
-    tmp_path, monkeypatch, terminal, expected
-):
-    from jaeger_ai.core.frameworks import openclaw, openclaw_native
-
-    sessions = tmp_path / "agents/main/sessions"
-    sessions.mkdir(parents=True)
-    native = {"session_id": "session-key", "run_id": "native-run"}
-    rows = [
-        {
-            "type": "model.completed",
-            **native,
-            "sessionKey": native["session_id"],
-            "runId": native["run_id"],
-            "data": {"assistantTexts": ["durable answer"]},
-        },
-        {
-            "type": "session.ended",
-            "sessionKey": native["session_id"],
-            "runId": native["run_id"],
-            "data": terminal,
-        },
-    ]
-    (sessions / "receipt.trajectory.jsonl").write_text(
-        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
-    )
-    monkeypatch.setattr(openclaw, "_openclaw_home", lambda: tmp_path)
-
-    receipt = openclaw_native.openclaw_reconcile(native)
-
-    assert receipt["status"] == expected
-    assert receipt["execution_unknown"] is False
-    assert receipt["output"] == "durable answer"
 
 
-def test_openclaw_reconcile_retains_ownership_without_terminal_receipt(tmp_path, monkeypatch):
-    from jaeger_ai.core.frameworks import openclaw, openclaw_native
-
-    (tmp_path / "agents/main/sessions").mkdir(parents=True)
-    monkeypatch.setattr(openclaw, "_openclaw_home", lambda: tmp_path)
-    with pytest.raises(RuntimeError, match="no terminal trajectory receipt"):
-        openclaw_native.openclaw_reconcile(
-            {"session_id": "session-key", "run_id": "native-run"}
-        )
 
 
 def test_structured_list_input_and_model_override(tmp_path):
@@ -555,113 +505,12 @@ def test_host_workspace_translation_rejects_escape():
             host_workspace(path)
 
 
-def test_openclaw_native_keeps_rest_session_key_and_filters_peer_events(tmp_path, monkeypatch):
-    from jaeger_ai.core.frameworks import openclaw_native as native
-    run = Run(tmp_path, "existing-session", "hello")
-    calls = []
-    class Gateway:
-        def __init__(self, *args):
-            self.frames = iter([
-                {"event": "exec.approval.requested", "payload": {"id": "wrong", "request": {"runId": "other", "sessionKey": "other"}}},
-                {"event": "chat", "payload": {"runId": "other", "state": "delta", "deltaText": "WRONG"}},
-                {"event": "agent", "payload": {"runId": run.id, "stream": "tool", "data": {"phase": "start", "name": "read", "toolCallId": "tool1"}}},
-                {"event": "agent", "payload": {"runId": run.id, "stream": "tool", "data": {"phase": "result", "name": "read", "toolCallId": "tool1"}}},
-                {"event": "chat", "payload": {"runId": run.id, "state": "delta", "deltaText": "Hello"}},
-                {"event": "chat", "payload": {"runId": run.id, "state": "final", "message": {"content": [{"type": "text", "text": "Hello"}]}}},
-            ])
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def request(self, method, params):
-            calls.append((method, params))
-            return {"runId": run.id}
-        def next_event(self): return next(self.frames)
-    monkeypatch.setattr(native, "NativeGateway", Gateway)
-    assert native.openclaw_turn(run) == "Hello"
-    assert run.output == "Hello"
-    assert calls[0][1]["sessionKey"] == "agent:main:openai-user:hermes:existing-session"
-    assert calls[0][1]["idempotencyKey"] == run.id
-    assert not run.pending
-    run.cancel()
-    assert calls[-1] == ("chat.abort", {"sessionKey": "agent:main:openai-user:hermes:existing-session", "runId": run.id})
 
 
-def test_openclaw_native_keeps_configured_model_when_picker_id_is_unknown(tmp_path, monkeypatch):
-    from jaeger_ai.core.frameworks import openclaw_native as native
-    run = Run(tmp_path, "picker-session", "hello")
-    run.model = "kimi-k2.7-code:cloud"
-    run.provider = "ollama"
-    calls = []
-
-    class Gateway:
-        def __init__(self, *args):
-            self.frames = iter([
-                {"event": "chat", "payload": {"runId": run.id, "state": "final",
-                    "message": {"content": [{"type": "text", "text": "kept-default"}]}}},
-            ])
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def request(self, method, params):
-            calls.append((method, params))
-            if method == "models.list":
-                return {"models": [{"provider": "ollama-cloud-via-host", "id": "glm-5.3-flash:cloud"}]}
-            if method == "sessions.list":
-                return {"sessions": []}
-            return {"runId": run.id}
-        def next_event(self): return next(self.frames)
-
-    monkeypatch.setattr(native, "NativeGateway", Gateway)
-    assert native.openclaw_turn(run) == "kept-default"
-    assert [method for method, _ in calls] == ["models.list", "chat.send"]
 
 
-@pytest.mark.parametrize(
-    ("receipt", "expected"),
-    [
-        ({"runId": "native-run", "status": "ok",
-          "terminalReply": {"disposition": "visible", "text": "finished"}}, "completed"),
-        ({"runId": "native-run", "status": "error", "error": "provider failed"}, "failed"),
-        ({"runId": "native-run", "status": "timeout", "stopReason": "rpc", "endedAt": 123}, "cancelled"),
-    ],
-)
-def test_openclaw_reconcile_accepts_only_terminal_agent_wait_evidence(
-    monkeypatch, receipt, expected
-):
-    from jaeger_ai.core.frameworks import openclaw_native as native
-    calls = []
-
-    class Gateway:
-        def __init__(self, *args): pass
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def request(self, method, params):
-            calls.append((method, params))
-            return receipt
-
-    monkeypatch.setattr(native, "NativeGateway", Gateway)
-    result = native.openclaw_reconcile({
-        "session_id": "agent:main:openai-user:hermes:session",
-        "run_id": "native-run",
-    })
-    assert result["status"] == expected
-    assert result["execution_unknown"] is False
-    assert result["session_id"] == "agent:main:openai-user:hermes:session"
-    assert result["run_id"] == "native-run"
-    assert calls == [("agent.wait", {"runId": "native-run", "timeoutMs": 1})]
 
 
-@pytest.mark.parametrize("status", ["timeout", "pending"])
-def test_openclaw_reconcile_retains_unknown_execution(status, monkeypatch):
-    from jaeger_ai.core.frameworks import openclaw_native as native
-
-    class Gateway:
-        def __init__(self, *args): pass
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def request(self, method, params): return {"runId": "native-run", "status": status}
-
-    monkeypatch.setattr(native, "NativeGateway", Gateway)
-    with pytest.raises(RuntimeError, match="not terminal"):
-        native.openclaw_reconcile({"session_id": "session", "run_id": "native-run"})
 
 
 def test_http_400_and_404_are_not_retried_as_transient():
@@ -683,112 +532,6 @@ def test_mcp_credential_is_resolved_at_call_time(tmp_path, monkeypatch):
     assert jaeger.mcp_api_key() == read_token("jaegerd")
     monkeypatch.setenv("JAEGERS_MCP_API_KEY", "rotated-key")
     assert jaeger.mcp_api_key() == "rotated-key"
-
-
-def test_operator_recovery_finds_exact_store_and_allows_next_turn(tmp_path, monkeypatch):
-    from jaeger_ai.core.frameworks import recovery
-    from jaeger_ai.contract.frameworks import BackendProtocol
-
-    root = tmp_path / "instances/jaeger/run/hermes-webui-adapter/profiles/hermes"
-    first = Runs(root, lambda run, workspace: "unused")
-    first.ownership.claim("session", "a" * 32)
-    run = Run(root, "session", "work", run_id="a" * 32)
-    run.dispatch(session_id="native-session", run_id="native-run")
-    protocol = BackendProtocol(
-        lambda run, workspace: "next",
-        lambda native: {**native, "status": "completed", "execution_unknown": False},
-    )
-    monkeypatch.setattr(recovery, "backend_protocol", lambda runtime: protocol)
-
-    result = recovery.reconcile_owned_run("hermes", run.id, state_root=tmp_path)
-    assert result["status"] == "completed"
-    assert result["runtime"] == "hermes"
-    first.ownership.claim("session", "b" * 32)
-
-
-def test_operator_abandon_records_override_and_releases_roundtable(tmp_path):
-    from jaeger_ai.core.frameworks import recovery
-
-    root = tmp_path / "profiles/roundtable/table-runs"
-    runs = Runs(root, lambda run, workspace: "unused")
-    runs.ownership.claim("table-session", "a" * 32)
-    run = Run(root, "table-session", "work", run_id="a" * 32)
-    run.dispatch(session_id=run.session, run_id=run.id)
-
-    result = recovery.abandon_owned_run(
-        "roundtable", run.id, "native receipt expired", state_root=tmp_path
-    )
-    assert result["status"] == "failed"
-    assert result["execution_unknown"] is False
-    assert result["reconciliation"]["source"] == "operator_abandon"
-    runs.ownership.claim(run.session, "b" * 32)
-
-
-def test_openclaw_signs_native_challenge_without_changing_grants():
-    import base64
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    from jaeger_ai.core.frameworks.openclaw_native import connect_params, SCOPES
-    key = Ed25519PrivateKey.generate()
-    identity = {"deviceId": "test-device", "privateKeyPem": key.private_bytes(
-        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()}
-    params = connect_params({"ts": 123, "nonce": "challenge"}, "fake-token", identity)
-    encoded = params["device"]["signature"]
-    signature = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-    key.public_key().verify(signature, ("v3|test-device|cli|cli|operator|" + ",".join(SCOPES) + "|123|fake-token|challenge|linux|").encode())
-    assert params["scopes"] == ["operator.read", "operator.write", "operator.approvals"]
-
-
-def test_openclaw_fallback_streams_before_native_completion(monkeypatch):
-    from io import BytesIO
-    from jaeger_ai.core.frameworks import openclaw
-    released, entered = threading.Event(), threading.Event()
-    requests = []
-    class Response:
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def __iter__(self):
-            yield b'data: {"choices":[{"delta":{"content":"FIRST"}}]}\n'
-            entered.set()
-            released.wait(3)
-            yield b'data: [DONE]\n'
-    def request(req, **kwargs):
-        requests.append(json.loads(req.data))
-        return Response()
-    monkeypatch.setattr(openclaw.urllib.request, "urlopen", request)
-    monkeypatch.setattr(openclaw, "OPENCLAW_TOKEN_FILE", type("Token", (), {"read_text": lambda self: "fake"})())
-    handler = object.__new__(openclaw.Handler)
-    handler.wfile = BytesIO()
-    handler.send_response = lambda *a: None
-    handler.send_header = lambda *a: None
-    handler.end_headers = lambda: None
-    thread = threading.Thread(target=handler.stream_chat_completion, args=("current", "same-session"))
-    thread.start()
-    try:
-        assert entered.wait(2)
-        wait_for(lambda: b"FIRST" in handler.wfile.getvalue())
-        assert thread.is_alive()
-        assert requests[0]["stream"] is True
-        assert requests[0]["user"] == "hermes:same-session"
-    finally:
-        released.set()
-        thread.join(3)
-    assert b"[DONE]" in handler.wfile.getvalue()
-
-
-def test_openclaw_does_not_reinsert_native_history(monkeypatch):
-    from io import BytesIO
-    from jaeger_ai.core.frameworks import openclaw
-    calls = []
-    handler = object.__new__(openclaw.Handler)
-    body = json.dumps({"messages": [{"role": "user", "content": "OLD"},
-        {"role": "assistant", "content": "ALREADY SAVED"}, {"role": "user", "content": "NEW"}]}).encode()
-    handler.headers = {"Content-Length": str(len(body)), "X-Hermes-Session-Id": "same"}
-    handler.rfile = BytesIO(body)
-    handler.send_json = lambda *args: None
-    monkeypatch.setattr(openclaw, "chat_openclaw", lambda *args: calls.append(args) or "OK")
-    handler.create_chat_completion()
-    assert calls == [("NEW", "same")]
 
 
 def test_bridge_thread_ledger_switch_preserves_owner_not_other_session(tmp_path, monkeypatch):

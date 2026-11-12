@@ -95,7 +95,7 @@ def resolve_ollama_base_url(*, openai_compat: bool = True) -> str:
         candidates = ["127.0.0.1", "localhost", bridge]
         chosen = "127.0.0.1"
 
-    from jaeger_ai.core.models.ollama_bridge import PROXY_PORT
+    PROXY_PORT = 11435  # authenticated container-guest proxy port (no longer shipped)
     chosen_port = _DEFAULT_OLLAMA_PORT if chosen in {"127.0.0.1", "localhost", "::1"} else PROXY_PORT
     for host in candidates:
         # The VM reaches the authenticated bridge, never raw Ollama on the LAN.

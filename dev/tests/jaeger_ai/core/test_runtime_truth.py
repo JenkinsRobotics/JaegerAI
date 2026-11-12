@@ -26,7 +26,6 @@ def test_product_default_is_jaeger():
     assert PRODUCT_DEFAULT_RUNTIME == "jaeger"
     assert PRODUCT_DEFAULT_PROFILE == "jaeger"
     assert product_default_profile() == "jaeger"
-    assert canonical_runtime("default") == "hermes"
     assert canonical_runtime("jaeger") == "jaeger"
 
 
@@ -35,9 +34,7 @@ def test_framework_inventory_marks_jaeger_product_default():
     by_id = {r["runtime_id"]: r for r in rows}
     assert by_id["jaeger"]["is_product_default"] is True
     assert by_id["jaeger"]["available"] is True
-    assert by_id["hermes"]["is_product_default"] is False
-    assert by_id["hermes"]["available"] is False
-    assert by_id["openclaw"]["available"] is False
+    assert set(by_id) == {"jaeger"}  # Hermes/OpenClaw/Roundtable retired 2026-11-11
 
 
 def test_capability_snapshot_does_not_claim_unconfigured_cloud():

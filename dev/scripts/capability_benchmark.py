@@ -34,8 +34,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from jaeger_ai.contract.ports import GATEWAY_PORT as _DEFAULT_GATEWAY_PORT
 from jaeger_ai.core.frameworks.native_runs import Runs, TERMINAL, jaeger_turn
-from jaeger_ai.core.frameworks.hermes_native import hermes_turn
-from jaeger_ai.core.frameworks.openclaw_native import openclaw_turn
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1284,10 +1282,11 @@ def run_no_skip_benchmark(out_dir: Path, target_agents: list[str], suite: str = 
     drivers = {}
     if "jaeger" in target_agents:
         drivers["jaeger"] = UnifiedRunsDriver("jaeger", jaeger_turn, receipts_dir)
-    if "hermes" in target_agents:
-        drivers["hermes"] = UnifiedRunsDriver("hermes", hermes_turn, receipts_dir)
-    if "openclaw" in target_agents:
-        drivers["openclaw"] = UnifiedRunsDriver("openclaw", openclaw_turn, receipts_dir)
+    for retired in ("hermes", "openclaw"):
+        if retired in target_agents:
+            # The Hermes/OpenClaw native clients were removed in the 2026-11-11
+            # cleanup (copies on the Desktop, phase2/). Jaeger is the only backend.
+            print(f"  skipping {retired}: native client retired; Jaeger is the only backend")
 
     print("\n=======================================================")
     print("  JAEGER VS HERMES VS OPENCLAW — COMPLETE NO-SKIP AUDIT")

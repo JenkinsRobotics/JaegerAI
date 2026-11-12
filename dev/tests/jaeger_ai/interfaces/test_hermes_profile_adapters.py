@@ -4,110 +4,17 @@ from io import BytesIO
 from types import SimpleNamespace
 import json
 
-from jaeger_ai.features.roundtable import roundtable
 from jaeger_ai.core.frameworks import jaeger
-from jaeger_ai.core.frameworks import openclaw
-from jaeger_ai.core.frameworks import setup
 
 
-def test_runs_protocol_matches_webui_and_closes_connection(monkeypatch):
-    import threading
-    import urllib.request
-    from http.server import ThreadingHTTPServer
-    monkeypatch.setattr('jaeger_ai.core.frameworks.native_runs.profile_key', lambda profile: 'test-key')
-    monkeypatch.setattr(openclaw, 'profile_key', lambda profile: 'test-key')
-
-    # Jaeger's durable/native Runs API is exercised by test_native_runs.py;
-    # these two adapters still support their legacy in-memory run records.
-    for module, handler_type in ((roundtable, roundtable.RoundtableHandler),
-                                 (openclaw, openclaw.Handler)):
-        run_id = "protocol-test"
-        with module._runs_lock:
-            module._runs[run_id] = {"status": "completed", "result": "READY", "error": ""}
-        server = ThreadingHTTPServer(("127.0.0.1", 0), handler_type)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            request = urllib.request.Request(f"http://127.0.0.1:{server.server_port}/v1/runs/{run_id}/events",
-                                             headers={'Authorization': 'Bearer test-key'})
-            with urllib.request.urlopen(request, timeout=2) as response:
-                text = response.read().decode()  # Must reach EOF, not hang until timeout.
-            events = [json.loads(line[5:]) for line in text.splitlines() if line.startswith("data:")]
-            assert events[0] == {"event": "message.delta", "delta": "READY"}
-            assert events[-1]["event"] == "run.completed"
-        finally:
-            server.shutdown()
-            server.server_close()
-            with module._runs_lock:
-                module._runs.pop(run_id, None)
 
 
-def test_incident_discussion_does_not_crash(monkeypatch):
-    for name in ("chat_hermes", "chat_jaeger", "chat_openclaw"):
-        monkeypatch.setattr(roundtable, name, lambda *args: "[Unknown] Need evidence")
-    chunks = []
-    roundtable.run_debate_stream("/incident diagnose service errors", chunks.append, "incident-test")
-    assert "Decision Summary" in "".join(chunks)
 
 
-def test_failed_member_is_not_asked_to_discuss(monkeypatch):
-    calls = []
-    monkeypatch.setattr(roundtable, "chat_hermes", lambda *args: calls.append("hermes") or "LLM request timed out.")
-    monkeypatch.setattr(roundtable, "chat_jaeger", lambda *args: "Ready")
-    monkeypatch.setattr(roundtable, "chat_openclaw", lambda *args: "Ready")
-    roundtable.run_debate_stream("hello", lambda text: None, "failure-test")
-    assert calls == ["hermes"]
 
 
-def test_roundtable_streams_group_chat_and_consensus(monkeypatch):
-    monkeypatch.setattr(roundtable, "chat_hermes", lambda prompt, session_id="": "Hermes answer")
-    monkeypatch.setattr(roundtable, "chat_jaeger", lambda prompt, session_id="": "Jaeger answer")
-    monkeypatch.setattr(roundtable, "chat_openclaw", lambda prompt, session_id="": "OpenClaw answer")
-    chunks = []
-
-    roundtable.run_debate_stream("Question?", chunks.append)
-    output = "".join(chunks)
-
-    assert "Round 1 — Everyone Answers" in output
-    assert "Round 2 — Group Discussion" in output
-    assert "Hermes answer" in output
-    assert "Jaeger answer" in output
-    assert "OpenClaw answer" in output
-    assert "## 🤝 Decision Summary" in output
-    assert "**Chair:**" in output
 
 
-def test_chat_adapter_does_not_replay_ambiguous_remote_disconnect(monkeypatch):
-    from http.client import RemoteDisconnected
-
-    calls = {"n": 0}
-
-    class FakeResp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def __iter__(self):
-            chunk = {
-                "id": "1",
-                "choices": [{"index": 0, "delta": {"content": "recovered"}}],
-            }
-            yield f"data: {json.dumps(chunk)}\n".encode()
-            yield b"data: [DONE]\n"
-
-    def urlopen(_request, **_kwargs):
-        calls["n"] += 1
-        if calls["n"] < 3:
-            raise RemoteDisconnected("Remote end closed connection without response")
-        return FakeResp()
-
-    monkeypatch.setattr(roundtable.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(roundtable.time, "sleep", lambda _seconds: None)
-
-    assert roundtable._is_failed_answer(roundtable.chat_jaeger("hi", "session-1"))
-    assert calls["n"] == 1
 
 
 def test_jaeger_chat_returns_json_when_body_is_invalid():
@@ -211,391 +118,39 @@ def test_mcp_key_is_resolved_after_import_and_ignores_the_legacy_ares_key(monkey
     assert jaeger.mcp_api_key() == "late-env-key"
 
 
-def test_jaeger_runtime_artifacts_live_outside_repository():
-    assert setup.JAEGER_RUNTIME_ROOT == setup.operator_state_root() / "shared"
-    assert not setup.JAEGER_RUNTIME_ROOT.resolve().is_relative_to(setup.REPO_ROOT.resolve())
-    plist = setup._plist("test.adapter", "example.module")
-    assert str(setup.JAEGER_RUNTIME_ROOT / "logs").encode() in plist
-    assert b"PYTHONDONTWRITEBYTECODE" in plist
-    assert b"PYTHONPYCACHEPREFIX" in plist
-    assert b"<string>-B</string>" in plist
-
-
-def test_setup_launch_modules_exist():
-    import importlib.util
-
-    for module, _port in setup.SERVICES.values():
-        assert importlib.util.find_spec(module) is not None, module
-
-
-def test_connectivity_repairs_hermes_cli_link(tmp_path):
-    source = tmp_path / "GitHub" / "hermes-agent" / ".venv" / "bin" / "hermes"
-    source.parent.mkdir(parents=True)
-    source.write_text("#!/bin/sh\n", encoding="utf-8")
-    source.chmod(0o755)
-    stale = tmp_path / "bin" / "hermes"
-    stale.parent.mkdir()
-    stale.symlink_to(tmp_path / "missing-hermes")
-
-    configured = setup._configure_hermes_cli(tmp_path)
-
-    assert configured == stale
-    assert stale.resolve() == source.resolve()
-
-
-def test_internal_adapters_default_to_loopback():
-    assert jaeger.ADAPTER_HOST == "127.0.0.1"
-    assert roundtable.ADAPTER_HOST == "127.0.0.1"
-    assert openclaw.ADAPTER_HOST == "127.0.0.1"
-
-
-def test_roundtable_keeps_other_members_when_one_fails(monkeypatch):
-    monkeypatch.setattr(roundtable, "chat_hermes", lambda prompt, session_id="": "Hermes answer")
-    monkeypatch.setattr(roundtable, "chat_jaeger", lambda prompt, session_id="": "Jaeger answer")
-
-    def fail(_prompt, session_id=""):
-        raise RuntimeError("offline")
-
-    monkeypatch.setattr(roundtable, "chat_openclaw", fail)
-    chunks = []
-
-    roundtable.run_debate_stream("Question?", chunks.append)
-    output = "".join(chunks)
-
-    assert "Hermes answer" in output
-    assert "Jaeger answer" in output
-    assert "OpenClaw" in output
-    assert "offline" in output
-    assert "## 🤝 Decision Summary" in output
-
-
-def test_member_session_ids_are_stable_and_isolated():
-    first = roundtable._member_session_id("table-1", "jaeger")
-    assert first == roundtable._member_session_id("table-1", "jaeger")
-    assert first != roundtable._member_session_id("table-1", "openclaw")
-    assert first != roundtable._member_session_id("table-2", "jaeger")
-
-
-def test_hermes_uses_same_native_named_session_on_separate_turns(monkeypatch):
-    monkeypatch.setenv('ROUNDTABLE_HERMES_NATIVE', '0')
-    monkeypatch.setattr(roundtable.shutil, "which", lambda _name: "/bin/hermes")
-    commands = []
-
-    def run(command, **_kwargs):
-        commands.append(command)
-        return SimpleNamespace(
-            returncode=0,
-            stderr="",
-            stdout=f"answer {len(commands)}\n",
-        )
-
-    monkeypatch.setattr(roundtable.subprocess, "run", run)
-
-    assert roundtable.chat_hermes("first", "table-1") == "answer 1"
-    assert roundtable.chat_hermes("second", "table-1") == "answer 2"
-    assert commands[0][1:3] == ["chat", "-c"]
-    assert commands[0][3] == commands[1][3]
-    assert "--create-if-missing" in commands[0]
-    assert commands[0][-3:] == ["first", "--source", "tool"]
-    assert commands[1][-3:] == ["second", "--source", "tool"]
-
-
-def test_turn_plan_defaults_to_all_and_supports_mentions():
-    default = roundtable._turn_plan("What should we build?")
-    assert default["mode"] == "ask"
-    assert default["participants"] == roundtable.AGENT_ORDER
-
-    selected = roundtable._turn_plan("/review @jaeger @openclaw inspect this proposal")
-    assert selected["mode"] == "review"
-    assert selected["participants"] == ("jaeger", "openclaw")
-
-
-def test_operational_turn_requires_evidence_labels():
-    plan = roundtable._turn_plan("Collaborate to diagnose the broken container service")
-    assert plan["mode"] == "collaborate"
-    assert plan["evidence_required"] is True
-    prompt = roundtable._member_prompt(plan, "jaeger")
-    assert "[Verified]" in prompt
-    assert "Never translate a timeout into 'service down'" in prompt
-    assert "historical artifacts, not deployed source" in prompt
-
-
-def test_quick_mode_selects_one_best_member(monkeypatch):
-    calls = []
-    monkeypatch.setattr(roundtable, "chat_hermes", lambda prompt, session_id="": calls.append("hermes") or "answer")
-    monkeypatch.setattr(roundtable, "chat_jaeger", lambda prompt, session_id="": calls.append("jaeger") or "answer")
-    monkeypatch.setattr(roundtable, "chat_openclaw", lambda prompt, session_id="": calls.append("openclaw") or "answer")
-    chunks = []
-
-    roundtable.run_debate_stream("/quick diagnose the container", chunks.append)
-
-    assert calls == ["hermes"]
-    assert "Round 2" not in "".join(chunks)
-
-
-def test_setup_adds_shared_workspace_roots_without_erasing_existing_grants(tmp_path):
-    grants = tmp_path / ".jaeger" / "capabilities" / "grants.json"
-    grants.parent.mkdir(parents=True)
-    grants.write_text(json.dumps({
-        "version": 1,
-        "identities": {
-            "hermes": {"roots": ["/existing/hermes"], "capabilities": ["workspace.read"]},
-            "jaeger": {"roots": [], "capabilities": ["workspace.write"]},
-        },
-    }))
-
-    assert setup._configure_workspace_roots(tmp_path) == grants
-    document = json.loads(grants.read_text())
-
-    expected = {
-        str(tmp_path / "workspace"),
-        str(tmp_path / "GitHub"),
-        str(tmp_path / "Desktop"),
-        str(tmp_path / "Documents"),
-        "/Volumes/Jenkins_Robotics",
-        "/Volumes/Personal-Drive",
-    }
-    for identity in setup.WORKSPACE_IDENTITIES:
-        assert expected <= set(document["identities"][identity]["roots"])
-    assert "/existing/hermes" in document["identities"]["hermes"]["roots"]
-    assert document["identities"]["hermes"]["capabilities"] == ["workspace.read"]
-    assert document["identities"]["jaeger"]["capabilities"] == ["workspace.write"]
-
-
-def test_setup_publishes_same_workspace_tab_catalog_for_every_profile(tmp_path):
-    paths = setup._configure_webui_workspaces(tmp_path)
-
-    assert len(paths) == 4
-    expected = [
-        {"path": path, "name": name}
-        for path, name in setup.WEBUI_WORKSPACES
-    ]
-    for path in paths:
-        assert json.loads(path.read_text(encoding="utf-8")) == expected
-
-
-def test_setup_configures_native_and_profile_model_defaults(tmp_path):
-    for profile in setup.SERVICES:
-        path = tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("model:\n  default: old:cloud\n  provider: ollama\n")
-    hermes_default = tmp_path / ".jaeger" / "hermes" / "config.yaml"
-    hermes_default.write_text("model:\n  default: old:cloud\n  provider: ollama\n")
-    jaeger = tmp_path / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
-    jaeger.parent.mkdir(parents=True)
-    jaeger.write_text("external_model:\n  enabled: true\n")
-    openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
-    openclaw.parent.mkdir(parents=True)
-    openclaw.write_text(json.dumps({
-        "agents": {"defaults": {
-            "model": {"primary": "old/model"},
-            "memorySearch": {"provider": "old"},
-        }},
-        "gateway": {"tailscale": {"mode": "off", "resetOnExit": False}},
-        "meta": {"lastTouchedAt": "old", "lastTouchedVersion": "2026.7"},
-        "models": {"providers": {"ollama-cloud-via-host": {"models": []}}},
-    }))
-
-    setup._configure_agent_models(tmp_path, container_host="192.168.64.1")
-
-    for profile in setup.SERVICES:
-        profile_text = (
-            tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
-        ).read_text()
-        assert f"default: {setup.DEFAULT_AGENT_MODEL}" in profile_text
-        assert "base_url: http://192.168.64.1:11435/v1" in profile_text
-    assert f"default: {setup.DEFAULT_AGENT_MODEL}" in hermes_default.read_text()
-    assert "base_url: http://192.168.64.1:11435/v1" in hermes_default.read_text()
-    assert f"model: {setup.DEFAULT_AGENT_MODEL}" in jaeger.read_text()
-    assert f"base_url: {setup.OLLAMA_OPENAI_URL}" in jaeger.read_text()
-    config = json.loads(openclaw.read_text())
-    assert config["agents"]["defaults"]["model"]["primary"].endswith(setup.DEFAULT_AGENT_MODEL)
-    assert config["models"]["providers"]["ollama-cloud-via-host"]["models"][0]["id"] == setup.DEFAULT_AGENT_MODEL
-    assert any(
-        model["id"] == "glm-5.3:cloud"
-        for model in config["models"]["providers"]["ollama-cloud-via-host"]["models"]
-    )
-    from jaeger_ai.core.gateway.caller_auth import client_token
-    bridge_token = client_token("mcp")
-    assert config["agents"]["defaults"]["memorySearch"] == {
-        "provider": "ollama",
-        "model": setup.OPENCLAW_EMBEDDING_MODEL,
-        "remote": {
-            "baseUrl": "http://192.168.64.1:11435",
-            "apiKey": bridge_token,
-            "headers": {"Authorization": f"Bearer {bridge_token}"},
-        },
-    }
-    assert config["models"]["providers"]["ollama-cloud-via-host"]["baseUrl"] == "http://192.168.64.1:11435"
-    assert config["models"]["providers"]["ollama-cloud-via-host"]["apiKey"] == bridge_token
-    assert config["gateway"]["tailscale"]["resetOnExit"] is False
-    assert config["meta"]["lastTouchedAt"] == "old"
-    assert config["meta"]["lastTouchedVersion"] == "2026.7"
-
-
-def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
-    for profile_home in [tmp_path / ".jaeger" / "hermes"] + [
-        tmp_path / ".jaeger" / "hermes" / "profiles" / profile for profile in setup.SERVICES
-    ]:
-        profile_home.mkdir(parents=True, exist_ok=True)
-        profile_home.joinpath("config.yaml").write_text("model:\n  default: test\n")
-    openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
-    openclaw.parent.mkdir(parents=True)
-    openclaw.write_text("{}")
-    token_file = tmp_path / ".jaeger" / "gateway" / "mcp.token"
-    token_file.parent.mkdir(parents=True)
-    token_file.write_text("test-secret\n", encoding="utf-8")
-    codex = tmp_path / ".codex" / "config.toml"
-    codex.parent.mkdir(parents=True)
-    codex.write_text(
-        "model = \"test\"\n\n"
-        "[mcp_servers.ares-system]\n"
-        "url = \"http://127.0.0.1:8811/mcp\"\n"
-        "bearer_token_env_var = \"ARES_GATEWAY_TOKEN\"\n"
-    )
-    claude = tmp_path / ".claude.json"
-    claude.write_text(json.dumps({"mcpServers": {"ares-system": {"type": "http", "url": "old"}}}))
-
-    written = setup._configure_agent_connectivity(tmp_path)
-
-    for profile_home in [tmp_path / ".jaeger" / "hermes"] + [
-        tmp_path / ".jaeger" / "hermes" / "profiles" / profile for profile in setup.SERVICES
-    ]:
-        config = profile_home.joinpath("config.yaml").read_text()
-        assert "jaeger-host:" in config
-        assert setup.MCP_HTTP_URL in config
-        assert "mac-host:" not in config
-        assert "ares-host:" not in config
-    document = json.loads(openclaw.read_text())
-    assert document["mcp"]["servers"]["jaeger-host"]["url"] == setup.MCP_CONTAINER_GATEWAY_URL
-    assert document["mcp"]["servers"]["jaeger-host"]["headers"] == {
-        "Authorization": "Bearer test-secret",
-    }
-    assert "ares-system" not in document["mcp"]["servers"]
-    codex_text = codex.read_text()
-    assert "[mcp_servers.jaeger-local]" in codex_text
-    assert setup.MCP_HTTP_URL in codex_text
-    assert "ares-system" not in codex_text
-    assert "ARES_GATEWAY_TOKEN" not in codex_text
-    claude_document = json.loads(claude.read_text())
-    assert claude_document["mcpServers"]["jaeger-local"] == {
-        "type": "http", "url": setup.MCP_HTTP_URL,
-    }
-    assert "ares-system" not in claude_document["mcpServers"]
-    manifest = json.loads((tmp_path / ".jaeger" / "agent-network.json").read_text())
-    assert manifest["authority"] == "jaeger"
-    assert manifest["mcp"]["host"] == setup.MCP_HTTP_URL
-    assert manifest["mcp"]["container"] == setup.MCP_CONTAINER_GATEWAY_URL
-    assert manifest["mcp"]["container_auth"]["token_file"] == str(token_file)
-    assert manifest["a2a"]["host"] == setup.A2A_URL
-    assert manifest["a2a"]["container"] == setup.A2A_CONTAINER_GATEWAY_URL
-    assert manifest["a2a"]["container_auth"]["scheme"] == "bearer"
-    assert codex in written and claude in written
 
 
 
-def test_setup_removes_openclaw_ares_system_8813_default(tmp_path):
-    openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
-    openclaw.parent.mkdir(parents=True)
-    openclaw.write_text(json.dumps({
-        "mcp": {
-            "servers": {
-                "ares-system": {
-                    "url": "http://192.168.64.1:8813/mcp",
-                    "transport": "streamable-http",
-                }
-            }
-        }
-    }))
-    # Minimal hermes homes so connectivity walks profiles safely
-    for profile_home in [tmp_path / ".jaeger" / "hermes"] + [
-        tmp_path / ".jaeger" / "hermes" / "profiles" / profile for profile in setup.SERVICES
-    ]:
-        profile_home.mkdir(parents=True, exist_ok=True)
-        profile_home.joinpath("config.yaml").write_text("model:\n  default: test\n")
-
-    setup._configure_agent_connectivity(tmp_path)
-
-    document = json.loads(openclaw.read_text())
-    assert document["mcp"]["servers"]["jaeger-host"]["url"] == setup.MCP_CONTAINER_GATEWAY_URL
-    assert "ares-system" not in document["mcp"]["servers"]
-
-def test_setup_configures_profile_isolated_honcho_peers_on_lan(tmp_path):
-    paths = setup._configure_honcho(tmp_path)
-
-    assert len(paths) == 4
-    for path in paths:
-        document = json.loads(path.read_text())
-        assert document["baseUrl"] == "http://10.15.0.239:8088"
-        block = next(iter(document["hosts"].values()))
-        assert block["workspace"] == "jenkins-robotics"
-        assert block["enabled"] is True
-        assert "provider: honcho" in path.with_name("config.yaml").read_text()
 
 
-def _local_lineup_home(tmp_path):
-    for profile in setup.SERVICES:
-        path = tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            "model:\n  default: glm-5.3-flash:cloud\n  provider: ollama\n"
-            "auxiliary:\n  title_generation:\n    provider: custom\n"
-            "    model: qwen2.5:3b\n    base_url: http://127.0.0.1:11434/v1\n"
-        )
-    hermes_default = tmp_path / ".jaeger" / "hermes" / "config.yaml"
-    hermes_default.write_text("model:\n  default: gemma-4-26b:latest\n  provider: ollama\n")
-    jaeger = tmp_path / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
-    jaeger.parent.mkdir(parents=True)
-    jaeger.write_text(
-        "external_model:\n  enabled: true\n  provider: ollama\n"
-        "  base_url: http://127.0.0.1:11434/v1\n  model: gemma-4-26b:latest\n"
-        "  ctx: 32768\n  fallback:\n  - provider: ollama\n    model: gemma4:latest\n"
-    )
-    openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
-    openclaw.parent.mkdir(parents=True)
-    openclaw.write_text(json.dumps({
-        "agents": {"defaults": {
-            "model": {"primary": "ollama-local/gemma-4-26b:latest"},
-            "memorySearch": {"provider": "ollama", "model": "nomic-embed-text:latest"},
-        }},
-        "models": {"providers": {
-            "ollama-local": {"models": [
-                {"id": "gemma-4-26b:latest", "contextWindow": 32768},
-                {"id": "qwen2.5:3b", "contextWindow": 32768},
-                {"id": "nomic-embed-text:latest"},
-            ]},
-            "ollama-cloud-via-host": {"models": []},
-        }},
-    }))
-    return jaeger, hermes_default, openclaw
 
 
-def test_stack_setup_keeps_instance_chosen_local_lineup(tmp_path):
-    """stack up / app start must not reset a local lineup to the cloud default."""
-    jaeger, hermes_default, openclaw = _local_lineup_home(tmp_path)
-    instance_before = jaeger.read_text()
-    for _ in range(2):  # a restart runs setup again; the result is stable
-        setup._configure_agent_models(tmp_path, container_host="192.168.64.1")
-
-    assert jaeger.read_text() == instance_before
-    for profile in setup.SERVICES:
-        text = (tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml").read_text()
-        assert "default: gemma-4-26b:latest" in text
-        assert "glm-5.3-flash:cloud" not in text
-        assert "    model: qwen2.5:3b" in text  # auxiliary lineup untouched
-    assert "default: gemma-4-26b:latest" in hermes_default.read_text()
-    config = json.loads(openclaw.read_text())
-    defaults = config["agents"]["defaults"]
-    assert defaults["model"]["primary"] == "ollama-local/gemma-4-26b:latest"
-    assert defaults["memorySearch"]["model"] == "nomic-embed-text:latest"
-    local = config["models"]["providers"]["ollama-local"]["models"]
-    assert [m["id"] for m in local].count("gemma-4-26b:latest") == 1
-    assert next(m for m in local if m["id"] == "gemma-4-26b:latest")["contextWindow"] == 32768
 
 
-def test_chosen_agent_model_falls_back_only_when_unset(tmp_path):
-    assert setup.chosen_agent_model(tmp_path) == setup.DEFAULT_AGENT_MODEL
-    jaeger = tmp_path / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
-    jaeger.parent.mkdir(parents=True)
-    jaeger.write_text("external_model:\n  model: qwen2.5:3b\n")
-    assert setup.chosen_agent_model(tmp_path) == "qwen2.5:3b"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

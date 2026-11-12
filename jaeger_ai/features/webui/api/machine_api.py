@@ -18,7 +18,7 @@ from urllib.parse import parse_qs
 
 SOURCES = {
     "gateway": "gateway.log", "webui": "webui.log", "jobs": "jobs.log", "runner": "runner.log",
-    "agent": "agent.log", "ollama": "ollama.log", "ollama-bridge": "ollama-bridge.log",
+    "agent": "agent.log", "ollama": "ollama.log",
     "mcp": "mcp.log", "a2a": "a2a.log", "app": "JaegerAI.log", "hermes": "hermes.log",
 }
 MAX_LINES = 2000

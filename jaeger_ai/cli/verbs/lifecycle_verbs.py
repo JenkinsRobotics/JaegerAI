@@ -1,10 +1,8 @@
 """Lifecycle management verbs: ``jaeger start``, ``jaeger stop``, ``jaeger restart``, ``jaeger status``.
 
-Controls the complete multi-agent system:
+Controls the Jaeger stack:
   1. macOS App (JaegerAI.app menu bar application)
   2. Background services (launchd jobs for bridge, a2a, mcp, gateway)
-  3. Fabric Supervisor (agent-fabric-supervisor health watchdog)
-  4. Linux Containers (OpenClaw only; Hermes Agent runs on the host)
 """
 
 from __future__ import annotations
@@ -39,16 +37,14 @@ SERVICES_ORDERED = (
     ("com.jenkinsrobotics.jaeger-bridge", "Jaeger Bridge", None),
     ("com.jenkinsrobotics.jaeger-mcp-http", "Jaeger MCP HTTP", MCP_HTTP_PORT),
     ("com.jenkinsrobotics.jaeger-a2a", "Jaeger A2A", A2A_PORT),
-    ("com.jenkinsrobotics.agent-fabric-supervisor", "Fabric Supervisor", None),
 )
 
-SUPERVISOR_SERVICE = "com.jenkinsrobotics.agent-fabric-supervisor"
 APP_PROCESS_NAME = "JaegerAI"
 
 
 def _container_names() -> tuple[str, ...]:
-    from jaeger_ai.core.runtime.agent_workspaces import container_name
-    return (container_name("openclaw"),)
+    """Managed agent containers. None since the OpenClaw backend was removed."""
+    return ()
 
 
 def _command(command: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess:
@@ -201,11 +197,7 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
     names = () if args.no_containers else _container_names()
     failures = []
 
-    # Disable recovery before touching any work-owning service. If this fails,
-    # leave the rest intact rather than race the supervisor's repair loop.
-    order = [SUPERVISOR_SERVICE] + [
-        label for label, _, _ in reversed(SERVICES_ORDERED) if label != SUPERVISOR_SERVICE
-    ]
+    order = [label for label, _, _ in reversed(SERVICES_ORDERED)]
     for label in order:
         if label not in jobs:
             continue
@@ -216,8 +208,6 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
         if result.returncode:
             print(f"  Failed to stop {label}: {result.stderr.strip()}")
             failures.append(label)
-            if label == SUPERVISOR_SERVICE:
-                return 1
         else:
             print(f"  Stopped {label}")
 
@@ -380,8 +370,6 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
         return True
 
     for label, name, port in SERVICES_ORDERED:
-        if label == SUPERVISOR_SERVICE:
-            continue
         if not ensure_service(label, name):
             failures.append(name)
         elif not args.dry_run and port is not None:
@@ -410,11 +398,6 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                     failures.append("Jaeger gateway readiness")
         except Exception:
             failures.append("Jaeger gateway")
-
-    # Do not bring up automatic recovery over an incompletely started stack.
-    if not failures or args.dry_run:
-        if not ensure_service(SUPERVISOR_SERVICE, "Fabric Supervisor"):
-            failures.append("Fabric Supervisor")
 
     if not args.no_app:
         app_pids = _find_app_pids()
@@ -595,7 +578,7 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
             "pid": pid,
         })
 
-    # Collect OpenClaw container status. Hermes Agent is a host service.
+    # Collect managed container status (none by default).
     containers_report = []
     for cname in _container_names():
         cdata = containers.get(cname)

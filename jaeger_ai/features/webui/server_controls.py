@@ -18,7 +18,6 @@ SERVICES = {service.id: (service.name, service.label, service.port, service.heal
             for service in STACK_SERVICES}
 SERVICES.update({
     'container': ('Container Daemon', None, None, None),
-    'openclaw': ('OpenClaw', None, 18789, None),
 })
 DEFAULT_SERVICES = tuple(service.id for service in CORE_SERVICES)
 
@@ -47,10 +46,6 @@ class ServerControls:
 
     def loaded(self, label):
         return self.execute(['/bin/launchctl', 'print', f'{self.domain}/{label}']).returncode == 0
-
-    def container(self, service):
-        from jaeger_ai.core.runtime.agent_workspaces import container_name
-        return container_name(service)
 
     def ready(self, service):
         _, _, port, path = SERVICES[service]
@@ -121,27 +116,7 @@ class ServerControls:
                 self.execute([cli, 'system', 'stop'])
                 self.checked([cli, 'system', 'start', '--disable-kernel-install'])
             return
-        if service == 'openclaw':
-            cli = self.container_cli()
-            name = self.container(service)
-            if action in {'stop', 'restart'}:
-                # Stopping an already stopped container is a successful no-op.
-                result = self.execute([cli, 'inspect', name])
-                if result.returncode:
-                    raise RuntimeError('Configured container could not be inspected')
-                state = json.loads(result.stdout)[0]['status']['state']
-                if state == 'running':
-                    self.checked([cli, 'stop', name])
-            if action in {'start', 'restart'}:
-                if not self.ready('container'):
-                    self.change_one('container', 'start')
-                result = self.execute([cli, 'inspect', name])
-                if result.returncode:
-                    raise RuntimeError('Configured container is not installed')
-                if json.loads(result.stdout)[0]['status']['state'] != 'running':
-                    self.checked([cli, 'start', name])
-        else:
-            self.launch(service, action)
+        self.launch(service, action)
 
     def change(self, service, action):
         if action == 'reset':

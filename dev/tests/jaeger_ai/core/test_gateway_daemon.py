@@ -191,13 +191,13 @@ class TestGatewayServerAPI(_CallerAuthedTestCase):
         resp = await self.client.request(
             "POST",
             "/v1/sessions",
-            json={"session_id": "test-uuid", "title": "Audit Task", "profile": "roundtable"},
+            json={"session_id": "test-uuid", "title": "Audit Task", "profile": "jaeger"},
         )
         assert resp.status == 201
         data = await resp.json()
         sid = data["session_id"]
         assert sid == "test-uuid"
-        assert data["profile"] == "roundtable"
+        assert data["profile"] == "jaeger"
 
         # 2. List sessions
         resp = await self.client.request("GET", "/v1/sessions")

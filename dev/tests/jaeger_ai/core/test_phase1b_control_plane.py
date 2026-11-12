@@ -12,12 +12,6 @@ import pytest
 from jaeger_ai.core.gateway import caller_auth
 from jaeger_ai.core.gateway.caller_auth import CALLERS
 from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError, release_allowed
-from jaeger_ai.core.models.ollama_bridge import (
-    bridge_authorized,
-    bridge_request_allowed,
-    daemon_listen,
-    proxy_bind_hosts,
-)
 from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease, repairs_allowed
 from jaeger_ai.core.runtime.webui_bind import webui_bind_host
 from jaeger_ai.core.tasks.completion import CompletionError, authoritative_transition
@@ -57,19 +51,6 @@ def test_corrupt_stop_latch_fails_engaged(tmp_path: Path):
     assert GlobalStop(path).engaged() is True
 
 
-def test_ollama_daemon_is_loopback_and_proxy_rejects_lan():
-    assert daemon_listen() == "127.0.0.1:11434"
-    assert "0.0.0.0" not in proxy_bind_hosts("192.168.64.1")
-    assert "0.0.0.0" not in proxy_bind_hosts("0.0.0.0")
-    assert bridge_request_allowed(method="POST", path="/api/chat", peer_host="192.168.1.50") is False
-    assert bridge_request_allowed(method="DELETE", path="/api/delete", peer_host="127.0.0.1") is False
-    assert bridge_request_allowed(method="POST", path="/api/chat", peer_host="192.168.64.2") is True
-    assert bridge_authorized("192.168.64.2", None) is False
-    token = caller_auth.client_token("mcp")
-    assert token
-    assert bridge_authorized("192.168.64.2", f"Bearer {token}") is True
-    assert bridge_authorized("192.168.64.2", "Bearer not-the-token") is False
-    assert bridge_authorized("127.0.0.1", None) is True
 
 
 def test_completed_verified_requires_evidence():
@@ -323,87 +304,8 @@ def test_webui_launcher_never_touches_legacy_hermes_homes():
     assert "/webui-agent}" in text
 
 
-def test_ollama_bridge_refuses_unrestricted_paths():
-    import threading
-    from http.server import ThreadingHTTPServer
-    from urllib.error import HTTPError
-    from urllib.request import Request, urlopen
-
-    from jaeger_ai.core.models import ollama_bridge as bridge
-
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), bridge._Handler)
-    port = httpd.server_address[1]
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    try:
-        request = Request(f"http://127.0.0.1:{port}/api/delete", data=b"{}", method="POST")
-        try:
-            urlopen(request, timeout=2)
-            raise AssertionError("unrestricted model path was forwarded")
-        except HTTPError as exc:
-            assert exc.code == 403
-        deleted = Request(f"http://127.0.0.1:{port}/api/delete", method="DELETE")
-        try:
-            urlopen(deleted, timeout=2)
-            raise AssertionError("DELETE was not refused")
-        except HTTPError as exc:
-            assert exc.code == 403
-        assert "0.0.0.0" not in bridge.proxy_bind_hosts("192.168.64.1")
-        assert bridge.daemon_listen() == "127.0.0.1:11434"
-    finally:
-        httpd.shutdown()
 
 
-def test_stale_lease_suspends_and_expired_lease_shuts_the_gateway_down(tmp_path: Path, monkeypatch):
-    import time
-    import aiohttp.test_utils as aio_test
-
-    from jaeger_ai.core.gateway.server import JaegerGatewayApp
-    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
-    from jaeger_ai.core.runtime.fabric_supervisor import _repair_jaeger
-
-    lease = tmp_path / "lease.json"
-    monkeypatch.setenv("JAEGER_LIFECYCLE_LEASE", str(lease))
-    monkeypatch.setenv("JAEGER_GLOBAL_STOP_PATH", str(tmp_path / "stop.json"))
-
-    async def scenario():
-        gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "gw.sqlite3"))
-        gateway.app.on_startup.clear()
-        async with aio_test.TestClient(aio_test.TestServer(gateway.app)) as client:
-            _swift_lease(lease, time.time())
-            gateway._lifecycle_shutdown.clear()
-            gateway._note_lifecycle()
-            assert gateway._lifecycle_shutdown.is_set() is False
-            alive = await client.post(
-                "/v1/sessions", json={"session_id": "alive"}, headers=caller_auth.client_headers("cli"),
-            )
-            assert alive.status not in {401, 423}
-
-            _swift_lease(lease, time.time() - 8)
-            gateway._note_lifecycle()
-            assert gateway._lifecycle_shutdown.is_set() is False
-            stale = await client.post(
-                "/v1/sessions", json={"session_id": "stale"}, headers=caller_auth.client_headers("cli"),
-            )
-            assert stale.status == 423
-
-            _swift_lease(lease, time.time() - 30)
-            gateway._note_lifecycle()
-            assert gateway._lifecycle_shutdown.is_set() is True
-            expired = await client.post(
-                "/v1/sessions", json={"session_id": "expired"}, headers=caller_auth.client_headers("cli"),
-            )
-            assert expired.status == 423
-
-    asyncio.run(scenario())
-    assert repairs_allowed() is False
-    kicked = []
-    monkeypatch.setattr(
-        "jaeger_ai.core.runtime.fabric_supervisor._kickstart",
-        lambda label: kicked.append(label) or True,
-    )
-    assert _repair_jaeger() is False
-    assert kicked == []
 
 
 def test_attached_slash_is_a_command_not_a_model_turn(monkeypatch):

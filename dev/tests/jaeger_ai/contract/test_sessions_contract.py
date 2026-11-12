@@ -26,12 +26,12 @@ from jaeger_ai.contract.frameworks import FRAMEWORKS
 @pytest.mark.parametrize(
     ("session_id", "runtime"),
     [
-        ("webui-hermes-25e319419efc8aba3d8423ac69144035", "hermes"),
-        ("webui-openclaw-91cc0a21", "openclaw"),
+        ("webui-hermes-25e319419efc8aba3d8423ac69144035", None),
+        ("webui-openclaw-91cc0a21", None),
         ("webui-jaeger-4d2c2b3f", "jaeger"),
         # Roundtable joins its per-member legs with ':', not '-'. Matching only
         # '-' left every debate leg unattributed.
-        ("roundtable-hermes:44f0050a92ba504e860df5f1768f6e6d", "roundtable"),
+        ("roundtable-hermes:44f0050a92ba504e860df5f1768f6e6d", None),  # retired
         ("focus-jaeger-abc123", "jaeger"),
         # Pre-convention ids genuinely name no framework.
         ("01235f3384e1", None),
@@ -46,8 +46,9 @@ def test_runtime_from_session_id(session_id, runtime) -> None:
 
 def test_a_roundtable_leg_belongs_to_the_debate_not_the_member() -> None:
     """``roundtable-hermes:…`` is Hermes answering *for* a Roundtable debate."""
-    assert cs.runtime_from_session_id("roundtable-hermes:abc") == "roundtable"
-    assert cs.runtime_from_session_id("webui-hermes-abc") == "hermes"
+    # Roundtable and Hermes were retired: their legacy ids attribute to nothing.
+    assert cs.runtime_from_session_id("roundtable-hermes:abc") is None
+    assert cs.runtime_from_session_id("webui-hermes-abc") is None
 
 
 def test_minting_and_decoding_round_trip() -> None:
@@ -75,18 +76,18 @@ def test_a_surface_can_never_become_a_profile() -> None:
 # ── attribution precedence ───────────────────────────────────────────────
 
 def test_recorded_profile_beats_the_id() -> None:
-    found = cs.attribute("webui-hermes-abc", "webui", profile="openclaw")
-    assert found.runtime == "openclaw"
+    found = cs.attribute("webui-hermes-abc", "webui", profile="jaeger")
+    assert found.runtime == "jaeger"
 
 
 def test_id_beats_the_store_it_was_found_in() -> None:
-    found = cs.attribute("webui-openclaw-abc", "webui", store_runtime="hermes")
-    assert found.runtime == "openclaw"
+    found = cs.attribute("webui-jaeger-abc", "webui", store_runtime="other")
+    assert found.runtime == "jaeger"
 
 
 def test_store_is_the_last_resort_not_a_guess() -> None:
     """A bare id in Hermes' own database IS a Hermes conversation."""
-    assert cs.attribute("01235f3384e1", "cli", store_runtime="hermes").runtime == "hermes"
+    assert cs.attribute("01235f3384e1", "cli", store_runtime="jaeger").runtime == "jaeger"
     assert cs.attribute("01235f3384e1", "cli").runtime is None
 
 
