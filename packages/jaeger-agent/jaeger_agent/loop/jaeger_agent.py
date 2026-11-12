@@ -752,14 +752,6 @@ class JaegerAgent:
             # nudges. ``_one_model_step_with_length_retry`` returns the
             # final assistant message after the retry chain settles.
             assistant_msg = self._one_model_step_with_length_retry()
-            from jaeger_agent import live as _live
-            _calls = assistant_msg.get("tool_calls") if isinstance(assistant_msg, dict) else None
-            _live.emit("loop.iteration", {
-                "index": iteration, "max": self.max_iterations,
-                "decision": "continue" if _calls else "answer",
-                "reason": f"{len(_calls)} tool call(s) requested" if _calls else "model returned text without tool calls",
-                "tool_calls": len(_calls or []),
-            })
 
             # MODEL deliberation, if the adapter separated any out of the
             # visible answer. Fired here rather than inside the adapter so
@@ -827,6 +819,17 @@ class JaegerAgent:
                         )
                 except Exception as exc:
                     logger.debug("tool_call_repair error: %s", exc)
+
+            # Live step status — after plain-text tool-call recovery, so a CLI or
+            # local model that writes its calls as text still reads "continue".
+            from jaeger_agent import live as _live
+            _live.emit("loop.iteration", {
+                "index": iteration, "max": self.max_iterations,
+                "decision": "continue" if tool_calls else "answer",
+                "reason": (f"{len(tool_calls)} tool call(s) requested" if tool_calls
+                           else "model returned text without tool calls"),
+                "tool_calls": len(tool_calls),
+            })
 
             if tool_calls:
                 tool_calls = unique_tool_call_ids(tool_calls, self.messages)

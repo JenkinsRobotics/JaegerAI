@@ -625,6 +625,7 @@ def run_continued_turn(
             result = {**result, "halt_reason": "interrupted"}
             break
         nxt = None
+        why = ""
         halt = result.get("halt_reason")
         if continuation.is_loop_breaker(halt):
             break
@@ -636,6 +637,7 @@ def run_continued_turn(
             nxt = interactive_followup(ans, goal, halt, paths_checked=paths_checked,
                                        tools_used=tools_used, checks_done=checks,
                                        last_tools=step_tools if checks else None)
+            why = "owner verification follow-up"
             if nxt and nxt.startswith(MISSING_PATHS_NOTE[:30]):
                 paths_checked = True
             elif nxt and nxt.startswith(CHECK_STEP[:12]):
@@ -646,15 +648,18 @@ def run_continued_turn(
                 result = {**result, "text": last_answer}
         elif durable and not last_completion():
             nxt = harness_prompt(objective=goal)
+            why = "durable task not completed yet"
         elif ledger_open() or continuation.hit_inner_cap(halt):
+            why = "work ledger still open" if ledger_open() else f"inner loop hit its cap ({halt})"
             nxt = next_continuation_prompt(
                 ans, force_ledger=ledger_open(), halt_reason=halt, objective=goal,
             )
         elif continuation.enabled() and step < budget:
             if continuation.classify(ans) == "continue":
                 nxt = continuation.continuation_prompt(goal)
+                why = "answer reads as unfinished"
         if nxt and step < budget:
-            checkpoint = {"text": ans, "step": step, "halt_reason": halt}
+            checkpoint = {"text": ans, "step": step, "halt_reason": halt, "reason": why}
             checkpoints.append(checkpoint)
             if on_checkpoint is not None:
                 on_checkpoint(checkpoint)

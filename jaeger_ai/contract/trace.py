@@ -38,7 +38,7 @@ ACTIVE_STATES = frozenset({"running", "waiting"})
 #: Framework-responsibility events (execution loop, state, permissions,
 #: orchestration, reliability): annotate their run, never become nodes.
 RESPONSIBILITY_EVENTS = frozenset({
-    "loop.iteration", "loop.stop", "state.memory", "state.saved", "policy.decision",
+    "loop.iteration", "loop.stop", "loop.continuation", "state.memory", "state.saved", "policy.decision",
     "route.selected", "reliability.retry", "reliability.fallback", "reliability.exhausted",
     "reliability.timeout",
 })
