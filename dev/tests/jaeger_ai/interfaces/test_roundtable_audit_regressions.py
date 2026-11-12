@@ -6,42 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.features.roundtable import roundtable
 from jaeger_ai.interfaces.a2a_server import JaegerBridgeExecutor
 
 
-def test_quick_cannot_choose_excluded_member():
-    plan = roundtable._turn_plan('/quick @Hermes @Jaeger check ollama')
-    assert len(plan['participants']) == 1
-    assert plan['participants'][0] in {'hermes', 'jaeger'}
 
 
-def test_all_requires_complete_mention():
-    plan = roundtable._turn_plan('@alligator @Hermes hello')
-    assert plan['participants'] == ('hermes',)
 
 
-@pytest.mark.parametrize('ending,category', [
-    ([{'error': {'type': 'timeout', 'message': 'upstream timed out'}}, '[DONE]'], 'timeout'),
-    ([], 'incomplete_stream'),
-])
-def test_partial_stream_is_not_success(monkeypatch, ending, category):
-    class Response:
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-        def __iter__(self):
-            for item in [{'choices': [{'delta': {'content': 'Partial'}}]}, *ending]:
-                yield ('data: ' + (item if isinstance(item, str) else json.dumps(item)) + '\n').encode()
-    monkeypatch.setattr(roundtable.urllib.request, 'urlopen', lambda *a, **k: Response())
-    answer = roundtable.chat_openclaw('test', 'isolated')
-    assert roundtable._is_failed_answer(answer)
-    assert answer.error_category == category
-    assert answer.partial == 'Partial'
 
 
-def test_missing_member_session_is_rejected():
-    with pytest.raises(ValueError, match='session'):
-        roundtable._member_session_id('', 'jaeger')
 
 
 def test_a2a_unknown_cancel_never_issues_global_control():
@@ -92,8 +65,3 @@ def test_a2a_cancel_owns_native_turn_and_preserves_other_task():
     assert controls == [('cancel', {'turn_id': turn_ids['A']})]
 
 
-def test_native_permission_failures_are_not_transport_outages():
-    from jaeger_ai.core.frameworks.openclaw_native import gateway_error
-    from jaeger_ai.core.frameworks.resilience import failure_category
-    assert failure_category(gateway_error({'code':'INVALID_REQUEST','message':'missing scope: operator.admin'})) == 'permission_denied'
-    assert failure_category(gateway_error({'code':'NOT_PAIRED','message':'pairing required'})) == 'pairing_required'

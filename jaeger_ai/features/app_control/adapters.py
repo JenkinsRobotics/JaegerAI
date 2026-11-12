@@ -113,7 +113,7 @@ def default_specs() -> list[AppSpec]:
             surfaces=("http 127.0.0.1:5678", "webhooks")),
     ]
     for svc in ("a2a", "ares-worker", "bridge", "colima", "docs-indexer", "gateway", "jobs", "mcp-http",
-                "muse-bridge", "rackpc-tunnel", "webui", "ollama-bridge"):
+                "muse-bridge", "rackpc-tunnel", "webui"):
         specs.append(_ld(f"jaeger-{svc}", f"com.jenkinsrobotics.jaeger-{svc}",
                          self_service=svc in ("gateway", "webui", "mcp-http")))
     return specs

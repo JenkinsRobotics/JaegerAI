@@ -34,15 +34,3 @@ def test_helpers_need_explicit_grant(monkeypatch, identity):
         grants._require("applescript.execute")
 
 
-def test_openclaw_adapter_never_requests_operator_admin():
-    from jaeger_ai.core.frameworks import openclaw_native
-
-    assert "operator.admin" not in openclaw_native.SCOPES
-    tree = ast.parse((REPO / "jaeger_ai/core/frameworks/openclaw_native.py").read_text())
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-            values = [e.value for e in node.elts if isinstance(e, ast.Constant)]
-            assert "operator.admin" not in values, "OpenClaw adapter must not request operator.admin"
-        if isinstance(node, ast.keyword) and node.arg == "scopes":
-            src = ast.unparse(node.value)
-            assert "admin" not in src, src

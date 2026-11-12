@@ -1,25 +1,17 @@
-"""The four frameworks Jaeger can run a turn on — one table, no second copy.
+"""The framework table Jaeger runs a turn on — one table, no second copy.
 
-Jaeger routes a conversation to one of four backends. Each one is known by a
-different name depending on which layer you are standing in, and that is the
-whole problem this module exists to solve:
+Jaeger is the product and, since the 2026-11-11 cleanup, the only backend.
+The table shape is kept so every layer still names a backend one way:
 
-    runtime      the canonical id used in code           "hermes"
-    profile      the WebUI profile name                  "default"   ← not "hermes"
-    display_name what a human reads                      "Hermes Agent"
-    agent_id     the agent registry's id                 "tp:hermes"
-    container    the managed container, when it has one  "jaeger-hermes-webui"
+    runtime      the canonical id used in code           "jaeger"
+    profile      the WebUI profile name                  "jaeger"
+    display_name what a human reads                      "Jaeger AI"
+    agent_id     the agent registry's id                 "native:jaeger"
 
-The Hermes row is the trap: its runtime is ``hermes`` but its profile is
-``default``, so code that assumes the two words are interchangeable works for
-three frameworks out of four and silently misroutes the fourth.
-
-Before this table, that mapping was re-derived in eight places — the WebUI
-profile catalogue, the runner's alias dict, the readiness probe's if/else
-chain, three container-name dicts, the supervisor's repair table, Roundtable's
-member list, and again in JavaScript in the browser. On 2026-09-14 a roster
-click routed to the wrong framework precisely because two of those copies
-disagreed about what "active" meant.
+The Hermes, OpenClaw and Roundtable rows (and their native turn/reconcile
+backends) were removed. Stored sessions that still name them resolve to
+:class:`UnknownFramework`; every call site already treats that as "no
+framework" rather than guessing.
 
 Nothing here imports the rest of ``jaeger_ai``. It is the bottom layer, on the
 same rule as :mod:`jaeger_os.contract` — so any module may import it and none
@@ -35,8 +27,6 @@ from typing import Callable
 DEFAULT_AGENT_MODEL = "glm-5.3-flash:cloud"
 
 #: Jaeger is the product. Fresh WebUI with no profile cookie/session uses this
-#: runtime. Hermes keeps profile name ``default`` for upstream WebUI compatibility;
-#: that implementation detail must not become the Jaeger product default.
 PRODUCT_DEFAULT_RUNTIME = "jaeger"
 PRODUCT_DEFAULT_PROFILE = "jaeger"
 
@@ -49,8 +39,7 @@ class Framework:
     """Canonical id. Use this as the key anywhere code needs to name a backend."""
 
     profile: str
-    """The WebUI profile name. Equals ``runtime`` except for Hermes, which the
-    WebUI calls ``default`` because it is the profile you get with no cookie."""
+    """The WebUI profile name."""
 
     display_name: str
     """What a person reads. The only string that should ever reach a UI."""
@@ -100,37 +89,12 @@ class BackendProtocol:
 
 FRAMEWORKS: tuple[Framework, ...] = (
     Framework(
-        runtime="hermes",
-        profile="default",
-        display_name="Hermes Agent",
-        agent_id="tp:hermes",
-        turn="jaeger_ai.core.frameworks.hermes_native:hermes_turn",
-        reconciler="jaeger_ai.core.frameworks.hermes_native:hermes_reconcile",
-    ),
-    Framework(
         runtime="jaeger",
         profile="jaeger",
         display_name="Jaeger AI",
         agent_id="native:jaeger",
         turn="jaeger_ai.core.frameworks.jaeger:dispatcher_turn",
         reconciler="jaeger_ai.core.frameworks.jaeger:jaeger_reconcile",
-    ),
-    Framework(
-        runtime="openclaw",
-        profile="openclaw",
-        display_name="OpenClaw",
-        agent_id="tp:openclaw",
-        container="jaeger-openclaw",
-        turn="jaeger_ai.core.frameworks.openclaw_native:openclaw_turn",
-        reconciler="jaeger_ai.core.frameworks.openclaw_native:openclaw_reconcile",
-    ),
-    Framework(
-        runtime="roundtable",
-        profile="roundtable",
-        display_name="Roundtable",
-        agent_id="tp:roundtable",
-        composes=("jaeger", "hermes", "openclaw"),
-        owns_sessions=False,
     ),
 )
 
@@ -139,10 +103,10 @@ _BY_PROFILE = {f.profile: f for f in FRAMEWORKS}
 _BY_AGENT_ID = {f.agent_id: f for f in FRAMEWORKS}
 
 #: Spellings seen in the wild that mean an existing runtime.
-_ALIASES = {"jaegerai": "jaeger", "hermes-webui": "hermes"}
+_ALIASES = {"jaegerai": "jaeger"}
 
-#: The three backends Roundtable debates between, in speaking order.
-DEBATE_MEMBERS: tuple[str, ...] = _BY_RUNTIME["roundtable"].composes
+#: Runtimes a composed (debate) backend delegates to. None remain.
+DEBATE_MEMBERS: tuple[str, ...] = ()
 
 #: Runtimes that answer on their own — everything that is not a debate.
 SOLO_RUNTIMES: tuple[str, ...] = tuple(f.runtime for f in FRAMEWORKS if not f.composes)
@@ -153,7 +117,7 @@ SESSION_OWNERS: tuple[str, ...] = tuple(f.runtime for f in FRAMEWORKS if f.owns_
 
 
 class UnknownFramework(KeyError):
-    """Raised for a name that is not one of the four. Carries the valid set."""
+    """Raised for a name that is not a known framework. Carries the valid set."""
 
     def __init__(self, value: object) -> None:
         super().__init__(
@@ -169,10 +133,8 @@ def canonical_runtime(value: object) -> str:
     This is the one place a name is normalised. Case and surrounding whitespace
     are ignored because these values arrive from HTTP bodies and cookies.
 
-    >>> canonical_runtime("default")      # the WebUI's name for Hermes
-    'hermes'
-    >>> canonical_runtime("tp:openclaw")  # an agent registry id
-    'openclaw'
+    >>> canonical_runtime("native:jaeger")  # an agent registry id
+    'jaeger'
     >>> canonical_runtime(" JaegerAI ")
     'jaeger'
     """
@@ -193,7 +155,7 @@ def framework(value: object) -> Framework:
 
 
 def profile_name(value: object) -> str:
-    """The WebUI profile name for any spelling. ``"hermes"`` → ``"default"``."""
+    """The WebUI profile name for any spelling."""
     return framework(value).profile
 
 
@@ -213,7 +175,7 @@ def display_name(value: object) -> str:
 
 
 def is_known(value: object) -> bool:
-    """Whether ``value`` names one of the four, in any spelling."""
+    """Whether ``value`` names a known framework, in any spelling."""
     try:
         canonical_runtime(value)
     except UnknownFramework:

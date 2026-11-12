@@ -43,14 +43,10 @@ def reconcile_owned_run(runtime: str, run_id: str, *, state_root: Path | None = 
         raise FileNotFoundError(f"No owned {runtime} receipt found for run {run_id}")
     if len(roots) != 1:
         raise RuntimeError("Run identity appears in multiple ownership stores; inspect before reconciling")
-    if runtime == "roundtable":
-        from jaeger_ai.features.roundtable.service import TableService
-        result = TableService(roots[0].parent).reconcile(run_id)
-    else:
-        protocol = backend_protocol(runtime)
-        result = Runs(
-            roots[0], protocol.turn, reconciler=protocol.reconciler
-        ).reconcile(run_id)
+    protocol = backend_protocol(runtime)
+    result = Runs(
+        roots[0], protocol.turn, reconciler=protocol.reconciler
+    ).reconcile(run_id)
     return {**result, "runtime": runtime, "store": str(roots[0])}
 
 
@@ -149,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Resolve durable unknown native runs without redispatching them.",
     )
     parser.add_argument("action", choices=("reconcile", "abandon"))
-    parser.add_argument("runtime", choices=(*SOLO_RUNTIMES, "roundtable"))
+    parser.add_argument("runtime", choices=SOLO_RUNTIMES)
     parser.add_argument("run_id")
     parser.add_argument("--reason", default="")
     args = parser.parse_args(argv)

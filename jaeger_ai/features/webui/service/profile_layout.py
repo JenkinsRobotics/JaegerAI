@@ -34,10 +34,10 @@ def profile_display_name(profile_id: str | None) -> str:
     The fallback stays for ids that are genuinely not frameworks, such as an
     operator-created profile.
     """
-    key = str(profile_id or "default").strip().lower() or "default"
+    key = str(profile_id or "jaeger").strip().lower() or "jaeger"
     if is_known(key):
         return display_name(key)
-    return key[:1].upper() + key[1:] if key else PROFILE_DISPLAY_NAMES["default"]
+    return key[:1].upper() + key[1:]
 
 
 def library_model() -> dict[str, Any]:
@@ -47,11 +47,7 @@ def library_model() -> dict[str, Any]:
     Jaeger-native agents and third-party adapter faces remotely.
     """
     badges = [
-        PROFILE_DISPLAY_NAMES["default"],
         PROFILE_DISPLAY_NAMES["jaeger"],
-        PROFILE_DISPLAY_NAMES["openclaw"],
-        PROFILE_DISPLAY_NAMES["roundtable"],
-        "ARES",
     ]
     catalog: dict[str, Any] = {}
     try:

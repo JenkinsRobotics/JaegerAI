@@ -33,7 +33,7 @@ def test_restart_rejects_unknown_flags_before_stopping(monkeypatch):
 
 
 def test_stop_failure_is_reported_and_restart_does_not_start(monkeypatch, capsys):
-    label = lifecycle.SUPERVISOR_SERVICE
+    label = 'com.jenkinsrobotics.jaeger-bridge'
     monkeypatch.setattr(lifecycle, '_get_launchd_jobs', lambda: {label: {'pid': 1, 'status': 0}})
     monkeypatch.setattr(lifecycle, '_find_app_pids', lambda: [])
     monkeypatch.setattr(lifecycle.subprocess, 'run', lambda *a, **kw: CompletedProcess(a[0], 1, '', 'failed'))
@@ -72,10 +72,6 @@ def test_start_preserves_loaded_services_and_running_containers(monkeypatch, tmp
     assert not any('bootout' in c or 'bootstrap' in c or 'start' in c for c in calls)
 
 
-def test_container_names_follow_deployment_manifest(monkeypatch):
-    from jaeger_ai.core.runtime import agent_workspaces
-    monkeypatch.setattr(agent_workspaces, 'container_name', lambda role: 'selected-' + role)
-    assert lifecycle._container_names() == ('selected-openclaw',)
 
 
 def test_loaded_unhealthy_service_is_not_killed_by_start(monkeypatch, tmp_path):

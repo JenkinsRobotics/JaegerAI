@@ -57,7 +57,6 @@ def test_stack_up_reloads_loaded_job_configuration(monkeypatch):
     monkeypatch.setattr(stack, "_launchctl", lambda args: commands.append(args) or MagicMock(returncode=0))
     monkeypatch.setattr(stack, "migrate_legacy_launchagents", lambda: None)
     monkeypatch.setattr(stack, "sync_plists", list)
-    monkeypatch.setattr("jaeger_ai.core.frameworks.setup._configure_agent_models", lambda: None)
     monkeypatch.setattr(stack, "stack_status", lambda services: [{"ready": True}])
     service = SERVICE_BY_ID["gateway"]
     assert stack.stack_up([service])["ok"]
@@ -120,7 +119,7 @@ def test_stack_down_terminates_services(monkeypatch: pytest.MonkeyPatch):
     assert len(bootout_cmds) == len(STACK_SERVICES)
     labels = {command[1].rsplit("/", 1)[-1] for command in bootout_cmds}
     assert "com.jenkinsrobotics.jaeger-gateway" in labels
-    assert "com.jenkinsrobotics.jaeger-ollama-bridge" in labels
+    assert "com.jenkinsrobotics.jaeger-ollama-bridge" not in labels
     source = Path("jaeger_ai/core/runtime/stack.py").read_text(encoding="utf-8")
     assert "pgrep" not in source
     assert "lsof" not in source

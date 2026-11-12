@@ -52,7 +52,6 @@ def test_status_terminal_output(capsys, monkeypatch):
 
 def test_stop_dry_run(capsys, monkeypatch):
     monkeypatch.setattr(lifecycle_verbs, "_get_launchd_jobs", lambda: {
-        lifecycle_verbs.SUPERVISOR_SERVICE: {"pid": 999, "status": 0},
         "com.jenkinsrobotics.jaeger-bridge": {"pid": 1000, "status": 0},
     })
     monkeypatch.setattr(lifecycle_verbs, "_find_app_pids", lambda: [888])
@@ -68,7 +67,7 @@ def test_stop_dry_run(capsys, monkeypatch):
     assert "[dry-run]" in captured.out
     assert "Would terminate JaegerAI.app" in captured.out
     assert "Would stop Jaeger WebUI" in captured.out
-    assert f"Would bootout {lifecycle_verbs.SUPERVISOR_SERVICE}" in captured.out
+    assert "Would bootout com.jenkinsrobotics.jaeger-bridge" in captured.out
 
 
 def test_start_dry_run(capsys, monkeypatch):

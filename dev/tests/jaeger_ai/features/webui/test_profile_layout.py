@@ -39,11 +39,10 @@ def test_ensure_agent_state_schema_creates_db_when_missing(tmp_path: Path) -> No
 def test_profile_display_name_helper() -> None:
     from jaeger_ai.features.webui.service.profile_layout import profile_display_name
 
-    assert profile_display_name("default") == "Hermes Agent"
-    assert profile_display_name(None) == "Hermes Agent"
+    assert profile_display_name(None) == "Jaeger AI"
     assert profile_display_name("jaeger") == "Jaeger AI"
-    assert profile_display_name("openclaw") == "OpenClaw"
-    assert profile_display_name("roundtable") == "Roundtable"
+    # Retired frameworks and operator profiles fall back to a title-cased id.
+    assert profile_display_name("openclaw") == "Openclaw"
 
 
 def test_legacy_hermes_home_helpers_are_gone() -> None:

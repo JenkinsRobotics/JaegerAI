@@ -17,34 +17,18 @@ from jaeger_ai.contract import frameworks as fw
 
 # ── the table ────────────────────────────────────────────────────────────
 
-def test_the_four_frameworks_are_present_and_unique() -> None:
-    runtimes = [f.runtime for f in fw.FRAMEWORKS]
-    assert sorted(runtimes) == ["hermes", "jaeger", "openclaw", "roundtable"]
-    for field in ("runtime", "profile", "display_name", "agent_id"):
-        values = [getattr(f, field) for f in fw.FRAMEWORKS]
-        assert len(set(values)) == len(values), f"duplicate {field}: {values}"
-
-
-def test_hermes_profile_is_default() -> None:
-    """The trap this module exists for: Hermes' runtime and profile differ.
-
-    Code that treats the two words as interchangeable works for the other
-    three frameworks and silently misroutes this one.
-    """
-    assert fw.framework("hermes").profile == "default"
-    assert fw.canonical_runtime("default") == "hermes"
-    assert fw.profile_name("hermes") == "default"
+def test_jaeger_is_the_only_framework() -> None:
+    """Hermes, OpenClaw and Roundtable were retired on 2026-11-11."""
+    assert [f.runtime for f in fw.FRAMEWORKS] == ["jaeger"]
+    assert fw.DEBATE_MEMBERS == ()
+    for retired in ("hermes", "default", "openclaw", "roundtable", "tp:hermes"):
+        assert not fw.is_known(retired), retired
 
 
 @pytest.mark.parametrize(
     ("spelling", "runtime"),
-    [
-        ("hermes", "hermes"), ("default", "hermes"), ("tp:hermes", "hermes"),
-        ("jaeger", "jaeger"), ("native:jaeger", "jaeger"), ("jaegerai", "jaeger"),
-        ("openclaw", "openclaw"), ("tp:openclaw", "openclaw"),
-        ("roundtable", "roundtable"), ("tp:roundtable", "roundtable"),
-        ("  OpenClaw  ", "openclaw"),   # values arrive from HTTP bodies/cookies
-    ],
+    [("jaeger", "jaeger"), ("native:jaeger", "jaeger"), ("jaegerai", "jaeger"),
+     ("  Jaeger  ", "jaeger")],   # values arrive from HTTP bodies/cookies
 )
 def test_every_spelling_resolves(spelling: str, runtime: str) -> None:
     assert fw.canonical_runtime(spelling) == runtime
@@ -55,16 +39,8 @@ def test_an_unknown_name_names_the_valid_ones() -> None:
     with pytest.raises(fw.UnknownFramework) as caught:
         fw.canonical_runtime("gpt5")
     message = str(caught.value)
-    assert "gpt5" in message and "openclaw" in message and "default" in message
+    assert "gpt5" in message and "jaeger" in message
     assert not fw.is_known("gpt5")
-
-
-def test_roundtable_composes_the_other_three() -> None:
-    assert set(fw.DEBATE_MEMBERS) == {"jaeger", "hermes", "openclaw"}
-    assert "roundtable" not in fw.DEBATE_MEMBERS, "a debate cannot debate itself"
-    assert set(fw.SOLO_RUNTIMES) == set(fw.DEBATE_MEMBERS)
-    for member in fw.DEBATE_MEMBERS:
-        assert fw.framework(member).composes == (), f"{member} must answer alone"
 
 
 def test_every_native_backend_registers_turn_and_reconciler() -> None:
@@ -72,8 +48,6 @@ def test_every_native_backend_registers_turn_and_reconciler() -> None:
         protocol = fw.backend_protocol(runtime)
         assert callable(protocol.turn)
         assert callable(protocol.reconciler)
-    with pytest.raises(RuntimeError, match="no complete native backend protocol"):
-        fw.backend_protocol("roundtable")
 
 
 def test_agent_ids_use_a_known_origin_prefix() -> None:
@@ -85,21 +59,10 @@ def test_agent_ids_use_a_known_origin_prefix() -> None:
 
 # ── every former copy still agrees ───────────────────────────────────────
 
-def test_roundtable_members_match_the_contract() -> None:
-    from jaeger_ai.features.roundtable.policy import MEMBERS
-    assert tuple(MEMBERS) == fw.DEBATE_MEMBERS
 
 
-def test_workspace_identities_match_the_contract() -> None:
-    from jaeger_ai.core.frameworks.setup import WORKSPACE_IDENTITIES
-    assert set(WORKSPACE_IDENTITIES) == set(fw.SOLO_RUNTIMES)
 
 
-def test_managed_container_names_match_the_contract() -> None:
-    from jaeger_ai.core.runtime.agent_workspaces import MANAGED_CONTAINERS
-    assert MANAGED_CONTAINERS == {
-        f.runtime: f.container for f in fw.FRAMEWORKS if f.container
-    }
 
 
 def test_incomplete_backend_registration_is_rejected() -> None:
@@ -121,7 +84,7 @@ def test_chat_endpoint_defaults_are_defined_once_and_use_loopback(monkeypatch) -
     assert ports.OLLAMA_OPENAI_URL == ports.OLLAMA_URL + "/v1"
 
 
-def test_roundtables_jaeger_seat_is_pinned_to_the_jaeger_instance() -> None:
+def test_jaeger_turn_is_pinned_to_the_jaeger_instance() -> None:
     """Roundtable's Jaeger member must not follow the UI's active delegate.
 
     ``~/.jaeger/active_instance`` records which delegate a person last selected;
