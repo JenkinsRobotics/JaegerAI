@@ -19,7 +19,7 @@ export const PAGES: readonly PageId[] = [...PRIMARY_PAGES, "library", "automatio
 export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: string }[]>> = {
   agents: [{ id: "roster", title: "Agents" }, { id: "characters", title: "Characters" }, { id: "knowledge", title: "Memory & Skills" }],
   // Separate record sources and actions remain intact until the Milestone 4 board projection.
-  work: [{ id: "pipeline", title: "Pipeline" }, { id: "backlog", title: "Backlog" }, { id: "tasks", title: "Tasks" }, { id: "production", title: "Production" }, { id: "calendar", title: "Calendar" }, { id: "youtube", title: "YouTube" }],
+  work: [{ id: "pipeline", title: "Pipeline" }, { id: "process", title: "Process" }, { id: "backlog", title: "Backlog" }, { id: "tasks", title: "Tasks" }, { id: "production", title: "Production" }, { id: "calendar", title: "Calendar" }, { id: "youtube", title: "YouTube" }],
   research: [{ id: "runs", title: "Research" }, { id: "documents", title: "Documents" }, { id: "workspace", title: "Workspace" }],
 };
 

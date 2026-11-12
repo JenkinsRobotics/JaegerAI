@@ -53,6 +53,7 @@ const KnowledgePage = lazy(() => import('../unified/KnowledgePage').then((m) => 
 const BacklogPage = lazy(() => import('../unified/BacklogPage').then((m) => ({ default: m.BacklogPage })))
 const CalendarPage = lazy(() => import('../unified/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const PipelinePage = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.PipelinePage })))
+const ProcessView = lazy(() => import('../process/ProcessView').then((m) => ({ default: m.ProcessView })))
 const ProductionPage = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.ProductionPage })))
 const TaskBanner = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.TaskBanner })))
 const PageFallback = () => <div className="jg-u-page"><SkeletonRows n={6} /></div>
@@ -132,6 +133,7 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
             : <TasksWorkspace source={source} agents={store.agents} params={paramsOf('work')} onNavigate={go} />
           case 'production': return <ProductionPage source={source} params={active === 'work' && route.sub === 'production' ? route.params : new URLSearchParams()} onNavigate={go} />
           case 'calendar': return <CalendarPage source={source} onNavigate={go} />
+          case 'process': return <ProcessView source={source} params={paramsOf('work')} />
           case 'backlog': return <BacklogPage params={paramsOf('work')} />
           case 'youtube': return <YouTubePage params={paramsOf('work')} onNavigate={go} />
           default: return <><HomeDashboard source={source} store={store} onNavigate={go} /><PipelinePage source={source} params={active === 'work' && route.sub === 'pipeline' ? route.params : new URLSearchParams()} onNavigate={go} /></>

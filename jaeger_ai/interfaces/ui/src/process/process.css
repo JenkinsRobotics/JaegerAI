@@ -1,0 +1,80 @@
+/* Process view (HMI). State colours are tokens; literals only in custom properties. */
+.jg-proc {
+  --jg-proc-running: #f5a524;
+  --jg-proc-waiting: #3b9eff;
+  --jg-proc-succeeded: #2fbf71;
+  --jg-proc-failed: #ef4444;
+  --jg-proc-denied: #d946ef;
+  --jg-proc-cancelled: #8b8b96;
+  --jg-proc-idle: var(--jg-color-border, #3a3a44);
+  display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem; min-height: 0; overflow: auto;
+  font-size: 0.85rem;
+}
+.jg-proc__bar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.jg-proc__bar select { max-width: 22rem; }
+.jg-proc__lamps { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.jg-proc-lamp { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0.6rem; border-radius: 999px;
+  border: 1px solid var(--jg-proc-idle); font-weight: 600; letter-spacing: 0.04em; opacity: 0.55; }
+.jg-proc-lamp i { width: 0.7rem; height: 0.7rem; border-radius: 50%; background: var(--jg-proc-idle); }
+.jg-proc-lamp.is-on { opacity: 1; }
+.jg-proc-lamp--run.is-on i { background: var(--jg-proc-succeeded); box-shadow: 0 0 8px var(--jg-proc-succeeded); }
+.jg-proc-lamp--model.is-on i, .jg-proc-lamp--tool.is-on i { background: var(--jg-proc-running); box-shadow: 0 0 8px var(--jg-proc-running); animation: jg-proc-pulse 1s infinite; }
+.jg-proc-lamp--wait.is-on i { background: var(--jg-proc-waiting); box-shadow: 0 0 10px var(--jg-proc-waiting); animation: jg-proc-blink 0.8s steps(2) infinite; }
+.jg-proc-lamp--fault.is-on i { background: var(--jg-proc-failed); box-shadow: 0 0 10px var(--jg-proc-failed); }
+.jg-proc__link { margin-left: auto; opacity: 0.8; }
+.jg-proc__link.is-live { color: var(--jg-proc-succeeded); }
+.jg-proc__link.is-retrying { color: var(--jg-proc-running); }
+.jg-proc__runs { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.jg-proc__runs button { display: flex; flex-direction: column; align-items: flex-start; padding: 0.25rem 0.6rem; border-radius: 0.5rem;
+  border: 1px solid var(--jg-proc-idle); background: transparent; color: inherit; cursor: pointer; }
+.jg-proc__runs button[aria-pressed="true"] { border-color: var(--jg-color-accent, currentColor); }
+.jg-proc__runs small { opacity: 0.7; }
+.jg-proc__flow { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding: 0.5rem 0 1rem; }
+.jg-proc__col { display: flex; flex-direction: column; align-items: center; position: relative; padding-left: 2rem; }
+.jg-proc__col:first-child { padding-left: 0; }
+.jg-proc__pipe { position: absolute; left: 0; top: 1.9rem; width: 2rem; height: 3px; background: var(--jg-proc-idle); }
+.jg-proc__drop { display: block; width: 3px; height: 1rem; margin: 0 auto; background: var(--jg-proc-idle); }
+.jg-proc__pipe.is-flowing, .jg-proc__drop.is-flowing {
+  background: repeating-linear-gradient(90deg, var(--jg-proc-running) 0 6px, transparent 6px 12px);
+  background-size: 24px 100%; animation: jg-proc-flow 0.6s linear infinite; }
+.jg-proc__drop.is-flowing { background: repeating-linear-gradient(180deg, var(--jg-proc-running) 0 6px, transparent 6px 12px); background-size: 100% 24px; animation-name: jg-proc-flow-down; }
+.jg-proc__branch { display: flex; flex-direction: column; align-items: center; }
+.jg-proc-node { --c: var(--jg-proc-idle); min-width: 8.5rem; max-width: 12rem; padding: 0.45rem 0.6rem; border-radius: 0.6rem;
+  border: 2px solid var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.jg-proc-node.is-running { --c: var(--jg-proc-running); box-shadow: 0 0 14px color-mix(in srgb, var(--jg-proc-running) 60%, transparent); animation: jg-proc-glow 1.2s ease-in-out infinite; }
+.jg-proc-node.is-waiting { --c: var(--jg-proc-waiting); box-shadow: 0 0 14px color-mix(in srgb, var(--jg-proc-waiting) 70%, transparent); animation: jg-proc-blink 1s steps(2) infinite; }
+.jg-proc-node.is-succeeded { --c: var(--jg-proc-succeeded); }
+.jg-proc-node.is-failed, .jg-proc-node.is-unknown { --c: var(--jg-proc-failed); }
+.jg-proc-node.is-denied { --c: var(--jg-proc-denied); }
+.jg-proc-node.is-cancelled { --c: var(--jg-proc-cancelled); }
+.jg-proc-node__kind { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; }
+.jg-proc-node__name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-proc-node__meta { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.75rem; opacity: 0.85; }
+.jg-proc-node__state { color: var(--c); font-weight: 600; }
+.jg-proc__gantt { position: relative; display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--jg-proc-idle); padding-top: 0.5rem; }
+.jg-proc__grow { display: grid; grid-template-columns: 12rem 1fr; align-items: center; gap: 0; height: 1.1rem; }
+.jg-proc__glabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; opacity: 0.8; padding-right: 0.5rem; }
+.jg-proc__gtrack { position: relative; height: 0.7rem; }
+.jg-proc__gbar { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: var(--jg-proc-idle); }
+.jg-proc__gbar.is-running { background: var(--jg-proc-running); }
+.jg-proc__gbar.is-waiting { background: var(--jg-proc-waiting); }
+.jg-proc__gbar.is-succeeded { background: var(--jg-proc-succeeded); }
+.jg-proc__gbar.is-failed, .jg-proc__gbar.is-unknown { background: var(--jg-proc-failed); }
+.jg-proc__gbar.is-denied { background: var(--jg-proc-denied); }
+.jg-proc__gbar.is-cancelled { background: var(--jg-proc-cancelled); }
+.jg-proc__playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--jg-color-accent, currentColor); pointer-events: none; }
+.jg-proc__scrub { display: flex; align-items: center; gap: 0.6rem; }
+.jg-proc__scrub input[type="range"] { flex: 1; }
+.jg-proc__log { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow: auto; font-size: 0.75rem; }
+.jg-proc__log li { display: flex; gap: 0.6rem; padding: 0.1rem 0; border-bottom: 1px solid color-mix(in srgb, var(--jg-proc-idle) 40%, transparent); }
+.jg-proc__log li.is-running b { color: var(--jg-proc-running); }
+.jg-proc__log li.is-waiting b { color: var(--jg-proc-waiting); }
+.jg-proc__log li.is-succeeded b { color: var(--jg-proc-succeeded); }
+.jg-proc__log li.is-failed b { color: var(--jg-proc-failed); }
+.jg-proc__empty { opacity: 0.7; }
+@keyframes jg-proc-pulse { 50% { opacity: 0.45; } }
+@keyframes jg-proc-blink { 50% { opacity: 0.35; } }
+@keyframes jg-proc-glow { 50% { box-shadow: 0 0 4px transparent; } }
+@keyframes jg-proc-flow { to { background-position: 24px 0; } }
+@keyframes jg-proc-flow-down { to { background-position: 0 24px; } }
+@media (prefers-reduced-motion: reduce) { .jg-proc * { animation: none !important; } }

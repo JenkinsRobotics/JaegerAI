@@ -4,6 +4,7 @@
  * decision made here is the same gateway call (POST approve) and disappears from the chat too.
  */
 import { useEffect, useState } from "react";
+import { APPROVAL_PUSH_EVENT } from "../api/gateway";
 import type { JaegerSource, PendingApproval } from "../api/source";
 import { SessionApprovals } from "../chat/SessionApprovals";
 
@@ -13,7 +14,7 @@ const RECENT_SESSIONS = 12;
 export const isDecidable = (r: PendingApproval, sessionId: string) =>
   r.status === "pending" && ["handoff", "tool", "tool_confirm"].includes(r.kind) && r.session_id === sessionId;
 
-export function useApprovalSessions(source: JaegerSource, pollMs = 5000) {
+export function useApprovalSessions(source: JaegerSource, pollMs = 30_000) {
   const [pending, setPending] = useState<{ sessionId: string; count: number; title?: string; agentId?: string | null }[]>([]);
   useEffect(() => {
     if (!source.pendingApprovals) return;
@@ -29,8 +30,12 @@ export function useApprovalSessions(source: JaegerSource, pollMs = 5000) {
       } catch { /* gateway unreachable: keep the last read */ }
     };
     void read();
+    // Pushed approval.* frames refresh immediately; the poll is only a safety net.
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const onPush = () => { clearTimeout(pending); pending = setTimeout(() => void read(), 150); };
+    window.addEventListener(APPROVAL_PUSH_EVENT, onPush);
     const t = setInterval(() => void read(), pollMs);
-    return () => { live = false; clearInterval(t); };
+    return () => { live = false; clearInterval(t); clearTimeout(pending); window.removeEventListener(APPROVAL_PUSH_EVENT, onPush); };
   }, [source, pollMs]);
   return pending;
 }
