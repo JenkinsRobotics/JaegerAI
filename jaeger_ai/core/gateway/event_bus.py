@@ -76,6 +76,7 @@ EVENT_TYPES = frozenset({
     # Canonical spans (contract/trace.py): one model call = one step; hooks
     # that deny/rewrite a tool call; sub-agent runs started from a tool.
     "model.started", "model.finished", "hook.decision", "subagent.started", "subagent.finished",
+    "subagent.tool.started", "subagent.tool.finished", "tool.progress",
     # Connect Apps panel: {id, state, audit?} on the global stream.
     "connect_app.updated",
     # Published by POST /v1/runtime/tier (was emitted but never registered).

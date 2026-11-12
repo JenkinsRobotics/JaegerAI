@@ -134,13 +134,18 @@ def classify(event: str, d: dict[str, Any]) -> dict[str, Any] | None:
     if event == "clarify.resolved" and d.get("clarify_id"):
         st = {"cancelled": "cancelled", "expired": "cancelled"}.get(_s(d.get("status")), "succeeded")
         return node("input", f"clarify:{d['clarify_id']}", run, "question", st, "CUSTOM")
+    if event in {"subagent.tool.started", "subagent.tool.finished"} and call and d.get("subagent_id"):
+        done = event.endswith("finished")
+        state = ("succeeded" if d.get("ok") is not False else "failed") if done else "running"
+        return node("tool", f"tool:{call}", f"agent:{d['subagent_id']}", _s(d.get("tool")) or "tool", state,
+                    "TOOL_CALL_RESULT" if done else "TOOL_CALL_START")
     if event in {"agent.handoff", "agent.handoff.finished", "subagent.started", "subagent.finished"}:
         h = d.get("handoff") if isinstance(d.get("handoff"), dict) else d
         hid = _s(h.get("id") or h.get("handoff_id") or d.get("subagent_id"))
         if not hid:
             return None
         name = _s((h.get("metadata") or {}).get("target_display") if isinstance(h.get("metadata"), dict) else "") \
-            or _s(h.get("to_agent_id") or d.get("agent_id")) or "agent"
+            or _s(h.get("to_agent_id") or d.get("agent_id") or d.get("name")) or "agent"
         done = event in {"agent.handoff.finished", "subagent.finished"}
         st = ("failed" if _s(h.get("status")) in {"failed", "error"} else "succeeded") if done else "running"
         return node("subagent", f"agent:{hid}", f"tool:{call}" if call else run, name, st,
@@ -152,10 +157,17 @@ def classify(event: str, d: dict[str, Any]) -> dict[str, Any] | None:
                  "sources", "files.changed", "search.count", "follow_ups", "turn.steer", "turn.cancel"} and run:
         return node("info", step or run, run if step else None, event, None,
                     "STATE_DELTA" if event == "turn.plan" else "CUSTOM")
-    if event == "jaeger.state":
+    # Presence frames are published only by the Gateway bus (see
+    # contract.presence); here they are recognised by shape, not re-declared.
+    if event.endswith(".state") and _s(d.get("state")) in _presence_states():
         return node("presence", f"presence:{_s(d.get('session_id'))}", run, _s(d.get("state")),
                     None, "STATE_SNAPSHOT")
     return None
+
+
+def _presence_states() -> frozenset[str]:
+    from jaeger_ai.contract.presence import ACTIVITY_STATES
+    return frozenset(str(x) for x in ACTIVITY_STATES)
 
 
 def annotate(session_id: str, event: str, data: dict[str, Any], ts: float | None = None) -> dict[str, Any]:
