@@ -699,57 +699,5 @@ def read_session_run_events(
     }
 
 
-def delete_run_journal(session_id: str, *, session_dir: Path | None = None) -> bool:
-    """Remove the entire per-session run-journal directory (``_run_journal/{sid}/``).
-
-    The run journal stores one directory per session containing a ``{rid}.jsonl``
-    file per run, so removing the session's directory clears every run's full
-    request/response payloads. Invalid/empty ids and a missing directory are a
-    no-op so callers can invoke this unconditionally on delete. Returns ``True``
-    if a directory was removed, ``False`` otherwise.
-    """
-    import shutil
-
-    sid = str(session_id or "").strip()
-    # Reject path-traversal ids: the regex below permits dots, so a bare "." or
-    # ".." would resolve `root / RUN_JOURNAL_DIR_NAME / sid` to the journal ROOT
-    # (or its parent) and rmtree the wrong directory. The route call site only
-    # passes real sids, but this is a public helper — guard it directly.
-    if sid in (".", "..") or not sid or "/" in sid or "\\" in sid or not _SAFE_ID_RE.fullmatch(sid):
-        return False
-    root = Path(session_dir) if session_dir is not None else _default_session_dir()
-    session_journal_dir = root / RUN_JOURNAL_DIR_NAME / sid
-    if not session_journal_dir.exists():
-        return False
-    shutil.rmtree(session_journal_dir, ignore_errors=True)
-    removed = not session_journal_dir.exists()
-    # Evict any writer locks the removed runs left behind. `_lock_for` keys are
-    # ``(str(path.parent), path.name, pid)`` and every run file for this session
-    # lives directly under ``session_journal_dir``, so drop all keys whose parent
-    # dir matches — pid-independent — to keep `_WRITER_LOCKS` from growing forever.
-    # Guard on confirmed removal: `rmtree(ignore_errors=True)` can silently leave
-    # the directory (locked files on Windows, permission transients). If the files
-    # still exist their locks are still live — evicting them would hand a later
-    # `_lock_for` caller a brand-new Lock, breaking mutual exclusion with a writer
-    # still holding the old one.
-    if removed:
-        dir_key = str(session_journal_dir)
-        with _WRITER_LOCKS_GUARD:
-            for key in [k for k in _WRITER_LOCKS if k[0] == dir_key]:
-                del _WRITER_LOCKS[key]
-        # Drop cached next-seq entries for the removed runs too. Every run file
-        # for this session lives directly under ``session_journal_dir``, so its
-        # cache key's parent dir matches. Without this, a run re-created at the
-        # same path would resume the stale cached seq instead of restarting at 1.
-        # Hold ``_SEQ_CACHE_LOCK`` — the SAME mutex ``_reserve_next_seq``/
-        # ``_note_assigned_seq`` take — so a concurrent append on another path
-        # cannot mutate the dict mid-iteration (``dictionary changed size``).
-        with _SEQ_CACHE_LOCK:
-            for cache_key in [entry for entry in _SEQ_CACHE if str(Path(entry).parent) == dir_key]:
-                del _SEQ_CACHE[cache_key]
-        with _SUMMARY_CACHE_LOCK:
-            for cache_key in [entry for entry in _SUMMARY_CACHE if str(Path(entry).parent) == dir_key]:
-                del _SUMMARY_CACHE[cache_key]
-    return removed
 
 

@@ -39,8 +39,6 @@ _GATEWAY_PID_FILE = "gateway.pid"
 
 
 
-def _checked_at() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 

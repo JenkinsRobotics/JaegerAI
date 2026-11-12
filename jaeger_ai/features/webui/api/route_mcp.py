@@ -20,13 +20,6 @@ from .helpers import bad, j, _redact_text
 _MASKED_PLACEHOLDER = "••••••"
 
 
-def _get_active_hermes_home():
-    try:
-        from api.profiles import get_active_hermes_home
-        return get_active_hermes_home()
-    except Exception:
-        from .profiles import get_active_hermes_home
-        return get_active_hermes_home()
 
 
 def _mask_secrets(obj: Any) -> Any:
