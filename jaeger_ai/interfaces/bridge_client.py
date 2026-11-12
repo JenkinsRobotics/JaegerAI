@@ -19,7 +19,7 @@ from jaeger_ai.core.instance.instance import (
 from jaeger_ai.core.runtime import bridge_socket
 
 
-class HermesWebUIAdapterBridgeError(RuntimeError):
+class BridgeClientError(RuntimeError):
     pass
 
 
@@ -34,7 +34,7 @@ class BridgeClient:
     def socket_path(self) -> Path:
         path = bridge_socket.socket_path(self.layout)
         if path is None:
-            raise HermesWebUIAdapterBridgeError("Jaeger instance has no bridge socket path")
+            raise BridgeClientError("Jaeger instance has no bridge socket path")
         return path
 
     def health(self) -> dict[str, Any]:
@@ -95,7 +95,7 @@ class BridgeClient:
             from jaeger_ai.core.gateway.caller_auth import client_token
             token = client_token(gateway_caller)
             if not token:
-                raise HermesWebUIAdapterBridgeError(
+                raise BridgeClientError(
                     f"No Gateway caller token for {gateway_caller!r}; run `jaeger auth init`")
             relay["gateway_token"] = token
         with self._connection() as (_sock, rx):
@@ -125,8 +125,8 @@ class BridgeClient:
                 if on_event is not None and kind in {"delta", "reasoning", "tool", "state", "queued", "request"}:
                     on_event(frame)
                 if kind == "fatal":
-                    raise HermesWebUIAdapterBridgeError(str(frame.get("error") or "bridge failed"))
-        raise HermesWebUIAdapterBridgeError("bridge closed before replying")
+                    raise BridgeClientError(str(frame.get("error") or "bridge failed"))
+        raise BridgeClientError("bridge closed before replying")
 
     def _request(self, payload: dict[str, Any], *, timeout_s: float | None = None) -> Any:
         request_id = uuid.uuid4().hex
@@ -141,18 +141,18 @@ class BridgeClient:
                     continue
                 if frame.get("type") == "result" and str(frame.get("id") or "") == request_id:
                     if frame.get("ok", True) is False:
-                        raise HermesWebUIAdapterBridgeError(
+                        raise BridgeClientError(
                             str(frame.get("error") or "bridge request failed")
                         )
                     return frame.get("data")
                 if frame.get("type") == "fatal":
-                    raise HermesWebUIAdapterBridgeError(str(frame.get("error") or "bridge failed"))
-        raise HermesWebUIAdapterBridgeError("bridge closed before returning a result")
+                    raise BridgeClientError(str(frame.get("error") or "bridge failed"))
+        raise BridgeClientError("bridge closed before returning a result")
 
     def _connection(self):
         sock = bridge_socket.try_connect(self.socket_path, timeout_s=2.0)
         if sock is None:
-            raise HermesWebUIAdapterBridgeError(
+            raise BridgeClientError(
                 f"Jaeger bridge is not listening at {self.socket_path}"
             )
         return _SocketConnection(sock)
@@ -166,10 +166,10 @@ class BridgeClient:
             if frame.get("type") == "ready":
                 return frame
             if frame.get("type") == "fatal":
-                raise HermesWebUIAdapterBridgeError(
+                raise BridgeClientError(
                     str(frame.get("error") or "bridge handshake failed")
                 )
-        raise HermesWebUIAdapterBridgeError("bridge closed during handshake")
+        raise BridgeClientError("bridge closed during handshake")
 
     @staticmethod
     def _write(rx: Any, frame: dict[str, Any]) -> None:
@@ -215,3 +215,20 @@ def jaeger_bridge() -> "BridgeClient":
     """
     from jaeger_ai.contract.frameworks import framework
     return BridgeClient(framework("jaeger").runtime)
+
+
+def bridge_health() -> dict[str, Any]:
+    """Health frame from the live bridge socket, or ``{}`` when unreachable.
+
+    The bridge is a Unix socket, not an HTTP port: probing a TCP port (the
+    retired :8791 runner) is not evidence the agent is up.
+    """
+    try:
+        res = jaeger_bridge().health()
+    except Exception:  # noqa: BLE001
+        return {}
+    return res if isinstance(res, dict) else {}
+
+
+def bridge_reachable() -> bool:
+    return bool(bridge_health().get("ok"))

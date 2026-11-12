@@ -225,12 +225,13 @@ def _development_tools() -> dict[str, Any]:
 
 
 def _jaeger_services(*, gateway_port: int | None = None) -> dict[str, Any]:
-    from jaeger_ai.contract.ports import GATEWAY_PORT, WEBUI_ADAPTER_PORT, WEBUI_PORT
+    from jaeger_ai.contract.ports import GATEWAY_PORT, WEBUI_PORT
+    from jaeger_ai.interfaces.bridge_client import bridge_reachable
 
     gw = int(gateway_port or os.environ.get("JAEGER_GATEWAY_PORT") or GATEWAY_PORT)
     gateway = _port_open("127.0.0.1", gw)
     webui = _port_open("127.0.0.1", WEBUI_PORT)
-    bridge_http = _port_open("127.0.0.1", WEBUI_ADAPTER_PORT)
+    bridge_ok = bridge_reachable()
     fabric = False
     memory = False
     try:
@@ -246,7 +247,7 @@ def _jaeger_services(*, gateway_port: int | None = None) -> dict[str, Any]:
         pass
     return {
         "gateway": {"reachable": gateway, "port": gw},
-        "bridge": {"reachable": bridge_http, "port": WEBUI_ADAPTER_PORT},
+        "bridge": {"reachable": bridge_ok, "transport": "unix-socket"},
         "webui": {"reachable": webui, "port": WEBUI_PORT},
         "event_fabric": {"present": fabric},
         "memory_store": {"present": memory},

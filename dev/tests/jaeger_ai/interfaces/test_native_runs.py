@@ -350,7 +350,7 @@ def test_jaeger_preserves_unknown_native_receipt(tmp_path, monkeypatch):
         def __init__(self, *args): pass
         def turn(self, *args, **kwargs):
             return {'text': 'partial', 'execution_unknown': True}
-    monkeypatch.setattr('jaeger_ai.features.webui.adapter.bridge_client.BridgeClient', Bridge)
+    monkeypatch.setattr('jaeger_ai.interfaces.bridge_client.BridgeClient', Bridge)
     run = Run(tmp_path, 'session', 'hello')
     with pytest.raises(RuntimeError, match='uncertain'):
         jaeger_turn(run)
@@ -372,7 +372,7 @@ def test_jaeger_translates_native_events_and_targets_cancellation(tmp_path, monk
             event({"type": "delta", "text": "hello"})
             run.cancel()
             return {"text": "hello"}
-    monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", Bridge)
+    monkeypatch.setattr("jaeger_ai.interfaces.bridge_client.BridgeClient", Bridge)
     run = Run(tmp_path, "session", "hello")
     assert jaeger_turn(run) == "hello"
     assert controls == [("cancel", {"turn_id": run.id})]

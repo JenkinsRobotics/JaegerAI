@@ -2,8 +2,8 @@
 
 Port map (coherent defaults):
   * Jaeger WebUI (browser) — ``containers.jaeger_webui_port`` (8790)
-  * Hermes WebUI adapter (runner-local) — ``containers.adapter_port`` (8791)
-  * Instance webhooks — 8793 (moved off 8791 to avoid clashing with the adapter)
+  * Instance webhooks — 8793
+Turns execute on the Jaeger Gateway; there is no separate runner process.
 """
 
 from __future__ import annotations
@@ -25,8 +25,6 @@ from typing import Any
 from jaeger_ai.core.runtime.webui_bind import webui_bind_host
 from urllib.parse import unquote
 
-DEFAULT_ADAPTER_PORT = 8791
-DEFAULT_ADAPTER_HOST = "127.0.0.1"
 DEFAULT_WEBUI_PORT = WEBUI_PORT
 REPO_ROOT = Path(__file__).resolve().parents[4]
 WEBUI_SCRIPT = REPO_ROOT / "scripts" / "run-jaeger-webui.sh"
@@ -36,20 +34,11 @@ from .profile_layout import ensure_agent_state_schema
 
 @dataclass(frozen=True, slots=True)
 class WebUIUrls:
-    adapter: str
     web_ui: str
 
 
-def webui_urls(
-    *,
-    adapter_port: int = DEFAULT_ADAPTER_PORT,
-    adapter_host: str = DEFAULT_ADAPTER_HOST,
-    webui_port: int = DEFAULT_WEBUI_PORT,
-) -> WebUIUrls:
-    return WebUIUrls(
-        adapter=f"http://{adapter_host}:{adapter_port}/",
-        web_ui=f"http://127.0.0.1:{webui_port}/",
-    )
+def webui_urls(*, webui_port: int = DEFAULT_WEBUI_PORT) -> WebUIUrls:
+    return WebUIUrls(web_ui=f"http://127.0.0.1:{webui_port}/")
 
 
 
@@ -118,7 +107,6 @@ def _load_webui_config(instance: str | None = None) -> dict[str, Any]:
     layout = InstanceLayout(root=resolve_instance_dir(name))
     if not layout.exists():
         return {
-            "adapter_port": DEFAULT_ADAPTER_PORT,
             "jaeger_webui_port": DEFAULT_WEBUI_PORT,
             "tailscale_publish": False,
             "tailscale_https_port": 8443,
@@ -128,10 +116,6 @@ def _load_webui_config(instance: str | None = None) -> dict[str, Any]:
     cfg = load_yaml(layout.config_path, Config)
     containers = getattr(cfg, "containers", None)
     return {
-        "adapter_port": int(
-            getattr(containers, "adapter_port", DEFAULT_ADAPTER_PORT)
-            or DEFAULT_ADAPTER_PORT
-        ),
         "jaeger_webui_port": int(
             getattr(containers, "jaeger_webui_port", DEFAULT_WEBUI_PORT)
             or DEFAULT_WEBUI_PORT
@@ -149,14 +133,6 @@ def _webui_run_dir(layout: Any) -> Path:
     root = Path(layout.root) / "run" / "webui"
     root.mkdir(parents=True, exist_ok=True)
     return root
-
-
-def _adapter_pid_path(layout: Any) -> Path:
-    return _webui_run_dir(layout) / "adapter.pid"
-
-
-def _adapter_log_path(layout: Any) -> Path:
-    return _webui_run_dir(layout) / "adapter.log"
 
 
 def _webui_pid_path(layout: Any) -> Path:
@@ -292,24 +268,18 @@ def _listening_pid(port: int) -> int | None:
 
 
 class WebUIService:
-    """Start, stop, and inspect the first-party WebUI and runtime adapter."""
+    """Start, stop, and inspect the first-party WebUI backend."""
 
     def __init__(self, instance: str | None = None) -> None:
         self._cfg = _load_webui_config(instance)
         self.instance = str(self._cfg["instance"])
-        self.adapter_port = int(self._cfg["adapter_port"])
-        self.adapter_host = DEFAULT_ADAPTER_HOST
         self.webui_port = int(self._cfg.get("jaeger_webui_port", DEFAULT_WEBUI_PORT))
         self.tailscale_publish = bool(self._cfg.get("tailscale_publish", False))
         self.tailscale_https_port = int(self._cfg.get("tailscale_https_port", 8443))
         self.layout = self._cfg["layout"]
 
     def urls(self) -> WebUIUrls:
-        return webui_urls(
-            adapter_port=self.adapter_port,
-            adapter_host=self.adapter_host,
-            webui_port=self.webui_port,
-        )
+        return webui_urls(webui_port=self.webui_port)
 
     def browser_url(self) -> str:
         """Canonical chat URL: host Jaeger WebUI on :8790, never :8787.
@@ -335,11 +305,7 @@ class WebUIService:
 
     def status(self) -> dict[str, Any]:
         urls = self.urls()
-        adapter = self._adapter_status()
         webui = self._webui_status()
-        adapter_health = _http_ok(urls.adapter.rstrip("/") + "/api/health")
-        if not adapter_health.get("ok"):
-            adapter_health = _http_ok(urls.adapter)
         webui_health = _http_ok(urls.web_ui, timeout=5.0)
         identity = probe_webui_identity(urls.web_ui) if webui_health.get("ok") else {
             "ok": False,
@@ -354,11 +320,6 @@ class WebUIService:
         webui_health = {**webui_health, "identity": identity}
         return {
             "instance": self.instance,
-            "adapter": {
-                **adapter,
-                "url": urls.adapter,
-                "health": adapter_health,
-            },
             "webui": {
                 **webui,
                 "url": urls.web_ui,
@@ -368,32 +329,25 @@ class WebUIService:
             "chat_url": self.browser_url(),
             "serve_url": self.serve_url(),
             "ports": {
-                "adapter": self.adapter_port,
                 "webui": self.webui_port,
                 "webhooks": 8793,
             },
         }
 
     def start(self, *, publish_tailscale: bool | None = None) -> dict[str, Any]:
-        """Start Jaeger's WebUI and runtime adapter."""
+        """Start Jaeger's WebUI backend."""
         if self.layout is None:
             return {"ok": False, "error": f"instance {self.instance!r} not found"}
         from jaeger_ai.core.runtime.profile_paths import webui_agent_home
 
         _ensure_agent_home(webui_agent_home())
-        adapter_res = self._start_adapter()
-        if not adapter_res.get("ok"):
-            return {"ok": False, "adapter": adapter_res}
         webui_res = self._start_webui()
         tailscale_res: dict[str, Any] = {"ok": True, "skipped": True}
         should_publish = self.tailscale_publish if publish_tailscale is None else publish_tailscale
         if webui_res.get("ok") and should_publish:
             tailscale_res = self.publish_tailscale()
         return {
-            "ok": bool(adapter_res.get("ok"))
-            and bool(webui_res.get("ok"))
-            and bool(tailscale_res.get("ok")),
-            "adapter": adapter_res,
+            "ok": bool(webui_res.get("ok")) and bool(tailscale_res.get("ok")),
             "webui": webui_res,
             "tailscale": tailscale_res,
             "open": self.urls().web_ui,
@@ -425,20 +379,12 @@ class WebUIService:
         }
 
     def stop(self) -> dict[str, Any]:
-        adapter_res = self._stop_adapter()
         webui_res = self._stop_webui()
         return {
-            "ok": bool(adapter_res.get("ok")) and bool(webui_res.get("ok")),
-            "adapter": adapter_res,
+            "ok": bool(webui_res.get("ok")),
             "webui": webui_res,
             "status": self.status(),
         }
-
-    def _adapter_status(self) -> dict[str, Any]:
-        return self._listener_status(
-            pid_path=_adapter_pid_path(self.layout) if self.layout is not None else None,
-            port=self.adapter_port,
-        )
 
     def _webui_status(self) -> dict[str, Any]:
         return self._listener_status(
@@ -507,7 +453,6 @@ class WebUIService:
         log_path = _webui_log_path(self.layout)
         pid_path = _webui_pid_path(self.layout)
         env = os.environ.copy()
-        env["JAEGER_RUNNER_BASE_URL"] = self.urls().adapter.rstrip("/")
         # Only an explicit URL is forwarded; without one the WebUI discovers
         # the Gateway itself (contract.ports).
         if env.get("JAEGER_GATEWAY_URL"):
@@ -560,94 +505,6 @@ class WebUIService:
             pid_path.unlink(missing_ok=True)
             return {"ok": False, "error": "WebUI did not become healthy within 10 seconds", "pid": proc.pid, "log": str(log_path)}
         return {"ok": True, "pid": proc.pid, "log": str(log_path), "health": health}
-
-    def _start_adapter(self) -> dict[str, Any]:
-        assert self.layout is not None
-        current = self._adapter_status()
-        if current.get("running"):
-            return {"ok": True, "already_running": True, "pid": current.get("pid")}
-
-        log_path = _adapter_log_path(self.layout)
-        pid_path = _adapter_pid_path(self.layout)
-        env = os.environ.copy()
-        env["JAEGER_INSTANCE_NAME"] = self.instance
-        env["JAEGER_HERMES_WEBUI_ADAPTER_HOST"] = self.adapter_host
-        env["JAEGER_HERMES_WEBUI_ADAPTER_PORT"] = str(self.adapter_port)
-        cmd = [
-            sys.executable,
-            "-m",
-            "jaeger_ai.features.webui.adapter",
-            "--host",
-            self.adapter_host,
-            "--port",
-            str(self.adapter_port),
-            "--instance",
-            self.instance,
-        ]
-        log_f = open(log_path, "a", encoding="utf-8")  # noqa: SIM115
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=log_f,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                env=env,
-                start_new_session=True,
-            )
-        except Exception as exc:  # noqa: BLE001
-            log_f.close()
-            return {"ok": False, "error": str(exc)}
-        pid_path.write_text(str(proc.pid), encoding="utf-8")
-        deadline = time.monotonic() + 5
-        health: dict[str, Any] = {"ok": False}
-        while time.monotonic() < deadline:
-            if proc.poll() is not None:
-                log_f.close()
-                return {
-                    "ok": False,
-                    "error": f"adapter exited early (code {proc.returncode})",
-                    "log": str(log_path),
-                }
-            health = _http_ok(
-                f"http://{self.adapter_host}:{self.adapter_port}/api/health"
-            )
-            if health.get("ok"):
-                break
-            time.sleep(0.25)
-        log_f.close()
-        return {
-            "ok": True,
-            "pid": proc.pid,
-            "log": str(log_path),
-            "health": health,
-        }
-
-    def _stop_adapter(self) -> dict[str, Any]:
-        if self.layout is None:
-            return {"ok": True, "skipped": True}
-        pid_path = _adapter_pid_path(self.layout)
-        status = self._adapter_status()
-        pid = status.get("pid")
-        if not pid:
-            return {"ok": True, "already_stopped": True}
-        if _pid_alive(pid):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and _pid_alive(pid):
-                time.sleep(0.1)
-            if _pid_alive(pid):
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-        try:
-            pid_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        return {"ok": True, "pid": pid, "stopped": True}
 
     def _stop_webui(self) -> dict[str, Any]:
         if self.layout is None:

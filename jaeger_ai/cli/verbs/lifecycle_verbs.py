@@ -2,7 +2,7 @@
 
 Controls the complete multi-agent system:
   1. macOS App (JaegerAI.app menu bar application)
-  2. Background services (launchd jobs for bridge, a2a, mcp, adapters, gateway)
+  2. Background services (launchd jobs for bridge, a2a, mcp, gateway)
   3. Fabric Supervisor (agent-fabric-supervisor health watchdog)
   4. Linux Containers (OpenClaw only; Hermes Agent runs on the host)
 """
@@ -35,15 +35,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 SERVICES_ORDERED = (
     ("com.jenkinsrobotics.jaeger-gateway", "Jaeger Gateway", GATEWAY_PORT),
-    # The bridge uses a Unix socket; :8791 may belong to the legacy webhook
-    # service, so an open HTTP port is not evidence of bridge readiness.
+    # The bridge uses a Unix socket, so it has no port to probe.
     ("com.jenkinsrobotics.jaeger-bridge", "Jaeger Bridge", None),
     ("com.jenkinsrobotics.jaeger-mcp-http", "Jaeger MCP HTTP", MCP_HTTP_PORT),
     ("com.jenkinsrobotics.jaeger-a2a", "Jaeger A2A", A2A_PORT),
-    ("com.jenkinsrobotics.jaeger-hermes-adapter", "Jaeger Adapter", 8642),
-    ("com.jenkinsrobotics.roundtable-hermes-adapter", "Roundtable Adapter", 8643),
-    ("com.jenkinsrobotics.openclaw-hermes-adapter", "OpenClaw Adapter", 8644),
-    ("com.jenkinsrobotics.hermes-native-api", "Hermes Native API", 8645),
     ("com.jenkinsrobotics.agent-fabric-supervisor", "Fabric Supervisor", None),
 )
 
@@ -181,14 +176,6 @@ def _service_port_open(
 ) -> bool | None:
     if port is None:
         return None
-    if label in {
-        "com.jenkinsrobotics.jaeger-hermes-adapter",
-        "com.jenkinsrobotics.roundtable-hermes-adapter",
-        "com.jenkinsrobotics.openclaw-hermes-adapter",
-    }:
-        return _is_port_open(port) or _is_port_open(port, "192.168.64.1")
-    if label == "com.jenkinsrobotics.hermes-native-api":
-        return _is_port_open(port, "127.0.0.1")
     if label == "com.jenkinsrobotics.jaeger-gateway":
         url = resolve_gateway_url()
         return _is_port_open(urlsplit(url).port or port, urlsplit(url).hostname or "127.0.0.1")
@@ -457,8 +444,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                 webui_svc = WebUIService()
                 w_status = webui_svc.status()
                 webui_running = bool(w_status.get("webui", {}).get("running")) or _is_port_open(WEBUI_PORT)
-                adapter_running = bool(w_status.get("adapter", {}).get("running")) or _is_port_open(8791)
-                if webui_running and adapter_running:
+                if webui_running:
                     ts = None
                     try:
                         from jaeger_ai.features.webui.service.service import _tailscale_ipv4

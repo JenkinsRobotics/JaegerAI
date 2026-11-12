@@ -80,11 +80,8 @@ def collect_runtime_status(*, include_network: bool = True) -> dict[str, Any]:
     webui_ok = _port_open(WEBUI_PORT) if include_network else False
     bridge_ok = False
     if include_network:
-        try:
-            from jaeger_ai.contract.ports import WEBUI_ADAPTER_PORT
-            bridge_ok = _port_open(int(WEBUI_ADAPTER_PORT))
-        except Exception:
-            bridge_ok = _port_open(8791)
+        from jaeger_ai.interfaces.bridge_client import bridge_reachable
+        bridge_ok = bridge_reachable()
 
     # Certification records describe eligibility, never the running model.
     from jaeger_ai.core.models.model_resolver import serving_model

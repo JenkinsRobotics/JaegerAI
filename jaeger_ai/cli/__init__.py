@@ -85,8 +85,6 @@ def main(argv: list[str] | None = None) -> int:
         "  gateway     install/start/stop Agentgateway (MCP :8811, A2A :8812)\n"
         "  gateway daemon\n"
         "              run the Jaeger Gateway (sessions + SSE, loopback :33418)\n"
-        "  hermes-webui-adapter\n"
-        "              run the loopback adapter for the Hermes WebUI\n"
         "  capability  validate a capability package (`capability validate`)\n"
         "  provider    report live vs code-supported providers (`provider doctor`)\n"
         "  device      inspect generic device/node contract (`device inspect`)\n"

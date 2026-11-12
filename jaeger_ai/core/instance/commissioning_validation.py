@@ -659,11 +659,10 @@ def validate_background(instance_root: Path, report: ValidationReport, *, offlin
 
 
 def validate_interfaces(report: ValidationReport, *, offline: bool, gateway_port: int | None = None) -> None:
-    from jaeger_ai.contract.ports import GATEWAY_PORT, WEBUI_ADAPTER_PORT, WEBUI_PORT
+    from jaeger_ai.contract.ports import GATEWAY_PORT, WEBUI_PORT
 
     gw = int(gateway_port or os.environ.get("JAEGER_GATEWAY_PORT") or GATEWAY_PORT)
     webui_port = int(os.environ.get("JAEGER_WEBUI_PORT") or WEBUI_PORT)
-    adapter_port = int(os.environ.get("JAEGER_HERMES_WEBUI_ADAPTER_PORT") or WEBUI_ADAPTER_PORT)
     if offline:
         for name in ("cli_attach", "webui_attach", "bridge_attach"):
             _add(report, name, "interfaces", kind=KIND_DISABLED, status=STATUS_DISABLED,
@@ -712,20 +711,18 @@ def validate_interfaces(report: ValidationReport, *, offline: bool, gateway_port
     else:
         _add(report, "webui_attach", "interfaces", kind=KIND_DISABLED, status=STATUS_DISABLED,
              evidence=f"webui:{webui_port} not listening")
-    bridge_same, bridge_seen = _same_entity([
-        f"http://127.0.0.1:{adapter_port}/health",
-        f"http://127.0.0.1:{adapter_port}/api/health",
-        f"http://127.0.0.1:{adapter_port}/v1/runtime/status",
-    ])
-    if _port_open(adapter_port) and bridge_same:
+    from jaeger_ai.interfaces.bridge_client import bridge_health
+    bh = bridge_health()
+    bridge_seen = str(bh.get("entity_id") or (bh.get("Agent") or {}).get("entity_id") or "")
+    if bh.get("ok") and entity and bridge_seen == entity:
         _add(report, "bridge_attach", "interfaces", kind=KIND_LIVE, status=STATUS_PASS,
-             evidence=f"bridge:{adapter_port} same entity_id={entity}", artifact=entity)
-    elif _port_open(adapter_port):
+             evidence=f"bridge socket same entity_id={entity}", artifact=entity)
+    elif bh.get("ok"):
         _add(report, "bridge_attach", "interfaces", kind=KIND_DISABLED, status=STATUS_DISABLED,
-             evidence=f"bridge:{adapter_port} listening but not this entity_id={entity} seen={bridge_seen}")
+             evidence=f"bridge socket up but not this entity_id={entity} seen={bridge_seen}")
     else:
         _add(report, "bridge_attach", "interfaces", kind=KIND_DISABLED, status=STATUS_DISABLED,
-             evidence=f"bridge:{adapter_port} not listening")
+             evidence="bridge socket not reachable")
 
 
 def run_validation(

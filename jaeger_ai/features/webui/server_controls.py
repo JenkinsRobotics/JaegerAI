@@ -60,15 +60,8 @@ class ServerControls:
                 res = self.execute([cli, 'system', 'status'])
                 return res.returncode == 0 and 'running' in str(res.stdout).lower()
             if service == 'agent':
-                from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+                from jaeger_ai.interfaces.bridge_client import jaeger_bridge
                 return bool(jaeger_bridge().health().get('ok'))
-            if service == 'hermes':
-                from jaeger_ai.core.frameworks.hermes_native import connection
-                base, _ = connection()
-                from urllib.parse import urlsplit
-                url = urlsplit(base)
-                with socket.create_connection((url.hostname, url.port), timeout=1):
-                    return True
             if path:
                 try:
                     with urlopen(f'http://127.0.0.1:{port}{path}', timeout=2) as response:

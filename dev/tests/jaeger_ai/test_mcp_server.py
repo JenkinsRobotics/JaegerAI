@@ -222,7 +222,7 @@ def test_main_stdio_attaches_to_live_bridge(monkeypatch):
         def run(self):
             ran.append("run")
 
-    monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", lambda instance: DummyBridge())
+    monkeypatch.setattr("jaeger_ai.interfaces.bridge_client.BridgeClient", lambda instance: DummyBridge())
     monkeypatch.setattr(mcp_server, "build_server", lambda client, inst, model, bridge: DummyServer())
 
     ret = mcp_server.main(["jaeger-test"])
@@ -247,7 +247,7 @@ def test_main_stdio_attaches_to_gateway_when_bridge_unavailable(monkeypatch):
         def run(self):
             ran.append("gw_run")
 
-    monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", lambda instance: DeadBridge())
+    monkeypatch.setattr("jaeger_ai.interfaces.bridge_client.BridgeClient", lambda instance: DeadBridge())
     callers = []
     monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient",
                         lambda **kw: callers.append(kw.get("caller")) or LiveGateway())
@@ -270,7 +270,7 @@ def test_main_stdio_truthful_error_when_gateway_unavailable(monkeypatch, capsys)
         def probe(self):
             raise RuntimeError("no gateway")
 
-    monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", lambda instance: DeadBridge())
+    monkeypatch.setattr("jaeger_ai.interfaces.bridge_client.BridgeClient", lambda instance: DeadBridge())
     monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient", lambda **kw: DeadGateway())
 
     ret = mcp_server.main(["jaeger-test"])

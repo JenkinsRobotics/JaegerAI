@@ -27,11 +27,10 @@ def test_browser_url_stays_on_loopback_when_tailscale_is_up(monkeypatch):
     assert ui.browser_url() == "http://127.0.0.1:9790/"
 
 
-def test_urls_expose_only_adapter_and_webui(monkeypatch):
+def test_urls_expose_only_webui(monkeypatch):
     urls = make_service(monkeypatch).urls()
-    assert urls.adapter == "http://127.0.0.1:9791/"
     assert urls.web_ui == "http://127.0.0.1:9790/"
-    assert set(urls.__dataclass_fields__) == {"adapter", "web_ui"}
+    assert set(urls.__dataclass_fields__) == {"web_ui"}
 
 
 def test_serve_url_is_advertised_only_when_publishing(monkeypatch):

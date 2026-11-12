@@ -16,10 +16,10 @@ from typing import Any
 
 from jaeger_ai.contract.frameworks import display_name, is_known
 
-from ..adapter.profile_catalog import PROFILES
+from jaeger_ai.contract.frameworks import FRAMEWORKS
 
 # Canonical id → chat/profile label (matches vendor static FALLBACK maps).
-PROFILE_DISPLAY_NAMES: dict[str, str] = {name: label for name, _, label in PROFILES}
+PROFILE_DISPLAY_NAMES: dict[str, str] = {f.profile: f.display_name for f in FRAMEWORKS}
 
 
 def profile_display_name(profile_id: str | None) -> str:

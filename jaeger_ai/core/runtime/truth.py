@@ -27,6 +27,23 @@ def _instance_root() -> Path | None:
         return None
 
 
+def _native_ready(name: str, bridge: Any) -> bool:
+    """Bounded "is it up right now" probe for one framework runtime."""
+    if name == "jaeger":
+        return bool(bridge.health().get("ok"))
+    if name == "hermes":
+        from urllib.request import Request, urlopen
+
+        from jaeger_ai.core.frameworks.hermes_native import connection
+        base, key = connection()
+        with urlopen(Request(base + "/health", headers={"Authorization": "Bearer " + key}), timeout=3) as response:
+            return response.status == 200
+    from jaeger_ai.core.frameworks.openclaw_native import NativeGateway
+    from jaeger_ai.core.frameworks.openclaw import OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE
+    with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE):
+        return True
+
+
 def framework_inventory(*, probe: Any | None = None) -> list[dict[str, Any]]:
     """Runtime-owned framework rows for the WebUI selector."""
     rows: list[dict[str, Any]] = []
@@ -34,9 +51,8 @@ def framework_inventory(*, probe: Any | None = None) -> list[dict[str, Any]]:
     reasons: dict[str, str] = {}
     if probe is None:
         try:
-            from jaeger_ai.features.webui.adapter.profile_catalog import native_ready
-            from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
-            probe = lambda name, _ready=native_ready, _bridge=jaeger_bridge: _ready(name, _bridge())
+            from jaeger_ai.interfaces.bridge_client import jaeger_bridge
+            probe = lambda name, _bridge=jaeger_bridge: _native_ready(name, _bridge())
         except Exception:
             probe = None
     for f in FRAMEWORKS:

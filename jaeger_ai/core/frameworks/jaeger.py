@@ -52,7 +52,7 @@ _native_lock = threading.Lock()
 
 def dispatcher_turn(run, workspace=None):
     from jaeger_ai.features.dispatcher.store import DispatcherStore
-    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+    from jaeger_ai.interfaces.bridge_client import jaeger_bridge
     store = DispatcherStore(jaeger_bridge().layout)
     store.repair_projections()
     run.native_session = store.route(run.session, run.message)
@@ -74,7 +74,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
 
     def create_native_run(self, body):
         from jaeger_ai.features.dispatcher.store import DispatcherStore
-        from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+        from jaeger_ai.interfaces.bridge_client import jaeger_bridge
         binding = DispatcherStore(jaeger_bridge().layout).overview()['dispatcher_session']
         if binding and (body.get('session_id') or self.headers.get('X-Hermes-Session-Id')) == binding:
             body = {**body, 'session_id': 'dispatcher'}
@@ -95,7 +95,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
                 return True
             from .conversation import Conversation
             from jaeger_ai.features.dispatcher.store import DispatcherStore
-            from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+            from jaeger_ai.interfaces.bridge_client import jaeger_bridge
             try:
                 bridge = jaeger_bridge()
                 conversation = Conversation(DispatcherStore(bridge.layout), self.native_runs(),
@@ -124,7 +124,7 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         if not self.profile_authorized():
             return True
         from jaeger_ai.features.dispatcher.store import DispatcherStore
-        from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+        from jaeger_ai.interfaces.bridge_client import jaeger_bridge
         try:
             bridge = jaeger_bridge()
             store = DispatcherStore(bridge.layout)

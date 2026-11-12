@@ -113,7 +113,7 @@ def _kickstart(label: str) -> bool:
 
 def _bridge_ready() -> bool:
     try:
-        from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+        from jaeger_ai.interfaces.bridge_client import jaeger_bridge
         result = jaeger_bridge().health()
         return bool(result.get("ok") and result.get("ready", {}).get("agent") == "ready")
     except Exception:  # noqa: BLE001

@@ -31,11 +31,9 @@ from typing import Any, Callable
 from jaeger_ai.contract.ports import (
     A2A_PORT,
     GATEWAY_PORT,
-    HERMES_NATIVE_API_PORT,
     LOOPBACK,
     MCP_HTTP_PORT,
     OLLAMA_PORT,
-    WEBUI_ADAPTER_PORT,
     WEBUI_PORT,
 )
 from jaeger_ai.core.instance.instance import install_root, operator_state_root
@@ -122,22 +120,6 @@ def _webui_command() -> list[str]:
     return ["/bin/zsh", str(run_script)]
 
 
-def _runner_command() -> list[str]:
-    return [
-        _default_python(),
-        "-u",
-        "-B",
-        "-m",
-        "jaeger_ai.interfaces.hermes_webui_adapter",
-        "--host",
-        LOOPBACK,
-        "--port",
-        str(WEBUI_ADAPTER_PORT),
-        "--instance",
-        "jaeger",
-    ]
-
-
 def _mcp_command() -> list[str]:
     return [
         _default_python(),
@@ -151,11 +133,6 @@ def _mcp_command() -> list[str]:
 
 def _a2a_command() -> list[str]:
     return [_default_python(), "-m", "jaeger_ai.interfaces.a2a_server"]
-
-
-def _hermes_command() -> list[str]:
-    script = REPO_ROOT / "scripts" / "hermes-native-api-service.py"
-    return [_default_python(), "-B", str(script)]
 
 
 def _common_env() -> dict[str, str]:
@@ -203,7 +180,6 @@ def _gateway_env() -> dict[str, str]:
         "JAEGER_GATEWAY_HOST": LOOPBACK,
         "JAEGER_GATEWAY_PORT": str(GATEWAY_PORT),
         "JAEGER_WEBUI_URL": f"http://{LOOPBACK}:{WEBUI_PORT}",
-        "JAEGER_BRIDGE_HEALTH_URL": f"http://{LOOPBACK}:{WEBUI_ADAPTER_PORT}/health",
     })
     return env
 
@@ -256,19 +232,6 @@ STACK_SERVICES: list[ServiceDef] = [
         env_builder=_bridge_env,
     ),
     ServiceDef(
-        id="runner",
-        name="Chat Runner",
-        label="com.jenkinsrobotics.jaeger-hermes-webui-adapter",
-        port=WEBUI_ADAPTER_PORT,
-        health_path="/health",
-        command_builder=_runner_command,
-        env_builder=_common_env,
-        # A second execution path (the WebUI's Hermes/OpenClaw/Roundtable
-        # runner). Isolated: a turn runs on the Gateway, so a default
-        # ``stack up`` does not start it. See jaeger_ai/contract/legacy_paths.py.
-        optional=True,
-    ),
-    ServiceDef(
         id="webui",
         name="Web UI",
         label="com.jenkinsrobotics.jaeger-webui",
@@ -293,16 +256,6 @@ STACK_SERVICES: list[ServiceDef] = [
         port=A2A_PORT,
         health_path=None,
         command_builder=_a2a_command,
-        env_builder=_common_env,
-        optional=True,
-    ),
-    ServiceDef(
-        id="hermes",
-        name="Hermes API",
-        label="com.jenkinsrobotics.hermes-native-api",
-        port=HERMES_NATIVE_API_PORT,
-        health_path=None,
-        command_builder=_hermes_command,
         env_builder=_common_env,
         optional=True,
     ),
@@ -471,6 +424,9 @@ def migrate_legacy_launchagents() -> list[str]:
     # Also include agent-fabric-supervisor which is retired
     all_targets = set(s.label for s in STACK_SERVICES) | {
         "com.jenkinsrobotics.agent-fabric-supervisor",
+        # Retired 2026-11-11: the :8791 Hermes/OpenClaw runner and Hermes API.
+        "com.jenkinsrobotics.jaeger-hermes-webui-adapter",
+        "com.jenkinsrobotics.hermes-native-api",
         "com.jenkinsrobotics.jaeger-hermes-adapter",
         "com.jenkinsrobotics.openclaw-hermes-adapter",
         "com.jenkinsrobotics.roundtable-hermes-adapter",
@@ -493,7 +449,7 @@ def probe_service_health(service: ServiceDef) -> bool:
     try:
         if service.id == "agent":
             # Probe bridge AF_UNIX socket
-            from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+            from jaeger_ai.interfaces.bridge_client import jaeger_bridge
             return bool(jaeger_bridge().health().get("ok"))
 
         if service.port:
