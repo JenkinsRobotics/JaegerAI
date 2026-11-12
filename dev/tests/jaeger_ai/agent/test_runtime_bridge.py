@@ -434,6 +434,7 @@ def test_glm_and_custom_sampling_parameters_plumbed_to_request():
 def test_fallback_adapters_inherit_configured_sampling_parameters(monkeypatch):
     import jaeger_ai.main as _main
     from jaeger_agent.loop.runtime_bridge import _fallback_adapters_for
+    import jaeger_ai.core.models.external_model  # noqa: F401 - the host installs the fallback seam
     fake_cfg = SimpleNamespace(
         external_model=SimpleNamespace(
             fallback=[
@@ -473,6 +474,7 @@ def test_fallback_adapters_inherit_configured_sampling_parameters(monkeypatch):
 def test_fallback_uses_its_own_output_context_and_effort(monkeypatch):
     from jaeger_ai.core.instance.schemas import ExternalModelConfig
     from jaeger_agent.loop.runtime_bridge import _fallback_adapters_for
+    import jaeger_ai.core.models.external_model  # noqa: F401 - the host installs the fallback seam
     cfg=ExternalModelConfig(provider='openai',model='primary',ctx=131072,max_tokens=8192,
         reasoning_effort='xhigh',fallback=[{'provider':'ollama','model':'local',
         'ctx':4096,'max_tokens':512,'reasoning_effort':'none','timeout_s':45}])

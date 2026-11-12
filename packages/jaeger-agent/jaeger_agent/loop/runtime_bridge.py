@@ -244,6 +244,18 @@ def reasoning_effort_for(provider: str, model: str, configured: Any) -> str | No
     return value
 
 
+# Host seam: the product installs how a fallback model client is built (its
+# client class plus per-provider base URLs and credential names), so this
+# framework never imports the product. See jaeger_ai/core/models/external_model.py.
+_fallback_client_factory: Any = None
+
+
+def install_fallback_client_factory(build: Any, base_urls: dict, credentials: dict) -> None:
+    """Called once by the host: ``build(target_config, layout) -> client``."""
+    global _fallback_client_factory
+    _fallback_client_factory = (build, base_urls, credentials)
+
+
 def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
     """Build only declared alternatives, with each provider's own credentials.
 
@@ -253,8 +265,9 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
     ext = getattr(client, "ext", None)
     if ext is None:
         return []
-    from jaeger_ai.core.models.external_model import ExternalModelClient
-    from jaeger_ai.core.models.configuration import _BASE_URLS, _CREDENTIALS
+    if _fallback_client_factory is None:
+        return []
+    ExternalModelClient, _BASE_URLS, _CREDENTIALS = _fallback_client_factory
     out = []
     for row in getattr(ext, "fallback", ()) or ():
         item = row if isinstance(row, dict) else row.model_dump()

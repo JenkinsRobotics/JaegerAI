@@ -125,6 +125,7 @@ def test_explicit_cloud_alias_never_becomes_a_local_route(configured, adapter):
 def test_fallback_uses_admitted_config_and_own_credentials(configured, monkeypatch):
     from jaeger_ai.core.instance.schemas import FallbackModel
     from jaeger_agent.loop.runtime_bridge import _fallback_adapters_for
+    import jaeger_ai.core.models.external_model  # noqa: F401 - the host installs the fallback seam
     configured.external_model.fallback=[FallbackModel(provider="openai",model="gpt-test")]
     seen=[]
     def build(ext,layout):
