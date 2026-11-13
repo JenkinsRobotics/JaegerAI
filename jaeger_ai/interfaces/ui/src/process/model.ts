@@ -21,6 +21,8 @@ export interface Span {
   detail?: string;
   /** 0..1 when the tool reports it (MCP-style progress/total). */
   progress?: number;
+  /** Registry id of the agent a sub-agent span runs as (room turn, hand-off target). */
+  agentId?: string;
   /** Indices (into the folded event list) of the events that touched this span (capped). */
   events: number[];
 }
@@ -58,6 +60,16 @@ export function apply(state: ProcessState, e: GatewayEvent, index: number): Proc
   state.cursor = index;
   state.lastEvent = e;
   const t = e.trace;
+  if (t?.kind === "message" && t.span_id && e.event === "agent.message") {
+    // An agent's reply annotates its span (room turn / hand-off) rather than adding a node.
+    const owner = state.spans.get(t.span_id);
+    const text = (e.payload as Record<string, unknown> | undefined)?.text;
+    if (owner && typeof text === "string" && text.trim()) {
+      owner.detail = text.trim().replace(/\s+/g, " ").slice(0, 200);
+      if (owner.events.length < 60) owner.events.push(index);
+    }
+    return state;
+  }
   if (!t || !t.span_id || !NODE_KINDS.has(t.kind)) return state;
   let span = state.spans.get(t.span_id);
   if (!span) {
@@ -74,6 +86,12 @@ export function apply(state: ProcessState, e: GatewayEvent, index: number): Proc
     span.parent = t.parent_span_id;
     const parent = state.spans.get(t.parent_span_id);
     if (parent && !parent.children.includes(span.id)) parent.children.push(span.id);
+  }
+  if (span.kind === "subagent" && !span.agentId) {
+    const p = (e.payload ?? {}) as Record<string, unknown>;
+    const h = (p.handoff && typeof p.handoff === "object" ? p.handoff : {}) as Record<string, unknown>;
+    const id = p.agent_id ?? h.to_agent_id;
+    if (typeof id === "string" && id) span.agentId = id;
   }
   span.lastIndex = index;
   if (span.events.length < 60) span.events.push(index);
