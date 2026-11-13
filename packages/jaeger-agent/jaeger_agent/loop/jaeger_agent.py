@@ -1959,6 +1959,7 @@ class JaegerAgent:
                         self._interrupt_event,
                         stale_timeout=self.stale_call_timeout_s,
                         first_progress_timeout_s=getattr(adapter, "first_progress_timeout_s", self.first_progress_timeout_s),
+                        execute_tool=self._execute_cli_mcp_tool if getattr(adapter, "supports", lambda _f: False)("mcp_tools") else None,
                         on_heartbeat=self._on_call_heartbeat,
                         # Token-level deltas for live consumers (TTS
                         # sentence-chunking, TUI streaming). None when
@@ -2345,6 +2346,33 @@ class JaegerAgent:
             "guidance": guidance,
             "started": started,
         }
+
+    def _execute_cli_mcp_tool(self, tool: ToolDef | str, arguments: dict[str, Any]) -> Any:
+        """Run one Jaeger tool for a CLI-brain MCP call.
+
+        Uses the same prepare / execute / finish path as the agent loop so
+        permissions, approvals, guardrails, and events stay identical.
+        Serialized because the MCP server may call in from a worker thread
+        while the model call is blocked.
+        """
+        import uuid
+        name = tool.name if isinstance(tool, ToolDef) else str(tool)
+        args = dict(arguments or {})
+        call_id = f"mcp-{uuid.uuid4().hex[:16]}"
+        tc: ToolCall = {"id": call_id, "name": name, "arguments": args}
+        lock = getattr(self, "_cli_mcp_lock", None)
+        if lock is None:
+            lock = self._cli_mcp_lock = threading.Lock()
+        with lock:
+            self._append_message({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [tc],
+            })
+            prep = self._prepare_dispatch(tc)
+            content = self._execute_prepared(prep)
+            self._finish_dispatch(prep, content)
+            return content
 
     @in_agent_selection
     def _execute_prepared(self, prep: dict[str, Any]) -> Any:

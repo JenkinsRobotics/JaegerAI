@@ -5,6 +5,11 @@ leave this process. The CLI is a completion backend — flatten the
 transcript to a prompt, spawn the binary (no ``shell=True``), parse
 stdout back to one assistant ``Message``.
 
+Grok and Claude Code receive this turn's Jaeger tools as a native MCP
+server (loopback HTTP). Built-in CLI file tools stay disabled. The
+Hermes ``<tool_call>`` text catalogue is only a fallback when MCP
+cannot start or the backend has no MCP client.
+
 Delegates (``delegate_task``) remain the "go do this whole job in that
 agent" path. This adapter is the opposite: the CLI *is* the model.
 """
@@ -51,11 +56,19 @@ def flatten_messages(
     messages: list[Message],
     tools: list[ToolDef],
     system: str,
+    *,
+    mcp_hint: bool = False,
 ) -> str:
     """System + transcript → one prompt the CLI can consume."""
     parts: list[str] = []
     if system and system.strip():
         parts.append(f"System:\n{system.strip()}")
+    if mcp_hint and not tools:
+        parts.append(
+            "System:\nUse the Jaeger MCP tools provided in this session for "
+            "file, editor, shell, and other work. Jaeger executes them under "
+            "the owner's policy. Do not use the CLI's built-in file or editor tools."
+        )
     if tools:
         from .hermes_xml import HERMES_TOOL_INSTRUCTIONS
         parts.append(
@@ -262,7 +275,17 @@ class CliBackendAdapter(ProviderAdapter):
         tools: list[ToolDef],
         system: str,
     ) -> dict[str, str]:
-        return {"prompt": flatten_messages(messages, tools, system)}
+        self._pending_messages = messages
+        self._pending_tools = list(tools or [])
+        self._pending_system = system
+        from .cli_turn_mcp import MCP_BACKENDS
+        mcp_capable = self.backend_id in MCP_BACKENDS
+        return {"prompt": flatten_messages(
+            messages,
+            tools if not mcp_capable else [],
+            system,
+            mcp_hint=mcp_capable and bool(tools),
+        )}
 
     def call(
         self,
@@ -313,20 +336,56 @@ class CliBackendAdapter(ProviderAdapter):
             visible_stream = None
 
         def _run() -> dict[str, Any]:
-            if self.backend_id == "grok" and "--single" in argv:
-                # Full schemas and history exceed macOS argv limits. Keep the
-                # prompt private and out of process listings; delete on exit.
-                with tempfile.TemporaryDirectory(prefix="jaeger-completion-") as folder:
-                    path = os.path.join(folder, "prompt.txt")
-                    with open(path, "w", encoding="utf-8") as handle:
-                        os.chmod(path, 0o600)
-                        handle.write(prompt)
-                    child_argv = list(argv)
+            from .cli_turn_mcp import MCP_BACKENDS, attach_cli_mcp
+
+            tools = list(getattr(self, "_pending_tools", []) or [])
+            execute = kwargs.get("execute_tool")
+            use_workdir = (
+                (self.backend_id == "grok" and "--single" in argv)
+                or (self.backend_id in MCP_BACKENDS and tools and callable(execute))
+            )
+            if not use_workdir:
+                return self._spawn(argv, stdin_bytes, spec, on_delta=on_delta, on_reasoning=on_reasoning, on_progress=progress.touch)
+
+            # Full schemas and history exceed macOS argv limits. Keep the
+            # prompt private and out of process listings; delete on exit.
+            # The same workdir holds the per-turn Jaeger MCP config.
+            with tempfile.TemporaryDirectory(prefix="jaeger-completion-") as folder:
+                live_prompt = prompt
+                child_argv = list(argv)
+                spawn_stdin = stdin_bytes
+                prompt_file = None
+                if self.backend_id == "grok" and "--single" in child_argv:
+                    prompt_file = os.path.join(folder, "prompt.txt")
                     index = child_argv.index("--single")
-                    child_argv[index:index + 2] = ["--prompt-file", path]
+                    child_argv[index:index + 2] = ["--prompt-file", prompt_file]
                     child_argv.extend(["--cwd", folder])
-                    return self._spawn(child_argv, stdin_bytes, spec, on_delta=on_delta, on_reasoning=on_reasoning, on_progress=progress.touch)
-            return self._spawn(argv, stdin_bytes, spec, on_delta=on_delta, on_reasoning=on_reasoning, on_progress=progress.touch)
+                child_argv, extra_env, mcp, text_fallback = attach_cli_mcp(
+                    self.backend_id, child_argv, folder, tools, execute if callable(execute) else None,
+                )
+                if text_fallback and tools:
+                    live_prompt = flatten_messages(
+                        getattr(self, "_pending_messages", []) or [],
+                        tools,
+                        getattr(self, "_pending_system", "") or "",
+                    )
+                    if spawn_stdin is not None:
+                        spawn_stdin = live_prompt.encode("utf-8")
+                try:
+                    if prompt_file:
+                        with open(prompt_file, "w", encoding="utf-8") as handle:
+                            os.chmod(prompt_file, 0o600)
+                            handle.write(live_prompt)
+                    return self._spawn(
+                        child_argv, spawn_stdin, spec,
+                        on_delta=on_delta, on_reasoning=on_reasoning,
+                        on_progress=progress.touch,
+                        cwd=folder if self.backend_id == "claude" else None,
+                        extra_env=extra_env,
+                    )
+                finally:
+                    if mcp is not None:
+                        mcp.stop()
 
         def _abandon() -> None:
             self._kill()
@@ -360,8 +419,10 @@ class CliBackendAdapter(ProviderAdapter):
         on_delta: Any = None,
         on_reasoning: Any = None,
         on_progress: Any = None,
+        cwd: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        env = self._environment(spec)
+        env = self._environment(spec, extra_env)
         popen_kwargs: dict[str, Any] = {
             "args": argv,
             "stdin": subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
@@ -370,6 +431,8 @@ class CliBackendAdapter(ProviderAdapter):
             "env": env,
             "shell": False,
         }
+        if cwd:
+            popen_kwargs["cwd"] = cwd
         if os.name != "nt":
             popen_kwargs["start_new_session"] = True
         logger.debug("cli backend spawn: %s", self.backend_id)
@@ -425,10 +488,13 @@ class CliBackendAdapter(ProviderAdapter):
             except (OSError, ProcessLookupError):
                 pass
 
-    def _environment(self, spec: Any) -> dict[str, str]:
+    def _environment(self, spec: Any, extra_env: dict[str, str] | None = None) -> dict[str, str]:
         allowed = set(_SAFE_ENV)
         allowed.update(getattr(spec, "credential_env", ()) or ())
-        return {key: value for key, value in os.environ.items() if key in allowed}
+        env = {key: value for key, value in os.environ.items() if key in allowed}
+        if extra_env:
+            env.update({key: value for key, value in extra_env.items() if value is not None})
+        return env
 
     def parse_response(self, raw: Any) -> Message:
         if isinstance(raw, str):
@@ -444,7 +510,11 @@ class CliBackendAdapter(ProviderAdapter):
         return Message(role="assistant", content=text, finish_reason="stop")
 
     def supports(self, feature: str) -> bool:
-        return self.backend_id == "grok" and feature == "streaming"
+        if feature == "streaming":
+            return self.backend_id == "grok"
+        if feature == "mcp_tools":
+            return self.backend_id in {"grok", "claude"}
+        return False
 
     def health_check(self) -> dict[str, Any]:
         started = time.perf_counter()
