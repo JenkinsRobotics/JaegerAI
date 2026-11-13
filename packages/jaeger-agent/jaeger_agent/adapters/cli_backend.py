@@ -380,7 +380,7 @@ class CliBackendAdapter(ProviderAdapter):
                         child_argv, spawn_stdin, spec,
                         on_delta=on_delta, on_reasoning=on_reasoning,
                         on_progress=progress.touch,
-                        cwd=folder if self.backend_id == "claude" else None,
+                        cwd=folder,
                         extra_env=extra_env,
                     )
                 finally:
@@ -513,7 +513,8 @@ class CliBackendAdapter(ProviderAdapter):
         if feature == "streaming":
             return self.backend_id == "grok"
         if feature == "mcp_tools":
-            return self.backend_id in {"grok", "claude"}
+            from .cli_turn_mcp import MCP_BACKENDS
+            return self.backend_id in MCP_BACKENDS
         return False
 
     def health_check(self) -> dict[str, Any]:

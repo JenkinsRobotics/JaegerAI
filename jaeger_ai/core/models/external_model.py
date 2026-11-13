@@ -368,20 +368,29 @@ class ExternalModelClient:
         top_p: float = 0.95,
         stream: bool = False,
         grammar: str | None = None,
+        tools: list | None = None,
+        execute_tool=None,
     ) -> ExtChatResult:
         """One-shot chat completion. ``stream`` / ``grammar`` are ignored
         (parity with ``LlamaCppPythonClient.chat``).
 
         Cloud calls are wrapped in :func:`cloud_errors.retry_call` — a
         rate-limit or transient 5xx is retried with jittered backoff; a
-        bad key / unknown model is raised straight through (audit A8)."""
+        bad key / unknown model is raised straight through (audit A8).
+
+        CLI brains accept ``tools`` and ``execute_tool`` so a toolful
+        turn uses the same CliBackendAdapter / per-turn MCP path as the
+        agent loop, instead of a tool-less one-shot."""
         from jaeger_agent.core.errors import retry_call
 
         is_oai = self.provider in _OPENAI_COMPATIBLE
 
         def _call() -> str:
             if self.provider == "cli":
-                return self._chat_cli(messages, max_tokens, temperature, top_p)
+                return self._chat_cli(
+                    messages, max_tokens, temperature, top_p,
+                    tools=tools, execute_tool=execute_tool,
+                )
             if is_oai:
                 return self._chat_openai(messages, max_tokens, temperature, top_p)
             return self._chat_anthropic(messages, max_tokens, temperature, top_p)
@@ -492,8 +501,15 @@ class ExternalModelClient:
                 pass
         return active
 
-    def _chat_cli(self, messages, max_tokens, temperature, top_p) -> str:
-        """One-shot completion through the installed agent CLI."""
+    def _chat_cli(self, messages, max_tokens, temperature, top_p,
+                  tools=None, execute_tool=None) -> str:
+        """Completion through the installed agent CLI.
+
+        When ``tools`` and ``execute_tool`` are provided, this uses the
+        same CliBackendAdapter path as the agent loop (per-turn MCP,
+        with the text catalogue only as fallback). A probe or aux
+        completion that omits tools stays a one-shot prompt.
+        """
         del max_tokens, temperature, top_p
         import threading
 
@@ -504,12 +520,18 @@ class ExternalModelClient:
             backend_id=self.ext.model,
             timeout_s=float(self.ext.timeout_s or 600.0),
         )
-        formatted = adapter.format_messages(
-            [Message(role=m["role"], content=m.get("content") or "") for m in messages],
-            [],
-            "",
+        system = "\n\n".join(
+            (m.get("content") or "") for m in messages if m.get("role") == "system"
         )
-        raw = adapter.call(formatted, threading.Event())
+        convo = [
+            Message(role=m["role"], content=m.get("content") or "")
+            for m in messages if m.get("role") != "system"
+        ]
+        formatted = adapter.format_messages(convo, list(tools or []), system)
+        call_kwargs = {}
+        if tools and callable(execute_tool):
+            call_kwargs["execute_tool"] = execute_tool
+        raw = adapter.call(formatted, threading.Event(), **call_kwargs)
         parsed = adapter.parse_response(raw)
         return str(parsed.get("content") or "")
 

@@ -1,4 +1,4 @@
-"""Per-turn loopback MCP server for CLI brains (Grok, Claude Code).
+"""Per-turn loopback MCP server for CLI brains (Grok, Claude, Codex, Gemini, Antigravity, Hermes).
 
 Industry-standard path: the CLI talks to Jaeger tools as real MCP tools.
 Each ``tools/call`` is executed by the same Jaeger tool executor the
@@ -25,7 +25,7 @@ from jaeger_os.core.tools.tool_schema import ToolDef
 
 logger = logging.getLogger(__name__)
 
-MCP_BACKENDS = frozenset({"grok", "claude"})
+MCP_BACKENDS = frozenset({"grok", "claude", "codex", "gemini", "agy", "hermes"})
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_-]+")
 
 ExecuteTool = Callable[[ToolDef, dict[str, Any]], Any]
@@ -72,6 +72,20 @@ def permission_argv(backend_id: str, autonomy: str) -> list[str]:
             argv.extend(["--permission-mode", "bypassPermissions"])
         else:
             argv.extend(["--permission-mode", "dontAsk"])
+    elif backend_id == "codex":
+        # Jaeger owns approval; keep the CLI sandbox. Never pass
+        # --dangerously-bypass-approvals-and-sandbox.
+        argv.extend(["--ask-for-approval", "never"])
+    elif backend_id == "gemini":
+        argv.extend(["--skip-trust", "--allowed-mcp-server-names", "jaeger"])
+        if mode == "auto":
+            argv.extend(["--approval-mode", "yolo"])
+    elif backend_id == "agy":
+        if "--sandbox" not in argv:
+            argv.append("--sandbox")
+    elif backend_id == "hermes":
+        if mode == "auto":
+            argv.append("--yolo")
     return argv
 
 
@@ -259,6 +273,77 @@ class TurnToolMcp:
         path.chmod(0o600)
         return str(path)
 
+    def write_gemini_config(self, folder: str) -> None:
+        """Project-scoped Gemini settings (loaded from cwd ``.gemini/settings.json``)."""
+        from pathlib import Path
+
+        if not self.url or not self.token:
+            raise RuntimeError("turn MCP is not running")
+        target = Path(folder) / ".gemini"
+        target.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "mcp": {"allowed": ["jaeger"]},
+            "mcpServers": {
+                "jaeger": {
+                    "httpUrl": self.url,
+                    "headers": {"Authorization": f"Bearer {self.token}"},
+                    "trust": True,
+                }
+            },
+        }
+        path = target / "settings.json"
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        path.chmod(0o600)
+
+    def write_agy_config(self, folder: str) -> None:
+        """Project-scoped Antigravity MCP settings (do not touch the user home)."""
+        from pathlib import Path
+
+        if not self.url or not self.token:
+            raise RuntimeError("turn MCP is not running")
+        payload = {
+            "mcpServers": {
+                "jaeger": {
+                    "httpUrl": self.url,
+                    "headers": {"Authorization": f"Bearer {self.token}"},
+                    "trust": True,
+                }
+            }
+        }
+        for relative in (".gemini/antigravity-cli", ".gemini"):
+            target = Path(folder) / relative
+            target.mkdir(parents=True, exist_ok=True)
+            path = target / "settings.json"
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            path.chmod(0o600)
+
+    def write_hermes_config(self, folder: str) -> str:
+        """Sidecar Hermes MCP config. Returns the file path for HERMES_CONFIG_PATH."""
+        from pathlib import Path
+
+        if not self.url or not self.token:
+            raise RuntimeError("turn MCP is not running")
+        path = Path(folder) / "hermes-jaeger.yaml"
+        body = (
+            "mcp_servers:\n"
+            "  jaeger:\n"
+            f'    url: "{self.url}"\n'
+            "    headers:\n"
+            f'      Authorization: "Bearer {self.token}"\n'
+        )
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o600)
+        return str(path)
+
+    def codex_argv(self) -> list[str]:
+        """Codex ``-c`` overrides that point at this turn's MCP server."""
+        if not self.url or not self.token:
+            raise RuntimeError("turn MCP is not running")
+        return [
+            "-c", f"mcp_servers.jaeger.url={self.url}",
+            "-c", "mcp_servers.jaeger.bearer_token_env_var=JAEGER_TURN_MCP_TOKEN",
+        ]
+
 
 def attach_cli_mcp(
     backend_id: str,
@@ -295,6 +380,29 @@ def attach_cli_mcp(
         if folder:
             config_path = server.write_claude_config(folder)
             child.extend(["--mcp-config", config_path, "--strict-mcp-config"])
+        else:
+            server.stop()
+            return argv, {}, None, True
+    elif backend_id == "codex":
+        child.extend(server.codex_argv())
+        extra_env["JAEGER_TURN_MCP_TOKEN"] = server.token or ""
+    elif backend_id == "gemini":
+        if folder:
+            server.write_gemini_config(folder)
+        else:
+            server.stop()
+            return argv, {}, None, True
+    elif backend_id == "agy":
+        if folder:
+            server.write_agy_config(folder)
+        else:
+            server.stop()
+            return argv, {}, None, True
+    elif backend_id == "hermes":
+        if folder:
+            config_path = server.write_hermes_config(folder)
+            extra_env["HERMES_CONFIG_PATH"] = config_path
+            extra_env["HERMES_CONFIG"] = config_path
         else:
             server.stop()
             return argv, {}, None, True
