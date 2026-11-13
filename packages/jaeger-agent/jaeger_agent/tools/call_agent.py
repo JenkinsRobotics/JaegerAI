@@ -474,3 +474,35 @@ def delegate(profile: str = "", brief: str = "", context: str = "", timeout_seco
             return {"ok": False, "status": "failed", "error": current.get("error"), "handoff_id": handoff_id}
     return {"ok": False, "status": "timeout", "handoff_id": handoff_id,
             "error": "Helper did not finish in time; its result is not treated as done"}
+
+
+@register_tool_from_function(name="transfer_to_agent", side_effect="external")
+def transfer_to_agent(agent: str = "", reason: str = "") -> dict[str, Any]:
+    """Hand this whole conversation to a teammate (Team / Auto collaboration
+    mode; OpenAI Agents SDK handoff). The chat moves to ``agent`` with its full
+    history; when you finish this turn, the teammate takes the next turn in the
+    same chat and answers in its own voice. Use when the person's request is
+    clearly that teammate's job from here on. For a check whose result only
+    you need, use delegate instead. After a successful transfer, end your turn
+    with one short line saying who takes over."""
+    who = (agent or "").strip()
+    if not who:
+        return {"ok": False, "error": "agent is required", "teammates": _helpers()}
+    record = _resolve_helper(who)
+    if record is None:
+        return {"ok": False, "error": f"unknown teammate: {who}", "teammates": _helpers()}
+    from jaeger_agent.task_port import current_task_context
+    turn = current_task_context() or {}
+    session_id, request_id = turn.get("session_id"), turn.get("request_id")
+    if not session_id or not request_id:
+        return {"ok": False, "error": "transfer_to_agent only works inside a chat turn"}
+    status, payload = _request_json(
+        "POST", f"/v1/sessions/{quote(str(session_id), safe='')}/transfer",
+        {"to_agent_id": record.id, "request_id": request_id, "reason": (reason or "").strip()[:300]},
+        timeout=15,
+    )
+    if status >= 400 or not payload.get("ok"):
+        return {"ok": False, "status": payload.get("status") or "rejected",
+                "error": payload.get("error") or f"transfer refused (HTTP {status})"}
+    return {"ok": True, "status": "transferred", "to": payload.get("agent_name") or record.id,
+            "guidance": "End this turn now with one short line saying who takes over; do not answer the request yourself."}

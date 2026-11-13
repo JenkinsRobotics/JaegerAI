@@ -52,6 +52,7 @@ RESULT_INLINE_CHARS = 6000
 HELPER_DENIED_TOOLS = frozenset({
     # delegation (depth 1)
     "delegate", "call_agent", "run_team", "get_agent_result", "delegate_task", "list_delegate_runtimes",
+    "transfer_to_agent",
     # talking to the user / outside
     "clarify", "ask_user", "help_me", "send_message", "send_email", "notify", "text_to_speech", "speak",
     "reply_email", "post_message",
