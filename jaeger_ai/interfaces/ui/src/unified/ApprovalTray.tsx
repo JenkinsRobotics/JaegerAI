@@ -43,7 +43,7 @@ export function useApprovalSessions(source: JaegerSource, pollMs = 30_000) {
 export function approvalHost(source: JaegerSource) {
   return {
     pendingApprovals: (sessionId: string) => source.pendingApprovals?.(sessionId) ?? Promise.resolve([]),
-    respondToConfirmation: (sessionId: string, approvalId: string, decision: "approve" | "deny") => source.approve(sessionId, approvalId, decision === "approve"),
+    respondToConfirmation: (sessionId: string, approvalId: string, decision: "approve" | "deny", scope?: "once" | "session") => source.approve(sessionId, approvalId, decision === "approve", scope),
   };
 }
 

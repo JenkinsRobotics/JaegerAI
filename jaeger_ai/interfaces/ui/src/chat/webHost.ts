@@ -398,8 +398,8 @@ export class WebHost implements ChatHost {
     return this.source.clarificationStatus(sessionId, clarifyId);
   };
 
-  async respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny") {
-    await this.source.approve(turnId, callId, decision === "approve");
+  async respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny", scope?: "once" | "session") {
+    await this.source.approve(turnId, callId, decision === "approve", scope);
   }
   approvalStatus(approvalId: string) {
     if (!this.source.approvalStatus) return Promise.reject(new Error("Approval status lookup is unavailable"));

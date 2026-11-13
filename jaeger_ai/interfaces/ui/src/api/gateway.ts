@@ -398,8 +398,9 @@ export class GatewayClient implements JaegerSource {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/clarify/${encodeURIComponent(clarifyId)}`, { revision, response });
   }
 
-  async approve(_sessionId: string, approvalId: string, approved: boolean) {
-    await this.json(`/v1/approvals/${encodeURIComponent(approvalId)}`, { approved });
+  async approve(_sessionId: string, approvalId: string, approved: boolean, scope?: "once" | "session") {
+    const decision = !approved ? "deny" : scope === "session" ? "session" : "once";
+    await this.json(`/v1/approvals/${encodeURIComponent(approvalId)}`, { approved, decision });
   }
   async tasks(): Promise<Task[]> {
     const data = await this.json<{ tasks?: Task[] } | Task[]>("/v1/tasks");

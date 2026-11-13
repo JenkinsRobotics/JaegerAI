@@ -6,7 +6,7 @@ import { APPROVAL_PUSH_EVENT } from "../api/gateway";
 
 type Host = {
   pendingApprovals(sessionId: string): Promise<PendingApproval[]>;
-  respondToConfirmation(sessionId: string, approvalId: string, decision: "approve" | "deny"): Promise<void>;
+  respondToConfirmation(sessionId: string, approvalId: string, decision: "approve" | "deny", scope?: "once" | "session"): Promise<void>;
 };
 
 export function SessionApprovals({ sessionId, host, excludeIds = [] }: { sessionId: string; host: Host; excludeIds?: string[] }) {
@@ -35,12 +35,12 @@ export function SessionApprovals({ sessionId, host, excludeIds = [] }: { session
     const timer = setInterval(() => void read(), 15_000);
     return () => { active = false; clearInterval(timer); window.removeEventListener(APPROVAL_PUSH_EVENT, onPush); };
   }, [host, sessionId]);
-  const decide = async (id: string, decision: "approve" | "deny") => {
+  const decide = async (id: string, decision: "approve" | "deny", scope?: "once" | "session") => {
     if (deciding.current) return;
     deciding.current = true;
     setBusy(id);
     try {
-      await host.respondToConfirmation(sessionId, id, decision);
+      await host.respondToConfirmation(sessionId, id, decision, scope);
       resolved.current.add(id);
       setRows((current) => current.filter((r) => r.approval_id !== id));
       setError(undefined);
@@ -50,7 +50,7 @@ export function SessionApprovals({ sessionId, host, excludeIds = [] }: { session
   return <div aria-label="Conversation approvals" aria-live="polite">
     {error && <p role="alert">Couldn’t load or decide approval: {error}</p>}
     {rows.filter(row => !excludeIds.includes(row.approval_id)).map((row) => <fieldset key={row.approval_id} disabled={Boolean(busy)} style={{ border: 0, padding: 0, margin: 0 }}>
-      <ApprovalCard title={row.prompt} message={row.task ?? row.target ?? row.prompt} toolName={row.tool} reviewerVerdict={row.reviewer_verdict ?? undefined} reviewerReason={row.reviewer_reason ?? undefined} onDecide={(decision) => void decide(row.approval_id, decision)} />
+      <ApprovalCard title={row.prompt} message={row.task ?? row.target ?? row.prompt} toolName={row.tool} reviewerVerdict={row.reviewer_verdict ?? undefined} reviewerReason={row.reviewer_reason ?? undefined} onDecide={(decision) => void decide(row.approval_id, decision === "deny" ? "deny" : "approve", decision === "session" ? "session" : "once")} />
     </fieldset>)}
   </div>;
 }
