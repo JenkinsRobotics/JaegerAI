@@ -1,0 +1,68 @@
+/* Responsive shell (2026-11-12): fit the real screen in any size/orientation, iPad portrait first.
+ * Loaded after stableDemo.css + conversationShell.css so these rules win the cascade.
+ * - Header sits BELOW the iOS status bar (black-translucent + viewport-fit=cover): it grows by safe-area-inset-top.
+ * - The document never scrolls (iOS toolbar collapse used to push the header off-screen).
+ * - Chat column + composer share one centered, padded width; composer clears the home indicator once. */
+.jg-stable-demo { --jg-shell-header-h: calc(52px + env(safe-area-inset-top, 0px)); --jg-shell-pad: clamp(16px, 4vw, 40px); }
+/* Every size: the header reserves the status-bar inset (0 on desktop, ~24px on an iPad Home Screen app). */
+.jg-stable-demo, .jg-stable-demo[data-inspector=true], .jg-stable-demo[data-sidebar=false] { grid-template-rows: var(--jg-shell-header-h) minmax(0,1fr); }
+.jg-stable-demo__header { height: var(--jg-shell-header-h); min-height: var(--jg-shell-header-h); padding-top: env(safe-area-inset-top, 0px); }
+
+@media (max-width:820px), (max-height:520px) and (max-width:1000px) {
+  html:has(.jg-stable-demo), html:has(.jg-stable-demo) body { overflow: hidden; overscroll-behavior: none; height: 100%; }
+  .jg-stable-demo, .jg-stable-demo[data-inspector=true], .jg-stable-demo[data-sidebar=false] {
+    grid-template-rows: var(--jg-shell-header-h) minmax(0,1fr);
+    padding-bottom: 0;
+    padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px);
+  }
+  /* Compact Codex-style toolbar: every control visible, 44px targets, title truncates instead of the buttons. */
+  .jg-stable-demo__header {
+    height: var(--jg-shell-header-h); min-height: var(--jg-shell-header-h);
+    padding: env(safe-area-inset-top, 0px) max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px));
+    gap: 6px; overflow: visible;
+  }
+  .jg-stable-demo__header-start, .jg-stable-demo__tools { flex: none; gap: 2px; }
+  .jg-stable-demo__header .jg-stable-demo__top-button { display: inline-flex; flex: none; width: 44px; height: 44px; min-width: 44px; }
+  .jg-stable-demo__profile { flex: 1 1 auto; min-width: 0; justify-content: center; }
+  .jg-stable-demo__profile-copy { min-width: 0; max-width: 100%; }
+  .jg-stable-demo__profile-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+  .jg-stable-demo__toolbar-divider { height: 20px; margin: 0 2px; }
+  .jg-stable-demo__sidebar { top: var(--jg-shell-header-h); padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
+  .jg-stable-demo__backdrop { inset: var(--jg-shell-header-h) 0 0; }
+
+  /* Turn minimap is a mouse affordance; on narrow/touch screens it was the stray dashes hugging the left edge. */
+  .jg-stable-demo .jg-conversation-minimap { display: none; }
+  .jg-stable-demo .jg-chat:has(.jg-conversation-minimap) .jg-chat__scroll { margin-left: 0; }
+
+  /* One centered column, balanced padding, same width for the transcript and the composer. */
+  .jg-stable-demo .jg-chat__column {
+    box-sizing: border-box; width: min(760px, 100%); margin-inline: auto;
+    padding: 16px var(--jg-shell-pad) 24px;
+  }
+  .jg-stable-demo .jg-chat .jg-composer, .jg-stable-demo .jg-composer {
+    box-sizing: border-box; align-self: center;
+    width: calc(min(760px, 100%) - 2 * var(--jg-shell-pad) + 16px);
+    max-width: none; margin: 0 auto calc(env(safe-area-inset-bottom, 0px) + 12px);
+  }
+  .jg-stable-demo[data-keyboard=true] .jg-composer { margin-bottom: 8px; }
+}
+
+/* Phones: tighter gutters. */
+@media (max-width:520px) {
+  .jg-stable-demo { --jg-shell-pad: 16px; }
+}
+
+/* Tablet portrait (iPad mini/Air/Pro upright): a little more air above the transcript. */
+.jg-stable-demo[data-touch=true][data-orientation=portrait][data-size=medium] .jg-chat__column { padding-top: 20px; }
+
+/* Short landscape (phone sideways, iPad with keyboard): keep the header lean. */
+@media (max-height:520px) and (orientation:landscape) {
+  .jg-stable-demo { --jg-shell-header-h: calc(46px + env(safe-area-inset-top, 0px)); }
+  .jg-stable-demo .jg-chat__column { padding-top: 8px; }
+}
+
+/* Touch screens at any width (iPad landscape too): no hover minimap hugging the left edge. */
+@media (pointer:coarse) {
+  .jg-stable-demo .jg-conversation-minimap { display: none; }
+  .jg-stable-demo .jg-chat:has(.jg-conversation-minimap) .jg-chat__scroll { margin-left: 0; }
+}
