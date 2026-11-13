@@ -645,6 +645,10 @@ def route(handler, parsed, method: str) -> bool:
         return _proxy(handler, method, f'/v1/sessions/{session_id}/requests/{parts[2]}/steer{query}',
                       _body_bytes(handler) if method == 'POST' else None)
 
+    # /v1/sessions/{id}/requests/{request_id}/otel — OTLP/JSON trace of one run
+    if len(parts) == 4 and parts[1] == "requests" and parts[3] == "otel" and method == "GET":
+        return _proxy(handler, "GET", f"/v1/sessions/{session_id}/requests/{parts[2]}/otel")
+
     # /v1/sessions/{id}/requests/{request_id}
     if len(parts) == 3 and parts[1] == "requests" and method == "GET":
         return _proxy(

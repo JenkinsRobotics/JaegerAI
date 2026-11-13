@@ -940,6 +940,7 @@ class JaegerGatewayApp:
             logger.warning("lifecycle hooks bridge unavailable", exc_info=True)
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
+        self._install_otel_export()
         self.store.event_sink = self.event_bus.fanout  # unknown-outcome acknowledgements reach live clients
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
         #: clarify_id → future resolved with the owner's answer (GB-033).
@@ -1698,6 +1699,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/requests/{request_id}", self.handle_get_request_any_session)
         self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
         self.app.router.add_get("/v1/sessions/{id}/trace-history", self.handle_trace_history)
+        self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}/otel", self.handle_request_otel)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_get("/v1/handoffs/{id}/messages", self.handle_handoff_messages)
         self.app.router.add_post("/v1/handoffs/{id}/reply", self.handle_handoff_reply)
@@ -3892,6 +3894,52 @@ class JaegerGatewayApp:
         except ValueError:
             return web.json_response({"error": "Invalid cursor"}, status=400)
         return web.json_response(await asyncio.to_thread(self.store.trace_history, session_id, before, limit))
+
+    def _install_otel_export(self) -> None:
+        """Push each finished run to an OTLP/HTTP collector when the standard
+        ``OTEL_EXPORTER_OTLP_(TRACES_)ENDPOINT`` env var is set (off otherwise)."""
+        from jaeger_ai.contract import otel
+        if not otel.export_endpoint() or not hasattr(self.event_bus, "add_observer"):
+            return
+        ends = {"turn.finish", "turn.failed", "turn.cancelled", "turn.unknown"}
+
+        def observe(evt: Any) -> None:
+            rid = (evt.data or {}).get("request_id") if evt.event in ends else None
+            if not rid or evt.session_id == "*":
+                return
+
+            def _send() -> None:
+                try:
+                    otel.push(self.run_otlp(evt.session_id, str(rid)))
+                except Exception:  # noqa: BLE001 — telemetry never breaks a turn
+                    logger.debug("otel export failed", exc_info=True)
+
+            threading.Thread(target=_send, name="otel-export", daemon=True).start()
+
+        self.event_bus.add_observer(observe)
+
+    def run_otlp(self, session_id: str, request_id: str) -> dict[str, Any]:
+        """One run as an OTLP/JSON trace with OpenTelemetry GenAI attributes."""
+        from jaeger_ai.contract import otel
+        events: list[dict[str, Any]] = []
+        cursor = 0
+        for _ in range(50):  # bounded: at most 50 x 2000 rows
+            page = self.store.replay_events(session_id, cursor, limit=2000, session_only=True)["events"]
+            if not page:
+                break
+            events.extend(page)
+            cursor = int(page[-1]["event_id"])
+        doc = otel.otlp_document(otel.spans_for_run(events, request_id, session_id=session_id))
+        doc["trace_id"] = otel.trace_id(request_id)
+        return doc
+
+    async def handle_request_otel(self, request: web.Request) -> web.Response:
+        """GET /v1/sessions/{id}/requests/{request_id}/otel — OTLP/JSON export of one run."""
+        session_id = request.match_info["id"]
+        if not self.store.get_session(session_id):
+            return web.json_response({"error": "Session not found"}, status=404)
+        doc = await asyncio.to_thread(self.run_otlp, session_id, request.match_info["request_id"])
+        return web.json_response(doc)
 
     def _session_model_choice(self, model_id: str) -> dict[str, Any] | None:
         """``{model, provider}`` if ``model_id`` is a reachable /v1/runtime/models entry.

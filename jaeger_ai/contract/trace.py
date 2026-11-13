@@ -16,7 +16,8 @@ replayed, carries the same correlation block under ``data["trace"]``::
       "seq":    17,                         # per-run, gap-detectable (process-local)
       "ts":     1762921234.123,             # wall clock, seconds
       "duration_ms": 88 | null,             # on terminal transitions
-      "agui":   "TOOL_CALL_START"           # nearest AG-UI event type
+      "agui":   "TOOL_CALL_START",          # nearest AG-UI event type
+      "trace_id": "<32 hex>"               # W3C / OpenTelemetry trace id of the run
     }
 
 The SSE ``id:`` is still the durable, global ``event_id`` (monotonic, the
@@ -73,6 +74,14 @@ def _mark(span_id: str, state: str | None, ts: float) -> int | None:
 
 def _s(v: Any) -> str:
     return "" if v is None else str(v)
+
+
+def _w3c_trace_id(rid: str) -> str | None:
+    """W3C/OpenTelemetry trace id of a run (see :mod:`jaeger_ai.contract.otel`)."""
+    if not rid:
+        return None
+    from jaeger_ai.contract.otel import trace_id
+    return trace_id(rid)
 
 
 def _run_span(rid: str) -> str:
@@ -252,7 +261,8 @@ def annotate(session_id: str, event: str, data: dict[str, Any], ts: float | None
         elif isinstance(data.get("elapsed_s"), (int, float)):
             duration = int(float(data["elapsed_s"]) * 1000)
     trace = {"v": VERSION, "run_id": rid or None, "turn_id": _s(data.get("turn_id")) or None,
-             **info, "seq": _bump(rid) if rid else None, "ts": now, "duration_ms": duration}
+             **info, "seq": _bump(rid) if rid else None, "ts": now, "duration_ms": duration,
+             "trace_id": _w3c_trace_id(rid)}
     return {**data, "trace": trace}
 
 
@@ -282,7 +292,7 @@ def history_trace(event: str, data: dict[str, Any], ts: float,
             duration = int(float(data["elapsed_s"]) * 1000)
     rid = _s(data.get("request_id") or data.get("run_id"))
     return {"v": VERSION, "run_id": rid or None, "turn_id": _s(data.get("turn_id")) or None,
-            **info, "seq": None, "ts": ts, "duration_ms": duration}
+            **info, "seq": None, "ts": ts, "duration_ms": duration, "trace_id": _w3c_trace_id(rid)}
 
 
 def split_record(record: dict[str, Any]) -> dict[str, Any]:
