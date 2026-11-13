@@ -204,3 +204,35 @@ def test_explicit_tool_list_is_never_silently_budgeted():
     agent = JaegerAgent(adapter=Adapter(),tools=[tool],scope_tools=True,
         context_guard=ContextGuard(ContextBudget(ctx_window=2048)))
     assert agent.tool_names() == ['required']
+
+
+def test_tool_named_exactly_by_the_owner_is_selected_even_when_gated():
+    """Live 2026-11-12: 'Use the MCP tool mcp__rea__inspect_plist ...' — the
+    gated rea server's 66 tools were all hidden, so the model never saw the
+    tool it was told to use. Naming a tool exactly is the opt-in."""
+    names = ['mcp__fixture__inspect_plist', 'mcp__fixture__write']
+    for name in names: add(name, 'Inspect')
+    scopes.register_mcp_server_toolset('fixture', names, gated=True)
+    try:
+        adapter = Adapter()
+        agent = JaegerAgent(adapter=adapter)
+        agent.run_turn('Use mcp__fixture__inspect_plist on Calculator.app')
+        assert [t.name for t in adapter.tools] == names[:1]  # only the named one; write stays hidden
+        agent2 = JaegerAgent(adapter=Adapter())
+        agent2.run_turn('inspect the plist please')
+        assert agent2.tools == []
+    finally: scopes.unregister_mcp_server_toolset('fixture')
+
+
+def test_named_tool_is_not_selected_for_untrusted_content():
+    names = ['mcp__fixture__inspect_plist']
+    add(names[0], 'Inspect')
+    scopes.register_mcp_server_toolset('fixture', names, gated=True)
+    token = scopes.set_untrusted_content(True)
+    try:
+        adapter = Adapter()
+        JaegerAgent(adapter=adapter).run_turn('Use mcp__fixture__inspect_plist now')
+        assert all(t.name != names[0] for t in (adapter.tools or []))
+    finally:
+        scopes._untrusted.reset(token)
+        scopes.unregister_mcp_server_toolset('fixture')

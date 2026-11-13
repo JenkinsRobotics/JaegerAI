@@ -597,6 +597,7 @@ class JaegerAgent:
                         )
             except KeyError as exc:
                 raise ValueError(f"Invalid tool discovery category: {exc}") from exc
+        self._select_named_tools(route_query)
 
         # Fresh per-turn state. Counters from a previous turn would
         # falsely trip the backstop on the second message of a session.
@@ -738,6 +739,27 @@ class JaegerAgent:
             self._record_skill_outcomes()
             if getattr(self, "_ephemeral_run", False):
                 self.bind_run(None)
+
+    def _select_named_tools(self, route_query: str) -> None:
+        """A tool the owner names exactly (``mcp__rea__inspect_plist``) is
+        selected for the session, even from a gated MCP server: naming it is
+        the explicit opt-in (Claude Code: an MCP tool named in the prompt is
+        loaded by tool search). Never for untrusted content, never past an
+        explicit ``tools=[...]`` allowlist or the permission filter."""
+        if self._tools_filter_locked or not route_query or "_" not in route_query:
+            return
+        try:
+            from jaeger_agent.skill_registry.toolset_scoping import is_untrusted_content
+            if is_untrusted_content():
+                return
+        except Exception:  # noqa: BLE001
+            return
+        import re as _re
+        words = set(_re.findall(r"[A-Za-z][A-Za-z0-9_]*_[A-Za-z0-9_]+", route_query))
+        if not words:
+            return
+        named = {t.name for t in self._all_tools if t.name in words}
+        self._tool_selection.inferred.update(named)
 
     def _guard_output(self, text: str) -> str:
         """Output guardrail tripwire on the final answer: a tripped wire
