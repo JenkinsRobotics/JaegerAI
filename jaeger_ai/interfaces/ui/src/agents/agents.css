@@ -167,6 +167,17 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-chat-row__title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jg-chat-row__time { flex: none; color: var(--aether-color-text-faint); font-size: var(--jg-font-tiny); }
 .jg-chat-row--more { color: var(--aether-color-text-faint); }
+.jg-chat-group { margin: 0; }
+.jg-chat-group + .jg-chat-group { margin-top: 6px; }
+.jg-chat-group__label { padding: 6px 8px 2px 54px; color: var(--aether-color-text-faint); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.jg-pinned .jg-chat-group__label, .jg-details .jg-chat-group__label { padding-left: 14px; }
+.jg-details .jg-chat-group__label { padding-left: 0; }
+.jg-chat-search { display: block; margin: 4px 8px 6px 54px; }
+.jg-pinned .jg-chat-search, .jg-details .jg-chat-search { margin-left: 14px; }
+.jg-details .jg-chat-search { margin-left: 0; }
+.jg-chat-search input { width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--jg-color-border); background: var(--jg-color-inset, var(--jg-color-pane)); color: var(--aether-color-text); font: inherit; font-size: var(--jg-font-small); }
+.jg-chat-search__empty { margin: 0 8px 8px 54px; color: var(--aether-color-text-faint); font-size: var(--jg-font-small); }
+.jg-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .jg-chat-row__edit {
   width: 100%; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--aether-color-border-focus);
   background: var(--aether-color-bg-control); color: var(--aether-color-text); font: inherit; font-size: var(--jg-font-small);

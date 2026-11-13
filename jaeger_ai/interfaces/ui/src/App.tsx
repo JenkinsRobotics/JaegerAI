@@ -30,6 +30,7 @@ import { PrimaryPicker } from "./agents/PrimaryPicker";
 import { AgentManagement } from "./agents/AgentManagement";
 import { AgentDetails } from "./agents/AgentDetails";
 import { agentsSidebarSlots, type Selection } from "./agents/AgentsSidebar";
+import { activityAt, chatTitle, shortTime, useAgentChats, visibleChats } from "./agents/chats";
 import { useAgentsStore } from "./agents/agentsStore";
 import { label, visible } from "./agents/agentsLogic";
 import { agentSlug, NewChatMenu } from "./agents/NewChatMenu";
@@ -109,7 +110,7 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
   const [agentPrompt, setAgentPrompt] = useState<{ kind: "rename" | "delete" | "section" | "duplicate"; agent: Agent } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 2600); return () => clearTimeout(t); }, [notice]);
-  // Grok-style sessions: one home chat per agent, history read-only.
+  // Agent click opens the home chat; New chat starts a fresh session. Older sessions stay in the sidebar.
   const names = useRef<(id: string) => string>((id) => id);
   const home: HomeSessions = useMemo(() => {
     const opts = { agentName: (id: string) => names.current(id), onCursor: (sid: string, id: number) => host.noteCursor(sid, id) };
@@ -186,6 +187,9 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
   const selectionKey = `${selectedAgentId ?? ""}|${explicitSessionId ?? ""}`;
   // A prior bot's composer must never accept input while the new home resolves.
   const sessionId = sessionBinding?.key === selectionKey ? sessionBinding.id : undefined;
+  const [chatVersion, setChatVersion] = useState(0);
+  const agentChats = useAgentChats(source, selectedAgentId, chatVersion);
+  const chats = visibleChats(agentChats, sessionId);
 
   // Selecting an agent opens its one home chat. An explicit session (a handoff's worker side) opens as is.
   useEffect(() => {
@@ -206,8 +210,16 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
     return () => window.removeEventListener("online", reconnect);
   }, [sessionError]);
 
-  /** There is one chat per agent now: "new chat with X" opens X's home chat. */
+  /** Open this agent's home chat (does not create a new session). */
   const newChat = useCallback((agentId: string) => { if (agentId === selectedAgentId) void store.seeAgent(agentId); setSelection({ type: "agent", agentId }); }, [selectedAgentId, store.seeAgent]);
+  /** Codex / Cursor: New chat starts a fresh session and keeps earlier ones in the list. */
+  const startNewChat = useCallback((agentId: string) => {
+    void source.createSession({ agent_id: agentId, title: "New chat" }).then((row) => {
+      setChatVersion((n) => n + 1);
+      setSelection({ type: "agent", agentId, sessionId: row.session_id });
+      setPhoneView("chat");
+    }, () => { newChat(agentId); setPhoneView("chat"); });
+  }, [source, newChat]);
 
   const createAgent = useCallback(async (displayName: string, job: string, operationId: string, template?: { id: string; version: number }, snapshot?:string) => {
     const agent = await source.createAgent({
@@ -268,11 +280,11 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); if (onNavigate) onNavigate("/settings"); else setSettingsOpen(true); return; }
       if (onOpenPalette) { if (view !== "chat") return; }
       else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setJumpOpen((v) => !v); return; }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newChat(selectedAgentId ?? defaultAgentId); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") { event.preventDefault(); startNewChat(selectedAgentId ?? defaultAgentId); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newChat, selectedAgentId, defaultAgentId, onNavigate, onOpenPalette, view]);
+  }, [startNewChat, selectedAgentId, defaultAgentId, onNavigate, onOpenPalette, view]);
 
   const actions = source.agentActions;
   const caps = agentCaps(agentMenu ? store.agents.filter((a) => a.id === agentMenu.agentId) : store.agents, actions);
@@ -345,15 +357,19 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
   const slots = agentsSidebarSlots({
     state: store,
     selection: selection.type === "agent" ? { ...selection, sessionId } : selection,
-    chats: [],
+    chats,
+    openChatId: sessionId,
     onSelect: (next) => {
       if (onNavigate && next.type !== "agent") { onNavigate(next.type === "grok" ? "/home/widgets" : `/${next.type}`); return; }
       if (next.type === "agent" && next.agentId === selectedAgentId) void store.seeAgent(next.agentId);
       setSelection(next);
     },
     onNewChatMenu: setNewChatAnchor,
-    onRenameChat: () => {},
-    onArchiveChat: () => {},
+    onRenameChat: (id, title) => { void source.updateSession(id, { title }).then(() => setChatVersion((n) => n + 1), fail("rename the chat")); },
+    onArchiveChat: (id) => { void source.updateSession(id, { archived: true }).then(() => {
+      setChatVersion((n) => n + 1);
+      if (selection.type === "agent" && (selection.sessionId === id || sessionId === id)) setSelection({ type: "agent", agentId: selection.agentId });
+    }, fail("archive the chat")); },
     onSearch: () => (onOpenPalette ? onOpenPalette() : setJumpOpen(true)),
     onConnectApps: () => setConnectOpen(true),
     onSettings: () => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true)),
@@ -386,6 +402,8 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
         onSettings={() => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true))}
         onChat={() => { newChat(defaultAgentId); onNavigate?.("/"); }}
         recents={<PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { newChat(agentId); setPhoneView("chat"); }}
+          chats={chats.map((row) => ({ sessionId: row.session_id, title: chatTitle(row), time: shortTime(activityAt(row)) }))} openChatId={sessionId}
+          onOpenChat={(id) => { if (selectedAgentId) { setSelection({ type: "agent", agentId: selectedAgentId, sessionId: id }); setPhoneView("chat"); } }}
           onSearch={() => (onOpenPalette ? onOpenPalette() : setJumpOpen(true))} onNew={setNewChatAnchor} onSettings={() => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true))} onAgentMenu={openAgentMenu} />}>
         <PhoneChat avatarState={store.error ? "connecting" : clipState} agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
           onBack={() => { setPhoneView("list"); void store.refresh(); }} onInfo={() => host.openDetails?.(phoneAgent?.id ?? LEAD_ID)}>{chatBody}</PhoneChat>
@@ -432,7 +450,7 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
         input={{ placeholder: "Name", value: `${label(agentPrompt.agent)} copy` }} onDone={onPromptDone} />}
       {notice && <div className="jg-toast" role="status">{notice}</div>}
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
-        controls={source.specialistControls} onNewChat={newChat} onCreateAgent={createAgent} onRecoverAgent={recoverCreatedAgent} />
+        controls={source.specialistControls} onNewChat={startNewChat} onCreateAgent={createAgent} onRecoverAgent={recoverCreatedAgent} />
       {memoryAgentId&&source.agentMemory&&<AgentMemory key={memoryAgentId} agentId={memoryAgentId} controls={source.agentMemory} onClose={()=>setMemoryAgentId(undefined)}/>}
       {knowledgeAgentId && source.agentKnowledge && <AgentKnowledge key={knowledgeAgentId} agentId={knowledgeAgentId} controls={source.agentKnowledge} onClose={() => setKnowledgeAgentId(undefined)} onSaved={() => { void store.refresh(); }} />}
       {messageSearchAgent && source.searchMessages && <MessageSearch source={source} agentId={messageSearchAgent.id} name={label(messageSearchAgent)} onClose={() => setMessageSearchAgent(undefined)} />}
@@ -442,9 +460,11 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
       <SettingsDialog modelsContent={settingsDestinations?.models} integrationsExtras={settingsDestinations?.integrations} checkpointsPanel={settingsDestinations?.checkpoints} widgetsPanel={settingsDestinations?.widgets} integrationsPanel={<IntegrationsPage source={source} />} inline={view === "settings"} tab={view === "settings" ? settingsTab : undefined} segment={settingsSegment} onTab={onSettingsTab} resetPanel={<DangerReset />} financePanel={source.finance&&<FinancePanel controls={source.finance}/>} computerPanel={<LocalComputerPanel source={source}/>} clipboardPanel={<NativeClipboardPanel/>} updatesPanel={source.updatePlan&&<UpdatePlanPanel source={source}/>} requestedTab={settingsRequest} memoryPanel={source.semanticClaims&&<EntityMemoryPanel source={source}/>} notificationsPanel={source.notifications && <NotificationsPanel controls={source.notifications} agents={store.agents} onOpen={(id)=>{void openNotificationConversation(id);}}/>} channelsPanel={source.channels ? <ChannelsPanel source={source} agents={store.agents} /> : undefined} workflowsPanel={source.workflows ? <WorkflowsPanel source={source} agents={store.agents} /> : undefined} diagnosticsPanel={source.diagnostics ? <DiagnosticsPanel source={source} /> : undefined} toolsPanel={source.tools ? <ToolsPanel source={source} sessionId={sessionId} /> : undefined} open={settingsOpen} onClose={() => {setSettingsOpen(false);setSettingsRequest(undefined);}} capabilities={settingsCaps} automationsPanel={source.schedules || source.webhooks ? <>{source.schedules && <AutomationsPanel controls={source.schedules}/>}{source.webhooks && <WebhooksPanel source={source} agents={store.agents}/>}</> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} artifacts={source.taskArtifacts} /> : undefined} agentsPanel={<><AgentManagement onMemory={source.agentMemory?agent=>{setSettingsOpen(false);setMemoryAgentId(agent.id);}:undefined} onKnowledge={source.agentKnowledge ? agent => { setSettingsOpen(false); setKnowledgeAgentId(agent.id); } : undefined} onSearch={source.searchMessages ? agent => { setSettingsOpen(false); setMessageSearchAgent(agent); } : undefined} onConfigure={source.specialistControls ? agent => { setSettingsOpen(false); setConfigurationAgentId(agent.id); } : undefined} onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} /></>} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
+        chats={chats.map((row) => ({ sessionId: row.session_id, title: chatTitle(row), agentId: row.agent_id ?? selectedAgentId, preview: row.last_message_preview }))}
+        onChat={(chat) => { setSelection({ type: "agent", agentId: chat.agentId ?? selectedAgentId ?? defaultAgentId, sessionId: chat.sessionId }); setPhoneView("chat"); }}
         onAgent={(agentId) => { newChat(agentId); if (phone) setPhoneView("chat"); }}
         actions={[
-          { id: "new", label: "New chat", shortcut: "⌘N", run: () => newChat(selectedAgentId ?? defaultAgentId) },
+          { id: "new", label: "New chat", shortcut: "⌘N", run: () => startNewChat(selectedAgentId ?? defaultAgentId) },
           { id: "history", label: "Chat history", run: () => host.openHistory?.(selectedAgentId ?? defaultAgentId) },
           { id: "tasks", label: "Tasks", run: () => (onNavigate ? onNavigate("/work/tasks") : setSelection({ type: "tasks" })) },
           { id: "settings", label: "Settings", shortcut: "⌘,", run: () => setSettingsOpen(true) },

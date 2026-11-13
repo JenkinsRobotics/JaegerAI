@@ -25,6 +25,8 @@ interface Props {
   selection: Selection;
   /** The selected agent's visible chats (chats.visibleChats). */
   chats: SessionRow[];
+  /** Bound session to highlight when the agent was opened without an explicit id. */
+  openChatId?: string;
   onSelect: (selection: Selection) => void;
   /** The + button: opens the New chat menu anchored to it. */
   onNewChatMenu: (anchor: HTMLElement) => void;
@@ -49,14 +51,14 @@ interface Props {
 }
 
 /** Sidebar content split into the AppShell slots: top / primary / sections / footer. */
-export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewChatMenu, onRenameChat, onArchiveChat, onSearch, onConnectApps, onSettings, onRetry, userInitials, status, pins = [], onPin = () => {}, onUnpin = () => {}, onInfo, onHistory, onMarkRead, onAgentMenu }: Props) {
+export function agentsSidebarSlots({ state, selection, chats, openChatId, onSelect, onNewChatMenu, onRenameChat, onArchiveChat, onSearch, onConnectApps, onSettings, onRetry, userInitials, status, pins = [], onPin = () => {}, onUnpin = () => {}, onInfo, onHistory, onMarkRead, onAgentMenu }: Props) {
   const { lead: primary, specialists: all } = sidebarRows(state.agents, state.summaries);
   const rows = primary ? [primary, ...all] : all;
   const { pinned: pinnedRows, rest: specialists } = splitPinned(rows, pins);
   const lead = pinnedRows.find((r) => r.agent.id === primary?.agent.id);
   const pinned = pinnedRows.filter((r) => r.agent.id !== lead?.agent.id);
   const selectedAgent = selection.type === "agent" ? selection.agentId : undefined;
-  const openId = selection.type === "agent" ? selection.sessionId : undefined;
+  const openId = openChatId ?? (selection.type === "agent" ? selection.sessionId : undefined);
   const chatsFor = (agentId: string) => selectedAgent === agentId && (
     <ChatList rows={chats} openId={openId} onRename={onRenameChat} onArchive={onArchiveChat}
       onOpen={(sessionId) => onSelect({ type: "agent", agentId, sessionId })} />

@@ -117,3 +117,9 @@ html.jg-phone .jg-chat__scroll { overscroll-behavior: contain; overflow-anchor: 
 .jg-pdrawer__scrim { position: absolute; inset: 0; z-index: 20; border: 0; padding: 0; background: color-mix(in srgb, var(--jg-p-bg) 25%, transparent); }
 @media (prefers-reduced-motion: reduce) { .jg-pdrawer__card, .jg-pdrawer__menu { transition: none; } }
 html[data-jg-motion="reduce"] .jg-pdrawer__card, html[data-jg-motion="reduce"] .jg-pdrawer__menu { transition: none; }
+
+.jg-pchats { display: flex; flex-direction: column; padding: 0 16px 12px; gap: 2px; }
+.jg-pchat { display: flex; align-items: baseline; gap: 10px; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 12px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.jg-pchat.is-open { background: var(--jg-color-active); }
+.jg-pchat__title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-pchat__time { flex: none; color: var(--aether-color-text-faint); font-size: var(--jg-font-tiny); }
