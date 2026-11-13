@@ -5904,6 +5904,13 @@ class JaegerGatewayApp:
         from jaeger_ai.features.agent_bridge.tool_scope import goal_scope
         from jaeger_ai.features.channels.replies import scope as channel_reply_scope
 
+        try:  # an edited guardrails section applies from the next turn on
+            from jaeger_ai.core.safety.guardrails import refresh_if_changed
+            refreshed = refresh_if_changed(self._config_path())
+            if refreshed is not None:
+                logger.info("guardrails reloaded: %s", ", ".join(refreshed) or "none")
+        except Exception:  # noqa: BLE001 — keep the installed guardrails
+            logger.debug("guardrail refresh skipped", exc_info=True)
         actor = (execution or {}).get("caller")
         try:
             with caller_identity(actor if isinstance(actor, str) and actor.strip() else None), \
