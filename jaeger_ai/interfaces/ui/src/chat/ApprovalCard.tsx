@@ -20,8 +20,9 @@ export function approvalSubject(input: unknown, message: string): string {
   return message;
 }
 
-export function ApprovalCard({ title, message, toolName, input, decided, onDecide }: {
+export function ApprovalCard({ title, message, toolName, input, decided, reviewerVerdict, reviewerReason, onDecide }: {
   title: string; message: string; toolName?: string; input?: unknown; decided?: "approve" | "deny";
+  reviewerVerdict?: string; reviewerReason?: string;
   onDecide: (decision: "approve" | "deny") => void;
 }) {
   const tool = toolName ?? /^Run (.+)\?$/.exec(title)?.[1];
@@ -47,6 +48,7 @@ export function ApprovalCard({ title, message, toolName, input, decided, onDecid
       </div>
       {subject && <pre className="jg-approval__cmd" aria-label="Exact command">{subject}</pre>}
       {subject !== message && message && <div className="jg-approval__note">{message}</div>}
+      {reviewerReason && <div className="jg-approval__review">{reviewerVerdict === "deny" ? "Reviewer declined" : reviewerVerdict === "unsure" ? "Reviewer was unsure" : "Reviewer"}: {reviewerReason}</div>}
       <div className="jg-approval__actions">
         <button type="button" className="jg-action" onClick={() => onDecide("deny")}>Deny once <kbd>Esc</kbd></button>
         <button type="button" className="jg-action jg-action--primary" onClick={() => onDecide("approve")}>Allow once</button>

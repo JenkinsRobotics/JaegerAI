@@ -63,6 +63,7 @@ export type ActivityKind =
   | "task.created"
   | "task.updated"
   | "approval.requested"
+  | "approval.reviewed"
   | "approval.resolved"
   | "agent.status"
   | "project.checked"

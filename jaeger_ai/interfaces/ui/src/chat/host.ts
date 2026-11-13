@@ -23,7 +23,7 @@ export type ChatPart =
   | { kind: "markdownContent"; text: string; role?: AssistantContentRole; itemId?: string }
   | { kind: "thinking"; text: string; durationMs?: number }
   | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string }
-  | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny" }
+  | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny"; reviewerVerdict?: string; reviewerReason?: string }
   | { kind: "progress"; message: string }
   /** Live loop position (model.started/finished); one per turn, replaced in place. */
   | { kind: "step"; index: number; state: "running" | "done" | "failed"; model?: string }

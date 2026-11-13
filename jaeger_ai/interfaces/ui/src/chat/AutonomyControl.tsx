@@ -8,14 +8,14 @@ type AutonomyHost = Pick<ChatHost, "runtimeAutonomy" | "setRuntimeAutonomy">;
 
 const modes: Array<{ id: RuntimeAutonomy; label: string; description: string; icon: typeof Shield }> = [
   { id: "ask", label: "Ask for approval", description: "Ask before outward, hardware, and destructive actions.", icon: Shield },
-  { id: "scoped", label: "Approve for me", description: "Use saved scope and ask when a new risky action appears.", icon: ToolShield },
+  { id: "scoped", label: "Approve for me", description: "Actions inside saved scope run automatically. Actions outside scope are reviewed by a model; if it is unsure or would deny, you will be asked.", icon: ToolShield },
   { id: "auto", label: "Full access", description: "Run permitted tools automatically. Hardline blocks still require you.", icon: Zap },
 ];
 
 const fallback = modes[0];
 const details = (mode?: RuntimeAutonomy) => modes.find(item => item.id === mode) ?? fallback;
 
-export function AutonomyControl({ host }: { host: AutonomyHost }) {
+export function AutonomyControl({ host, dimmed = false }: { host: AutonomyHost; dimmed?: boolean }) {
   const [current, setCurrent] = useState<RuntimeAutonomy>();
   const [reading, setReading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -65,7 +65,7 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
   };
   const active = current ? details(current) : {label: "Approval mode unavailable"};
   return (
-    <div className="jg-autonomy">
+    <div className={`jg-autonomy${dimmed ? " is-dimmed" : ""}`}>
       <button
         ref={trigger}
         type="button"
@@ -73,9 +73,9 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
         aria-label={`Permissions: ${active.label}`}
         aria-haspopup="menu"
         aria-expanded={open}
-        disabled={!available}
-        title={available ? "Choose how Jaeger asks before using tools" : "Approval mode is unavailable"}
-        onClick={() => { setOpen(value => !value); if (!open) void refresh(); }}
+        disabled={!available || dimmed}
+        title={dimmed ? "Approvals apply when tools are available in Agent or Plan mode" : available ? "Choose how Jaeger asks before using tools" : "Approval mode is unavailable"}
+        onClick={() => { if (dimmed) return; setOpen(value => !value); if (!open) void refresh(); }}
       >
         <ToolShield size={20} />
         <span className="jg-composer__policy-label">{active.label}</span>

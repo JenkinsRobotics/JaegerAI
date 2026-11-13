@@ -56,7 +56,7 @@ function persistedToPart(p: PersistedPart, agentName: (id: string) => string): C
       const state = p.state ?? p.status;
       const denied = ["deny", "denied", "rejected", "cancelled", "expired"].includes(String(p.decision ?? state));
       const decision = state === "pending" || (!p.decision && state === "resolved") ? undefined : denied ? "deny" : "approve";
-      return { kind: "confirmation", callId: p.approval_id, title: p.tool ? `Run ${p.tool}?` : "Approval needed", message: p.target ?? "", decision };
+      return { kind: "confirmation", callId: p.approval_id, title: p.tool ? `Run ${p.tool}?` : "Approval needed", message: p.target ?? "", decision, reviewerVerdict: p.reviewer_verdict || undefined, reviewerReason: p.reviewer_reason || undefined };
     }
     case "handoff": {
       const agentId = String(p.agent_id ?? "");

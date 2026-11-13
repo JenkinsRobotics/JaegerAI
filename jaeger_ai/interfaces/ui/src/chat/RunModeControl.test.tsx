@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 import type { RuntimeTierSnapshot } from '../api/source';
 import { RunModeControl } from './RunModeControl';
 
-const snapshot: RuntimeTierSnapshot = {tier:'agent',options:['chat','agent','jaeger'],descriptions:{chat:'No tools',agent:'Tools under policy',jaeger:'Resident mode'}};
+const snapshot: RuntimeTierSnapshot = {tier:'agent',options:['chat','agent','plan'],descriptions:{chat:'No tools',agent:'Tools under policy',plan:'Read-only plan'}};
 it('uses Gateway options and waits for confirmation before changing the displayed mode', async () => {
  let resolve!: (value:RuntimeTierSnapshot)=>void;
  const host = {runtimeTier:vi.fn().mockResolvedValue(snapshot),setRuntimeTier:vi.fn(()=>new Promise<RuntimeTierSnapshot>(done=>{resolve=done;}))};

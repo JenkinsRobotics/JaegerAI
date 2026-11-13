@@ -50,7 +50,7 @@ export function SessionApprovals({ sessionId, host, excludeIds = [] }: { session
   return <div aria-label="Conversation approvals" aria-live="polite">
     {error && <p role="alert">Couldn’t load or decide approval: {error}</p>}
     {rows.filter(row => !excludeIds.includes(row.approval_id)).map((row) => <fieldset key={row.approval_id} disabled={Boolean(busy)} style={{ border: 0, padding: 0, margin: 0 }}>
-      <ApprovalCard title={row.prompt} message={row.task ?? row.prompt} onDecide={(decision) => void decide(row.approval_id, decision)} />
+      <ApprovalCard title={row.prompt} message={row.task ?? row.target ?? row.prompt} toolName={row.tool} reviewerVerdict={row.reviewer_verdict ?? undefined} reviewerReason={row.reviewer_reason ?? undefined} onDecide={(decision) => void decide(row.approval_id, decision)} />
     </fieldset>)}
   </div>;
 }

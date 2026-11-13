@@ -10,7 +10,7 @@ it("posts the selected autonomy mode to the Gateway", async () => {
 
 it('reads and changes the existing Gateway interaction tier', async () => {
  const client=new GatewayClient();
- const json=vi.spyOn(client,'json').mockResolvedValue({tier:'chat',options:['chat','agent','jaeger']});
+ const json=vi.spyOn(client,'json').mockResolvedValue({tier:'chat',options:['chat','agent','plan']});
  await client.runtimeTier();await client.setRuntimeTier('chat');
  expect(json.mock.calls).toEqual([['/v1/runtime/tier'],['/v1/runtime/tier',{tier:'chat'}]]);
 });

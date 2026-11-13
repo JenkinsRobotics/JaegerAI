@@ -51,6 +51,7 @@ import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
 import type { VoiceHost } from "./nativeHost";
 import { AutonomyControl } from "./AutonomyControl";
 import { RunModeControl } from "./RunModeControl";
+import type { RuntimeTier } from "../api/source";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
 type Decide = (callId: string, decision: "approve" | "deny") => void;
@@ -161,7 +162,7 @@ export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; d
 function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onDecide: Decide; onAnswer?: (clarifyId: string, revision: number, response: string) => Promise<ClarifyAnswerResult>; tool?: { toolName: string; input: unknown }; decided?: "approve" | "deny" }) {
   if (part.kind === "question") return <QuestionCard title={part.title} options={part.options} chosenId={part.chosenId} status={part.status} answerKey={clarificationAnswerKey(part.callId, part.revision ?? 1)}
     onAnswer={onAnswer && part.status === "pending" ? (response) => onAnswer(part.callId, part.revision ?? 1, response) : undefined} />;
-  return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided ?? part.decision} onDecide={(d) => onDecide(part.callId, d)} />;
+  return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided ?? part.decision} reviewerVerdict={part.kind === "confirmation" ? part.reviewerVerdict : undefined} reviewerReason={part.kind === "confirmation" ? part.reviewerReason : undefined} onDecide={(d) => onDecide(part.callId, d)} />;
 }
 
 /** Preserve interactive cards and notices outside the shared work disclosure. */
@@ -349,6 +350,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   /** Grok's "Composer actions" (the + button) and "Message actions" (right-click a bubble) menus. */
   const plus = useRef<HTMLButtonElement>(null);
   const [composerMenu, setComposerMenu] = useState(false);
+  const [runTier, setRunTier] = useState<RuntimeTier>();
   // On iOS, moving focus from the software-keyboard textarea to a toolbar
   // button can dismiss the keyboard before the synthetic click is delivered.
   // Once the user enters the composer, keep its compact toolbar expanded so
@@ -1068,6 +1070,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         {draftError && <div role="alert">{draftError}</div>}
         {deliveryNotice && <div className="jg-composer__notice" role="alert">{deliveryNotice}</div>}
         {(pendingSteer || pendingQueue) && <div role="status">A follow-up needs confirmation. <button type="button" disabled={followUpBusy} onClick={()=>void checkFollowUp()}>Check sent message</button></div>}
+        {runTier === "plan" && <div className="jg-plan-banner" role="status">Plan mode uses read-only tools and ends with a plan for you to approve.{!active && <button type="button" className="jg-plan-execute" disabled={!host.setRuntimeTier} onClick={() => { void (async () => { const value = await host.setRuntimeTier?.("agent"); if (value?.tier === "agent") { setRunTier("agent"); if (!active && !draft.trim()) send("Execute the approved plan."); } })(); }}>Switch to Agent and execute</button>}</div>}
         <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : active ? "Follow up" : agent.id === "native:jaeger" ? "Do anything" : `Ask ${agent.name}`} value={draft} onFocus={()=>setComposerExpanded(true)} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         {active && hasText && <div className="jg-followup-actions" role="group" aria-label="Follow-up delivery">
           {host.sessionQueue && <button type="button" className="jg-busy-mode" aria-label="Queue next message" disabled={followUpBusy || Boolean(pendingSteer || pendingQueue)} onClick={() => void submitWhileBusy("queue")}>Queue next</button>}
@@ -1079,8 +1082,8 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
-          <AutonomyControl host={host} />
-          <RunModeControl host={host} disabled={Boolean(active)} />
+          <AutonomyControl host={host} dimmed={runTier === "chat"} />
+          <RunModeControl host={host} disabled={Boolean(active)} onTier={setRunTier} />
           <span className="jg-composer__spacer" />
           <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
           {host instanceof WebHost && <>{!voiceModeOpen && <VoiceDictation />}<VoiceMode primary={!active && !hasText} onOpenChange={setVoiceModeOpen} disabled={Boolean(listening) || !session || !draftReady || preparingFiles || files.length>0 || Boolean(quote) || recoveryBlocked || recoveryStatus === 'unknown'} busy={Boolean(active)} outcome={session?.turns.at(-1) ? {id:session.turns.at(-1)!.requestId || session.turns.at(-1)!.turnId,state:session.turns.at(-1)!.state} : undefined} reply={spokenTurn ? {id:spokenTurn.requestId || spokenTurn.turnId,text:replyText(spokenTurn)} : undefined} onTranscript={async text=>{const accepted=active?await submitWhileBusy('steer',text):send(text,true);if(!accepted)setDraft(draft=>draft?draft+'\n'+text:text);return Boolean(accepted);}} /></>}

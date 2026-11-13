@@ -77,7 +77,7 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
     case "approval.request": {
       const parts: ChatPart[] = [];
       if (p.call_id) parts.push({ kind: "toolInvocation", callId: str(p.call_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "waitingForConfirmation" });
-      parts.push({ kind: "confirmation", callId: str(p.approval_id ?? p.id ?? p.call_id), title: str(p.title ?? (p.tool ? `Run ${str(p.tool)}?` : "Approval needed")), message: str(p.prompt ?? p.summary ?? p.message) });
+      parts.push({ kind: "confirmation", callId: str(p.approval_id ?? p.id ?? p.call_id), title: str(p.title ?? (p.tool ? `Run ${str(p.tool)}?` : "Approval needed")), message: str(p.prompt ?? p.summary ?? p.message), reviewerVerdict: str(p.reviewer_verdict) || undefined, reviewerReason: str(p.reviewer_reason) || undefined });
       return { parts };
     }
     case "approval.resolved": {
