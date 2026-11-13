@@ -23,6 +23,7 @@ import { sendJson } from "../unified/webui";
 import { Plus, MessageSquare, FolderOpen, CheckCircle, Settings, PanelLeft, Bot, Workflow, Search, Image, Compass, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2, PanelRight } from "../components/Icons";
 import "./stableDemo.css";
 import "./conversationShell.css";
+import "./responsiveShell.css";
 import { navigate, pathOf, useRoute, SUBTABS, type PageId } from "../shell/router";
 import { AppWindow } from "../windows/AppWindow";
 import { clampWidth, SIDEBAR } from "../shell/sidebarSizing";
@@ -67,6 +68,33 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     try { localStorage.setItem(WORK_WIDTH_KEY, String(next)); } catch { /* session-only preference */ }
   };
   const shellRef = useRef<HTMLDivElement>(null);
+  // Size + orientation of the real screen, live (rotation, Split View, Stage Manager).
+  // CSS keys off data-size / data-orientation; the document itself never scrolls, so
+  // iOS can't slide the header up under the status bar after a toolbar collapse.
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || typeof matchMedia !== "function") return;
+    const portrait = matchMedia("(orientation: portrait)");
+    const sync = () => {
+      const width = shell.clientWidth || window.innerWidth;
+      shell.dataset.size = width < 600 ? "compact" : width < 840 ? "medium" : width < 1200 ? "regular" : "expanded";
+      shell.dataset.orientation = portrait.matches ? "portrait" : "landscape";
+      shell.dataset.touch = String(matchMedia("(pointer: coarse)").matches);
+      if (shell.dataset.keyboard !== "true" && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0);
+    };
+    sync();
+    portrait.addEventListener("change", sync);
+    window.addEventListener("resize", sync);
+    window.addEventListener("orientationchange", sync);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(sync) : null;
+    ro?.observe(shell);
+    return () => {
+      portrait.removeEventListener("change", sync);
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("orientationchange", sync);
+      ro?.disconnect();
+    };
+  }, []);
   useEffect(() => {
     const viewport = window.visualViewport;
     const shell = shellRef.current;
