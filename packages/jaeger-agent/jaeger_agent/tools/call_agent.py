@@ -251,13 +251,16 @@ def call_agent(
     tools = [part.strip() for part in str(allowed_tools or "").split(",") if part.strip()]
     from jaeger_agent.task_port import current_task_context
     turn = current_task_context() or {}
+    body = _handoff_body(work, turn, from_agent_id=from_agent_id,
+                         require_approval=require_approval, request_id=rid,
+                         parent_run_id=parent_run_id, permitted_context=permitted_context,
+                         timeout_seconds=timeout_seconds, tools=tools, project_id=project_id)
+    # The Gateway applies the owner's collaboration mode: in one mind (and in
+    # auto unless the owner @mentioned the agent) this runs as ``delegate``.
+    body["via"] = "call_agent"
+    body["lead_allowed_tools"] = _lead_tools()
     status, payload = _request_json(
-        "POST", f"/v1/agents/{quote(target, safe=':')}/handoff",
-        _handoff_body(work, turn, from_agent_id=from_agent_id,
-                      require_approval=require_approval, request_id=rid,
-                      parent_run_id=parent_run_id, permitted_context=permitted_context,
-                      timeout_seconds=timeout_seconds, tools=tools, project_id=project_id),
-        timeout=15,
+        "POST", f"/v1/agents/{quote(target, safe=':')}/handoff", body, timeout=15,
     )
     if status >= 400 or payload.get("error"):
         return {"ok": False, "status": payload.get("status") or "failed", **payload}
@@ -318,3 +321,128 @@ def get_agent_result(handoff_id: str) -> dict[str, Any]:
     done = payload.get("status") == "completed" and payload.get("result", {}).get("ok") is True
     return {"ok": done, "completed": done, "handoff": payload,
             "status": payload.get("status"), "result": payload.get("result", {})}
+
+
+# ── delegate: think with an inner helper (one-mind collaboration) ──────────
+#
+# Contract after Hermes Agent's ``delegate_task`` (MIT, NousResearch/hermes-agent
+# tools/delegate_tool.py; contract only, no code copied): the helper starts in a
+# fresh context from the brief (+ a read-only excerpt of the lead's memory),
+# its tools are the lead's narrowed by the helper profile and never wider, it
+# cannot message the person, write long-term memory, schedule, delegate further
+# or approve itself, and only its result comes back. The Gateway enforces all of
+# this (``mode: "delegate"``); this tool only asks and waits.
+
+
+def _lead_tools() -> list[str] | None:
+    """The tools this turn may use (None = the owner's whole catalog)."""
+    try:
+        from jaeger_agent.tool_executor import active_tool_allowlist
+        allowed = active_tool_allowlist()
+    except Exception:  # noqa: BLE001
+        return None
+    return sorted(allowed) if allowed is not None else None
+
+
+def _lead_workspace(turn: dict[str, Any]) -> str:
+    execution = turn.get("execution") or {}
+    if execution.get("workspace"):
+        return str(execution["workspace"])
+    try:
+        from jaeger_agent.core.workspace import get_effective_workspace_dir
+        return str(get_effective_workspace_dir() or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _helpers() -> list[dict[str, Any]]:
+    _, snap = _request_json("GET", "/v1/team", timeout=10)
+    out = []
+    for agent in snap.get("agents") or []:
+        if agent.get("role") == "lead":
+            continue
+        out.append({"profile": agent.get("display_name"), "id": agent.get("id"),
+                    "does": (agent.get("description") or "")[:200], "skills": agent.get("skills") or []})
+    return out
+
+
+def _resolve_helper(profile: str) -> Any:
+    try:
+        from jaeger_agent.core.host import service
+        registry = service("agent_registry").get_default_registry()
+    except Exception:  # noqa: BLE001
+        return None
+    record = registry.get_agent(profile) or _agent_by_name(registry, profile)
+    if record is not None:
+        return record
+    needle = profile.strip().lstrip("@").strip().lower()
+    if len(needle) < 3:
+        return None
+    try:
+        agents = [a for a in registry.list_agents() if not getattr(a, "disabled", False)]
+    except Exception:  # noqa: BLE001
+        return None
+    hits = [a for a in agents if needle in str(getattr(a, "display_name", "") or "").lower()]
+    return hits[0] if len(hits) == 1 else None
+
+
+@register_tool_from_function(name="delegate", side_effect="external")
+def delegate(profile: str = "", brief: str = "", context: str = "", timeout_seconds: int = 300) -> dict[str, Any]:
+    """Think with one of your inner helpers (Design & Style, Mac App, Gateway & WebUI,
+    System Engineer, ...). The helper works on ``brief`` in a fresh context and
+    returns only its result to you; it never talks to the person. You then answer
+    in your own voice. Use for a focused review or a context-heavy side task;
+    for simple things just do the work yourself. Call with no profile to list
+    helpers. ``context``: anything from this chat the helper needs (it cannot see
+    the chat). Long results come back as a preview plus ``result_path`` to read."""
+    work = (brief or "").strip()
+    who = (profile or "").strip()
+    if not who or who.lower() in {"list", "?", "help"}:
+        return {"ok": True, "helpers": _helpers(),
+                "guidance": "Call delegate(profile=<profile>, brief=<what you need back>)."}
+    if not work:
+        return {"ok": False, "error": "brief is required: say exactly what you need back"}
+    record = _resolve_helper(who)
+    if record is None:
+        return {"ok": False, "error": f"unknown helper: {who}", "helpers": _helpers()}
+    from jaeger_agent.task_port import current_task_context
+    turn = current_task_context() or {}
+    rid = uuid.uuid4().hex
+    body = _handoff_body(work, turn, from_agent_id="native:jaeger", require_approval=False,
+                         request_id=rid, parent_run_id="", permitted_context="",
+                         timeout_seconds=max(30, min(int(timeout_seconds or 300), 1800)), tools=[])
+    body.update({"mode": "delegate", "context": (context or "").strip()[:8000],
+                 "lead_allowed_tools": _lead_tools()})
+    workspace = _lead_workspace(turn)
+    if workspace and not body.get("project_id"):
+        body["workspace"] = workspace
+    status, payload = _request_json("POST", f"/v1/agents/{quote(record.id, safe=':')}/handoff", body, timeout=15)
+    if status >= 400 or payload.get("error"):
+        return {"ok": False, "status": payload.get("status") or "rejected",
+                "error": payload.get("error") or f"helper not started (HTTP {status})"}
+    handoff_id = payload.get("id")
+    current = payload
+    deadline = time.monotonic() + int(body["timeout_seconds"]) + 30
+    while time.monotonic() < deadline:
+        state = str(current.get("status") or "")
+        if state in {"completed", "failed", "cancelled", "denied", "execution_unknown"}:
+            result = current.get("result") or {}
+            meta = result.get("metadata") or {}
+            text = str(result.get("summary") or "")
+            path = meta.get("result_path")
+            out = {"ok": state == "completed", "status": state, "helper": getattr(record, "display_name", record.id),
+                   "handoff_id": handoff_id, "result": text[:6000] if path else text,
+                   "tokens": meta.get("tokens")}
+            if path:
+                out["result_path"] = path
+                out["note"] = "Result was long; the full text is at result_path (read_file)."
+            if state != "completed":
+                out["error"] = text or state
+            out["answer_in_your_own_voice"] = True
+            return out
+        time.sleep(0.25)
+        _, current = _request_json("GET", f"/v1/handoffs/{handoff_id}", timeout=10)
+        if current.get("error"):
+            return {"ok": False, "status": "failed", "error": current.get("error"), "handoff_id": handoff_id}
+    return {"ok": False, "status": "timeout", "handoff_id": handoff_id,
+            "error": "Helper did not finish in time; its result is not treated as done"}

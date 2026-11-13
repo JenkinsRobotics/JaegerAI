@@ -80,6 +80,9 @@ EVENT_TYPES = frozenset({
     # Team runtime (gateway/team_routes.py): a room message is a run, each
     # member turn an agent span, agent.message what an agent said.
     "room.started", "room.turn", "room.finished", "agent.message",
+    # Collaboration (core/runtime/collaboration.py): an inner helper's run under
+    # the lead's tool call, and the saved mode changing.
+    "delegate.started", "delegate.finished", "delegate.failed", "collaboration.mode.changed",
     "loop.iteration", "loop.stop", "loop.continuation", "state.memory", "state.saved", "policy.decision", "route.selected",
     "reliability.retry", "reliability.fallback", "reliability.exhausted", "reliability.timeout", "stream.status",
     # Connect Apps panel: {id, state, audit?} on the global stream.

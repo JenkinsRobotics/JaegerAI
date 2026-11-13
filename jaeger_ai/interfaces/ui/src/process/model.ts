@@ -51,6 +51,15 @@ function detailOf(e: GatewayEvent): string | undefined {
     const tok = p.usage_reported === false ? "usage not reported" : `${u.prompt_tokens ?? 0} in · ${u.completion_tokens ?? 0} out tokens`;
     return [who, tok, typeof p.error === "string" ? p.error : ""].filter(Boolean).join(" · ").slice(0, 200);
   }
+  if (e.event.startsWith("delegate.")) {
+    // Inner helper: what Jaeger asked (start) or what came back (finish), plus usage.
+    const tk = (p.tokens ?? null) as Record<string, unknown> | null;
+    const used = tk && typeof tk.total === "number" && tk.total > 0 ? `${tk.total} tokens` : "";
+    const cost = typeof p.cost_usd === "number" ? `$${p.cost_usd.toFixed(4)}` : "";
+    const said = e.event === "delegate.started" ? p.brief : (p.error ?? p.summary);
+    const text = [typeof said === "string" ? said.replace(/\s+/g, " ") : "", used, cost].filter(Boolean).join(" · ");
+    return text ? text.slice(0, 200) : undefined;
+  }
   const text = p.summary ?? p.message ?? p.prompt ?? p.error;
   return typeof text === "string" && text ? text.slice(0, 200) : undefined;
 }

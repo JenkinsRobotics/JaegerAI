@@ -289,6 +289,11 @@ def _tool_event_args(args: Any) -> dict[str, Any]:
 TOOL_HEARTBEAT_S = float(os.environ.get("JAEGER_TOOL_HEARTBEAT_S", "5") or 0)
 
 
+def _is_team_agent(record: Any) -> bool:
+    """A team specialist (Team page roster) rather than a built-in agent."""
+    return bool(record is not None and ((getattr(record, "metadata", None) or {}).get("team")))
+
+
 def _live_activity_id(request_id: str, call_id: str) -> str:
     """Durable activity id for one model tool call: namespaced by request so a
     provider that reuses ids (``call_0``) across turns stays unique."""
@@ -573,6 +578,11 @@ async def _authenticate_caller(request: web.Request, handler: Any) -> web.Stream
         return await handler(request)
     finally:
         _REQUEST_CALLER.reset(bound)
+
+
+def _collab_timeout() -> int:
+    from jaeger_ai.core.runtime.collaboration import DEFAULT_TIMEOUT_S
+    return int(DEFAULT_TIMEOUT_S)
 
 
 def _handoff_tool_scope(target: Any, allowed_tools: Any) -> dict[str, Any]:
@@ -1731,6 +1741,8 @@ class JaegerGatewayApp:
         mount_blueprint_routes(self)
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
+        self.app.router.add_get("/v1/runtime/collaboration", self.handle_get_collaboration)
+        self.app.router.add_post("/v1/runtime/collaboration", self.handle_set_collaboration)
         self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)
         self.app.router.add_get("/v1/runtime/tier", self.handle_get_tier)
         self.app.router.add_post("/v1/runtime/tier", self.handle_set_tier)
@@ -2738,6 +2750,23 @@ class JaegerGatewayApp:
             # owner's approval itself; only the owner's autonomy=auto does.
             from jaeger_ai.core.runtime.autonomy import effective_autonomy
             require_approval = effective_autonomy(self._config_path()) != "auto"
+        # Collaboration mode (core/runtime/collaboration.py): ``delegate`` runs the
+        # target as an inner helper of the lead — fresh context from a brief, the
+        # lead's tools narrowed, result returned to the lead only. ``call_agent``
+        # is an alias of it unless the mode is ``team`` (or ``auto`` and the owner
+        # @mentioned that agent in the asking message).
+        collab_mode = self._collaboration_mode()
+        delegate_mode = str(body.get("mode") or "").strip().lower() == "delegate"
+        if not delegate_mode and str(body.get("via") or "") == "call_agent":
+            from jaeger_ai.core.runtime.collaboration import call_agent_is_delegate
+            delegate_mode = call_agent_is_delegate(
+                collab_mode, explicit_mention=self._owner_mentioned(body, target))
+        if delegate_mode and body.get("reply_to_handoff_id"):
+            return web.json_response({"error": "An inner helper has no thread to reply to; delegate a new brief"}, status=400)
+        if delegate_mode:
+            # The helper's tools are a subset of the lead's and every tool call
+            # keeps its own policy/approval gate, so starting it is not a new grant.
+            require_approval = False
         reply_parent = None
         if body.get("reply_to_handoff_id"):
             if not isinstance(body["reply_to_handoff_id"], str):
@@ -2787,6 +2816,12 @@ class JaegerGatewayApp:
             # The owner approved this team when creating the project.
             require_approval = False
             approved_by = "project_grant"
+
+        if delegate_mode:
+            allowed_tools = self._delegate_tool_grant(body.get("lead_allowed_tools"), allowed_tools)
+            if not workspace and hint_session:
+                workspace = str(((self.store.get_session(hint_session) or {}).get("workspace")) or "").strip() or None
+            timeout_s = min(timeout_s, int(body.get("timeout_seconds") or 0) or _collab_timeout())
 
         # Preserve the authenticated actor and a durable bridge root across
         # approval/restart; a child must not become an internal owner turn.
@@ -2855,6 +2890,10 @@ class JaegerGatewayApp:
             return web.json_response({"error":"Specialist is disabled; no new handoff admitted"},status=403)
         if requested_model and model_choice is None:
             return web.json_response({'error':'Selected handoff model is not available in the current configured catalog'},status=400)
+        if delegate_mode:
+            cap_error = self._delegate_cap_error(hint_session, parent_run_id, depth, parent_chain)
+            if cap_error:
+                return web.json_response({"error": cap_error, "ok": False, "status": "rejected"}, status=409)
         from jaeger_ai.core.agent_registry.specialist_runtime import check_delegation_limits
         limit_error = check_delegation_limits(
             from_agent_id=from_id,
@@ -2892,7 +2931,11 @@ class JaegerGatewayApp:
             "metadata": {
                 "task_id": str(body.get("task_id") or "").strip()[:128] or None,  # G5
                 # The asking tool call: the Process view nests this agent under it.
-                "call_id": str(body.get("call_id") or "").strip()[:128] or None,
+                "call_id": self._activity_call_id(str(body.get("call_id") or "").strip()[:128] or None, parent_run_id),
+                "collaboration": "delegate" if delegate_mode else "handoff",
+                "collaboration_mode": collab_mode,
+                "via": str(body.get("via") or ("delegate" if delegate_mode else "handoff"))[:32],
+                "delegate_context": str(body.get("context") or "")[:8000] if delegate_mode else None,
                 "reply_to_handoff_id": reply_parent["id"] if reply_parent else None,
                 "thread_handoff_id": ((reply_parent.get("metadata") or {}).get("thread_handoff_id") or reply_parent["id"]) if reply_parent else handoff_id,
                 "caller_actor": actor,
@@ -2976,6 +3019,9 @@ class JaegerGatewayApp:
         the chat streams it with the turn and turn_parts persists it as a
         ``handoff`` part when the turn completes.
         """
+        if ((record.get("metadata") or {}).get("collaboration")) == "delegate":
+            self._publish_delegate(event, record)
+            return
         self.event_bus.publish("*", event, {"handoff": record})
         try:
             from jaeger_ai.features.backlog.reconcile import record_native_handoff
@@ -3002,6 +3048,52 @@ class JaegerGatewayApp:
                     "agent_id": record.get("to_agent_id"), "from_agent_id": record.get("from_agent_id"),
                     "agent_name": (record.get("metadata") or {}).get("target_display"),
                     "status": record.get("status"), "text": str(result.get("summary") or "")[:4000]})
+
+    def _publish_delegate(self, event: str, record: dict[str, Any]) -> None:
+        """An inner helper's lifecycle (one-mind collaboration).
+
+        Globally it is still a handoff row (Team page / Inner workings list it).
+        On the chat that asked, it is a ``delegate.started`` /
+        ``delegate.finished`` / ``delegate.failed`` span under the asking tool
+        call — the Process view draws it as a helper node. Nothing is posted to
+        the chat transcript or the helper's home chat, no ``agent.message`` is
+        emitted and no backlog task is created: the lead answers in one voice."""
+        self.event_bus.publish("*", event, {"handoff": record})
+        meta = record.get("metadata") or {}
+        result = record.get("result") or {}
+        rmeta = result.get("metadata") or {}
+        status = str(record.get("status") or "")
+        finished = event == "agent.handoff.finished"
+        name = "delegate.started" if not finished else (
+            "delegate.finished" if status == "completed" else "delegate.failed")
+        origin = self._origin_turn(record)
+        if not origin:
+            return
+        call_id = meta.get("call_id")
+        payload: dict[str, Any] = {
+            "request_id": origin[1], "handoff_id": record.get("id"), "subagent_id": record.get("id"),
+            "agent_id": record.get("to_agent_id"), "agent_name": meta.get("target_display"),
+            "profile": meta.get("target_display") or record.get("to_agent_id"),
+            "from_agent_id": record.get("from_agent_id"), "status": status, "call_id": call_id,
+            "parent_step_id": self._step_for_call(origin[0], call_id),
+            "parent_span_id": f"tool:{call_id}" if call_id else f"run:{origin[1]}",
+            "brief": str(record.get("task") or "")[:500],
+            "tools": [t for t in (meta.get("effective_tools") or meta.get("allowed_tools") or [])
+                      if t != "__helper_no_tools__"][:60],
+            "collaboration_mode": meta.get("collaboration_mode"), "via": meta.get("via"),
+        }
+        if finished:
+            tokens = rmeta.get("tokens") if isinstance(rmeta.get("tokens"), dict) else None
+            started = record.get("created_at")
+            payload.update({
+                "ok": status == "completed", "summary": str(result.get("summary") or "")[:4000],
+                "tokens": tokens, "cost_usd": (tokens or {}).get("cost_usd"),
+                "result_path": rmeta.get("result_path"),
+                "duration_ms": int((time.time() - float(started)) * 1000) if isinstance(started, (int, float)) else None,
+            })
+            if status != "completed":
+                payload["error"] = str(result.get("summary") or status)[:1000]
+        self.event_bus.publish(origin[0], name, payload)
 
     # ── Sessions contract: home chats, typed messages, rolling summary ──
 
@@ -4427,6 +4519,143 @@ class JaegerGatewayApp:
             return out
         return payload
 
+    # ── Collaboration mode: inner helpers (delegate) ─────────────────────
+
+    def _owner_mentioned(self, body: dict[str, Any], target: Any) -> bool:
+        """Did the owner's asking message @mention ``target``? (auto mode: an
+        explicit @Name keeps the team hand-off; otherwise call_agent delegates)."""
+        parent = str(body.get("parent_run_id") or body.get("parent_request_id") or "")
+        row = (self.store.get_request(parent) or self.store.get_request_by_turn(parent)) if parent else None
+        text = str((row or {}).get("input_text") or "")
+        if "@" not in text:
+            return False
+        from jaeger_ai.core.team.mentions import Peer, mentioned_peers
+        name = str(getattr(target, "display_name", "") or getattr(target, "name", "") or "")
+        peers = [Peer(target.id, name)]
+        short = re.sub(r"(?i)^jaeger\s+", "", name).strip()
+        if short and short != name:
+            peers.append(Peer(target.id, short))
+        return bool(mentioned_peers(text, peers))
+
+    @staticmethod
+    def _delegate_tool_grant(lead_allowed: Any, requested: list[str] | None) -> list[str]:
+        """Helper tools = the lead's tools minus what helpers may never use
+        (messaging, memory writes, scheduling, delegation, self-approval),
+        narrowed by any explicit request. The profile narrows again at run time
+        (``_specialist_scope``). Never empty: an empty grant would read as
+        "standing tools", so a no-tool helper gets a name that matches nothing."""
+        from jaeger_ai.core.runtime.collaboration import helper_tool_grant
+        if isinstance(lead_allowed, list):
+            lead = [str(x) for x in lead_allowed if isinstance(x, str)]
+        else:
+            try:
+                from jaeger_os.core.tools.tool_registry import get_tools
+                lead = [t.name for t in get_tools()]
+            except Exception:  # noqa: BLE001 — no registry: no tools
+                lead = []
+        grant = helper_tool_grant(lead)
+        if requested:
+            wanted = {str(x) for x in requested}
+            grant = [t for t in grant if t in wanted]
+        return grant or ["__helper_no_tools__"]
+
+    def _delegate_cap_error(self, session_id: str | None, parent_run_id: Any, depth: int,
+                            parent_chain: list[str]) -> str | None:
+        from jaeger_ai.core.runtime import collaboration as collab
+        meta = ((self.store.get_session(session_id) or {}).get("metadata") or {}) if session_id else {}
+        if meta.get("handoff_child") or depth >= collab.MAX_DEPTH or parent_chain:
+            return "An inner helper cannot delegate further (depth limit 1)"
+        if not parent_run_id:
+            return None
+        rows = [h for h in self.store.list_handoffs(session_id=session_id, limit=200) if session_id
+                and str(h.get("parent_run_id") or "") == str(parent_run_id)
+                and (h.get("metadata") or {}).get("collaboration") == "delegate"]
+        active = [h for h in rows if h.get("status") in {"pending_approval", "approved", "running", "admitted"}]
+        if len(active) >= collab.MAX_CONCURRENT:
+            return f"{len(active)} helpers are already running for this message; at most {collab.MAX_CONCURRENT} at once"
+        if len(rows) >= collab.MAX_PER_TURN:
+            return f"This message already used {len(rows)} helpers; at most {collab.MAX_PER_TURN} per message"
+        spent = 0
+        for h in rows:
+            tokens = (((h.get("result") or {}).get("metadata") or {}).get("tokens") or {})
+            spent += int(tokens.get("total") or 0) if isinstance(tokens, dict) else 0
+        if spent >= collab.MAX_TOKENS_PER_TURN:
+            return f"Helpers already used {spent} tokens on this message; budget is {collab.MAX_TOKENS_PER_TURN}"
+        return None
+
+    def _activity_call_id(self, call_id: str | None, parent_run_id: Any) -> str | None:
+        """The asking tool call as the Gateway's durable activity id (the span
+        the Process view drew for it), so the helper node nests under it. The
+        agent loop knows only the model's raw id (``call_…``); the Gateway
+        namespaces it per request (``_live_activity_id``)."""
+        if not call_id or call_id.startswith(("tool_", "sub_")) or not parent_run_id:
+            return call_id
+        parent = str(parent_run_id)
+        row = self.store.get_request(parent) or self.store.get_request_by_turn(parent)
+        return _live_activity_id((row or {}).get("request_id") or parent, call_id)
+
+    def _step_for_call(self, session_id: str, call_id: str | None) -> str | None:
+        """The model step (``step_id``) whose tool call started a helper."""
+        if not call_id:
+            return None
+        try:
+            buffered = list(getattr(self.event_bus, "_buffer", ()) or ())
+        except Exception:  # noqa: BLE001
+            return None
+        for evt in reversed(buffered[-4000:]):
+            if getattr(evt, "session_id", None) != session_id or getattr(evt, "event", "") != "tool.started":
+                continue
+            data = getattr(evt, "data", None) or {}
+            if data.get("call_id") == call_id and data.get("step_id"):
+                return str(data["step_id"])
+        return None
+
+    def _helper_usage(self, worker_session_id: str | None) -> dict[str, Any]:
+        """Tokens (and cost, when the provider reports it) a helper's run used."""
+        out = {"prompt": 0, "completion": 0, "total": 0, "reported": False, "cost_usd": None}
+        if not worker_session_id:
+            return out
+        try:
+            events = self.store.replay_events(worker_session_id, 0, limit=2000, session_only=True)["events"]
+        except Exception:  # noqa: BLE001
+            return out
+        cost = 0.0
+        for evt in events:
+            if evt.get("event") != "model.finished":
+                continue
+            data = evt.get("data") or {}
+            usage = data.get("usage") or {}
+            if isinstance(usage, dict) and data.get("usage_reported") is not False and usage:
+                out["reported"] = True
+                out["prompt"] += int(usage.get("prompt_tokens") or 0)
+                out["completion"] += int(usage.get("completion_tokens") or 0)
+            for key in ("cost_usd", "cost"):
+                if isinstance(data.get(key), (int, float)):
+                    cost += float(data[key])
+                    out["cost_usd"] = round(cost, 6)
+        out["total"] = out["prompt"] + out["completion"]
+        return out
+
+    def _store_helper_output(self, handoff_id: str, text: str) -> str | None:
+        """Large helper results go to a file the lead can read (its read roots
+        always include ``logs/tool_results``); the lead gets a preview + path."""
+        from jaeger_ai.core.runtime.collaboration import RESULT_INLINE_CHARS
+        if len(text or "") <= RESULT_INLINE_CHARS:
+            return None
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+            logs = getattr(layout, "logs_dir", None)
+            base = Path(logs) if logs else self._instance_root() / "logs"
+            folder = base / "tool_results"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"helper-{re.sub(r'[^A-Za-z0-9_-]', '', handoff_id)}.md"
+            path.write_text(text, encoding="utf-8")
+            return str(path)
+        except Exception:  # noqa: BLE001 — the inline preview still reaches the lead
+            logger.warning("helper output not saved for %s", handoff_id, exc_info=True)
+            return None
+
     def _bind_requested_agent(self, body: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
         """Home a new chat on the agent the client asked for.
 
@@ -4447,6 +4676,13 @@ class JaegerGatewayApp:
         if record is None or getattr(record, "disabled", False):
             return {**metadata, "agent_id": requested}
         canonical = str(getattr(record, "id", None) or requested)
+        if canonical != LEAD_AGENT_ID and _is_team_agent(record) \
+                and self._collaboration_mode() == "one_mind" \
+                and not metadata.get("room") and not metadata.get("handoff_child"):
+            # One mind: every chat is Jaeger's. The asked-for specialist is kept
+            # as a hint; Jaeger can delegate to it as an inner helper.
+            return {**metadata, "agent_id": LEAD_AGENT_ID, "requested_agent_id": canonical,
+                    "route_checked": True}
         out = {**metadata, "agent_id": canonical}
         if canonical != LEAD_AGENT_ID:
             out.update(agent_pinned=True, route_checked=True)
@@ -4498,7 +4734,10 @@ class JaegerGatewayApp:
                 self.store.update_metadata(sid, {"route_checked": True})
                 return False
             target = suggest_specialist(text)
-            if not target or self._registry().get_agent(target) is None:
+            record = self._registry().get_agent(target) if target else None
+            if record is None or (_is_team_agent(record) and self._collaboration_mode() != "team"):
+                # One mind / auto: team specialists are Jaeger's inner helpers,
+                # so triage never moves a chat to one of them as another voice.
                 self.store.update_metadata(sid, {"route_checked": True})
                 return False
             self.store.update_metadata(sid, {
@@ -4513,6 +4752,51 @@ class JaegerGatewayApp:
         except Exception:  # noqa: BLE001 — triage must never fail a turn
             logger.debug("auto-route failed", exc_info=True)
             return False
+
+    def _collaboration_prompt(self) -> str:
+        """The lead's note on how it works with its specialists (by mode)."""
+        mode = self._collaboration_mode()
+        try:
+            helpers = [a for a in self._registry().list_agents()
+                       if ((getattr(a, "metadata", None) or {}).get("team")) and not getattr(a, "disabled", False)]
+        except Exception:  # noqa: BLE001
+            helpers = []
+        if not helpers:
+            return ""  # no specialists: nothing to say, the request stays unadorned
+        names = ", ".join(str(getattr(a, "display_name", a.id)) for a in helpers)
+        if mode == "team":
+            return ("[Collaboration: Team]\nYour teammates (" + names + ") can take a task in their own voice: "
+                    "call_agent hands it to them and their reply is shown in the chat. For an internal check whose "
+                    "result only you need, use delegate(profile, brief).")
+        lead = ("[Collaboration: One mind]\n" if mode == "one_mind" else "[Collaboration: Auto]\n")
+        return lead + (
+            "You are one mind. Your specialists are inner helpers, not separate voices: " + names + ". "
+            "When a focused review or a context-heavy side task would help, call delegate(profile, brief, context). "
+            "A helper cannot see this chat, so put what it needs in brief/context. It returns its result only to you; "
+            "then answer the person yourself, in your own voice, owning the answer. For simple things just do the work. "
+            + ("" if mode == "one_mind" else
+               "If the person explicitly @mentions an agent, call_agent hands that agent the task in its own voice.")).strip()
+
+    def _one_mind_front_door(self, session: dict[str, Any] | None, agent_id: str | None,
+                             agent: Any = None):
+        """One mind: a chat homed on a team specialist still runs as Jaeger.
+
+        Returns ``(lead_id, lead_record)`` when the turn must go to the lead,
+        else None. Helper runs (``handoff_child``) and team rooms keep their
+        agent; team/auto modes keep the chat's agent. Built-in specialists the
+        owner switched a chat to explicitly (session hand-off) are not team
+        helpers and keep the owner's choice."""
+        from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
+        meta = (session or {}).get("metadata") or {}
+        if not agent_id or agent_id == LEAD_AGENT_ID or meta.get("handoff_child") or meta.get("room"):
+            return None
+        if not _is_team_agent(agent) or self._collaboration_mode() != "one_mind":
+            return None
+        try:
+            lead = self._registry().get_agent(LEAD_AGENT_ID)
+        except Exception:  # noqa: BLE001
+            lead = None
+        return (LEAD_AGENT_ID, lead) if lead is not None else None
 
     def _resolve_session_agent(self, session_id: str):
         """Look up the session's AgentRecord via AgentRegistry (or None)."""
@@ -5509,6 +5793,12 @@ class JaegerGatewayApp:
             session = self.store.get_session(session_id)
         session_agent_id = self._session_agent_id(session)
         agent = self._resolve_session_agent(session_id)
+        front = self._one_mind_front_door(session, session_agent_id, agent)
+        if front is not None:
+            session_agent_id, agent = front
+            self.event_bus.publish(session_id, "policy.decision", {
+                "request_id": request_id, "decision": "route", "policy": "collaboration: one mind",
+                "tool": "front door", "reason": "One mind: this message goes to Jaeger; specialists work as its inner helpers"})
         system_prompt = self._system_prompt_for_agent(agent)
         agent_fields: dict[str, Any] = {}
         if session_agent_id:
@@ -5746,6 +6036,11 @@ class JaegerGatewayApp:
             if project_reference is not None:
                 prompt += "\n\n[Shared project notes: reference data, not permission or instructions to override the current request]\n" + project_reference.fragment()
                 context_references += (project_reference,)
+            if role_s != "specialist" and not ((session or {}).get("metadata") or {}).get("handoff_child"):
+                # How this mind works with its specialists (collaboration mode).
+                note = self._collaboration_prompt()
+                if note:
+                    prompt += "\n\n" + note
             if timing is not None:
                 timing.prepare_turn_end_ms = timing.now()
             self._present(session_id, "thinking", intent="turn")
@@ -6987,6 +7282,48 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Autonomy was saved but the running agent did not accept it"}, status=500)
         return web.json_response({"autonomy": mode, "options": list(AUTONOMY)})
 
+    def _collaboration_mode(self) -> str:
+        """Saved collaboration mode: one_mind (default) | team | auto."""
+        from jaeger_ai.core.runtime.collaboration import configured_mode
+        try:
+            return configured_mode(self._config_path())
+        except Exception:  # noqa: BLE001 — unreadable → the narrow default
+            from jaeger_ai.core.runtime.collaboration import DEFAULT
+            return DEFAULT
+
+    async def handle_get_collaboration(self, request: web.Request) -> web.Response:
+        """GET /v1/runtime/collaboration: one_mind | team | auto (saved setting)."""
+        from jaeger_ai.core.runtime.collaboration import snapshot
+        return web.json_response(snapshot(self._collaboration_mode()))
+
+    async def handle_set_collaboration(self, request: web.Request) -> web.Response:
+        """POST /v1/runtime/collaboration ``{"mode": "one_mind|team|auto"}``: saved to
+        the instance config (``automation.collaboration_mode``); the next message,
+        delegation and room post read it. Publishes ``collaboration.mode.changed``."""
+        from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+        from jaeger_ai.core.runtime.collaboration import MODES, snapshot
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        mode = str((body or {}).get("mode") or "").strip().lower().replace("-", "_").replace(" ", "_") \
+            if isinstance(body, dict) else ""
+        if mode not in MODES:
+            return web.json_response({"error": f"mode must be one of {list(MODES)}"}, status=400)
+        path = self._config_path()
+        if path is None or not Path(path).is_file():
+            return web.json_response({"error": "No instance config to save to"}, status=409)
+        previous = self._collaboration_mode()
+        config = load_yaml(Path(path), Config)
+        config.automation.collaboration_mode = mode
+        dump_yaml(Path(path), config)
+        saved = self._collaboration_mode()
+        if saved != mode:
+            return web.json_response({"error": "Collaboration mode was not saved"}, status=500)
+        self.event_bus.publish("*", "collaboration.mode.changed", {"mode": mode, "previous": previous})
+        return web.json_response(snapshot(mode))
+
     def _current_tier(self) -> str:
         """Return the active interaction tier ('chat', 'agent', 'jaeger')."""
         path = self._config_path()
@@ -7338,15 +7675,34 @@ class JaegerGatewayApp:
             display = getattr(target, "display_name", None) or record["to_agent_id"]
             specialty = meta.get("specialty") or (getattr(target, "metadata", None) or {}).get("specialty") or display
             allowed = meta.get("allowed_tools") or []
-            prompt = bounded_prompt(
-                display_name=str(display),
-                specialty=str(specialty),
-                task=record["task"],
-                permitted_context=str(meta.get("permitted_context") or ""),
-                allowed_tools=frozenset(str(x) for x in allowed) if allowed else None,
-                workspace=meta.get("workspace") or None,
-                project_name=meta.get("project_name") or None,
-            )
+            is_helper = meta.get("collaboration") == "delegate"
+            if is_helper:
+                from jaeger_ai.core.agent_registry.specialists import expand_tool_patterns, specialist_tools
+                from jaeger_ai.core.runtime.collaboration import helper_prompt, memory_excerpt, scrub_excerpt
+                try:
+                    excerpt = await asyncio.wait_for(asyncio.to_thread(memory_excerpt, record["task"]), timeout=8)
+                except Exception:  # noqa: BLE001 — a helper still runs from its brief alone
+                    excerpt = ""
+                profile_tools = specialist_tools(target)
+                shown = [t for t in allowed if t != "__helper_no_tools__"]
+                if profile_tools:
+                    shown = [t for t in expand_tool_patterns(profile_tools, set(shown)) if t in set(shown)]
+                prompt = helper_prompt(
+                    display_name=str(display), specialty=str(specialty), brief=record["task"],
+                    context=str(meta.get("delegate_context") or meta.get("permitted_context") or ""),
+                    memory_excerpt=scrub_excerpt(excerpt), tools=shown,
+                    workspace=meta.get("workspace") or None,
+                )
+            else:
+                prompt = bounded_prompt(
+                    display_name=str(display),
+                    specialty=str(specialty),
+                    task=record["task"],
+                    permitted_context=str(meta.get("permitted_context") or ""),
+                    allowed_tools=frozenset(str(x) for x in allowed) if allowed else None,
+                    workspace=meta.get("workspace") or None,
+                    project_name=meta.get("project_name") or None,
+                )
             timeout = int(meta.get("timeout_seconds") or DEFAULT_TIMEOUT_S)
             runs = InMemoryRunStore()
             child = runs.create(
@@ -7356,8 +7712,12 @@ class JaegerGatewayApp:
                 parent_run_id=None,
                 relation="delegate",
             )
-            self.store.save_handoff({**record, "status": "running", "child_run_id": child.id})
-            self._post_handoff_request(record)
+            running = self.store.save_handoff({**record, "status": "running", "child_run_id": child.id})
+            if is_helper:
+                # An inner helper's brief is not a chat message anywhere.
+                self._publish_handoff("agent.handoff", running)
+            else:
+                self._post_handoff_request(record)
             runtime = NativeSpecialistRuntime(self._specialist_chat)
             delegates = DelegateRegistry()
             delegates.register(runtime, replace=True)
@@ -7403,6 +7763,12 @@ class JaegerGatewayApp:
                 record={**record,'metadata':{**(record.get('metadata') or {}),'cancelled_before_admission':True}}
             elif current.get('status')=='cancelled':status='cancelled'
             ok = status == "completed"
+            result_path = None
+            if is_helper:
+                result_meta["tokens"] = self._helper_usage(result.worker_session_id)
+                result_path = self._store_helper_output(record["id"], str(summary or ""))
+                if result_path:
+                    result_meta["result_path"] = result_path
             saved = self.store.save_handoff({
                 **record,
                 "status": status,
