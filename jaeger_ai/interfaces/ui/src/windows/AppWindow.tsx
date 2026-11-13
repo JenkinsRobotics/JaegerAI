@@ -99,7 +99,7 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
     { id: 'settings:general', label: 'Appearance and text size', hint: 'Settings → General', run: () => go('/settings/general') },
     ...['library', 'compare', 'usage'].map((section) => ({ id: `models:${section}`, label: `Go to ${section === 'library' ? 'Model library' : section === 'compare' ? 'Compare' : 'Usage'}`, hint: 'Settings → Models', run: () => go(`/settings/models/${section}`) })),
     ...['hermes', 'openclaw', 'sharepoint'].map((section) => ({ id: `integration:${section}`, label: `Go to ${section === 'hermes' ? 'Hermes' : section === 'openclaw' ? 'OpenClaw' : 'SharePoint'}`, hint: 'Settings → Integrations', run: () => go(`/settings/integrations/${section}`) })),
-    ...['checkpoints', 'widgets'].map((section) => ({ id: `settings:${section}`, label: `Go to ${section === 'widgets' ? 'My widgets' : 'Checkpoints'}`, hint: 'Settings', run: () => go(`/settings/${section}`) })),
+    ...['checkpoints', 'widgets'].map((section) => ({ id: `settings:${section}`, label: `Go to ${section === 'widgets' ? 'Home widgets' : 'Checkpoints'}`, hint: 'Settings', run: () => go(`/settings/${section}`) })),
     ...CHARACTERS.map((c) => ({ id: `character:${c.id}`, label: `New agent: ${c.name}`, hint: c.role, run: () => go(`/agents/characters?character=${encodeURIComponent(c.id)}`) })),
   ], [go])
 

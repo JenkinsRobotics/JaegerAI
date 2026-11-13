@@ -2,7 +2,7 @@
 export type PanelId = "checkpoints" | "widgets" | "appearance" | "general" | "voice" | "notifications" | "agents" | "memory" | "integrations" | "models" | "automations" | "machine" | "privacy" | "limits" | "about";
 export interface Entry { id: string; panel: PanelId; anchor: string; label: string; keywords: string[] }
 export const PANEL_LABEL: Record<PanelId, string> = {
-  checkpoints: "Checkpoints", widgets: "My widgets", appearance: "Appearance", general: "General", voice: "Voice & audio", notifications: "Notifications", agents: "Agents", memory: "Memory & skills",
+  checkpoints: "Checkpoints", widgets: "Home widgets", appearance: "Appearance", general: "General", voice: "Voice & audio", notifications: "Notifications", agents: "Agents", memory: "Memory & skills",
   integrations: "Integrations & MCP", models: "Models & Providers", automations: "Automations", machine: "Machine & devices", privacy: "Privacy & data", limits: "Spending limits", about: "About & diagnostics",
 };
 export const GROUPS: { id: string; label: string; panels: PanelId[] }[] = [
@@ -21,7 +21,7 @@ export const LEGACY_SETTINGS: Record<string, string> = {
 const e = (panel: PanelId, anchor: string, label: string, ...keywords: string[]): Entry => ({ id: `${panel}.${anchor}`, panel, anchor, label, keywords });
 export const REGISTRY: Entry[] = [
   e("checkpoints", "checkpoints", "Checkpoints", "workspace", "versions", "restore"),
-  e("widgets", "widgets", "My widgets", "personalisation", "layout"),
+  e("widgets", "widgets", "Home widgets", "personalisation", "layout", "my widgets"),
   e("models", "library", "Model library", "models", "inventory"),
   e("models", "compare", "Compare models", "compare"),
   e("models", "usage", "Model usage", "usage"),
@@ -29,7 +29,7 @@ export const REGISTRY: Entry[] = [
   e("integrations", "openclaw", "OpenClaw", "engine"),
   e("integrations", "sharepoint", "SharePoint", "documents"),
   e("appearance", "theme", "Theme (Light, Dark, System)", "theme", "dark", "light", "mode", "appearance"),
-  e("appearance", "feel", "Feel", "feel", "style", "colors", "accent", "jaeger blue", "skin"),
+  e("appearance", "feel", "Accent color", "feel", "style", "colors", "accent", "jaeger blue", "skin"),
   e("appearance", "icon", "App icon", "icon", "logo", "favicon", "dock", "custom icon", "upload"),
   e("appearance", "text-size", "Text size", "font", "text size", "zoom"),
   e("appearance", "density", "Density", "density", "compact", "comfortable", "rows"),
