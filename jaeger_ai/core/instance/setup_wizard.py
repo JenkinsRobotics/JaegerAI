@@ -669,18 +669,20 @@ def run_wizard(
             if linked is not None:
                 print(f"     ✓ linked {linked.name} (no download needed)")
 
-    # ── Step 3 · Permissions ────────────────────────────────────────
-    _step(3, "Permissions")
+    # ── Step 3 · Autonomy (approvals) ──────────────────────────────
+    _step(3, "Approvals")
     print("  Some tools act on the world — run code, control the computer,")
     print("  install packages. How should the agent handle those?")
-    perm_mode = _ask_choice(
+    autonomy_choice = _ask_choice(
         "Choose",
         [
-            ("confirm", "Ask me before each action  (recommended)"),
-            ("allow", "Auto-allow everything  (trusted, unattended deployment)"),
+            ("scoped", "Agree the risky scope up front, then run within it  (recommended)"),
+            ("ask", "Ask me before every outward or destructive action"),
+            ("auto", "Auto-approve  (trusted, unattended deployment)"),
         ],
         default=0,
     )
+    perm_mode = "allow" if autonomy_choice == "auto" else "confirm"
 
     # ── Step 4 · Interaction (WIZ-3) ────────────────────────────────
     # How does the user want to talk to {name} by default? The choice
@@ -782,7 +784,7 @@ def run_wizard(
         print(f"     Asleep model (same as awake — no swap)")
     else:
         print(f"     Asleep model {asleep_path}  (swaps in during deep-think)")
-    print(f"     Permissions  {'ask before each action' if perm_mode == 'confirm' else 'auto-allow'}")
+    print(f"     Approvals    {autonomy_choice}")
     print(f"     Interaction  default mode = {interaction_mode}")
     print(f"     Warm-up      TTS={'on' if warm_tts else 'off'}  "
           f"STT={'on' if warm_stt else 'off'}")
@@ -806,6 +808,7 @@ def run_wizard(
         awake_provider=awake_provider,
         asleep_model=asleep_path,
         permission_mode=perm_mode,
+        autonomy=autonomy_choice,
         interaction_mode=interaction_mode,
         voice_enabled=voice_enable_choice,
         make_default=False,     # asked interactively below
@@ -959,6 +962,12 @@ def setup_defaults() -> dict:
         "voices": [{"id": vid, "label": label} for vid, label in _VOICES],
         "default_character": ("assistant" if any(r[0] == "assistant" for r in rows)
                               else (rows[0][0] if rows else None)),
+        "autonomy_modes": [
+            {"id": "scoped", "label": "Agree the risky scope up front, then run within it"},
+            {"id": "ask", "label": "Ask me before every outward or destructive action"},
+            {"id": "auto", "label": "Auto-approve (trusted, unattended deployment)"},
+        ],
+        # Legacy alias: older first-run clients still send permission_mode.
         "permission_modes": [
             {"id": "confirm", "label": "Ask me before each action"},
             {"id": "allow", "label": "Auto-allow everything"},
@@ -1359,6 +1368,7 @@ def create_instance(
     awake_provider: str | None = None,
     asleep_model: str | None = None,
     permission_mode: str = "confirm",
+    autonomy: str | None = None,
     interaction_mode: str = "gui",
     voice_enabled: bool = False,
     make_default: bool = True,
@@ -1428,7 +1438,14 @@ def create_instance(
         voice_tone=shim.voice_tone or "clear, even-keeled",
         voice_id=voice_id,
     )
-    from jaeger_ai.core.instance.schemas import DeepThinkConfig, VoiceConfig
+    from jaeger_ai.core.instance.schemas import AutomationConfig, DeepThinkConfig, VoiceConfig
+    from jaeger_ai.core.runtime.autonomy import AUTONOMY, permissions_mode_for
+
+    autonomy_value = (autonomy or "").strip().lower()
+    if autonomy_value not in AUTONOMY:
+        autonomy_value = "auto" if str(permission_mode).strip().lower() == "allow" else "scoped"
+    autonomy = autonomy_value
+    permission_mode = permissions_mode_for(autonomy)
 
     is_in_process = awake_model in MODEL_REGISTRY or awake_model.endswith(".gguf")
     # Native capacity is not an allocation budget: keep first boot at 32K.
@@ -1445,6 +1462,7 @@ def create_instance(
         deep_think=DeepThinkConfig(coder_model=asleep_model),
         warmup=WarmupConfig(tts=True, stt=True, vision=False),
         permissions=PermissionsConfig(mode=permission_mode),
+        automation=AutomationConfig(autonomy=autonomy or "scoped"),
         interaction=InteractionConfig(default_mode=interaction_mode),
         voice=VoiceConfig(enabled=voice_enabled),
     )

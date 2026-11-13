@@ -459,7 +459,8 @@ def _instance_inspect(argv: list[str]) -> int:
         print("# config.yaml")
         print(f"  model:        {cfg.model.model_path}")
         print(f"  ctx:          {cfg.model.ctx}")
-        print(f"  permissions:  {cfg.permissions.mode}")
+        print(f"  autonomy:     {cfg.automation.autonomy}")
+        print(f"  permissions:  {cfg.permissions.mode}  (derived from autonomy)")
         print(f"  interaction:  {cfg.interaction.default_mode}")
         print(f"  voice:        {'on' if cfg.voice.enabled else 'off'}")
     except Exception as exc:  # noqa: BLE001

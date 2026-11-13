@@ -909,23 +909,21 @@ class PluginsConfig(BaseModel):
 
 
 class PermissionsConfig(BaseModel):
-    """How the agent handles tier-gated actions — running code,
-    controlling the computer, installing packages.
+    """Internal confirmation-provider mode, derived from ``automation.autonomy``.
 
-      • ``confirm`` — the agent asks before each tier-gated action.
-      • ``allow``   — auto-approve; nothing prompts (a trusted,
-                      unattended deployment).
+      • ``confirm`` — derived from autonomy ``ask`` or ``scoped``.
+      • ``allow``   — derived from autonomy ``auto``.
 
-    Chosen during first-boot setup and persisted here, so the posture
-    survives every restart. Change it any time by editing this field.
+    Owner-facing control is ``automation.autonomy``. This field is kept
+    so older readers and the confirmation provider stay compatible.
     Tier-0 reads are always free; this governs tiers 1-4.
     """
 
     model_config = ConfigDict(extra="forbid")
     mode: Literal["confirm", "allow"] = Field(
-        "confirm", json_schema_extra=_setting("permissions"),
-        description="confirm — ask before each tier-gated action; "
-                    "allow — auto-approve everything (trusted unattended deployment).")
+        "confirm", json_schema_extra=_setting("permissions", hidden=True),
+        description="Derived from automation.autonomy (auto→allow, otherwise confirm). "
+                    "Not shown as a separate setting.")
 
 
 class SecurityConfig(BaseModel):

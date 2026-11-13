@@ -136,6 +136,8 @@ def _walk(model_cls: type, instance: Any, prefix: str,
         extra = field_info.json_schema_extra
         if not isinstance(extra, dict) or "group" not in extra:
             continue  # not exposed — identity keys, provenance, deferred blocks
+        if extra.get("hidden"):
+            continue  # kept on the model for compatibility, not owner-facing
         kind, choices = _kind_and_choices(field_info.annotation)
         if kind is None:
             continue  # unrenderable type (Path, list) — skip, don't fabricate
@@ -232,6 +234,22 @@ def set_value(layout: Any, path: str, value: Any) -> dict[str, Any]:
     model (coerce + validate + locked ``mutate_yaml``). Returns ``{ok, restart_required,
     path, value}``. Raises ``ValueError`` on an unknown path or invalid value."""
     from pydantic import ValidationError
+    if path == "permissions.mode":
+        # Hidden duplicate: map the legacy knob onto automation.autonomy.
+        from jaeger_ai.core.runtime.autonomy import (
+            permissions_mode_for, set_autonomy, sync_permissions_mode,
+        )
+        raw = str(value or "").strip().lower()
+        if raw not in {"confirm", "allow"}:
+            raise ValueError("permissions.mode must be 'confirm' or 'allow'")
+        autonomy = "auto" if raw == "allow" else "scoped"
+        result = set_value(layout, "automation.autonomy", autonomy)
+        sync_permissions_mode(getattr(layout, "config_path", None))
+        set_autonomy(autonomy)
+        result = dict(result)
+        result["path"] = path
+        result["value"] = permissions_mode_for(autonomy)
+        return result
     desc = describe(layout, path)
     if desc is None:
         raise ValueError(f"unknown setting: {path!r}")
@@ -246,6 +264,11 @@ def set_value(layout: Any, path: str, value: Any) -> dict[str, Any]:
         try:return Config.model_validate(data)
         except ValidationError as exc:raise ValueError(_fmt_validation_error(path,exc)) from exc
     new,_,_=mutate_yaml(layout.config_path,Config,change)
+    if path == "automation.autonomy":
+        from jaeger_ai.core.runtime.autonomy import set_autonomy, sync_permissions_mode
+        sync_permissions_mode(layout.config_path)
+        set_autonomy(str(value).strip().lower())
+        new = _load(layout)
     saved = _read_path(new, path)
     if desc["type"] == "secret":
         saved = ""

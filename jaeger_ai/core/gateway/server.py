@@ -983,6 +983,11 @@ class JaegerGatewayApp:
             logger.info("guardrails: %s", ", ".join(_install_guardrails(self._config_path())) or "none")
         except Exception:  # noqa: BLE001 — a broken guardrail config never blocks startup
             logger.warning("guardrails unavailable", exc_info=True)
+        try:
+            from jaeger_ai.core.runtime.autonomy import sync_permissions_mode
+            sync_permissions_mode(self._config_path())
+        except Exception:  # noqa: BLE001 — a config migrate never blocks startup
+            logger.warning("autonomy/permissions sync skipped", exc_info=True)
         self.store.event_sink = self.event_bus.fanout  # unknown-outcome acknowledgements reach live clients
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
         #: clarify_id → future resolved with the owner's answer (GB-033).
@@ -7553,6 +7558,8 @@ class JaegerGatewayApp:
             return web.json_response({"error": "No instance config to save to"}, status=409)
         config = load_yaml(Path(path), Config)
         config.automation.autonomy = mode
+        from jaeger_ai.core.runtime.autonomy import permissions_mode_for
+        config.permissions.mode = permissions_mode_for(mode)
         dump_yaml(Path(path), config)
         receipt = set_autonomy(mode)
         if not receipt.get("ok"):

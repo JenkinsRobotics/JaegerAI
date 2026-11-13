@@ -39,8 +39,15 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
     if layout is not None and layout.exists():
         config = load_yaml(layout.config_path, Config)
         updated, _, _ = selected_model_config(config, provider=provider, model=model)
-        if args.get("permission_mode"):
-            updated.permissions.mode = str(args["permission_mode"])
+        if args.get("autonomy") or args.get("permission_mode"):
+            from jaeger_ai.core.runtime.autonomy import (
+                AUTONOMY, permissions_mode_for, autonomy_from_permissions_mode,
+            )
+            autonomy = str(args.get("autonomy") or "").strip().lower()
+            if autonomy not in AUTONOMY:
+                autonomy = autonomy_from_permissions_mode(str(args.get("permission_mode") or ""))
+            updated.automation.autonomy = autonomy
+            updated.permissions.mode = permissions_mode_for(autonomy)
         if args.get("asleep_model"):
             updated.deep_think.coder_model = str(args["asleep_model"])
         if profile:
@@ -76,6 +83,7 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
             awake_model=model, awake_provider=provider,
             asleep_model=args.get("asleep_model") or model,
             permission_mode=str(args.get("permission_mode") or "confirm"),
+            autonomy=str(args.get("autonomy") or "") or None,
         )
     from jaeger_ai.core.models.onboarding_credentials import persist_pending
     from jaeger_ai.core.instance.first_boot import (

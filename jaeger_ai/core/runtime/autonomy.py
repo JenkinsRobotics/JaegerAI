@@ -39,6 +39,21 @@ UNREADABLE_DEFAULT = "ask"
 """Used when the config cannot be read/parsed or holds an invalid value: an
 error never widens autonomy (fail closed → ask)."""
 
+
+def permissions_mode_for(autonomy: str) -> str:
+    """Internal ``permissions.mode`` derived from owner-facing autonomy.
+
+    ``auto`` → ``allow`` (headless auto-approve). ``ask`` and ``scoped``
+    → ``confirm``. Specific deny rules are unchanged.
+    """
+    return "allow" if (autonomy or "").strip().lower() == "auto" else "confirm"
+
+
+def autonomy_from_permissions_mode(mode: str) -> str:
+    """Backward-compatible read of a legacy ``permissions.mode`` value."""
+    return "auto" if (mode or "").strip().lower() == "allow" else "scoped"
+
+
 _DESC = {
     "ask": "pause for approval before every outward/hardware/destructive action",
     "scoped": "agree risky scope up front, then run autonomously within it; "
@@ -75,6 +90,12 @@ def configured_autonomy(config_path: Path | str | None) -> str:
             return UNREADABLE_DEFAULT
         value = automation.get("autonomy")
         if value is None or str(value).strip() == "":
+            # A legacy install that only set permissions.mode=allow must
+            # keep auto-approve; otherwise the default is scoped.
+            permissions = raw.get("permissions") or {}
+            mode = permissions.get("mode") if isinstance(permissions, dict) else None
+            if str(mode or "").strip().lower() == "allow":
+                return "auto"
             return CONFIG_DEFAULT
         value = str(value).strip().lower()
         return value if value in AUTONOMY else UNREADABLE_DEFAULT
@@ -122,3 +143,42 @@ def set_autonomy(name: str) -> dict:
     _state["explicit"] = True
     _publish(target)
     return {"ok": True, "mode": target}
+
+def sync_permissions_mode(config_path: Path | str | None) -> str:
+    """Make ``automation.autonomy`` the source of truth and derive ``permissions.mode``.
+
+    If the saved file had ``permissions.mode: allow`` while autonomy was
+    not ``auto``, autonomy is migrated to ``auto`` so auto-approve is not
+    lost. Specific deny / grant rules are not touched. Returns the
+    autonomy value after the sync. No write when already consistent.
+    """
+    if not config_path:
+        return CONFIG_DEFAULT
+    path = Path(config_path)
+    if not path.is_file():
+        return CONFIG_DEFAULT
+    try:
+        from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+
+        config = load_yaml(path, Config)
+        saved = getattr(getattr(config, "automation", None), "autonomy", None)
+        mode = getattr(getattr(config, "permissions", None), "mode", None)
+        autonomy = str(saved or "").strip().lower()
+        if autonomy not in AUTONOMY:
+            autonomy = autonomy_from_permissions_mode(str(mode or ""))
+        elif autonomy != "auto" and str(mode or "").strip().lower() == "allow":
+            # Preserve a previously saved auto-approve posture.
+            autonomy = "auto"
+        derived = permissions_mode_for(autonomy)
+        changed = False
+        if getattr(config.automation, "autonomy", None) != autonomy:
+            config.automation.autonomy = autonomy
+            changed = True
+        if getattr(config.permissions, "mode", None) != derived:
+            config.permissions.mode = derived
+            changed = True
+        if changed:
+            dump_yaml(path, config)
+        return autonomy
+    except Exception:  # noqa: BLE001 — never widen on a failed migrate
+        return configured_autonomy(path)
