@@ -34,11 +34,11 @@ export const STREAM_STYLES: Record<StreamStyleId, StreamStyleParams> = {
   // smooth for deltas up to one viewport. See stream-grok.md for each source.
   grok: {
     id: "grok",
-    reveal: { mode: "words", ratePerSec: 20, tickMs: 50, maxLagChars: 600, catchUp: "snap", adaptive: true },
+    reveal: { mode: "words", ratePerSec: 80, tickMs: 16, maxLagChars: 80, catchUp: "accelerate", adaptive: true },
     enter: { kind: "fade", durationMs: 200, easing: "ease-out", blurPx: 4 },
     markdown: { midStream: "live", partialFence: "live" },
     indicator: { kind: "avatar" },
-    scroll: { follow: "whenAtBottom", thresholdPx: 4, smooth: true },
+    scroll: { follow: "whenAtBottom", thresholdPx: 80, smooth: false },
   },
   // PROVISIONAL placeholders (not measured yet).
   vscode: {

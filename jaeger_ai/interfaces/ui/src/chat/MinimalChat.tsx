@@ -21,7 +21,8 @@ import { whenNoPopup } from "../popups/coordinator";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
-import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
+import { ArrowDownIcon, CloseIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
+import { MessageActions, ModelError, ThinkingRow, isDebugThinking } from "./chatUx";
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { RuntimeSettings } from "../settings/RuntimeSettings";
@@ -36,7 +37,7 @@ import { ChatHome } from "./ChatHome";
 import { navigate } from "../shell/router";
 import { stageSavedMedia, addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
-import { activityPhrase, stepsSummary, type ToolPart } from "./activity";
+import { stepsSummary, type ToolPart } from "./activity";
 import { applyPart, isSessionMissingError, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type ClarifyAnswerResult, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
 import { SessionApprovals } from "./SessionApprovals";
@@ -114,7 +115,7 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
     case "modelIdentity":
       return <details className="jg-knowledge-context jg-knowledge-context--diagnostic"><summary>Actual model · {part.actualModel??"Unknown"}</summary><p>{part.actualModel?"Model identity reported by the provider response; this is not independent backend verification.":"No provider model identity was retained for this response. The configured or requested model is not proof of the actual remote model."}</p></details>;
     case "toolSelection":
-      return <details className="jg-knowledge-context"><summary>Tools available · {part.receipt.selected_count}</summary><p>{part.receipt.mode === "progressive" ? "Tools are loaded as this task needs them." : "The full available tool set is enabled."}</p><ul>{part.receipt.tools.filter(tool => tool.selected || !tool.available).map(tool => <li key={tool.tool}><strong>{tool.tool}</strong> · {tool.source}<small> · {tool.available ? tool.selection_reason : tool.unavailable_reason}</small></li>)}</ul>{part.receipt.truncated && <p>Showing a limited tool list.</p>}</details>;
+      return null;
     case "modelContext":
       return <details className="jg-knowledge-context jg-knowledge-context--diagnostic"><summary>Model dispatch context · {part.outline.messages.length} messages</summary><p>Observed immediately before an adapter call; provider acceptance and consumption are unknown. No prompt content is retained.</p><p>Format: {part.outline.shape} · Separate system text: {part.outline.system_chars} characters · Tool schemas: {part.outline.tool_count}</p><ol>{part.outline.messages.map((row, index) => <li key={index}>{row.role} · {row.text_chars} text characters · {row.omitted_blocks} non-text blocks omitted</li>)}</ol>{part.outline.truncated && <p>Outline limited; some entries omitted.</p>}<p>Character counts are not token usage.</p>{part.outline.items && <><h4>Context item provenance</h4><ul>{part.outline.items.map(item=><li key={item.reference}>{item.owner} · {item.claim_id ?? item.event_id ?? (item.document_id?item.document_id+" revision "+item.document_revision:item.record_ref.slice(0,16))} · {({retained_exact:"Complete item retained at dispatch",budget_dropped:"Excluded by context budget",not_retained_exact:"Complete item absent after formatting/compaction",unobservable:"Adapter representation unobservable"} as Record<string,string>)[item.state]}</li>)}</ul><p>Checks require the complete owner-framed item, not a matching marker or count. An absent item may have been summarized; this does not mean its durable record was forgotten. Opaque references identify source records without exposing paths or private text.</p></>}<p>Provider consumption and execution permissions are not inferred from these receipts.</p></details>;
     case "knowledgeContext":
@@ -125,7 +126,7 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
         <RevealMarkdown text={part.text} live={live} links={links} style={style} />
       </section>;
     case "thinking":
-      return <details className="jg-thinking" open={live && part.durationMs === undefined ? true : undefined} key={part.durationMs === undefined ? "live" : "done"}><summary>{part.durationMs === undefined ? "Thinking" : `Thought for ${seconds(part.durationMs)} s`}</summary><p>{part.text}</p></details>;
+      return isDebugThinking(part.text) ? null : <ThinkingRow live={live && part.durationMs === undefined} durationMs={part.durationMs} text={part.text} startedAt={undefined} />;
     case "progress":
       return null; // shown live by the progress line
     case "toolInvocation":
@@ -133,7 +134,7 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
     case "warning":
       return <div className="jg-notice jg-notice--warn">{part.message}</div>;
     case "error":
-      return <div className="jg-notice jg-notice--error">{part.message}</div>;
+      return null;
     default:
       return null;
   }
@@ -258,9 +259,21 @@ export function ProgressLine({ phrase, step, sessionId }: { phrase: string; step
 
 /** Text is its own streaming indicator. Keep activity only before text or for live tools. */
 export function showsProgress(turn: ChatTurn): boolean {
-  if (turn.state !== "pending") return false;
-  const last = turn.parts.filter(p => p.kind !== "toolSelection" && p.kind !== "step" && p.kind !== "modelContext" && p.kind !== "modelIdentity" && p.kind !== "knowledgeContext").at(-1);
-  return !(last?.kind === "markdownContent" && last.text);
+  void turn;
+  return false;
+}
+
+function replyHasText(turn: ChatTurn): boolean {
+  return turn.parts.some((part) => part.kind === "markdownContent" && Boolean(part.text));
+}
+
+function turnErrors(turn: ChatTurn): string[] {
+  const messages = turn.parts.flatMap((part) => {
+    if (part.kind === "error" && part.message) return [part.message];
+    if (part.kind === "thinking" && isDebugThinking(part.text)) return [part.text];
+    return [];
+  });
+  return [...new Set(messages)];
 }
 
 const replyText = (turn: ChatTurn) => {
@@ -568,8 +581,8 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   const follow = (el: HTMLElement) => whenNoPopup(() => { if (stick.current) followNow(el); });
   const followNow = (el: HTMLElement) => {
     const jump = el.scrollHeight - el.clientHeight - el.scrollTop;
-    if (streamStyle.scroll.smooth && jump > 0 && jump <= el.clientHeight && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    else el.scrollTop = el.scrollHeight;
+    void jump;
+    el.scrollTop = el.scrollHeight;
   };
   // Follow new content only while the reader is at the bottom; after an older page lands, hold the
   // reader's place instead.
@@ -954,7 +967,6 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   };
 
   const links: Links = { onSuggest: draftReady && !draftError ? (text)=>{setDraft(old=>old ? old+"\n"+text : text);field.current?.focus();} : undefined, onCopy: (text) => void host.copy(text), onOpen: (url) => host.openExternal(url) };
-  const agentName = (id: string) => (id === agent.id ? agent.name : undefined);
   const dictation = Boolean(voiceHost) && Boolean(caps.dictation ?? caps.voice);
   const voiceChat = Boolean(voiceHost) && Boolean(caps.voiceChat ?? caps.voice);
   const hasText = Boolean(draft.trim()) || files.length > 0;
@@ -984,7 +996,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         <div className="jg-chat__column">
           {filesOpen && host.sessionFiles && sessionId && <><SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)} onSelectMedia={bytesUploadEnabled()&&draftReady&&!active&&!recoveryBlocked?file=>{try{if(!sessionId||active||recoveryBlocked)return;stageSavedMedia([],sessionId,file);setFiles(current=>{const result=stageSavedMedia(current,sessionId,file);setFileNote(result.note);return result.files;});}catch(e){setFileNote(String(e));}}:undefined}/>{host.taskArtifacts&&<TaskArtifacts key={"artifacts:"+sessionId} controls={host.taskArtifacts} sessionId={sessionId}/>}</>}
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
-          {session && !session.turns.length && <ChatHome portrait={agents?.[0]?.avatar_url} />}
+          {session && !session.turns.length && <ChatHome onSuggest={(prompt) => { if (!active && !recoveryBlocked) send(prompt); else setDraft(prompt); }} />}
           {session && (older || olderError) && (
             <div className="jg-older" role="status">
               {loadingOlder ? "Loading earlier messages…"
@@ -1015,17 +1027,27 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 : "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
-                : "activity" in seg ? <ActivityFold key={`activity:${i}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
-                : "diagnostic" in seg ? <div key={`diagnostic:${i}`} className="jg-turn-diagnostic" data-stream-role="diagnostic">{seg.diagnostic.map((p,j)=><BubblePart key={j} part={p} links={links} live={false} style={streamStyle}/>)}</div>
+                : "activity" in seg ? (seg.activity.every(part => part.kind === "thinking" || part.kind === "progress")
+                  ? <ThinkingRow key={`activity:${i}`} live={turn.state === "pending" && !replyHasText(turn)} startedAt={turn.createdAt} sessionId={session?.id} durationMs={seg.activity.filter((part): part is Extract<ChatPart,{kind:"thinking"}> => part.kind === "thinking").reduce((total, part) => total + (part.durationMs ?? 0), 0) || undefined} text={seg.activity.filter((part): part is Extract<ChatPart,{kind:"thinking"}> => part.kind === "thinking").map(part => part.text).filter(text => text && !isDebugThinking(text)).join("\n") || undefined} />
+                  : <ActivityFold key={`activity:${i}`} parts={seg.activity.filter(part => part.kind !== "thinking")} live={turn.state === "pending"} links={links} style={streamStyle} />)
+                : "diagnostic" in seg ? null
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant" tabIndex={0} aria-haspopup="menu">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
+              {turn.state === "pending" && !replyHasText(turn) && !turn.parts.some(part => part.kind === "thinking" || (part.kind === "toolInvocation" && ["executing","streaming","waitingForConfirmation"].includes(part.state))) && (
+                <ThinkingRow live startedAt={turn.createdAt} sessionId={session?.id} />
+              )}
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
-              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} step={[...turn.parts].reverse().find((p): p is StepPart => p.kind === "step")} sessionId={session?.id} />}
-              {(turn.state === "failed" || turn.state === "unknown") && (
-                <div className="jg-turn-error" role="alert">
-                  <span>{turn.parts.find((p): p is Extract<ChatPart, { kind: "error" }> => p.kind === "error")?.message
-                    ?? (turn.state === "failed" ? "This turn failed." : "This turn ended unexpectedly.")}</span>
-                  {turn.message && !active && <button type="button" onClick={() => send(turn.message)}>Retry</button>}
-                </div>
+              {(turnErrors(turn).length > 0 || turn.state === "failed" || turn.state === "unknown") && (
+                <ModelError details={turnErrors(turn)} onRetry={turn.message && !active ? () => send(turn.message) : undefined} />
+              )}
+              {replyHasText(turn) && (
+                <MessageActions
+                  createdAt={turn.createdAt}
+                  onCopy={() => void copyMessageText(replyText(turn))}
+                  onRetry={turn.message && turn.state !== "pending" ? () => send(turn.message) : undefined}
+                  up={(reactions[`${turn.requestId}|assistant`] ?? []).includes("👍")}
+                  down={(reactions[`${turn.requestId}|assistant`] ?? []).includes("👎")}
+                  onThumb={turn.requestId ? (emoji, activeThumb) => changeReaction(turn.requestId, "assistant", emoji, activeThumb) : undefined}
+                />
               )}
             </section>
           ))}
@@ -1090,27 +1112,18 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
           <AutonomyControl host={host} dimmed={runTier === "chat"} />
-          <RunModeControl host={host} disabled={Boolean(active)} onTier={setRunTier} />
+          <RunModeControl host={host} onTier={setRunTier} />
           <span className="jg-composer__spacer" />
-          <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
+          <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} />
           {host instanceof WebHost && <>{!voiceModeOpen && <VoiceDictation />}<VoiceMode primary={!active && !hasText} onOpenChange={setVoiceModeOpen} disabled={Boolean(listening) || !session || !draftReady || preparingFiles || files.length>0 || Boolean(quote) || recoveryBlocked || recoveryStatus === 'unknown'} busy={Boolean(active)} outcome={session?.turns.at(-1) ? {id:session.turns.at(-1)!.requestId || session.turns.at(-1)!.turnId,state:session.turns.at(-1)!.state} : undefined} reply={spokenTurn ? {id:spokenTurn.requestId || spokenTurn.turnId,text:replyText(spokenTurn)} : undefined} onTranscript={async text=>{const accepted=active?await submitWhileBusy('steer',text):send(text,true);if(!accepted)setDraft(draft=>draft?draft+'\n'+text:text);return Boolean(accepted);}} /></>}
-        {dictation && !voiceModeOpen && primary !== "dictate" && (
-          <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
-            aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
-            disabled={listening === "voice"} onClick={() => void toggleListening("dictation")}><MicIcon /></button>
-        )}
         {active
           ? <button type="button" className="jg-send jg-send--stop" aria-label="Stop current turn (⌘Esc)" onClick={stop}><StopIcon /></button>
-          : host instanceof WebHost && !hasText ? null
-          : primary === "send"
+          : hasText || primary === "send"
             ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText || recoveryBlocked || preparingFiles || !draftReady || !session || Boolean(pendingSteer || pendingQueue) || recoveryStatus === "unknown"}><SendIcon /></button>
-            : primary === "dictate"
-              ? <button type="button" className={`jg-send${listening === "dictation" ? " is-listening" : ""}`}
-                  aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
-                  onClick={() => void toggleListening("dictation")}><MicIcon /></button>
-            : <button type="button" className={`jg-send jg-send--speak${listening === "voice" ? " is-listening" : ""}`}
-                aria-label={listening === "voice" ? "Stop and send" : "Start voice chat"} aria-pressed={listening === "voice"}
-                disabled={listening === "dictation"} onClick={() => void toggleListening("voice")}><WaveIcon /><span className="jg-send__label">{listening === "voice" ? "Send" : "Speak"}</span></button>}
+            : host instanceof WebHost ? null
+            : <button type="button" className={`jg-send jg-send--speak${listening ? " is-listening" : ""}`}
+                aria-label={listening ? "Stop voice" : "Start voice"} aria-pressed={Boolean(listening)}
+                onClick={() => void toggleListening(primary === "dictate" ? "dictation" : "voice")}><WaveIcon /></button>}
         </div>
       </form>
     </div>
