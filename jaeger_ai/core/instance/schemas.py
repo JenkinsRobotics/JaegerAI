@@ -1264,6 +1264,25 @@ class StackConfig(BaseModel):
     env: dict[str, dict[str, str | int | float | bool | None]] = Field(default_factory=dict)
 
 
+class GuardrailsInputConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: Regexes (case-insensitive) that trip the input guardrail on the owner's message.
+    block_patterns: list[str] = Field(default_factory=list)
+
+
+class GuardrailsOutputConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    #: Stop a final answer that carries a credential-shaped token.
+    secret_leak: bool = True
+
+
+class GuardrailsConfig(BaseModel):
+    """Input/output guardrails (OpenAI Agents SDK tripwire semantics)."""
+    model_config = ConfigDict(extra="forbid")
+    input: GuardrailsInputConfig = Field(default_factory=GuardrailsInputConfig)
+    output: GuardrailsOutputConfig = Field(default_factory=GuardrailsOutputConfig)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1297,6 +1316,7 @@ class Config(BaseModel):
     kokoro_tts: KokoroTTSConfig = Field(default_factory=KokoroTTSConfig)
     whisper_stt: WhisperSTTConfig = Field(default_factory=WhisperSTTConfig)
     containers: ContainersConfig = Field(default_factory=ContainersConfig)
+    guardrails: GuardrailsConfig = Field(default_factory=GuardrailsConfig)
     # 0.2.6: ``user: UserConfig`` field removed. Per-instance content
     # (persona, custom skills, prompt overlays, files) lives inside
     # the runtime instance dir; nothing meaningful was shared across

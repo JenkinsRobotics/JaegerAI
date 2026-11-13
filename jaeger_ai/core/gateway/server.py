@@ -941,6 +941,11 @@ class JaegerGatewayApp:
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
         self._install_otel_export()
+        try:  # built-in input/output guardrails (OpenAI Agents SDK tripwire semantics)
+            from jaeger_ai.core.safety.guardrails import install as _install_guardrails
+            logger.info("guardrails: %s", ", ".join(_install_guardrails(self._config_path())) or "none")
+        except Exception:  # noqa: BLE001 — a broken guardrail config never blocks startup
+            logger.warning("guardrails unavailable", exc_info=True)
         self.store.event_sink = self.event_bus.fanout  # unknown-outcome acknowledgements reach live clients
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
         #: clarify_id → future resolved with the owner's answer (GB-033).
