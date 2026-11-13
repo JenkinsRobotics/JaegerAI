@@ -41,7 +41,7 @@ ACTIVE_STATES = frozenset({"running", "waiting"})
 RESPONSIBILITY_EVENTS = frozenset({
     "loop.iteration", "loop.stop", "loop.continuation", "state.memory", "state.saved", "policy.decision",
     "route.selected", "reliability.retry", "reliability.fallback", "reliability.exhausted",
-    "reliability.timeout",
+    "reliability.timeout", "guardrail.tripped",
 })
 
 _lock = threading.Lock()

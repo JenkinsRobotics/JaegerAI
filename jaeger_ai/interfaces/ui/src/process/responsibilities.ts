@@ -20,7 +20,8 @@ export function respOf(event: string): RespId | null {
   if (event.startsWith("tool.") || event.startsWith("subagent.tool.")) return "tools";
   if (event.startsWith("loop.") || event === "turn.start" || event === "turn.finish" || event === "turn.checkpoint") return "loop";
   if (event.startsWith("state.") || event === "turn.plan" || event.startsWith("task.")) return "state";
-  if (event === "policy.decision" || event.startsWith("approval.") || event === "hook.decision" || event.startsWith("clarify.")) return "permissions";
+  if (event === "policy.decision" || event.startsWith("approval.") || event === "hook.decision" || event.startsWith("clarify.")
+    || event === "guardrail.tripped") return "permissions";
   if (event === "route.selected" || event === "subagent.started" || event === "subagent.finished" || event.startsWith("agent.handoff")
     || event.startsWith("room.") || event === "agent.message" || event.startsWith("delegate.")) return "orchestration";
   if (event.startsWith("reliability.") || ["turn.failed", "turn.cancelled", "turn.unknown", "turn.reconciled"].includes(event)) return "reliability";
@@ -55,7 +56,8 @@ export function responsibilities(events: readonly GatewayEvent[], upTo: number, 
       case "model.started": set("models", e, "active", `${s(p.model) || "model"} · step ${s(p.index)}`, [s(p.provider), s(p.location), s(p.route_reason)].filter(Boolean).join(" · ") || "calling"); break;
       case "model.finished": {
         const u = (p.usage ?? {}) as Record<string, number>;
-        const usage = p.usage_reported === false ? "usage not reported by lane" : `${u.prompt_tokens ?? 0} in / ${u.completion_tokens ?? 0} out tokens`;
+        const cost = typeof p.cost_usd === "number" ? ` · $${p.cost_usd.toFixed(4)}` : "";
+        const usage = p.usage_reported === false ? "usage not reported by lane" : `${u.prompt_tokens ?? 0} in / ${u.completion_tokens ?? 0} out tokens${cost}`;
         set("models", e, p.ok === false ? "fault" : "ok", `${s(p.actual_model ?? p.model) || "model"} · ${fmt(p.duration_ms)}`,
           p.ok === false ? `failed: ${s(p.error) || "error"} (${s(p.provider)})` : `${s(p.provider)} · ${usage}`);
         break;
@@ -87,6 +89,7 @@ export function responsibilities(events: readonly GatewayEvent[], upTo: number, 
       case "policy.decision": set("permissions", e, p.decision === "deny" ? "fault" : p.decision === "needs_approval" ? "warn" : "ok", `${s(p.decision)} · ${s(p.tool)}`, `${s(p.policy)}${p.reason ? `: ${s(p.reason)}` : ""}`); break;
       case "approval.request": set("permissions", e, "warn", "waiting for approval", s(p.prompt ?? p.kind)); break;
       case "approval.resolved": set("permissions", e, s(p.decision ?? p.status).includes("deny") ? "fault" : "ok", `approval ${s(p.decision ?? p.status)}`, s(p.kind)); break;
+      case "guardrail.tripped": set("permissions", e, "fault", `${s(p.stage)} guardrail tripped`, `${s(p.guardrail)}${p.reason ? `: ${s(p.reason)}` : ""}`); break;
       case "hook.decision": set("permissions", e, p.action === "deny" ? "fault" : "ok", `hook ${s(p.action)} · ${s(p.tool)}`, `${s(p.hook)}${p.reason ? `: ${s(p.reason)}` : ""}`); break;
       case "route.selected": set("orchestration", e, "ok", `route · ${s(p.model) || "default model"}`, `${s(p.reason)}${p.lane ? ` · lane ${s(p.lane)}` : ""} · tools: ${s(p.tools)}`); break;
       case "room.started": set("orchestration", e, "active", `room · ${Array.isArray(p.members) ? p.members.length : 0} members`, s(p.text).slice(0, 120)); break;

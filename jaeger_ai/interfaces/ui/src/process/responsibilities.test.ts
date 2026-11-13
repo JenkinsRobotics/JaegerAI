@@ -38,6 +38,18 @@ describe("eight responsibilities", () => {
     expect(respOf("policy.decision")).toBe("permissions");
   });
 
+  it("shows a model step's cost and a tripped guardrail", () => {
+    const events = [
+      ev("model.finished", { index: 1, ok: true, model: "grok", provider: "cli", usage: { prompt_tokens: 54240, completion_tokens: 931 }, cost_usd: 0.112338, duration_ms: 900 }),
+      ev("guardrail.tripped", { stage: "output", guardrail: "secret_leak", reason: "credential-shaped token" }),
+    ];
+    const by = Object.fromEntries(responsibilities(events, events.length - 1, "run:r1", health).map((r) => [r.id, r]));
+    expect(by.models.detail).toContain("54240 in / 931 out tokens · $0.1123");
+    expect(respOf("guardrail.tripped")).toBe("permissions");
+    expect(by.permissions.tone).toBe("fault");
+    expect(by.permissions.value).toBe("output guardrail tripped");
+  });
+
   it("attributes a sub-agent's own loop steps to orchestration, not the parent loop", () => {
     const events = [
       ev("loop.iteration", { index: 1, max: 50, decision: "continue", reason: "1 tool call(s) requested" }),

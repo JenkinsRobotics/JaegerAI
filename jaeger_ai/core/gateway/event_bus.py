@@ -85,6 +85,8 @@ EVENT_TYPES = frozenset({
     "delegate.started", "delegate.finished", "delegate.failed", "collaboration.mode.changed",
     "loop.iteration", "loop.stop", "loop.continuation", "state.memory", "state.saved", "policy.decision", "route.selected",
     "reliability.retry", "reliability.fallback", "reliability.exhausted", "reliability.timeout", "stream.status",
+    # Input/output guardrail tripwire (jaeger_agent.guardrails).
+    "guardrail.tripped",
     # Connect Apps panel: {id, state, audit?} on the global stream.
     "connect_app.updated",
     # Published by POST /v1/runtime/tier (was emitted but never registered).
