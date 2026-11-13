@@ -1696,6 +1696,8 @@ class JaegerGatewayApp:
         register_approvals_inbox(self)  # literal /v1/approvals/* paths before /{id}
         from .agents_tab_routes import register as register_agents_tab
         register_agents_tab(self)
+        from .team_routes import register as register_team
+        register_team(self)  # roster, rooms, live agent lanes (team runtime)
         register_push(self)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_post("/v1/approvals/{id}/decision", self.handle_resolve_approval)
@@ -2889,6 +2891,8 @@ class JaegerGatewayApp:
             "result": {},
             "metadata": {
                 "task_id": str(body.get("task_id") or "").strip()[:128] or None,  # G5
+                # The asking tool call: the Process view nests this agent under it.
+                "call_id": str(body.get("call_id") or "").strip()[:128] or None,
                 "reply_to_handoff_id": reply_parent["id"] if reply_parent else None,
                 "thread_handoff_id": ((reply_parent.get("metadata") or {}).get("thread_handoff_id") or reply_parent["id"]) if reply_parent else handoff_id,
                 "caller_actor": actor,
@@ -2991,6 +2995,13 @@ class JaegerGatewayApp:
             self.event_bus.publish(origin[0], event, {"handoff": record, "request_id": origin[1]})
         if event == "agent.handoff.finished":
             self._post_handoff_result(record)
+            if origin:
+                result = record.get("result") or {}
+                self.event_bus.publish(origin[0], "agent.message", {
+                    "request_id": origin[1], "handoff_id": record.get("id"),
+                    "agent_id": record.get("to_agent_id"), "from_agent_id": record.get("from_agent_id"),
+                    "agent_name": (record.get("metadata") or {}).get("target_display"),
+                    "status": record.get("status"), "text": str(result.get("summary") or "")[:4000]})
 
     # ── Sessions contract: home chats, typed messages, rolling summary ──
 
@@ -7424,11 +7435,19 @@ class JaegerGatewayApp:
         if parent_row and (parent_row['status'] in {'cancelling','cancelled','execution_unknown','failed'} or self._cancellations.is_cancelled(parent_row['request_id'])):
             raise ValueError('Parent request stopped or uncertain; no child admission')
         admitted = self.store.admit_request(session_id, text, request_id=child_rid, requested=requested,expected_model_revision=revision)
-        self._start_admitted_turn(admitted, session_id, text)
-        rid = admitted["request_id"]
-        task = self._running_tasks.get(rid)
-        if task is not None:
-            await task
+        mirror = getattr(self, "team_mirror", None)
+        origin = self._origin_turn(current_handoff) if (mirror is not None and current_handoff) else None
+        if origin:
+            mirror.bind(session_id, origin[0], origin[1], current_handoff["id"])
+        try:
+            self._start_admitted_turn(admitted, session_id, text)
+            rid = admitted["request_id"]
+            task = self._running_tasks.get(rid)
+            if task is not None:
+                await task
+        finally:
+            if origin:
+                mirror.unbind(session_id)
         row = self.store.get_request(rid) or {}
         result = row.get("result") or {}
         if row.get("status") != "completed":

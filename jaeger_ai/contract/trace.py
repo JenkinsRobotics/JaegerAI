@@ -150,15 +150,41 @@ def classify(event: str, d: dict[str, Any]) -> dict[str, Any] | None:
         state = ("succeeded" if d.get("ok") is not False else "failed") if done else "running"
         return node("tool", f"tool:{call}", f"agent:{d['subagent_id']}", _s(d.get("tool")) or "tool", state,
                     "TOOL_CALL_RESULT" if done else "TOOL_CALL_START")
+    if event in {"room.started", "room.finished"} and run:
+        if event == "room.started":
+            return node("run", run, None, "room", "running", "RUN_STARTED")
+        st = "failed" if _s(d.get("status")) == "failed" else "succeeded"
+        return node("run", run, None, "room", st, "RUN_FINISHED" if st == "succeeded" else "RUN_ERROR")
+    if event == "room.turn" and d.get("turn_id"):
+        # One member's turn in a room: an agent lane, nested under the member
+        # turn that @-handed it the room (else under the room run).
+        status = _s(d.get("status"))
+        st = {"running": "running", "failed": "failed", "passed": "succeeded"}.get(status, "succeeded")
+        parent = f"agent:{d['parent_turn_id']}" if d.get("parent_turn_id") else run
+        return node("subagent", f"agent:{d['turn_id']}", parent, _s(d.get("agent_name") or d.get("agent_id")) or "agent",
+                    st, "STEP_STARTED" if st == "running" else "STEP_FINISHED")
+    if event == "agent.message":
+        span = f"agent:{d['turn_id']}" if d.get("turn_id") else (f"agent:{d['handoff_id']}" if d.get("handoff_id") else None)
+        if span:
+            return node("message", span, None, _s(d.get("agent_name") or d.get("agent_id")) or "agent", None,
+                        "TEXT_MESSAGE_CONTENT")
     if event in {"agent.handoff", "agent.handoff.finished", "subagent.started", "subagent.finished"}:
         h = d.get("handoff") if isinstance(d.get("handoff"), dict) else d
         hid = _s(h.get("id") or h.get("handoff_id") or d.get("subagent_id"))
         if not hid:
             return None
+        hmeta = h.get("metadata") if isinstance(h.get("metadata"), dict) else {}
+        # A handoff carries the asking tool call in its metadata (call_agent).
+        call = call or _s(hmeta.get("call_id"))
         name = _s((h.get("metadata") or {}).get("target_display") if isinstance(h.get("metadata"), dict) else "") \
             or _s(h.get("to_agent_id") or d.get("agent_id") or d.get("name")) or "agent"
         done = event in {"agent.handoff.finished", "subagent.finished"}
-        st = ("failed" if _s(h.get("status")) in {"failed", "error"} else "succeeded") if done else "running"
+        hstatus = _s(h.get("status"))
+        if done:
+            st = {"failed": "failed", "error": "failed", "cancelled": "cancelled", "denied": "denied",
+                  "execution_unknown": "unknown"}.get(hstatus, "succeeded")
+        else:
+            st = "waiting" if hstatus == "pending_approval" else "running"
         return node("subagent", f"agent:{hid}", f"tool:{call}" if call else run, name, st,
                     "STEP_FINISHED" if done else "STEP_STARTED")
     if event == "hook.decision":

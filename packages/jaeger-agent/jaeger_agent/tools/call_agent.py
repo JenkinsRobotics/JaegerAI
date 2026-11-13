@@ -16,6 +16,7 @@ from typing import Any, Callable
 APPROVAL_POLL_S = 0.5
 APPROVAL_WAIT_S = 300
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
@@ -112,11 +113,32 @@ def _handoff_body(work, turn, *, from_agent_id, require_approval, request_id,
         "timeout_seconds": int(timeout_seconds),
         "allowed_tools": tools,
     }
+    try:  # the asking tool call, so the Process view nests the agent under it
+        from jaeger_agent import live as _live
+        call_id = _live.current_tool_call()
+    except Exception:  # noqa: BLE001
+        call_id = None
+    if call_id:
+        body["call_id"] = str(call_id)
     if project_id:
         body["project_id"] = project_id
     elif execution.get("workspace"):
         body["workspace"] = str(execution["workspace"])
     return body
+
+
+def _agent_by_name(registry: Any, name: str) -> Any:
+    """Resolve ``@Display Name`` / ``Display Name`` / bare name to one agent (exact, case-insensitive)."""
+    needle = name.strip().lstrip("@").strip().lower()
+    if not needle:
+        return None
+    try:
+        agents = registry.list_agents()
+    except Exception:  # noqa: BLE001
+        return None
+    hits = [a for a in agents if needle in {str(getattr(a, "display_name", "") or "").lower(),
+                                            str(getattr(a, "name", "") or "").lower()}]
+    return hits[0] if len(hits) == 1 else None
 
 
 @register_tool_from_function(name="run_team", side_effect="external")
@@ -137,7 +159,7 @@ def run_team(assignments: str, project_id: str = "", timeout_seconds: int = 1800
         target = str(item["agent_id"]).strip()
         rid = uuid.uuid4().hex
         status, payload = _request_json(
-            "POST", f"/v1/agents/{target}/handoff",
+            "POST", f"/v1/agents/{quote(target, safe=':')}/handoff",
             _handoff_body(str(item["task"]).strip(), turn,
                           from_agent_id="native:jaeger", require_approval=True,
                           request_id=rid, parent_run_id="",
@@ -189,9 +211,10 @@ def call_agent(
     allowed_tools: str = "",
     project_id: str = "",
 ) -> dict[str, Any]:
-    """Hand a bounded task to a standing specialist and return its evidence.
+    """Hand a bounded task to a teammate agent and return its evidence.
 
-    Uses Gateway ``POST /v1/agents/{id}/handoff``. Approval, timeout, cancel
+    ``agent_id`` is the agent's id (``native:...``) or its display name
+    (``@Jaeger Design & Style`` works). Uses Gateway ``POST /v1/agents/{id}/handoff``. Approval, timeout, cancel
     and specialist failure are explicit. This is not complete until a child
     run result is persisted.
     """
@@ -212,12 +235,13 @@ def call_agent(
         from jaeger_agent.core.host import service
         get_default_registry = service("agent_registry").get_default_registry
 
-        record = get_default_registry().get_agent(target)
+        registry = get_default_registry()
+        record = registry.get_agent(target) or _agent_by_name(registry, target)
         if record is None:
             return {
                 "ok": False,
                 "error": f"unknown agent: {target}",
-                "hint": "Use native:surfaces, native:gateway, or native:everyday",
+                "hint": "Use an agent id (native:...) or its display name; '@Name' works too",
             }
         target = record.id
     except Exception:
@@ -228,7 +252,7 @@ def call_agent(
     from jaeger_agent.task_port import current_task_context
     turn = current_task_context() or {}
     status, payload = _request_json(
-        "POST", f"/v1/agents/{target}/handoff",
+        "POST", f"/v1/agents/{quote(target, safe=':')}/handoff",
         _handoff_body(work, turn, from_agent_id=from_agent_id,
                       require_approval=require_approval, request_id=rid,
                       parent_run_id=parent_run_id, permitted_context=permitted_context,
