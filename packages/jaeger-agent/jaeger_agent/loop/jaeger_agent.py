@@ -1956,6 +1956,11 @@ class JaegerAgent:
                             )
                         except Exception:  # noqa: BLE001 — calibration is best-effort
                             pass
+                    if self.last_halt_reason == "stalled":
+                        # A stalled attempt was retried (or a fallback adapter
+                        # answered): the step recovered, so the stale flag must
+                        # not halt the loop after the next tool call.
+                        self.last_halt_reason = None
                     return adapter.parse_response(raw)
                 except AgentInterrupted:
                     # Interrupt propagates — handled by ``run_turn`` via

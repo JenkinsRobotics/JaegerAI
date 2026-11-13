@@ -414,3 +414,41 @@ def test_progress_silence_still_trips_stale():
             _goes_quiet, ev,
             poll_interval=0.02, stale_timeout=0.3, progress=prog,
         )
+
+
+def test_recovered_stall_does_not_halt_the_loop_after_the_next_tool():
+    """Regression (live 2026-11-12, one-mind delegate turn): a stalled
+    model call that succeeded on retry left ``last_halt_reason='stalled'``
+    set, so the loop stopped as "stalled" right after the next tool call
+    and the turn failed even though every step had recovered."""
+    from pydantic import BaseModel
+    from jaeger_agent import register_tool
+
+    class _NoArgs(BaseModel):
+        pass
+
+    clear_registry()
+
+    @register_tool("ping_tool", "Ping.", _NoArgs)
+    def _ping() -> dict:
+        return {"ok": True}
+
+    class _StallThenTool(_StallingAdapter):
+        def call(self, formatted, interrupt_event, *, stale_timeout=None, on_heartbeat=None, **kwargs):  # noqa: ARG002
+            self.calls += 1
+            if self.calls == 1:
+                raise StaleCallTimeout("no progress (test)")
+            if self.calls == 2:
+                return {"role": "assistant", "content": None,
+                        "tool_calls": [{"id": "c1", "name": "ping_tool", "arguments": {}}]}
+            return {"role": "assistant", "content": "done"}
+
+    primary = _StallThenTool()
+    agent = JaegerAgent(adapter=primary)
+    agent.stale_call_timeout_s = 0.1
+    try:
+        assert agent.run_turn("hi") == "done"
+        assert agent.last_halt_reason is None
+        assert primary.calls == 3
+    finally:
+        clear_registry()
