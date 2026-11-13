@@ -29,7 +29,7 @@ export function OrchestrationPanes({ adapter, onNavigate, now, initialCaller }: 
   return (
     <div className="jg-orch" data-inspector={handoff ? "open" : undefined}>
       <div className="jg-orch-grid">
-        <nav className="jg-orch-nav" aria-label="Team">
+        <nav className="jg-orch-nav" aria-label="Agents">
           {s.status === "loading" ? <SkeletonRows n={4} /> : <><LeadCard lead={lead} team={team} rows={s.rows} /><SpecialistStatusList team={team} selected={agentFilter} onSelect={setAgentFilter} /></>}
         </nav>
         <main className="jg-orch-main">

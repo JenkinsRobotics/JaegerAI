@@ -208,7 +208,7 @@ export function TasksPage({ source }: TasksPageProps) {
           <Search size={18} />
           <input
             type="text"
-            placeholder="Search tasks by objective, id, or bot..."
+            placeholder="Search tasks by objective, id, or agent..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />

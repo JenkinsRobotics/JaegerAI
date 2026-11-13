@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RuntimeAutonomy } from "../api/source";
-import { AlertCircle, Check, ChevronDown, Shield, ToolShield, Zap } from "../components/Icons";
+import { Check, ChevronDown, Shield, ToolShield, Zap } from "../components/Icons";
 import { useExclusivePopup } from "../popups/coordinator";
 import type { ChatHost } from "./host";
 
@@ -100,11 +100,6 @@ export function AutonomyControl({ host, dimmed = false }: { host: AutonomyHost; 
             </button>
           ))}
           {error && <p className="jg-autonomy-error" role="alert">{error} <button type="button" disabled={reading} onClick={() => void refresh()}>Retry</button></p>}
-          <footer className="jg-autonomy-menu__footer">
-            <button type="button" className="jg-autonomy-menu__learn" onClick={() => setOpen(false)}>
-              <AlertCircle size={14} /> Learn more about permissions
-            </button>
-          </footer>
         </div>
       )}
     </div>
