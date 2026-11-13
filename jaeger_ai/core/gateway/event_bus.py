@@ -351,8 +351,15 @@ class GatewayEventBus:
             last_id = since_event_id
             while True:
                 wake.clear()
-                window = (self.replay_window(session_id, last_id, session_only=True)
-                          if session_only else self.replay_window(session_id, last_id))
+                # The durable read runs off the event loop: every publish wakes
+                # every subscriber, and N synchronous sqlite pages per token
+                # delta stalled the Gateway loop (and every other stream) while
+                # a long answer streamed.
+                if self.store is not None:
+                    window = await asyncio.to_thread(
+                        self.replay_window, session_id, last_id, session_only=session_only)
+                else:
+                    window = self.replay_window(session_id, last_id, session_only=session_only)
                 if window["cursor_expired"]:
                     raise ReplayGap("Event cursor expired; reload session transcript")
                 records = window["events"]

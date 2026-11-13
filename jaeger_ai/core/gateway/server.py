@@ -7130,9 +7130,14 @@ class JaegerGatewayApp:
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "Access-Control-Allow-Origin": "*",
+                # Never let a reverse proxy buffer the stream (token deltas).
+                "X-Accel-Buffering": "no",
             },
         )
         await response.prepare(request)
+        # EventSource reconnect delay (SSE spec ``retry:``); with the ``id:``
+        # on every frame the browser resumes from Last-Event-ID by itself.
+        await response.write(b"retry: 2000\n\n")
 
         events = (self.event_bus.subscribe(session_id, since_event_id=last_event_id, session_only=True)
                   if session_only else self.event_bus.subscribe(session_id, since_event_id=last_event_id))
@@ -7165,15 +7170,16 @@ class JaegerGatewayApp:
                 await response.write(chunk.encode("utf-8"))
                 pending = asyncio.create_task(anext(events))
         except ReplayGap:
-            if session_only:  # tell the client its cursor fell out of retention
-                gap = {"event": "stream.status", "session_id": session_id, "timestamp": time.time(),
-                       "data": {"state": "gap", "resumed_from": last_event_id}}
-                try:
-                    await response.write(f"event: stream.status\ndata: {json.dumps(gap)}\n\n".encode("utf-8"))
-                except Exception:  # noqa: BLE001
-                    pass
-        except (asyncio.CancelledError, ConnectionResetError, StopAsyncIteration):
-            pass
+            # Tell the client its cursor fell out of retention (reload the
+            # transcript, then resume from latest), on every stream kind.
+            gap = {"event": "stream.status", "session_id": session_id, "timestamp": time.time(),
+                   "data": {"state": "gap", "resumed_from": last_event_id}}
+            try:
+                await response.write(f"event: stream.status\ndata: {json.dumps(gap)}\n\n".encode("utf-8"))
+            except Exception:  # noqa: BLE001
+                pass
+        except (asyncio.CancelledError, ConnectionError, StopAsyncIteration):
+            pass  # client went away (tab switch, reload, network drop); it resumes by id
         finally:
             pending.cancel()
             await asyncio.gather(pending, return_exceptions=True)
