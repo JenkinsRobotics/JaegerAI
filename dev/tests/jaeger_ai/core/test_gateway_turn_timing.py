@@ -60,3 +60,15 @@ async def test_admitted_turn_receipt_has_content_free_timing(monkeypatch, tmp_pa
     assert all(c["start_ms"] <= c["end_ms"] <= timing["turn_finish_ms"] for c in timing["model_calls"] + timing["tool_calls"])
     assert prompt not in json.dumps(timing)
     assert message not in json.dumps(timing)
+
+
+def test_turn_usage_totals_tokens_and_cost_across_model_steps():
+    from jaeger_ai.core.gateway.turn_timing import TurnTiming
+    t = TurnTiming()
+    t.model_start(); t.model_done({"prompt_tokens": 100, "completion_tokens": 20, "cost_usd": 0.01})
+    t.model_start(); t.model_done({"prompt_tokens": 50, "completion_tokens": 5, "cost_usd": 0.002})
+    u = t.snapshot()["usage"]
+    assert u == {"requests": 2, "input_tokens": 150, "output_tokens": 25, "total_tokens": 175,
+                 "reported": True, "cost_usd": 0.012}
+    t2 = TurnTiming(); t2.model_start(); t2.model_done({})
+    assert t2.usage()["reported"] is False and t2.usage()["cost_usd"] is None

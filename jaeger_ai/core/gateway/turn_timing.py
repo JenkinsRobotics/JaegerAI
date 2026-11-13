@@ -40,6 +40,9 @@ class TurnTiming:
             value = usage.get(key)
             if isinstance(value, int) and value > 0:
                 entry[key] = value
+        cost = usage.get("cost_usd") if isinstance(usage, dict) else None
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            entry["cost_usd"] = float(cost)
         self.model_calls.append(entry)
         self._model_start = None
 
@@ -56,8 +59,19 @@ class TurnTiming:
     def continuation(self) -> None:
         self.continuation_steps.append(self.now())
 
+    def usage(self) -> dict:
+        """Run total across model steps (OpenAI Agents SDK ``Usage`` shape:
+        requests, input/output/total tokens) plus cost when providers report it."""
+        inp = sum(int(c.get("prompt_tokens") or 0) for c in self.model_calls)
+        out = sum(int(c.get("completion_tokens") or 0) for c in self.model_calls)
+        costs = [float(c["cost_usd"]) for c in self.model_calls if "cost_usd" in c]
+        return {"requests": len(self.model_calls), "input_tokens": inp, "output_tokens": out,
+                "total_tokens": inp + out, "reported": bool(inp or out),
+                "cost_usd": round(sum(costs), 6) if costs else None}
+
     def snapshot(self) -> dict:
         return {
+            "usage": self.usage(),
             "admission_ms": 0.0,
             "prepare_turn_start_ms": self.prepare_turn_start_ms,
             "prepare_turn_end_ms": self.prepare_turn_end_ms,

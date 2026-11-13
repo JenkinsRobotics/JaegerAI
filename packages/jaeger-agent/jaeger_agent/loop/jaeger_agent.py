@@ -1943,6 +1943,9 @@ class JaegerAgent:
                         "prompt_tokens": max(0, self.last_prompt_tokens - before_prompt_tokens),
                         "completion_tokens": max(0, self.last_completion_tokens - before_completion_tokens),
                     }
+                    _cost = raw.get("cost_usd") if isinstance(raw, dict) else None
+                    if isinstance(_cost, (int, float)) and not isinstance(_cost, bool):
+                        _usage["cost_usd"] = float(_cost)  # type: ignore[assignment]
                     self.callbacks.on_model_call_done({**_usage, **_model_identity(adapter, raw)})  # type: ignore[dict-item]
                     _hooks.fire("post_model", {"ok": True, "usage": dict(_usage),
                                                "duration_ms": int((time.monotonic() - _model_t0) * 1000)})

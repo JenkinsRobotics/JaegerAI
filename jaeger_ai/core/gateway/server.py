@@ -5520,6 +5520,8 @@ class JaegerGatewayApp:
             self.event_bus.publish(session_id, "model.finished", {
                 **ids, "step_id": step["id"], "index": step["index"], "ok": ok,
                 "usage": tokens if reported else {}, "usage_reported": reported,
+                **({"cost_usd": round(float(usage["cost_usd"]), 6)}
+                   if isinstance(usage.get("cost_usd"), (int, float)) and not isinstance(usage.get("cost_usd"), bool) else {}),
                 **identity, **({"model": model} if model and "model" not in identity else {}),
                 "lane": lane or None,
                 "duration_ms": int((time.monotonic() - (step["t0"] or time.monotonic())) * 1000),
