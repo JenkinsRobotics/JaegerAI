@@ -79,6 +79,15 @@ def _run_span(rid: str) -> str:
     return f"run:{rid}"
 
 
+def _activity(call: str, rid: str) -> str:
+    """Gateway activity id for a model tool-call id (gateway.server._live_activity_id)."""
+    if not call or not rid or call.startswith(("tool_", "sub_")):
+        return call
+    import re
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "", call)[:80]
+    return f"tool_{rid.replace('-', '')[:12]}_{safe}" if safe else call
+
+
 def _approval_state(d: dict[str, Any]) -> str:
     status = _s(d.get("status") or d.get("decision")).lower()
     if d.get("approved") is True or status in {"approved", "allow", "allowed", "once", "always", "session"}:
@@ -168,6 +177,17 @@ def classify(event: str, d: dict[str, Any]) -> dict[str, Any] | None:
         if span:
             return node("message", span, None, _s(d.get("agent_name") or d.get("agent_id")) or "agent", None,
                         "TEXT_MESSAGE_CONTENT")
+    if event in {"delegate.started", "delegate.finished", "delegate.failed"} and d.get("handoff_id"):
+        # An inner helper (one-mind collaboration): a node under the lead's tool call.
+        hid = _s(d["handoff_id"])
+        call = _activity(call, rid)
+        st = {"delegate.started": "running", "delegate.finished": "succeeded"}.get(event)
+        if st is None:
+            st = {"cancelled": "cancelled", "denied": "denied", "execution_unknown": "unknown"}.get(
+                _s(d.get("status")), "failed")
+        return node("subagent", f"agent:{hid}", f"tool:{call}" if call else run,
+                    _s(d.get("agent_name") or d.get("profile") or d.get("agent_id")) or "helper", st,
+                    "STEP_STARTED" if st == "running" else "STEP_FINISHED")
     if event in {"agent.handoff", "agent.handoff.finished", "subagent.started", "subagent.finished"}:
         h = d.get("handoff") if isinstance(d.get("handoff"), dict) else d
         hid = _s(h.get("id") or h.get("handoff_id") or d.get("subagent_id"))
@@ -175,7 +195,9 @@ def classify(event: str, d: dict[str, Any]) -> dict[str, Any] | None:
             return None
         hmeta = h.get("metadata") if isinstance(h.get("metadata"), dict) else {}
         # A handoff carries the asking tool call in its metadata (call_agent).
-        call = call or _s(hmeta.get("call_id"))
+        # Older records hold the model's raw id; the tool span uses the
+        # Gateway's per-request activity id, so map it or the node is orphaned.
+        call = call or _activity(_s(hmeta.get("call_id")), rid)
         name = _s((h.get("metadata") or {}).get("target_display") if isinstance(h.get("metadata"), dict) else "") \
             or _s(h.get("to_agent_id") or d.get("agent_id") or d.get("name")) or "agent"
         done = event in {"agent.handoff.finished", "subagent.finished"}

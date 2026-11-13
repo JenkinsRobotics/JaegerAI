@@ -503,6 +503,17 @@ class AutomationConfig(BaseModel):
             "action is audited."
         ),
     )
+    collaboration_mode: Literal["one_mind", "team", "auto"] = Field(
+        "one_mind",
+        json_schema_extra=_setting("autonomy"),
+        description=(
+            "How Jaeger works with its specialist agents. 'one_mind' (default): every "
+            "message goes to Jaeger; specialists are inner helpers it delegates to and "
+            "it answers in one voice. 'team': rooms, @Name hand-offs and a roster you "
+            "chat with. 'auto': inner helpers by default, team rooms only when you open "
+            "a room or @mention an agent."
+        ),
+    )
     inner_max_iterations: int = Field(
         24, ge=1, le=200,
         json_schema_extra=_setting("autonomy"),

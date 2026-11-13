@@ -1,15 +1,20 @@
-/* Team — the agents that work together, and the rooms where they do it.
+/* Team / Inner workings — Jaeger's specialists and how it works with them.
+ * Collaboration mode decides the page: in One mind (default) it is "Inner
+ * workings" — helper profiles Jaeger delegates to and the delegation history;
+ * in Team / Auto it is the roster and rooms below.
+ * Team — the agents that work together, and the rooms where they do it.
  * Roster cards (persona, skills, tools, live status) and a room view: post to a
  * room and every addressed member takes a real turn on its own Gateway session;
  * a member that writes @Name hands the room to that teammate. Everything here is
  * read from the live Gateway (/v1/team, the room's session stream) — no demo data.
  * Layout language matches the Process view (cards, status marks, tokens). */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowRight, Bot, CheckCircle2, GitBranch, Loader2, MessagesSquare, Plus, Send, Sparkles, Users, Wrench, XCircle } from "lucide-react";
+import { Activity, ArrowRight, Bot, Brain, CheckCircle2, GitBranch, Loader2, MessagesSquare, Plus, Send, Sparkles, Users, Wrench, XCircle } from "lucide-react";
 import type { JaegerSource } from "../api/source";
 import type { GatewayEvent } from "../api/types";
 import type { RoomDetail, TeamAgent, TeamRoom, TeamSnapshot } from "../api/team";
 import { AgentAvatar } from "./AgentAvatar";
+import { CollaborationModeControl } from "./CollaborationMode";
 import "./team.css";
 
 type Working = Record<string, { agent: string; since: number }>;
@@ -108,8 +113,10 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
   useEffect(() => { void refresh(); const t = setInterval(refresh, 8000); return () => clearInterval(t); }, [refresh]);
 
   const agents = useMemo(() => new Map((snap?.agents ?? []).map((a) => [a.id, a])), [snap]);
-  const rooms = useMemo(() => (snap?.rooms ?? []).filter((r) => showProbes || !r.probe), [snap, showProbes]);
-  useEffect(() => { if (!roomId && rooms[0]) setRoomId(rooms[0].session_id); }, [rooms, roomId]);
+  // One mind (the default): no rooms; the page shows Jaeger's inner helpers.
+  const oneMind = snap?.mode === "one_mind";
+  const rooms = useMemo(() => (oneMind ? [] : (snap?.rooms ?? []).filter((r) => showProbes || !r.probe)), [snap, showProbes, oneMind]);
+  useEffect(() => { if (oneMind) { if (roomId) setRoomId(null); return; } if (!roomId && rooms[0]) setRoomId(rooms[0].session_id); }, [rooms, roomId, oneMind]);
 
   const loadRoom = useCallback(async (id: string) => {
     if (!api) return;
@@ -164,21 +171,29 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
   const workingCount = (snap?.agents ?? []).filter((a) => (a.activity?.status ?? a.status) === "working").length;
   const currentRoom: TeamRoom | undefined = rooms.find((r) => r.session_id === roomId) ?? snap?.rooms.find((r) => r.session_id === roomId);
 
+  const helpers = (snap?.agents ?? []).filter((a) => a.role !== "lead");
+  const delegations = (snap?.handoffs ?? []).filter((h) => h.kind === "delegate");
+  const shownAgents = oneMind ? helpers : (snap?.agents ?? []);
+  const shownHandoffs = oneMind ? delegations : (snap?.handoffs ?? []);
   return (
-    <section className="jg-team" aria-label="Team">
+    <section className="jg-team" aria-label={oneMind ? "Inner workings" : "Team"}>
       <header className="jg-team__bar">
-        <div className="jg-team__title"><Users size={16} /> Team</div>
-        <span className="jg-team__meta">{snap ? `${snap.agents.length} agents · ${workingCount} working · ${snap.rooms.filter((r) => !r.probe).length} rooms` : "loading…"}</span>
+        <div className="jg-team__title">{oneMind ? <><Brain size={16} /> Inner workings</> : <><Users size={16} /> Team</>}</div>
+        <span className="jg-team__meta">{!snap ? "loading…" : oneMind
+          ? `${helpers.length} helpers · ${workingCount} working · ${delegations.length} delegations`
+          : `${snap.agents.length} agents · ${workingCount} working · ${snap.rooms.filter((r) => !r.probe).length} rooms`}</span>
         {error && <span className="jg-team__error" role="alert"><XCircle size={14} /> {error}</span>}
-        <button type="button" className="jg-team-btn is-primary" onClick={() => { setPicking((p) => !p); setPicked([]); }}>
-          <Plus size={14} /> {picking ? "Cancel" : "New room"}</button>
+        <CollaborationModeControl api={api} compact onChanged={() => { setPicking(false); setPicked([]); void refresh(); }} />
+        {!oneMind && <button type="button" className="jg-team-btn is-primary" onClick={() => { setPicking((p) => !p); setPicked([]); }}>
+          <Plus size={14} /> {picking ? "Cancel" : "New room"}</button>}
       </header>
 
       <div className="jg-team__body">
         <div className="jg-team__left">
-          <div className="jg-team__section-head"><Bot size={14} /> Roster {picking && <em>· pick at least two members</em>}</div>
+          <div className="jg-team__section-head"><Bot size={14} /> {oneMind ? "Helper profiles" : "Roster"} {picking && <em>· pick at least two members</em>}</div>
+          {oneMind && <p className="jg-team-inner__note">You talk to Jaeger. It calls these helpers itself; each works from a brief with Jaeger's tools narrowed to its profile and returns a result only to Jaeger.</p>}
           <div className="jg-team__roster" role="list">
-            {(snap?.agents ?? []).map((a) => (
+            {shownAgents.map((a) => (
               <AgentCard key={a.id} agent={a} picking={picking} picked={picked.includes(a.id)}
                 onPick={() => setPicked((p) => (p.includes(a.id) ? p.filter((x) => x !== a.id) : [...p, a.id]))} />))}
           </div>
@@ -187,18 +202,19 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
               <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Room name" aria-label="Room name" />
               <button type="button" className="jg-team-btn is-primary" disabled={picked.length < 2} onClick={() => void create()}>Create room · {picked.length}</button>
             </div>)}
-          <div className="jg-team__section-head"><GitBranch size={14} /> Recent hand-offs</div>
+          <div className="jg-team__section-head"><GitBranch size={14} /> {oneMind ? "Delegation history" : "Recent hand-offs"}</div>
           <ol className="jg-team-handoffs">
-            {(snap?.handoffs ?? []).length === 0 && <li className="jg-team__empty">No hand-offs between these agents yet.</li>}
-            {(snap?.handoffs ?? []).slice(0, 8).map((h) => {
+            {shownHandoffs.length === 0 && <li className="jg-team__empty">{oneMind ? "Jaeger has not delegated to a helper yet." : "No hand-offs between these agents yet."}</li>}
+            {shownHandoffs.slice(0, 8).map((h) => {
               const from = agents.get(h.from_agent_id), to = agents.get(h.to_agent_id);
               return (
                 <li key={h.id}>
                   <AgentAvatar name={from?.display_name ?? h.from_agent_id} seed={from?.avatar.seed} url={from?.avatar.url} size={22} />
                   <ArrowRight size={13} className="jg-team-handoffs__arrow" />
                   <AgentAvatar name={to?.display_name ?? h.to_agent_id} seed={to?.avatar.seed} url={to?.avatar.url} size={22} />
-                  <span className="jg-team-handoffs__kind">{h.kind === "room" ? "room" : "call"}</span>
-                  <span className="jg-team-handoffs__task" title={h.task}>{h.task}</span>
+                  <span className="jg-team-handoffs__kind">{h.kind === "room" ? "room" : h.kind === "delegate" ? "helper" : "call"}</span>
+                  <span className="jg-team-handoffs__task" title={h.summary ? `${h.task}\n\n→ ${h.summary}` : h.task}>{h.task}</span>
+                  {h.tokens && h.tokens.total > 0 && <span className="jg-team-handoffs__tokens">{h.tokens.total.toLocaleString()} tok</span>}
                   <span className={`jg-team-pill is-${h.status === "completed" ? "done" : h.status}`}>{h.status === "completed" ? <CheckCircle2 size={12} /> : null}{h.status.replace(/_/g, " ")}</span>
                   {h.session_id && onNavigate && <button type="button" className="jg-team-link" onClick={() => onNavigate(`/work/process?session=${encodeURIComponent(h.session_id!)}`)}>trace</button>}
                 </li>);
@@ -206,6 +222,13 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
           </ol>
         </div>
 
+        {oneMind ? (
+        <aside className="jg-team__room" aria-label="How Jaeger thinks">
+          <div className="jg-team-room__head"><Brain size={15} /> One mind</div>
+          <p className="jg-team__empty">Every message goes to Jaeger, which answers in one voice. When a focused review or a side task helps, it delegates to a helper; the helper's run shows as its own node under that step in the Process view.</p>
+          <p className="jg-team__empty">Team rooms and @Name hand-offs are off. Switch Collaboration mode to Team or Auto to use them.</p>
+        </aside>
+        ) : (
         <aside className="jg-team__room" aria-label="Room">
           <div className="jg-team-room__head">
             <MessagesSquare size={15} />
@@ -232,6 +255,7 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
               {sending ? <Loader2 size={14} className="jg-team-spin" /> : <Send size={14} />}</button>
           </form>
         </aside>
+        )}
       </div>
     </section>
   );

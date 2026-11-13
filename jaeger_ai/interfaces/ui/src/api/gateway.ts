@@ -60,6 +60,8 @@ export class GatewayClient implements JaegerSource {
     createRoom: (body) => this.json("/v1/team/rooms", body),
     room: (id) => this.json<import("./team").RoomDetail>(`/v1/team/rooms/${encodeURIComponent(id)}`),
     say: (id, text) => this.json(`/v1/team/rooms/${encodeURIComponent(id)}/messages`, { text }),
+    mode: () => this.json<import("./team").CollaborationSnapshot>("/v1/runtime/collaboration"),
+    setMode: (mode) => this.json<import("./team").CollaborationSnapshot>("/v1/runtime/collaboration", { mode }),
   };
   readonly organization = {
     get: () => this.json<import("./organization").Organization>("/v1/chat-organization"),

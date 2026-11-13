@@ -79,7 +79,8 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "people": (r"\b(person|people|profile|contact notes)\b",),
     "models": (r"\b(model|ollama|lm studio|context window|autonomy mode)\b",),
     "bench": (r"\b(benchmark|eval|evaluation)\b",),
-    "delegates": (r"\b(delegate|delegation|external agent|agent runtime)\b",),
+    "delegates": (r"\b(delegate|delegation|external agent|agent runtime|helpers?|specialists?|inner helper|"
+                  r"design (?:&|and) style|mac app|gateway (?:&|and) webui|system engineer|ask (?:your |the )?\w+ agent)\b",),
     "missions": (r"\b(mission|goal|plan steps?)\b",),
     "knowledge_library": (r"\b(knowledge library|document library|index documents?)\b",),
     "diagnostics": (r"\b(diagnostic|self[- ]check|system health|cpu|disk|uptime)\b",),
@@ -316,7 +317,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "system_control": frozenset({"system_control"}),
     "media_control": frozenset({"media_control", "now_playing"}),
     "ocr": frozenset({"ocr_file"}),
-    "delegates": frozenset({"list_delegate_runtimes", "call_agent", "get_agent_result", "run_team"}),
+    "delegates": frozenset({"list_delegate_runtimes", "delegate", "call_agent", "get_agent_result", "run_team"}),
     "finance": frozenset({
         "finance_summary", "finance_audit", "finance_transactions",
         "finance_inbox", "finance_sync", "finance_briefing",
@@ -373,7 +374,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "system_control": "volume, brightness, dark mode, do-not-disturb, prevent-sleep",
     "media_control": "control + read Music.app/Spotify playback",
     "ocr": "extract text from an image or PDF (Vision framework)",
-    "delegates": "inspect runtimes and request standing specialist handoffs",
+    "delegates": "think with inner helpers (delegate), inspect runtimes, request specialist handoffs",
     "finance": "inspect financial summaries, audit results and transactions",
     "missions": "create and track durable missions, goals, and plan steps",
     "goals": "create, list, update operator goals/projects; spawn durable goal tasks",

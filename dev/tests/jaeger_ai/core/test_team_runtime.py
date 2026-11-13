@@ -113,7 +113,8 @@ def test_trace_nests_room_turns_and_handoffs_under_their_caller():
     assert tool["parent_span_id"] == "agent:t2"
     h = classify("agent.handoff", {"request_id": "q", "handoff": {"id": "handoff_1", "status": "pending_approval",
                                                                   "metadata": {"call_id": "call_7", "target_display": "D"}}})
-    assert (h["span_id"], h["parent_span_id"], h["state"], h["name"]) == ("agent:handoff_1", "tool:call_7", "waiting", "D")
+    # The model's raw call id maps to the Gateway activity id of the tool span.
+    assert (h["span_id"], h["parent_span_id"], h["state"], h["name"]) == ("agent:handoff_1", "tool:tool_q_call_7", "waiting", "D")
     done = classify("agent.handoff.finished", {"handoff": {"id": "handoff_1", "status": "completed", "metadata": {}}})
     assert done["state"] == "succeeded"
 
@@ -169,6 +170,8 @@ async def team_client(tmp_path, monkeypatch):
         return ("Please review the header. @Design & Style" if agent_id == "native:eng" else "Looks fine."), "test:model"
 
     monkeypatch.setattr(gateway, "_specialist_chat", fake_specialist_chat)
+    # These tests cover the opt-in Team collaboration mode (rooms, pinned chats).
+    monkeypatch.setattr(gateway, "_collaboration_mode", lambda: "team")
     async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as c:
         yield c, gateway, calls
 

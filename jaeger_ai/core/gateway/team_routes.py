@@ -11,6 +11,12 @@ second execution stack.
   POST /v1/team/rooms                  {title, members[], probe?} -> room session
   GET  /v1/team/rooms/{id}             room + transcript (oldest first)
   POST /v1/team/rooms/{id}/messages    {text} -> members take turns (202)
+  GET  /v1/team/mode                   collaboration mode (same as /v1/runtime/collaboration)
+  POST /v1/team/mode                   {mode: one_mind|team|auto}
+
+Collaboration mode (core/runtime/collaboration.py) decides how this runs: in
+``one_mind`` (default) rooms are off and the page is "Inner workings" (helper
+profiles + delegation history); ``team`` and ``auto`` keep rooms and @Name.
 
 Events (contract/trace.py): ``room.started`` / ``room.finished`` bracket one
 person message (a run); ``room.turn`` is one member's turn (an agent span,
@@ -210,6 +216,22 @@ def room_handoffs(gateway, members: list[Any], *, rooms: int = 12, limit: int = 
     return out[:limit]
 
 
+def _handoff_row(h: dict[str, Any]) -> dict[str, Any]:
+    """A /v1/team handoff row: a team hand-off (``call_agent``) or an inner
+    helper run (``delegate``), with the helper's usage when it finished."""
+    meta = h.get("metadata") or {}
+    result = h.get("result") or {}
+    rmeta = result.get("metadata") or {}
+    row = {"kind": "delegate" if meta.get("collaboration") == "delegate" else "call_agent",
+           **{k: h.get(k) for k in ("id", "from_agent_id", "to_agent_id", "status", "task",
+                                    "session_id", "created_at", "updated_at")}}
+    if row["kind"] == "delegate":
+        row.update({"tokens": rmeta.get("tokens"), "result_path": rmeta.get("result_path"),
+                    "summary": str(result.get("summary") or "")[:400] or None,
+                    "via": meta.get("via")})
+    return row
+
+
 def register(gateway) -> None:
     mirror = ChildMirror(gateway)
     gateway.team_mirror = mirror
@@ -233,12 +255,14 @@ def register(gateway) -> None:
         ids = {m.id for m in members if m.id != LEAD_ID}
         handoffs = [h for h in gateway.store.list_handoffs(limit=200)
                     if h.get("to_agent_id") in ids or h.get("from_agent_id") in ids][:20]
-        direct = [{"kind": "call_agent", **{k: h.get(k) for k in ("id", "from_agent_id", "to_agent_id", "status", "task",
-                                                                "session_id", "created_at", "updated_at")}}
-                  for h in handoffs]
+        direct = [_handoff_row(h) for h in handoffs]
         in_rooms = await asyncio.to_thread(room_handoffs, gateway, members)
         merged = sorted(direct + in_rooms, key=lambda h: h.get("created_at") or 0, reverse=True)[:20]
+        from jaeger_ai.core.runtime.collaboration import snapshot as collab_snapshot
+        mode = gateway._collaboration_mode()
         return web.json_response({
+            "mode": mode,
+            "collaboration": collab_snapshot(mode),
             "agents": [agent_card(m, live=gateway._team_live, statuses=statuses) for m in members],
             "rooms": _rooms(gateway),
             "handoffs": merged,
@@ -254,7 +278,22 @@ def register(gateway) -> None:
         return web.FileResponse(path, headers={"Content-Type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
                                                "Cache-Control": "max-age=300"})
 
+    def rooms_off() -> web.Response | None:
+        if gateway._collaboration_mode() == "one_mind":
+            return web.json_response({"error": "Team rooms are off in One mind mode. Switch Collaboration mode "
+                                               "to Team or Auto in Settings → Agents to use rooms.",
+                                      "mode": "one_mind"}, status=409)
+        return None
+
+    async def get_mode(request: web.Request) -> web.Response:
+        return await gateway.handle_get_collaboration(request)
+
+    async def set_mode(request: web.Request) -> web.Response:
+        return await gateway.handle_set_collaboration(request)
+
     async def create_room(request: web.Request) -> web.Response:
+        if (off := rooms_off()) is not None:
+            return off
         body = await request.json() if request.can_read_body else {}
         if not isinstance(body, dict):
             return web.json_response({"error": "body must be an object"}, status=400)
@@ -287,6 +326,8 @@ def register(gateway) -> None:
         row = gateway.store.get_session(sid)
         if row is None or not (row.get("metadata") or {}).get("room"):
             return web.json_response({"error": "Room not found"}, status=404)
+        if (off := rooms_off()) is not None:
+            return off
         body = await request.json() if request.can_read_body else {}
         text = str((body or {}).get("text") or "").strip()
         if not text:
@@ -411,6 +452,8 @@ def register(gateway) -> None:
 
     app = gateway.app
     app.router.add_get("/v1/team", team)
+    app.router.add_get("/v1/team/mode", get_mode)
+    app.router.add_post("/v1/team/mode", set_mode)
     app.router.add_get("/v1/team/agents/{id}/avatar", avatar)
     app.router.add_post("/v1/team/rooms", create_room)
     app.router.add_get("/v1/team/rooms/{id}", get_room)

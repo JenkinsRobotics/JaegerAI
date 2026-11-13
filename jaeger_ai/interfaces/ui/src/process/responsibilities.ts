@@ -22,7 +22,7 @@ export function respOf(event: string): RespId | null {
   if (event.startsWith("state.") || event === "turn.plan" || event.startsWith("task.")) return "state";
   if (event === "policy.decision" || event.startsWith("approval.") || event === "hook.decision" || event.startsWith("clarify.")) return "permissions";
   if (event === "route.selected" || event === "subagent.started" || event === "subagent.finished" || event.startsWith("agent.handoff")
-    || event.startsWith("room.") || event === "agent.message") return "orchestration";
+    || event.startsWith("room.") || event === "agent.message" || event.startsWith("delegate.")) return "orchestration";
   if (event.startsWith("reliability.") || ["turn.failed", "turn.cancelled", "turn.unknown", "turn.reconciled"].includes(event)) return "reliability";
   return null;
 }
@@ -103,6 +103,13 @@ export function responsibilities(events: readonly GatewayEvent[], upTo: number, 
       case "agent.handoff.finished": { const n = who(p); agentsSeen.add(n); agentsBusy.delete(n);
         const st = s(((p.handoff ?? {}) as Record<string, unknown>).status);
         set("orchestration", e, ["failed", "denied", "execution_unknown"].includes(st) ? "warn" : agentsBusy.size ? "active" : "ok", team(), `${n} ${st || "finished"}`); break; }
+      case "delegate.started": { const n = who(p); agentsSeen.add(n); agentsBusy.add(n);
+        set("orchestration", e, "active", team(), `thinking with ${n}: ${s(p.brief).slice(0, 100)}`); break; }
+      case "delegate.finished": case "delegate.failed": { const n = who(p); agentsSeen.add(n); agentsBusy.delete(n);
+        const tk = (p.tokens ?? null) as Record<string, unknown> | null;
+        const used = tk && typeof tk.total === "number" && tk.total > 0 ? ` · ${tk.total} tokens` : "";
+        set("orchestration", e, e.event === "delegate.failed" ? "warn" : agentsBusy.size ? "active" : "ok", team(),
+          `${n} ${e.event === "delegate.failed" ? s(p.status) || "failed" : "returned to Jaeger"}${used}`); break; }
       case "agent.message": { const n = who(p); agentsSeen.add(n);
         set("orchestration", e, agentsBusy.size ? "active" : "ok", team(), `${n}: ${s(p.text).replace(/\s+/g, " ").slice(0, 120)}`); break; }
       case "subagent.started": subRunning++; set("orchestration", e, "active", `${subRunning} sub-agent(s) running`, `${s(p.name)}: ${s(p.task)}`); break;

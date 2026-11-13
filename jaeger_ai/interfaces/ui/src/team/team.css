@@ -111,3 +111,19 @@
 @keyframes jg-team-rot { to { transform: rotate(360deg); } }
 @keyframes jg-team-bounce { 0%, 80%, 100% { transform: translateY(0); opacity: .5; } 40% { transform: translateY(-3px); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .jg-team-spin, .jg-avatar.is-working::after, .jg-team-msg__typing i { animation: none; } }
+
+/* Collaboration mode control (Settings → Agents, Team / Inner workings header). */
+.jg-collab { display: grid; gap: 6px; margin: 0 0 14px; }
+.jg-collab.is-compact { margin: 0; }
+.jg-collab__label { font-weight: 600; font-size: 13px; }
+.jg-collab__seg { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 8px;
+  background: color-mix(in srgb, var(--jg-team-line) 60%, transparent); width: max-content; }
+.jg-collab__opt { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: inherit;
+  font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer; opacity: .75; }
+.jg-collab__opt:hover:not(:disabled) { opacity: 1; }
+.jg-collab__opt.is-on { background: var(--jg-team-surface); opacity: 1; font-weight: 600; box-shadow: var(--jg-team-shadow); }
+.jg-collab__opt:disabled { cursor: default; }
+.jg-collab__hint { margin: 0; font-size: 12px; opacity: .7; max-width: 60ch; }
+.jg-collab__error { margin: 0; font-size: 12px; color: var(--jg-danger); }
+.jg-team-handoffs__tokens { font-size: 11px; opacity: .65; white-space: nowrap; }
+.jg-team-inner__note { font-size: 12px; opacity: .7; margin: 4px 0 10px; }

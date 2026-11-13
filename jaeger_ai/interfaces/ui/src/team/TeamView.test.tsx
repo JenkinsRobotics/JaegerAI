@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TeamView } from "./TeamView";
-import type { TeamApi, TeamSnapshot } from "../api/team";
+import type { CollaborationMode, CollaborationSnapshot, TeamApi, TeamSnapshot } from "../api/team";
 
 const agent = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
   id, name: id, display_name: name, role: "specialist", team: "pilot", description: `${name} role`, persona: "", skills: ["s"], tools: ["read_file"],
@@ -36,6 +36,33 @@ describe("Team page", () => {
     expect(screen.getByText("room")).toBeTruthy();
     await waitFor(() => expect(screen.getByText("Two findings.")).toBeTruthy());
     expect(screen.queryByRole("option", { name: "Probe room" })).toBeNull();
+  });
+  it("is Inner workings in One mind: helper profiles and delegations, no rooms; the mode switch saves", async () => {
+    let mode: CollaborationMode = "one_mind";
+    const collab = (): CollaborationSnapshot => ({ mode, label: mode, description: "", default: "one_mind", limits: {},
+      options: [{ id: "one_mind", label: "One mind", description: "one" }, { id: "team", label: "Team", description: "team" }, { id: "auto", label: "Auto", description: "auto" }] });
+    const lead = agent("native:jaeger", "Jaeger", { role: "lead", team: null });
+    const oneMind: TeamApi = {
+      ...team,
+      snapshot: async () => ({ ...snap, mode, agents: [lead, ...snap.agents],
+        handoffs: [{ id: "d1", kind: "delegate", from_agent_id: "native:jaeger", to_agent_id: "native:b", status: "completed",
+          task: "Review the header", tokens: { prompt: 100, completion: 50, total: 150, reported: true, cost_usd: null } }, ...snap.handoffs] }),
+      mode: async () => collab(),
+      setMode: async (m) => { mode = m; return collab(); },
+    };
+    render(<TeamView source={{ team: oneMind } as never} />);
+    expect(await screen.findByText("Inner workings")).toBeTruthy();
+    expect(screen.getByText("2 helpers · 1 working · 1 delegations")).toBeTruthy();
+    expect(screen.getByText("Review the header")).toBeTruthy();
+    expect(screen.getByText("150 tok")).toBeTruthy();
+    expect(screen.queryByText("Review the Team page")).toBeNull(); // team hand-offs are not inner workings
+    expect(screen.queryByRole("heading", { name: "Jaeger" })).toBeNull(); // helpers, not the lead
+    expect(screen.queryByRole("button", { name: /New room/ })).toBeNull();
+    const teamBtn = await screen.findByRole("radio", { name: /Team/ });
+    await waitFor(() => expect((teamBtn as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(teamBtn);
+    await waitFor(() => expect(mode).toBe("team"));
+    expect(await screen.findByRole("button", { name: /New room/ })).toBeTruthy();
   });
   it("needs the live Gateway", () => {
     render(<TeamView source={{} as never} />);
