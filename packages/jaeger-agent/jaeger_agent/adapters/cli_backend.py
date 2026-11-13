@@ -148,6 +148,44 @@ def _find_text(value: Any) -> str:
     return ""
 
 
+def cli_usage(stdout: str) -> dict[str, Any]:
+    """Usage, cost and model from an agent CLI's JSON result record.
+
+    ``grok`` and ``claude`` both end ``--output-format json`` /
+    ``streaming-messages-json`` with a ``{"type": "result", "usage": {...},
+    "total_cost_usd": N, "modelUsage": {model: ...}}`` record (the Claude
+    Agent SDK result shape). Returns ``{}`` when there is none (plain text CLIs).
+    """
+    best: dict[str, Any] = {}
+    for line in reversed((stdout or "").strip().splitlines()[-400:]):
+        line = line.strip()
+        if not line.startswith("{") or '"usage"' not in line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        message = record.get("message") if isinstance(record.get("message"), dict) else {}
+        usage = record.get("usage") if isinstance(record.get("usage"), dict) else message.get("usage")
+        if not isinstance(usage, dict):
+            continue
+        out: dict[str, Any] = {"usage": {k: int(v) for k, v in usage.items()
+                                         if isinstance(v, (int, float)) and not isinstance(v, bool)}}
+        cost = record.get("total_cost_usd", record.get("cost_usd"))
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            out["cost_usd"] = float(cost)
+        models = record.get("modelUsage")
+        model = next(iter(models), None) if isinstance(models, dict) and models else message.get("model")
+        if isinstance(model, str) and model:
+            out["model"] = model
+        if record.get("type") == "result":
+            return out
+        best = best or out
+    return best
+
+
 def _build_argv(spec: Any, executable: str, prompt: str) -> tuple[list[str], bytes | None]:
     """Return ``(argv, stdin_bytes)``. Never goes through a shell."""
     if getattr(spec, "prompt_mode", "stdin") == "stdin":
@@ -328,10 +366,13 @@ class CliBackendAdapter(ProviderAdapter):
         if self._proc.returncode:
             raise RuntimeError(f"CLI backend {self.backend_id!r} exited with status {self._proc.returncode}: "
                                + stderr.decode("utf-8", errors="replace")[-2000:])
+        text = stdout.decode("utf-8", errors="replace")
         return {
-            "stdout": stdout.decode("utf-8", errors="replace"),
+            "stdout": text,
             "stderr": stderr.decode("utf-8", errors="replace"),
             "returncode": self._proc.returncode,
+            # usage / cost_usd / model when the CLI reports them (read by the loop).
+            **cli_usage(text),
         }
 
     def _kill(self) -> None:
