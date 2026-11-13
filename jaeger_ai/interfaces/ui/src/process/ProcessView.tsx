@@ -345,7 +345,7 @@ function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSe
         <div className="jg-pv__title"><Sparkles size={16} /> Process</div>
         <label className="jg-pv__field">Session
           <select value={sessionId ?? ""} onChange={(e) => setSessionId(e.target.value || null)}>
-            {visible.map((s) => <option key={s.session_id} value={s.session_id}>{(s.title || s.session_id).slice(0, 60)}</option>)}
+            {visible.length === 0 && <option value="">No conversations yet</option>}{visible.map((s) => <option key={s.session_id} value={s.session_id}>{(s.title || s.session_id).slice(0, 60)}</option>)}
           </select>
         </label>
         <label className="jg-pv__check"><input type="checkbox" checked={showProbes} onChange={(e) => setShowProbes(e.target.checked)} /> Show test sessions</label>
@@ -353,8 +353,8 @@ function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSe
         <span className={`jg-pv__link is-${health.link}`} title={`replayed ${health.replayed} · reconnects ${health.reconnects} · seq gaps ${health.gaps}`}><i className="jg-pv-dot" />{health.link === "live" ? "Live" : health.link}</span>
       </header>
 
-      {health.link === "unsupported" ? <p className="jg-pv__empty">The process view needs the live Gateway.</p> : <>
-        <div className="jg-pv__resps" role="list" aria-label="Framework responsibilities">
+      {health.link === "unsupported" ? <p className="jg-pv__empty">Process needs a live Gateway connection.</p> : <>
+        <div className="jg-pv__resps" role="list" aria-label="Status">
           {resp.map((r) => <RespCard key={r.id} r={r} active={respFilter === r.id} onClick={() => { setRespFilter((f) => (f === r.id ? null : r.id)); setTab("log"); }} />)}
         </div>
 
@@ -368,7 +368,7 @@ function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSe
         <div className={`jg-pv__main${selSpan ? " has-inspector" : ""}`}>
           <div className="jg-pv__canvas">
             {runId ? <Canvas state={state} runId={runId} now={now} selected={selected} onSelect={setSelected} faces={faces} />
-              : <p className="jg-pv__empty">{events.length ? "No turns in this session yet." : "Waiting for events…"}</p>}
+              : <p className="jg-pv__empty">{!sessionId ? "Select a conversation to inspect its turns." : events.length ? "This conversation has no recorded activity yet." : "Waiting for events…"}</p>}
           </div>
           {selSpan && <Inspector span={selSpan} events={events} now={now} onClose={() => setSelected(null)} />}
         </div>

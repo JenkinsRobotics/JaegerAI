@@ -186,3 +186,10 @@
   .jg-pv *, .jg-pv *::before { animation: none !important; transition: none !important; }
   .jg-pv .react-flow__edge.animated path { animation: none !important; stroke-dasharray: none !important; }
 }
+
+@container jg-pv (max-width: 700px) {
+  .jg-pv__bar { gap: 8px; }
+  .jg-pv__field { width: 100%; }
+  .jg-pv__field select { max-width: none; width: 100%; min-height: 44px; }
+  .jg-pv-btn { min-height: 44px; }
+}
