@@ -135,7 +135,7 @@ export interface ChatHost {
   openFile?(path: string): void;
   copy(text: string): Promise<void>;
   onThemeChanged?(cb: () => void): () => void;
-  /** For @ mentions. */
+  /** Agents the composer can name (header pill, identity). */
   listAgents?(): Promise<ChatAgentRef[]>;
   onSessionEvent?(cb: (event: { sessionId: string; type: string }) => void): () => void;
   openHandoffReply?(handoffId: string): void;
