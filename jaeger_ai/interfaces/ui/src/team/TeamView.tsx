@@ -194,11 +194,12 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
               const from = agents.get(h.from_agent_id), to = agents.get(h.to_agent_id);
               return (
                 <li key={h.id}>
-                  <AgentAvatar name={from?.display_name ?? h.from_agent_id} seed={from?.avatar.seed} size={22} />
+                  <AgentAvatar name={from?.display_name ?? h.from_agent_id} seed={from?.avatar.seed} url={from?.avatar.url} size={22} />
                   <ArrowRight size={13} className="jg-team-handoffs__arrow" />
-                  <AgentAvatar name={to?.display_name ?? h.to_agent_id} seed={to?.avatar.seed} size={22} />
+                  <AgentAvatar name={to?.display_name ?? h.to_agent_id} seed={to?.avatar.seed} url={to?.avatar.url} size={22} />
+                  <span className="jg-team-handoffs__kind">{h.kind === "room" ? "room" : "call"}</span>
                   <span className="jg-team-handoffs__task" title={h.task}>{h.task}</span>
-                  <span className={`jg-team-pill is-${h.status === "completed" ? "done" : h.status}`}>{h.status === "completed" ? <CheckCircle2 size={12} /> : null}{h.status}</span>
+                  <span className={`jg-team-pill is-${h.status === "completed" ? "done" : h.status}`}>{h.status === "completed" ? <CheckCircle2 size={12} /> : null}{h.status.replace(/_/g, " ")}</span>
                   {h.session_id && onNavigate && <button type="button" className="jg-team-link" onClick={() => onNavigate(`/work/process?session=${encodeURIComponent(h.session_id!)}`)}>trace</button>}
                 </li>);
             })}

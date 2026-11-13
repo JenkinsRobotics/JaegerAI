@@ -75,6 +75,7 @@
 .jg-team-handoffs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .jg-team-handoffs li { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--jg-team-line); background: var(--jg-team-surface); min-width: 0; }
 .jg-team-handoffs__arrow { color: var(--jg-team-muted); flex: none; }
+.jg-team-handoffs__kind { flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--jg-team-muted); border: 1px solid var(--jg-team-line); border-radius: 6px; padding: 0 5px; }
 .jg-team-handoffs__task { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .jg-team__room { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; min-height: 0; border-radius: 12px;

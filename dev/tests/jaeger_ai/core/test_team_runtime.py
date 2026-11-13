@@ -201,6 +201,10 @@ async def test_room_runs_members_hands_off_by_mention_and_emits_lanes(team_clien
     assert mirrored and all(t["parent_span_id"].startswith("agent:rt_") for t in mirrored)
     room = await (await client.get(f"/v1/team/rooms/{sid}")).json()
     assert [m["sender_agent_id"] for m in room["messages"]] == [None, "native:eng", "native:ds"]
+    team = await (await client.get("/v1/team")).json()
+    room_rows = [h for h in team["handoffs"] if h.get("kind") == "room"]
+    assert [(h["from_agent_id"], h["to_agent_id"], h["status"], h["session_id"]) for h in room_rows] == [
+        ("native:eng", "native:ds", "completed", sid)]
 
 
 def test_bind_skill_scope_is_task_local():
@@ -220,3 +224,33 @@ def test_bind_skill_scope_is_task_local():
     (scoped, threaded), outside = asyncio.run(main())
     assert scoped == frozenset({"design-review"}) and threaded == scoped
     assert outside is None
+
+
+@pytest.mark.asyncio
+async def test_chat_created_on_a_team_agent_is_pinned_and_never_auto_routed(team_client):
+    client, gateway, _ = team_client
+    resp = await client.post("/v1/sessions", json={"agent_id": "native:eng", "title": "pinned", "source": "webui"})
+    assert resp.status == 201
+    session = await resp.json()
+    meta = session["metadata"]
+    assert meta["agent_id"] == "native:eng" and meta["agent_pinned"] is True and meta["route_checked"] is True
+    assert gateway._auto_route(gateway.store.get_session(session["session_id"]), "fix the webui sidebar avatar") is False
+    # by registry name too, canonicalised to the native: id
+    meta2 = (await (await client.post("/v1/sessions", json={"agent_id": "ds"})).json())["metadata"]
+    assert meta2["agent_id"] == "native:ds" and meta2["agent_pinned"] is True
+
+
+@pytest.mark.asyncio
+async def test_lead_chat_that_names_a_teammate_stays_with_the_lead(team_client):
+    client, gateway, _ = team_client
+    session = await (await client.post("/v1/sessions", json={"agent_id": "native:jaeger", "title": "lead"})).json()
+    assert not session["metadata"].get("agent_pinned")
+    row = gateway.store.get_session(session["session_id"])
+    assert gateway._auto_route(row, "Use call_agent to ask Design & Style about the webui sidebar avatar") is False
+    assert gateway.store.get_session(session["session_id"])["metadata"]["route_checked"] is True
+
+
+def test_routed_specialists_keep_handoff_tools():
+    from jaeger_ai.core.agent_registry.specialists import STANDING_SPECIALISTS
+    routable = [s for s in STANDING_SPECIALISTS if s.get("keywords")]
+    assert routable and all({"call_agent", "get_agent_result"} <= set(s["allowed_tools"]) for s in routable)

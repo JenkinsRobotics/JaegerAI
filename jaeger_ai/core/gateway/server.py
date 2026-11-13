@@ -3593,6 +3593,7 @@ class JaegerGatewayApp:
         if surface and "source" not in metadata:
             metadata = {**metadata, "source": surface}
 
+        metadata = self._bind_requested_agent(body, metadata)
         existed = self.store.get_session(session_id) is not None
         session = self.store.ensure_session(
             session_id,
@@ -4426,6 +4427,50 @@ class JaegerGatewayApp:
             return out
         return payload
 
+    def _bind_requested_agent(self, body: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+        """Home a new chat on the agent the client asked for.
+
+        Clients name the agent at the top level (``{"agent_id": ...}``, the
+        WebUI's ``createSession``) or in ``metadata.agent_id``. The id is
+        resolved through the AgentRegistry (canonical ``native:`` id); a chat
+        started on a specific non-lead agent is the owner's assignment, so it
+        is pinned (``agent_pinned``) and lead triage never moves it away.
+        Unknown ids are left as given and unpinned (nothing to pin to)."""
+        requested = str(body.get("agent_id") or metadata.get("agent_id") or "").strip()
+        if not requested:
+            return metadata
+        from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
+        try:
+            record = self._registry().get_agent(requested)
+        except Exception:  # noqa: BLE001 — creating a chat must not fail on the registry
+            record = None
+        if record is None or getattr(record, "disabled", False):
+            return {**metadata, "agent_id": requested}
+        canonical = str(getattr(record, "id", None) or requested)
+        out = {**metadata, "agent_id": canonical}
+        if canonical != LEAD_AGENT_ID:
+            out.update(agent_pinned=True, route_checked=True)
+        return out
+
+    @staticmethod
+    def _names_teammate(text: str, agents: Any) -> bool:
+        """True when the message asks the lead to delegate (``call_agent``) or
+        names a team agent (``@Name`` or its display name). Such a message is
+        the lead's to hand off, so triage must not move it to a specialist
+        that cannot call anyone."""
+        low = str(text or "").lower()
+        if "call_agent" in low or "call agent" in low:
+            return True
+        for agent in agents or ():
+            meta = getattr(agent, "metadata", None) or {}
+            if not (isinstance(meta, dict) and meta.get("team")):
+                continue
+            for name in (getattr(agent, "display_name", ""), getattr(agent, "name", "")):
+                name = str(name or "").strip().lower()
+                if len(name) >= 3 and name in low:
+                    return True
+        return False
+
     def _auto_route(self, session: dict[str, Any] | None, text: str) -> bool:
         """Lead triage, once per conversation, before the first turn runs.
 
@@ -4445,6 +4490,13 @@ class JaegerGatewayApp:
         try:
             from jaeger_ai.core.agent_registry.router import suggest_specialist
 
+            try:
+                agents = self._registry().list_agents()
+            except Exception:  # noqa: BLE001
+                agents = []
+            if JaegerGatewayApp._names_teammate(text, agents):
+                self.store.update_metadata(sid, {"route_checked": True})
+                return False
             target = suggest_specialist(text)
             if not target or self._registry().get_agent(target) is None:
                 self.store.update_metadata(sid, {"route_checked": True})

@@ -11,7 +11,9 @@ const snap: TeamSnapshot = {
   agents: [agent("native:a", "Engineer"), agent("native:b", "Design", { status: "working" })],
   rooms: [{ session_id: "room-1", title: "Review room", members: ["native:a", "native:b"], probe: false },
           { session_id: "room-2", title: "Probe room", members: ["native:a", "native:b"], probe: true }],
-  handoffs: [{ id: "h1", from_agent_id: "native:a", to_agent_id: "native:b", status: "completed", task: "Review the Team page" }],
+  handoffs: [{ id: "h1", from_agent_id: "native:a", to_agent_id: "native:b", status: "completed", task: "Review the Team page" },
+             { id: "room:room-1:2:native:a", kind: "room", from_agent_id: "native:b", to_agent_id: "native:a", status: "not_taken",
+               task: "Design → Engineer in “Review room”", session_id: "room-1", room_title: "Review room" }],
   limits: {},
 };
 const team: TeamApi = {
@@ -29,6 +31,9 @@ describe("Team page", () => {
     expect(await screen.findByRole("heading", { name: "Engineer" })).toBeTruthy();
     expect(screen.getByText("2 agents · 1 working · 1 rooms")).toBeTruthy();
     expect(screen.getByText("Review the Team page")).toBeTruthy();
+    expect(screen.getByText("Design → Engineer in “Review room”")).toBeTruthy();
+    expect(screen.getByText("not taken")).toBeTruthy();
+    expect(screen.getByText("room")).toBeTruthy();
     await waitFor(() => expect(screen.getByText("Two findings.")).toBeTruthy());
     expect(screen.queryByRole("option", { name: "Probe room" })).toBeNull();
   });

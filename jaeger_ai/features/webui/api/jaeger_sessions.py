@@ -256,7 +256,44 @@ def passthrough_match(path: str, method: str) -> bool:
     return any(method in methods and rx.match(path) for methods, rx in GATEWAY_PASSTHROUGH)
 
 
+#: Team pack avatars (gateway/team_routes.py ``avatar``): the one binary route relayed.
+TEAM_AVATAR = re.compile(rf"^/v1/team/agents/{_ID}/avatar$")
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+
+
+def _proxy_avatar(handler, path: str) -> bool:
+    """Relay a team avatar image; anything that is not a small image is refused."""
+    from api.helpers import bad
+
+    req = Request(f"{gateway_base()}{path}", method="GET")
+    req.add_header("Accept", "image/*")
+    _add_caller_auth(req)
+    try:
+        with urlopen(req, timeout=UNARY_TIMEOUT) as resp:
+            ctype = str(resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            payload = resp.read(MAX_AVATAR_BYTES + 1)
+    except HTTPError as exc:
+        bad(handler, "no avatar" if exc.code == 404 else f"gateway error {exc.code}", int(exc.code))
+        return True
+    except (URLError, OSError) as exc:
+        bad(handler, f"gateway unreachable at {gateway_base()}: {exc}", 503)
+        return True
+    if not ctype.startswith("image/") or len(payload) > MAX_AVATAR_BYTES:
+        bad(handler, "gateway returned a non-image or oversized avatar", 502)
+        return True
+    handler.send_response(200)
+    handler.send_header("Content-Type", ctype)
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.send_header("Cache-Control", "max-age=300")
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.end_headers()
+    handler.wfile.write(payload)
+    return True
+
+
 def _passthrough(handler, path: str, query: str, method: str) -> bool:
+    if method == "GET" and TEAM_AVATAR.match(path):
+        return _proxy_avatar(handler, path)
     if not passthrough_match(path, method):
         return False
     if method in {"GET", "DELETE"}:
