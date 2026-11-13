@@ -75,6 +75,7 @@
 :root.aether-light-theme,
 :root .aether-home-theme,
 :root.aether-light-theme .aether-home-theme {
+  --jg-color-overlay: rgba(0, 0, 0, 0.46);
   --jg-color-text: var(--jg-color-fg);
   --jg-color-text-secondary: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-text-secondary), transparent);
   --jg-color-text-tertiary: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-text-tertiary), transparent);

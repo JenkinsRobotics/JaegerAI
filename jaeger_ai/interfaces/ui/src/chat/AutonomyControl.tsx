@@ -6,10 +6,10 @@ import type { ChatHost } from "./host";
 
 type AutonomyHost = Pick<ChatHost, "runtimeAutonomy" | "setRuntimeAutonomy">;
 
-const modes: Array<{ id: RuntimeAutonomy; label: string; description: string; icon: typeof Shield }> = [
-  { id: "ask", label: "Ask for approval", description: "Ask before outward, hardware, and destructive actions.", icon: Shield },
-  { id: "scoped", label: "Approve for me", description: "Actions inside saved scope run automatically. Actions outside scope are reviewed by a model; if it is unsure or would deny, you will be asked.", icon: ToolShield },
-  { id: "auto", label: "Full access", description: "Run permitted tools automatically. Hardline blocks still require you.", icon: Zap },
+const modes: Array<{ id: RuntimeAutonomy; label: string; longLabel: string; description: string; icon: typeof Shield }> = [
+  { id: "ask", label: "Ask", longLabel: "Ask for approval", description: "Ask before outward, hardware, and destructive actions.", icon: Shield },
+  { id: "scoped", label: "For me", longLabel: "Approve for me", description: "Actions inside the saved scope run automatically. Anything else is reviewed first.", icon: ToolShield },
+  { id: "auto", label: "Full", longLabel: "Full access", description: "Run permitted tools automatically.", icon: Zap },
 ];
 
 const fallback = modes[0];
@@ -83,7 +83,7 @@ export function AutonomyControl({ host, dimmed = false }: { host: AutonomyHost; 
       </button>
       {open && (
         <div className="jg-autonomy-menu" role="menu" aria-label="Tool approval mode">
-          <header>How should Jaeger actions be approved?</header><p className="jg-autonomy-scope">Applies to this Jaeger instance across conversations and devices. System safety restrictions still apply.</p>
+          <header>How should actions be approved?</header>
           {modes.map(mode => (
             <button
               key={mode.id}
@@ -95,7 +95,7 @@ export function AutonomyControl({ host, dimmed = false }: { host: AutonomyHost; 
               onClick={() => void select(mode.id)}
             >
               <mode.icon size={18} />
-              <span><strong>{mode.label}</strong><small>{mode.description}</small></span>
+              <span><strong>{mode.longLabel}</strong><small>{mode.description}</small></span>
               {saving === mode.id ? <span className="jg-autonomy-saving" aria-label="Saving" /> : current === mode.id ? <Check size={18} /> : null}
             </button>
           ))}

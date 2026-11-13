@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RuntimeTier, RuntimeTierSnapshot } from '../api/source';
-import { Check, ChevronDown, Zap } from '../components/Icons';
+import { Check, ChevronDown, FileText, MessageSquare, Wrench } from '../components/Icons';
 import { useExclusivePopup } from '../popups/coordinator';
 import type { ChatHost } from './host';
 
 type ModeHost = Pick<ChatHost, 'runtimeTier' | 'setRuntimeTier'>;
 const label = (tier: RuntimeTier) => tier.charAt(0).toUpperCase() + tier.slice(1);
+const MODE_COPY: Record<string, { icon: typeof MessageSquare; description: string }> = {
+  chat: { icon: MessageSquare, description: "Talk only — no tools." },
+  agent: { icon: Wrench, description: "Use tools to get the work done." },
+  plan: { icon: FileText, description: "Look around, then propose a plan for you to approve." },
+};
+const modeMeta = (tier: RuntimeTier) => MODE_COPY[tier] ?? { icon: Wrench, description: "" };
 
 /** Edits the existing Gateway-wide interaction tier; does not grant tool authority. */
 export function RunModeControl({host, disabled = false, onTier}: {host: ModeHost; disabled?: boolean; onTier?: (tier: RuntimeTier) => void}) {
@@ -49,14 +55,13 @@ export function RunModeControl({host, disabled = false, onTier}: {host: ModeHost
   };
   return <div className="jg-runmode">
     <button ref={trigger} type="button" className="jg-composer__policy jg-runmode__trigger" aria-label={`Run mode: ${snapshot ? label(snapshot.tier) : 'unavailable'}`} aria-haspopup="menu" aria-expanded={open} disabled={disabled || saving} title={disabled ? 'Run mode can change after this turn' : 'Choose Chat, Agent, or Plan mode'} onClick={() => {setOpen(value=>!value); if (!open) void refresh();}}>
-      <Zap size={20}/><span className="jg-composer__policy-label">{snapshot ? label(snapshot.tier) : 'Run mode'}</span><ChevronDown size={14} className="jg-composer__chevron"/>
+      {(() => { const Icon = snapshot ? modeMeta(snapshot.tier).icon : Wrench; return <Icon size={20}/>; })()}<span className="jg-composer__policy-label">{snapshot ? label(snapshot.tier) : 'Run mode'}</span><ChevronDown size={14} className="jg-composer__chevron"/>
     </button>
     {open && <div className="jg-autonomy-menu jg-runmode-menu" role="menu" aria-label="Run mode">
       <header>How should Jaeger work?</header>
-      <p className="jg-runmode__scope">Default for future turns across your clients. Tool approval rules still apply.</p>
-      {snapshot?.options.map(tier => <button type="button" role="menuitemradio" aria-checked={snapshot.tier === tier} disabled={disabled || loading || saving || needsRefresh} key={tier} onClick={() => void select(tier)}>
-        <Zap size={18}/><span><strong>{label(tier)}</strong><small>{snapshot.descriptions?.[tier]}</small></span>{snapshot.tier === tier && <Check size={18}/>}
-      </button>)}
+      {snapshot?.options.map(tier => { const Icon = modeMeta(tier).icon; return <button type="button" role="menuitemradio" aria-checked={snapshot.tier === tier} disabled={disabled || loading || saving || needsRefresh} key={tier} onClick={() => void select(tier)}>
+        <Icon size={18}/><span><strong>{label(tier)}</strong><small>{modeMeta(tier).description}</small></span>{snapshot.tier === tier && <Check size={18}/>}
+      </button>; })}
       {error && <p className="jg-autonomy-error" role="alert">{error}{needsRefresh ? ' Reopen this menu to retry.' : ''}</p>}
     </div>}
   </div>;

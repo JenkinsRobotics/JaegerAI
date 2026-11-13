@@ -3,7 +3,7 @@ import type {Organization,OrganizationAction} from "../api/organization";
 import {CompanionMode} from "./CompanionMode";
 import { ConversationSection } from "./ConversationSection";
 import {JaegerAvatar} from "../avatar/JaegerAvatar";
-import {STATUS_TEXT,type ClipState} from "../avatar/avatar";
+import {type ClipState} from "../avatar/avatar";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent, SessionRow } from "../api/types";
@@ -38,6 +38,24 @@ function storedPins() { try { return new Set<string>(JSON.parse(localStorage.get
 function storedSidebarWidth() { try { return clampWidth(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY) || SIDEBAR.defaultWidth)); } catch { return SIDEBAR.defaultWidth; } }
 function projectLabel(workspace: string) { return workspace.split(/[\\/]/).filter(Boolean).pop() || workspace; }
 function sessionActivity(row: SessionRow) { return row.last_activity_at ?? row.updated_at ?? row.created_at ?? 0; }
+
+const GENERIC_TITLES = new Set(["", "Jaeger stable chat", "New conversation", "New chat", "Chat with Jaeger", "Untitled conversation", "Untitled"]);
+function isGenericTitle(title?: string) { return !title || GENERIC_TITLES.has(title); }
+function isBackgroundSession(row: SessionRow) {
+  const title = (row.title || "").trim();
+  const lowered = title.toLowerCase();
+  if (!title) return false;
+  if (lowered.includes("gateway_turn")) return true;
+  if (title.startsWith("[skill-review") || lowered.startsWith("skill-review")) return true;
+  if (lowered.includes("switch check")) return true;
+  return false;
+}
+function titleFromMessage(text: string) {
+  const line = text.trim().replace(/\s+/g, " ");
+  if (line.length <= 60) return line;
+  const clipped = line.slice(0, 60).replace(/\s+\S*$/, "").replace(/[.,;:]+$/, "");
+  return `${clipped || line.slice(0, 60)}…`;
+}
 function SummaryGlyph() { return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6" cy="7" r="2"/><path d="M11 7h8"/><circle cx="6" cy="17" r="2"/><path d="M11 17h8"/></svg>; }
 type HeaderPopup = "menu" | "summary" | null;
 type MenuPage = "main" | "copy" | "open" | "fork";
@@ -156,7 +174,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     setOrganization(org);
     setPinnedSessions(new Set(org.sessions.filter(row=>row.pinned).map(row=>row.session_id)));
     const rows=await source.sessions({agent_id:"native:jaeger"});
-    setRecent(rows.filter(row=>!row.archived&&!unavailableSessions.current.has(row.session_id)).sort((a,b)=>sessionActivity(b)-sessionActivity(a)));
+    setRecent(rows.filter(row=>!row.archived&&!isBackgroundSession(row)&&!unavailableSessions.current.has(row.session_id)).sort((a,b)=>sessionActivity(b)-sessionActivity(a)));
   },[source]);
   useEffect(()=>{
     if(!source.organization)return;
@@ -300,7 +318,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     let live = true;
     Promise.all([source.sessions({ agent_id: "native:jaeger" }), !session && linkedSession === null && source.operatorSession ? source.operatorSession().catch(() => null) : Promise.resolve(null)]).then(([rows, operator]) => {
       if (!live) return;
-      const available = rows.filter(row => !row.archived && !unavailableSessions.current.has(row.session_id)).sort((a, b) => sessionActivity(b) - sessionActivity(a));
+      const available = rows.filter(row => !row.archived && !isBackgroundSession(row) && !unavailableSessions.current.has(row.session_id)).sort((a, b) => sessionActivity(b) - sessionActivity(a));
       setRecent(available);
       setHistoryReady(true);
       setHistoryError("");
@@ -326,13 +344,27 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     setBusy(true); setError("");
     try {
       // Independent lead conversation: never reuse or replay the stuck Builder request.
-      const row = await source.createSession({ agent_id: "native:jaeger", title: "Jaeger stable chat" });
+      const row = await source.createSession({ agent_id: "native:jaeger", title: "New chat" });
       selectSession(row.session_id);
     } catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(false); }
   };
   const currentRow = recent.find(row => row.session_id === session) ?? (selectedRow?.session_id === session ? selectedRow : undefined);
-  const currentTitle = organization?.sessions.find(row=>row.session_id===session)?.title || currentRow?.title || "Chat with Jaeger";
+  const currentTitle = organization?.sessions.find(row=>row.session_id===session)?.title || currentRow?.title || "New chat";
+  const headerTitle = isGenericTitle(currentTitle) ? (currentRow?.last_message_preview ? titleFromMessage(currentRow.last_message_preview) : "New chat") : currentTitle;
+  useEffect(() => {
+    if (!session || !isGenericTitle(currentTitle) || source.kind !== "live") return;
+    let live = true;
+    void httpGetJson()(`/v1/sessions/${encodeURIComponent(session)}/messages?limit=50`).then(async (payload) => {
+      const page = payload as { messages?: Array<{ role?: string; content?: string }> };
+      const first = [...(page.messages ?? [])].reverse().find((message) => message.role === "user" && message.content?.trim());
+      const title = first?.content ? titleFromMessage(first.content) : "";
+      if (!live || !title) return;
+      await source.updateSession(session, { title });
+      if (live) setRecent((rows) => rows.map((row) => row.session_id === session ? { ...row, title } : row));
+    }).catch(() => { /* Title stays generic until the first message is saved. */ });
+    return () => { live = false; };
+  }, [source, session, currentTitle, currentRow?.last_activity_at, currentRow?.message_count]);
   const togglePopup = (popup: Exclude<HeaderPopup, null>) => {
     setHeaderPopup(value => value === popup ? null : popup);
     setMenuPage("main"); setRenameOpen(false);
@@ -476,9 +508,9 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle navigation" title="Toggle navigation" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><PanelLeft size={18} /></button>
           <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Pencil size={18} /></button>
         </div>
-        <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : currentTitle}>
+        <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : headerTitle}>
           <span className="jg-stable-demo__profile-avatar"><JaegerAvatar portraitOverride={agent?.avatar_url} state={!ready || error ? "connecting" : avatarState} /></span>
-          <span className="jg-stable-demo__profile-copy"><strong>{workspacePage ? routeTitle[route.page] : currentTitle}<span className="jg-clip-status" role="status">{(ready && !error && avatarState === "idle" ? "Idle" : STATUS_TEXT[!ready || error ? "connecting" : avatarState])}</span></strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
+          <span className="jg-stable-demo__profile-copy"><strong>{workspacePage ? routeTitle[route.page] : headerTitle}</strong></span>
         </div>
         <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
           <button className="jg-stable-demo__top-button" type="button" aria-label="Conversation actions" aria-haspopup="menu" data-tooltip="Conversation actions" aria-expanded={headerPopup === "menu"} onClick={() => togglePopup("menu")}><MoreHorizontal size={19} /></button>
