@@ -3,7 +3,8 @@
  * (http/https only); fenced code gets its language, Copy, and lazy Shiki highlighting once the fence is
  * closed. The text is split into top-level blocks and each finished block is memoized, so a streaming reply
  * re-renders only its last block. */
-import { memo, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { alignNumericTables, repairPipeTables } from "./markdownTables";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { highlight, resolveLang } from "./highlight";
@@ -145,7 +146,10 @@ function PlainPortions({text, handlers}: {text:string;handlers:HandlersRef}) {
 
 export function Markdown({ text, onCopy, onOpen }: { text: string } & MarkdownHandlers): ReactNode {
   const handlers = useRef<MarkdownHandlers>({ onCopy, onOpen });
+  const root = useRef<HTMLDivElement>(null);
   handlers.current = { onCopy, onOpen };
-  if (text.length > MARKDOWN_UNITS_MAX) return <PlainPortions text={text} handlers={handlers}/>;
-  return <>{splitBlocks(text).map((block, i) => <Block key={i} text={block} handlers={handlers} />)}</>;
+  const source = repairPipeTables(text);
+  useLayoutEffect(() => { if (root.current) alignNumericTables(root.current); }, [source]);
+  if (source.length > MARKDOWN_UNITS_MAX) return <PlainPortions text={source} handlers={handlers}/>;
+  return <div ref={root} className="jg-md">{splitBlocks(source).map((block, i) => <Block key={i} text={block} handlers={handlers} />)}</div>;
 }
