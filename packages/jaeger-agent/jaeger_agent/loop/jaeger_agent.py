@@ -405,6 +405,8 @@ class JaegerAgent:
         # ``last_halt_reason`` is None on a clean finish; a string when
         # the backstop or interrupt cut the loop short.
         self.last_halt_reason: str | None = None
+        #: Set when an input/output guardrail tripped this turn (jaeger_agent.guardrails).
+        self.last_guardrail: dict[str, str] | None = None
         self.last_iteration_count: int = 0
         # Phase-8 liveness: wall-clock timestamp of the most recent
         # observed progress — set on every heartbeat tick during a
@@ -651,11 +653,22 @@ class JaegerAgent:
             except Exception:  # noqa: BLE001 — a host hook must not break a turn
                 pass
 
+        from jaeger_agent import guardrails as _guardrails
+        self.last_guardrail = None
+        tripped = _guardrails.run("input", route_query)
+        if tripped is not None:
+            # Input guardrail tripwire (OpenAI Agents SDK semantics): the
+            # agent does no work on this input; the turn ends with a notice.
+            self.last_guardrail = {"stage": "input", "guardrail": tripped.guardrail, "reason": tripped.reason}
+            note = _guardrails.refusal("input", tripped)
+            self._append_message({"role": "user", "content": user_message})
+            self._append_message({"role": "assistant", "content": note})
+            return note
         model_user_message = self._auto_route_skill(user_message) if content is None else content
         self._append_message({"role": "user", "content": model_user_message})
         self._turn_active = True
         try:
-            return self._run_turn_inner(user_message)
+            return self._guard_output(self._run_turn_inner(user_message))
         except ContextOverflow:
             # Try middle-out trajectory compression before giving up or re-raising
             try:
@@ -725,6 +738,21 @@ class JaegerAgent:
             self._record_skill_outcomes()
             if getattr(self, "_ephemeral_run", False):
                 self.bind_run(None)
+
+    def _guard_output(self, text: str) -> str:
+        """Output guardrail tripwire on the final answer: a tripped wire
+        replaces the answer (in the transcript too) with a notice."""
+        from jaeger_agent import guardrails as _guardrails
+        tripped = _guardrails.run("output", text or "") if text else None
+        if tripped is None:
+            return text
+        self.last_guardrail = {"stage": "output", "guardrail": tripped.guardrail, "reason": tripped.reason}
+        note = _guardrails.refusal("output", tripped)
+        for message in reversed(self.messages):
+            if message.get("role") == "assistant" and not message.get("tool_calls"):
+                message["content"] = note
+                break
+        return note
 
     def _run_turn_inner(self, user_message: str) -> str:
         """The actual loop body — see :meth:`run_turn` for the contract."""
