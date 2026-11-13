@@ -98,6 +98,23 @@ def _request_json(method: str, path: str, body: dict[str, Any] | None = None, ti
         return 503, {"error": f"gateway unreachable: {exc}", "http_status": 503}
 
 
+def _turn_stopped() -> bool:
+    """True once the asking turn was stopped (Stop / cancel). The Gateway's
+    turn cancel cascades to the child handoff itself; the tool only stops
+    waiting so the lead's loop can unwind immediately."""
+    try:
+        from jaeger_agent.core.cancellation import current_cancellation
+        event = current_cancellation()
+        return bool(event is not None and event.is_set())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _stopped_result(handoff_id: Any, **extra: Any) -> dict[str, Any]:
+    return {"ok": False, "status": "cancelled", "handoff_id": handoff_id,
+            "error": "Stopped: the turn was cancelled while waiting; the helper is cancelled with it", **extra}
+
+
 def _handoff_body(work, turn, *, from_agent_id, require_approval, request_id,
                   parent_run_id, permitted_context, timeout_seconds, tools,
                   project_id=""):
@@ -296,6 +313,8 @@ def call_agent(
                 "child_run_id": current.get("child_run_id"),
                 "error": None if ok else (result.get("summary") or state),
             }
+        if _turn_stopped():
+            return _stopped_result(handoff_id, request_id=rid)
         time.sleep(0.1)
         _, current = _request_json("GET", f"/v1/handoffs/{handoff_id}", timeout=10)
         if current.get("error"):
@@ -447,6 +466,8 @@ def delegate(profile: str = "", brief: str = "", context: str = "", timeout_seco
                 out["error"] = text or state
             out["answer_in_your_own_voice"] = True
             return out
+        if _turn_stopped():
+            return _stopped_result(handoff_id, helper=getattr(record, "display_name", record.id))
         time.sleep(0.25)
         _, current = _request_json("GET", f"/v1/handoffs/{handoff_id}", timeout=10)
         if current.get("error"):
