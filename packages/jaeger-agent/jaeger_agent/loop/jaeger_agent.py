@@ -677,8 +677,9 @@ class JaegerAgent:
                 compressed = compress_trajectory_if_needed(self.messages)
                 if len(compressed) < len(self.messages):
                     self.messages = compressed
-                    # Retry inner turn once with compressed context
-                    return self._run_turn_inner(user_message)
+                    # Retry inner turn once with compressed context; the
+                    # output guardrail applies to the retried answer too.
+                    return self._guard_output(self._run_turn_inner(user_message))
             except Exception:
                 pass
 
@@ -694,7 +695,7 @@ class JaegerAgent:
                         )
                     except Exception:
                         pass
-                    return self._run_turn_inner(user_message)
+                    return self._guard_output(self._run_turn_inner(user_message))
                 # Roll the user message back so a too-big prompt isn't
                 # sticky: with it left in place, every later turn
                 # re-fails on the same un-trimmable history.

@@ -39,13 +39,43 @@ def secret_leak(text: str) -> GuardrailResult | None:
     return None
 
 
+_installed: dict[str, Any] = {"path": None, "mtime": None, "off": []}
+
+
+def refresh_if_changed(config_path: Path | str | None) -> list[str] | None:
+    """Re-install when config.yaml changed since the last install, so an edited
+    ``guardrails`` section applies on the next turn without a restart.
+    Returns the new names when it re-installed, else None."""
+    try:
+        mtime = Path(config_path).stat().st_mtime if config_path else None
+    except OSError:
+        mtime = None
+    if _installed["path"] == str(config_path) and _installed["mtime"] == mtime:
+        return None
+    return install(config_path)
+
+
 def install(config_path: Path | str | None) -> list[str]:
-    """Register the configured guardrails; returns their names."""
+    """Register the configured guardrails; returns their names.
+
+    Idempotent and complete: a guardrail that is no longer configured is
+    removed, so turning one off in config takes effect on re-install."""
+    for off in _installed["off"]:
+        try:
+            off()
+        except Exception:  # noqa: BLE001
+            pass
+    _installed["off"] = []
+    try:
+        _installed["mtime"] = Path(config_path).stat().st_mtime if config_path else None
+    except OSError:
+        _installed["mtime"] = None
+    _installed["path"] = str(config_path)
     cfg = _config(config_path)
     names: list[str] = []
     out_cfg = cfg.get("output") if isinstance(cfg.get("output"), dict) else {}
     if out_cfg.get("secret_leak", True) is not False:
-        guardrails.register_output(secret_leak, name="secret_leak")
+        _installed["off"].append(guardrails.register_output(secret_leak, name="secret_leak"))
         names.append("output:secret_leak")
     in_cfg = cfg.get("input") if isinstance(cfg.get("input"), dict) else {}
     patterns = []
@@ -61,6 +91,6 @@ def install(config_path: Path | str | None) -> list[str]:
                     return GuardrailResult(True, "the message matches a blocked pattern in config.yaml",
                                            "blocked_pattern")
             return None
-        guardrails.register_input(blocked_pattern, name="blocked_pattern")
+        _installed["off"].append(guardrails.register_input(blocked_pattern, name="blocked_pattern"))
         names.append("input:blocked_pattern")
     return names
