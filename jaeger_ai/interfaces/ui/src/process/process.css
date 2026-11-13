@@ -105,6 +105,8 @@
 .jg-pv-card--tool .jg-pv-card__icon { color: var(--jg-proc-running); background: color-mix(in srgb, var(--jg-proc-running) 12%, transparent); }
 .jg-pv-card--subagent .jg-pv-card__icon { color: var(--jg-proc-denied); background: color-mix(in srgb, var(--jg-proc-denied) 12%, transparent); }
 .jg-pv-card--approval .jg-pv-card__icon, .jg-pv-card--hook .jg-pv-card__icon { color: var(--jg-proc-succeeded); background: color-mix(in srgb, var(--jg-proc-succeeded) 12%, transparent); }
+.jg-pv-card__agent { display: grid; place-items: center; width: 40px; height: 40px; flex: none; }
+.jg-pv-card--subagent { border-left: 3px solid color-mix(in srgb, var(--jg-proc-denied) 55%, var(--jg-pv-line)); }
 .jg-pv-card--end .jg-pv-card__icon { color: var(--jg-pv-muted); background: var(--jg-color-hover); }
 .jg-pv-card__text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
 .jg-pv-card__title { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

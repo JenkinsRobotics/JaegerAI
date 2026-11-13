@@ -24,14 +24,16 @@ import { foldAll, isActive, tree, type ProcessState, type Span, type SpanState }
 import { layout, NODE_H, NODE_W } from "./layout";
 import { respOf, responsibilities, type Resp, type RespId } from "./responsibilities";
 import { useProcessEvents } from "./useProcessEvents";
+import { AgentAvatar } from "../team/AgentAvatar";
 import "./process.css";
+import "../team/team.css";
 
 export const fmtMs = (ms: number | null | undefined) =>
   ms == null ? "" : ms < 1000 ? `${Math.max(0, Math.round(ms))} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
 
 const KIND: Record<string, { label: string; icon: LucideIcon }> = {
   run: { label: "Turn", icon: FlagTriangleRight }, model: { label: "Model step", icon: Brain }, tool: { label: "Tool", icon: Wrench },
-  approval: { label: "Approval", icon: ShieldCheck }, input: { label: "Question", icon: HelpCircle }, subagent: { label: "Sub-agent", icon: Bot },
+  approval: { label: "Approval", icon: ShieldCheck }, input: { label: "Question", icon: HelpCircle }, subagent: { label: "Agent", icon: Bot },
   hook: { label: "Hook", icon: Webhook }, end: { label: "End", icon: SquareStack },
 };
 const RESP_ICON: Record<RespId, LucideIcon> = {
@@ -54,7 +56,16 @@ function StatusMark({ state }: { state: SpanState | "idle" }) {
   return null;
 }
 
-type CardData = { span?: Span; kind: string; title: string; subtitle: string; state: SpanState | "idle"; selected?: boolean; progress?: number };
+type CardData = { span?: Span; kind: string; title: string; subtitle: string; state: SpanState | "idle"; selected?: boolean; progress?: number;
+  agent?: AgentFace };
+/** How an agent looks (Team roster): name + avatar seed/image. */
+export type AgentFace = { name: string; seed?: string | null; url?: string | null };
+
+/** "native:jaeger-design-style" -> "Jaeger Design Style" when the roster has no card for it. */
+export function agentLabel(id: string): string {
+  const bare = id.replace(/^[a-z]+:/, "");
+  return bare.split(/[-_]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(" ") || id;
+}
 type CardNode = Node<CardData, "card">;
 
 const Card = memo(function Card({ data }: NodeProps<CardNode>) {
@@ -65,7 +76,9 @@ const Card = memo(function Card({ data }: NodeProps<CardNode>) {
       initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.18 }}
       style={{ width: NODE_W, height: NODE_H }}>
       <Handle type="target" position={Position.Left} className="jg-pv-handle" isConnectable={false} />
-      <div className="jg-pv-card__icon"><Icon size={20} strokeWidth={1.75} /></div>
+      {data.agent
+        ? <div className="jg-pv-card__agent"><AgentAvatar name={data.agent.name} seed={data.agent.seed} url={data.agent.url} size={34} status={data.state} /></div>
+        : <div className="jg-pv-card__icon"><Icon size={20} strokeWidth={1.75} /></div>}
       <div className="jg-pv-card__text">
         <div className="jg-pv-card__title" title={data.title}>{data.title}</div>
         <div className="jg-pv-card__subtitle" title={data.subtitle}>{data.subtitle}</div>
@@ -82,14 +95,22 @@ function spanDuration(span: Span, now: number) {
   return isActive(span.state) ? Math.max(0, (now - span.startTs) * 1000) : span.durationMs;
 }
 
-function buildGraph(state: ProcessState, runId: string, now: number, selected: string | null) {
+function buildGraph(state: ProcessState, runId: string, now: number, selected: string | null, faces?: ReadonlyMap<string, AgentFace>) {
   const run = state.spans.get(runId);
   if (!run) return { nodes: [] as CardNode[], edges: [] as Edge[] };
   const nodes: CardNode[] = [];
   const edges: Edge[] = [];
+  const faceOf = (s: Span): AgentFace | undefined => {
+    if (s.kind !== "subagent") return undefined;
+    const known = s.agentId ? faces?.get(s.agentId) : undefined;
+    if (known) return known;
+    const name = s.agentId && (s.name === s.agentId || s.name === "agent") ? agentLabel(s.agentId) : s.name;
+    return { name, seed: s.agentId ?? s.name };
+  };
   const card = (s: Span): CardNode => ({
     id: s.id, type: "card", position: { x: 0, y: 0 },
-    data: { span: s, kind: s.kind, title: s.kind === "run" ? "Turn" : s.name, state: s.state, selected: s.id === selected, progress: s.progress,
+    data: { span: s, kind: s.kind, title: s.kind === "run" ? "Turn" : faceOf(s)?.name ?? s.name, state: s.state, selected: s.id === selected, progress: s.progress,
+      agent: faceOf(s),
       subtitle: [KIND[s.kind]?.label ?? s.kind, fmtMs(spanDuration(s, now)), s.detail].filter(Boolean).join(" · ") },
   });
   const edge = (from: Span | { id: string; state: SpanState | "idle" }, to: { id: string; state: SpanState | "idle" }): Edge => ({
@@ -105,7 +126,8 @@ function buildGraph(state: ProcessState, runId: string, now: number, selected: s
   };
   for (const st of steps) {
     nodes.push(card(st)); edges.push(edge(prev, st)); walk(st);
-    if (st.kind === "model") prev = st;
+    // Model steps chain the turn; so do top-level agent turns (a room's members speak in sequence).
+    if (st.kind === "model" || st.kind === "subagent") prev = st;
   }
   const endState: SpanState | "idle" = run.state === "running" ? "idle" : run.state;
   nodes.push({ id: "__end", type: "card", position: { x: 0, y: 0 },
@@ -114,8 +136,8 @@ function buildGraph(state: ProcessState, runId: string, now: number, selected: s
   return { nodes: layout(nodes, edges), edges };
 }
 
-function Canvas({ state, runId, now, selected, onSelect }: { state: ProcessState; runId: string; now: number; selected: string | null; onSelect: (id: string | null) => void }) {
-  const graph = useMemo(() => buildGraph(state, runId, now, selected), [state, runId, now, selected]);
+function Canvas({ state, runId, now, selected, onSelect, faces }: { state: ProcessState; runId: string; now: number; selected: string | null; onSelect: (id: string | null) => void; faces?: ReadonlyMap<string, AgentFace> }) {
+  const graph = useMemo(() => buildGraph(state, runId, now, selected, faces), [state, runId, now, selected, faces]);
   const flow = useReactFlow();
   // React Flow keeps each card's measured size on the node object it is given.
   // Rebuilt nodes would drop it (and hide the card until re-measured), so merge
@@ -252,7 +274,21 @@ function Waterfall({ state, runId, now, selected, onSelect }: { state: ProcessSt
   );
 }
 
+/** Team roster faces (name + avatar) by agent id, so agent nodes look like the Team page. */
+function useAgentFaces(source: JaegerSource): ReadonlyMap<string, AgentFace> | undefined {
+  const [faces, setFaces] = useState<ReadonlyMap<string, AgentFace>>();
+  useEffect(() => {
+    let live = true;
+    source.team?.snapshot().then((snap) => {
+      if (live) setFaces(new Map(snap.agents.map((a) => [a.id, { name: a.display_name, seed: a.avatar.seed, url: a.avatar.url }])));
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [source]);
+  return faces;
+}
+
 function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSearchParams }) {
+  const faces = useAgentFaces(source);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [showProbes, setShowProbes] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(params?.get("session") ?? null);
@@ -331,7 +367,7 @@ function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSe
 
         <div className={`jg-pv__main${selSpan ? " has-inspector" : ""}`}>
           <div className="jg-pv__canvas">
-            {runId ? <Canvas state={state} runId={runId} now={now} selected={selected} onSelect={setSelected} />
+            {runId ? <Canvas state={state} runId={runId} now={now} selected={selected} onSelect={setSelected} faces={faces} />
               : <p className="jg-pv__empty">{events.length ? "No turns in this session yet." : "Waiting for events…"}</p>}
           </div>
           {selSpan && <Inspector span={selSpan} events={events} now={now} onClose={() => setSelected(null)} />}

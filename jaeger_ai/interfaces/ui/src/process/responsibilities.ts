@@ -21,7 +21,8 @@ export function respOf(event: string): RespId | null {
   if (event.startsWith("loop.") || event === "turn.start" || event === "turn.finish" || event === "turn.checkpoint") return "loop";
   if (event.startsWith("state.") || event === "turn.plan" || event.startsWith("task.")) return "state";
   if (event === "policy.decision" || event.startsWith("approval.") || event === "hook.decision" || event.startsWith("clarify.")) return "permissions";
-  if (event === "route.selected" || event === "subagent.started" || event === "subagent.finished" || event.startsWith("agent.handoff")) return "orchestration";
+  if (event === "route.selected" || event === "subagent.started" || event === "subagent.finished" || event.startsWith("agent.handoff")
+    || event.startsWith("room.") || event === "agent.message") return "orchestration";
   if (event.startsWith("reliability.") || ["turn.failed", "turn.cancelled", "turn.unknown", "turn.reconciled"].includes(event)) return "reliability";
   return null;
 }
@@ -37,6 +38,13 @@ export function responsibilities(events: readonly GatewayEvent[], upTo: number, 
   };
   let toolsRunning = 0, toolsDone = 0, toolsFailed = 0, retries = 0, fallbacks = 0, subRunning = 0, subDone = 0;
   let memReads = 0, memWrites = 0;
+  const agentsSeen = new Set<string>(); const agentsBusy = new Set<string>();
+  const who = (p: Record<string, unknown>) => {
+    const h = (p.handoff && typeof p.handoff === "object" ? p.handoff : {}) as Record<string, unknown>;
+    const m = (h.metadata && typeof h.metadata === "object" ? h.metadata : {}) as Record<string, unknown>;
+    return s(p.agent_name || m.target_display || p.agent_id || h.to_agent_id).replace(/^native:/, "") || "agent";
+  };
+  const team = () => `${agentsSeen.size} agent${agentsSeen.size === 1 ? "" : "s"} · ${[...agentsSeen].join(", ")}`;
   for (let i = 0; i <= upTo && i < events.length; i++) {
     const e = events[i];
     const p = (e.payload ?? {}) as Record<string, unknown>;
@@ -81,6 +89,22 @@ export function responsibilities(events: readonly GatewayEvent[], upTo: number, 
       case "approval.resolved": set("permissions", e, s(p.decision ?? p.status).includes("deny") ? "fault" : "ok", `approval ${s(p.decision ?? p.status)}`, s(p.kind)); break;
       case "hook.decision": set("permissions", e, p.action === "deny" ? "fault" : "ok", `hook ${s(p.action)} · ${s(p.tool)}`, `${s(p.hook)}${p.reason ? `: ${s(p.reason)}` : ""}`); break;
       case "route.selected": set("orchestration", e, "ok", `route · ${s(p.model) || "default model"}`, `${s(p.reason)}${p.lane ? ` · lane ${s(p.lane)}` : ""} · tools: ${s(p.tools)}`); break;
+      case "room.started": set("orchestration", e, "active", `room · ${Array.isArray(p.members) ? p.members.length : 0} members`, s(p.text).slice(0, 120)); break;
+      case "room.turn": {
+        const n = who(p); agentsSeen.add(n);
+        if (p.status === "running") agentsBusy.add(n); else agentsBusy.delete(n);
+        set("orchestration", e, p.status === "failed" ? "warn" : agentsBusy.size ? "active" : "ok", team(),
+          `${n} ${p.status === "running" ? "is working" : s(p.status)}${p.parent_turn_id ? " (handed off)" : ""}`); break;
+      }
+      case "room.finished": set("orchestration", e, "ok", team(), `room finished · ${s(p.turns)} turn(s)`); break;
+      case "agent.handoff": { const n = who(p); agentsSeen.add(n); agentsBusy.add(n);
+        const h = (p.handoff ?? {}) as Record<string, unknown>;
+        set("orchestration", e, s(h.status) === "pending_approval" ? "warn" : "active", team(), `hand-off to ${n}: ${s(h.task).slice(0, 100)}`); break; }
+      case "agent.handoff.finished": { const n = who(p); agentsSeen.add(n); agentsBusy.delete(n);
+        const st = s(((p.handoff ?? {}) as Record<string, unknown>).status);
+        set("orchestration", e, ["failed", "denied", "execution_unknown"].includes(st) ? "warn" : agentsBusy.size ? "active" : "ok", team(), `${n} ${st || "finished"}`); break; }
+      case "agent.message": { const n = who(p); agentsSeen.add(n);
+        set("orchestration", e, agentsBusy.size ? "active" : "ok", team(), `${n}: ${s(p.text).replace(/\s+/g, " ").slice(0, 120)}`); break; }
       case "subagent.started": subRunning++; set("orchestration", e, "active", `${subRunning} sub-agent(s) running`, `${s(p.name)}: ${s(p.task)}`); break;
       case "subagent.finished": subRunning = Math.max(0, subRunning - 1); subDone++; set("orchestration", e, p.status === "failed" ? "warn" : subRunning ? "active" : "ok", `${subDone} sub-agent(s) finished`, `${s(p.name)} ${s(p.status)} in ${s(p.elapsed_s)} s`); break;
       case "reliability.retry": retries++; set("reliability", e, "warn", `${retries} retr${retries === 1 ? "y" : "ies"}${fallbacks ? ` · ${fallbacks} fallback` : ""}`, `${s(p.adapter)} ${s(p.kind)} · attempt ${s(p.attempt)}/${s(p.of)}`); break;

@@ -386,6 +386,8 @@ export interface JaegerSource {
   processStream?(sessionId: string, cursor: number, onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void>;
   /** Durable per-session history with traces, newest page before `before` (oldest-first rows). */
   processHistory?(sessionId: string, before?: number, limit?: number): Promise<{ events: GatewayEvent[]; hasMore: boolean }>;
+  /** Team runtime: roster, rooms (live Gateway only). */
+  team?: import("./team").TeamApi;
 }
 
 export interface TurnReceipt {
