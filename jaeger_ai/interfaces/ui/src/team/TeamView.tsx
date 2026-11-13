@@ -23,7 +23,7 @@ function timeAgo(ts?: number) {
 function StatusPill({ status }: { status: string }) {
   const working = status === "working" || status === "running" || status === "busy";
   return <span className={`jg-team-pill${working ? " is-working" : status === "failed" ? " is-failed" : ""}`}>
-    {working ? <Loader2 size={12} className="jg-team-spin" /> : <i className="jg-team-dot" />}{working ? "Working" : status === "idle" || !status ? "Idle" : status}
+    {working ? <Loader2 size={12} className="jg-team-spin" /> : <i className="jg-team-dot" />}{working ? "Working" : status === "idle" || !status ? "Idle" : status.startsWith("waiting") ? "Waiting" : status.replace(/_/g, " ")}
   </span>;
 }
 
