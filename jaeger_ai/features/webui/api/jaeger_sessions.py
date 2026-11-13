@@ -226,6 +226,11 @@ _ID = r"(?!inbox(?:/|$))[A-Za-z0-9_.:-]+"
 GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
     (frozenset(methods), re.compile(rx)) for methods, rx in (
         ({"GET"}, r"^/v1/activity$"),
+        # Team runtime (gateway/team_routes.py): roster, rooms, room messages.
+        ({"GET"}, r"^/v1/team$"),
+        ({"POST"}, r"^/v1/team/rooms$"),
+        ({"GET"}, r"^/v1/team/rooms/room-[a-f0-9]{16}$"),
+        ({"POST"}, r"^/v1/team/rooms/room-[a-f0-9]{16}/messages$"),
         ({"GET", "POST"}, r"^/v1/backlog$"),
         ({"GET", "POST"}, r"^/v1/ui/layout$"),
         ({"GET", "POST"}, r"^/v1/ui/logo$"),

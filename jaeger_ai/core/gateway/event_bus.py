@@ -77,6 +77,9 @@ EVENT_TYPES = frozenset({
     # that deny/rewrite a tool call; sub-agent runs started from a tool.
     "model.started", "model.finished", "hook.decision", "subagent.started", "subagent.finished",
     "subagent.tool.started", "subagent.tool.finished", "tool.progress",
+    # Team runtime (gateway/team_routes.py): a room message is a run, each
+    # member turn an agent span, agent.message what an agent said.
+    "room.started", "room.turn", "room.finished", "agent.message",
     "loop.iteration", "loop.stop", "loop.continuation", "state.memory", "state.saved", "policy.decision", "route.selected",
     "reliability.retry", "reliability.fallback", "reliability.exhausted", "reliability.timeout", "stream.status",
     # Connect Apps panel: {id, state, audit?} on the global stream.

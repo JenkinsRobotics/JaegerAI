@@ -163,7 +163,8 @@ def _message_read_state(meta: dict[str, Any]) -> dict[str, Any]:
     return {'unread': None, 'event_id': 0}
 
 
-MESSAGE_KINDS = frozenset({"message", "channel_message", "summary", "handoff_request", "handoff_result", "task_result"})
+MESSAGE_KINDS = frozenset({"message", "channel_message", "summary", "handoff_request", "handoff_result", "task_result",
+                           "room_message", "room_reply"})
 MESSAGES_PAGE_MAX = 200
 
 
