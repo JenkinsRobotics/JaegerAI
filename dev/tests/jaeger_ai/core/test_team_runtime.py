@@ -201,3 +201,22 @@ async def test_room_runs_members_hands_off_by_mention_and_emits_lanes(team_clien
     assert mirrored and all(t["parent_span_id"].startswith("agent:rt_") for t in mirrored)
     room = await (await client.get(f"/v1/team/rooms/{sid}")).json()
     assert [m["sender_agent_id"] for m in room["messages"]] == [None, "native:eng", "native:ds"]
+
+
+def test_bind_skill_scope_is_task_local():
+    """The specialist path imports bind_skill_scope; it must exist and stay inside its task."""
+    import asyncio
+
+    from jaeger_agent.skill_registry.playbook_skills import active_skill_scope, bind_skill_scope
+
+    async def specialist():
+        bind_skill_scope(["Design-Review"])
+        inner = await asyncio.to_thread(active_skill_scope)
+        return active_skill_scope(), inner
+
+    async def main():
+        return await asyncio.create_task(specialist()), active_skill_scope()
+
+    (scoped, threaded), outside = asyncio.run(main())
+    assert scoped == frozenset({"design-review"}) and threaded == scoped
+    assert outside is None
