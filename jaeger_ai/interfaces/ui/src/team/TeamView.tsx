@@ -14,7 +14,6 @@ import type { JaegerSource } from "../api/source";
 import type { GatewayEvent } from "../api/types";
 import type { RoomDetail, TeamAgent, TeamRoom, TeamSnapshot } from "../api/team";
 import { AgentAvatar } from "./AgentAvatar";
-import { CollaborationModeControl } from "./CollaborationMode";
 import "./team.css";
 
 type Working = Record<string, { agent: string; since: number }>;
@@ -113,8 +112,8 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
   useEffect(() => { void refresh(); const t = setInterval(refresh, 8000); return () => clearInterval(t); }, [refresh]);
 
   const agents = useMemo(() => new Map((snap?.agents ?? []).map((a) => [a.id, a])), [snap]);
-  // One mind (the default): no rooms; the page shows Jaeger's inner helpers.
-  const oneMind = snap?.mode === "one_mind";
+  // Jaeger always runs as one lead with internal helpers; rooms stay off in the UI.
+  const oneMind = true;
   const rooms = useMemo(() => (oneMind ? [] : (snap?.rooms ?? []).filter((r) => showProbes || !r.probe)), [snap, showProbes, oneMind]);
   useEffect(() => { if (oneMind) { if (roomId) setRoomId(null); return; } if (!roomId && rooms[0]) setRoomId(rooms[0].session_id); }, [rooms, roomId, oneMind]);
 
@@ -183,7 +182,6 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
           ? `${helpers.length} helpers · ${workingCount} working · ${delegations.length} delegations`
           : `${snap.agents.length} agents · ${workingCount} working · ${snap.rooms.filter((r) => !r.probe).length} rooms`}</span>
         {error && <span className="jg-team__error" role="alert"><XCircle size={14} /> {error}</span>}
-        <CollaborationModeControl api={api} compact onChanged={() => { setPicking(false); setPicked([]); void refresh(); }} />
         {!oneMind && <button type="button" className="jg-team-btn is-primary" onClick={() => { setPicking((p) => !p); setPicked([]); }}>
           <Plus size={14} /> {picking ? "Cancel" : "New room"}</button>}
       </header>
@@ -226,7 +224,6 @@ export function TeamView({ source, onNavigate }: { source: JaegerSource; onNavig
         <aside className="jg-team__room" aria-label="How Jaeger thinks">
           <div className="jg-team-room__head"><Brain size={15} /> One mind</div>
           <p className="jg-team__empty">Every message goes to Jaeger, which answers in one voice. When a focused review or a side task helps, it delegates to a helper; the helper's run shows as its own node under that step in the Process view.</p>
-          <p className="jg-team__empty">Team rooms and @Name hand-offs are off. Switch Collaboration mode to Team or Auto to use them.</p>
         </aside>
         ) : (
         <aside className="jg-team__room" aria-label="Room">

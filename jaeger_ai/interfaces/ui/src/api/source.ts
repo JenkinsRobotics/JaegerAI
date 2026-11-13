@@ -3,7 +3,7 @@ import type { ChatSession } from "../chat/host";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export type RuntimeAutonomy = "ask" | "scoped" | "auto";
-export type RuntimeTier = "chat" | "agent" | "jaeger";
+export type RuntimeTier = "chat" | "agent" | "plan";
 export interface RuntimeTierSnapshot {
   tier: RuntimeTier;
   options: RuntimeTier[];
@@ -40,6 +40,8 @@ import type { AgentActions } from "./agentActions";
 export interface PendingApproval {
   approval_id: string; session_id?: string; kind: string; prompt: string;
   task?: string; status: string;
+  tool?: string; target?: string;
+  reviewer_verdict?: string | null; reviewer_reason?: string | null;
 }
 
 export interface ClarificationSnapshot {

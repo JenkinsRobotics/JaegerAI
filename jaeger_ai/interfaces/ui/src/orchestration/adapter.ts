@@ -55,7 +55,7 @@ const NO_ACTIVITY = new Set<string>();
 export const resetActivityProbe = () => NO_ACTIVITY.clear();
 
 /** Kinds feed.ts turns into rows; others (backlog.updated, agent.updated) would fill the page and render nothing. */
-export const FEED_KINDS = ["agent.handoff", "agent.handoff.finished", "handoff.sent", "handoff.result", "agent.handoff.checked", "task.created", "task.updated", "approval.request", "approval.resolved", "agent.status.changed", "turn.start", "turn.finish", "turn.failed", "turn.cancelled", "turn.unknown", "project.checked"];
+export const FEED_KINDS = ["agent.handoff", "agent.handoff.finished", "handoff.sent", "handoff.result", "agent.handoff.checked", "task.created", "task.updated", "approval.request", "approval.reviewed", "approval.resolved", "agent.status.changed", "turn.start", "turn.finish", "turn.failed", "turn.cancelled", "turn.unknown", "project.checked"];
 
 export function gatewayActivity(base = "", fetchImpl: typeof fetch = (...a) => fetch(...a)): NonNullable<GapProvider["activity"]> {
   return async ({ before, agentId, names }) => {

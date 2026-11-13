@@ -171,6 +171,12 @@ export function eventRow(e: GatewayEvent, names: Names): ActivityRow | null {
       const id = str(p.approval_id ?? p.id);
       return id ? { key: `approval:${id}`, kind: "approval.requested", agentId: str(p.agent_id) || LEAD_ID, at, action: `asked for approval${str(p.title ?? p.prompt ?? p.tool ?? p.task) ? `: ${str(p.title ?? p.prompt ?? p.tool ?? p.task).slice(0, 160)}` : ""}`, needsYou: true, output: { kind: "approval", label: "Review", href: e.session_id && e.session_id !== "*" ? `/chat?agent=${encodeURIComponent(str(p.agent_id) || LEAD_ID)}` : "/home" } } : null;
     }
+    case "approval.reviewed": {
+      const verdict = str(p.verdict) || "unsure";
+      const reason = str(p.reason);
+      const tool = str(p.tool);
+      return { key: `approval-reviewed:${str(p.request_id) || str(p.approval_id) || at}:${verdict}`, kind: "approval.reviewed", agentId: str(p.agent_id) || LEAD_ID, at, action: `reviewer ${verdict}${tool ? ` ${tool}` : ""}${reason ? `: ${reason.slice(0, 160)}` : ""}` };
+    }
     case "approval.resolved": {
       const id = str(p.approval_id ?? p.id);
       return id ? { key: `approval:${id}:resolved`, kind: "approval.resolved", agentId: str(p.agent_id) || LEAD_ID, at, action: `approval ${str(p.decision) || (p.approved === true ? "granted" : p.approved === false ? "declined" : "resolved")}` } : null;

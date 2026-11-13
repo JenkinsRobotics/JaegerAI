@@ -93,7 +93,7 @@ export type PersistedPart =
   | { type: "reasoning"; text: string; duration_ms?: number }
   | { type: "tool"; call_id?: string | null; tool?: string; status?: string; state?: string; input?: unknown; output?: unknown; summary?: string }
   /** 417d8a0c: an approval the turn asked for. call_id is usually null, so it matches its tool on tool+target. */
-  | { type: "approval"; approval_id: string; call_id?: string | null; tool?: string; target?: string; status?: string; state?: string; decision?: string | null }
+  | { type: "approval"; approval_id: string; call_id?: string | null; tool?: string; target?: string; status?: string; state?: string; decision?: string | null; reviewer_verdict?: string; reviewer_reason?: string }
   | { type: "plan"; [key: string]: unknown }
   | { type: "handoff"; direction: "to" | "from"; handoff_id?: string; agent_id?: string; agent_name?: string; status?: string };
 

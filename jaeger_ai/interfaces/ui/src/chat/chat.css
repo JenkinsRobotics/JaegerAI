@@ -324,7 +324,7 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-runtime-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jg-autonomy, .jg-runmode { position: relative; flex: none; min-width: 0; }
 .jg-runmode__scope { margin: 0 10px 8px; color: var(--jg-color-text-secondary); font-size: var(--jg-font-small); line-height: 1.4; }
-.jg-runmode-menu > button:last-child { display: block; min-height: 40px; }
+.jg-autonomy.is-dimmed .jg-autonomy__trigger { opacity: .45; cursor: default; }
 .jg-followup-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .jg-composer__policy { display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: 36px; padding: 0 7px; border: 0; border-radius: 9px; background: transparent; color: var(--jg-color-text-secondary); font: inherit; font-size: var(--jg-font-small); white-space: nowrap; cursor: pointer; }
 .jg-composer__policy:hover, .jg-composer__policy[aria-expanded=true] { background: var(--jg-color-hover); color: var(--jg-color-text); }
@@ -491,3 +491,9 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 
 .jg-msgmenu__note { max-width: 280px; padding: 8px 10px; font-size: 12px; line-height: 1.4; opacity: .65; }
 .jg-bubble a { -webkit-touch-callout: default; }
+
+.jg-approval__review { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--jg-color-inset); color: var(--jg-color-text-secondary); font-size: 12px; line-height: 1.4; }
+.jg-plan-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; background: var(--jg-color-inset); color: var(--jg-color-text-secondary); font-size: 12px; line-height: 1.4; }
+.jg-plan-execute { height: 32px; padding: 0 12px; border: 1px solid var(--jg-color-border); border-radius: 999px; background: transparent; color: var(--jg-color-text); font: inherit; font-size: 12px; cursor: pointer; }
+.jg-plan-execute:hover { background: var(--jg-color-hover); }
+.jg-plan-execute:disabled { opacity: .45; cursor: default; }
