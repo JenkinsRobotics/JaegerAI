@@ -18,6 +18,7 @@ class TurnTiming:
         self.halt_reason = None
         self._model_start = None
         self._tools = {}
+        self.helpers = []
 
     def now(self) -> float:
         return round(max(0.0, (time.monotonic() - self.admitted_at) * 1000), 3)
@@ -46,6 +47,20 @@ class TurnTiming:
         self.model_calls.append(entry)
         self._model_start = None
 
+    def helper_done(self, handoff_id: str, tokens: dict | None, status: str = "") -> None:
+        """An inner helper (delegate) finished under this run: its usage is
+        part of the run's usage (OpenAI Agents SDK counts agent-as-tool runs)."""
+        if any(h.get("handoff_id") == handoff_id for h in self.helpers):
+            return
+        tokens = tokens if isinstance(tokens, dict) else {}
+        entry = {"handoff_id": handoff_id, "status": status,
+                 "input_tokens": int(tokens.get("prompt") or 0),
+                 "output_tokens": int(tokens.get("completion") or 0)}
+        cost = tokens.get("cost_usd")
+        if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            entry["cost_usd"] = float(cost)
+        self.helpers.append(entry)
+
     def tool_start(self, name: str) -> None:
         self._tools.setdefault(name, []).append(self.now())
 
@@ -65,9 +80,20 @@ class TurnTiming:
         inp = sum(int(c.get("prompt_tokens") or 0) for c in self.model_calls)
         out = sum(int(c.get("completion_tokens") or 0) for c in self.model_calls)
         costs = [float(c["cost_usd"]) for c in self.model_calls if "cost_usd" in c]
-        return {"requests": len(self.model_calls), "input_tokens": inp, "output_tokens": out,
-                "total_tokens": inp + out, "reported": bool(inp or out),
-                "cost_usd": round(sum(costs), 6) if costs else None}
+        out_doc = {"requests": len(self.model_calls), "input_tokens": inp, "output_tokens": out,
+                   "total_tokens": inp + out, "reported": bool(inp or out),
+                   "cost_usd": round(sum(costs), 6) if costs else None}
+        if self.helpers:
+            h_in = sum(h["input_tokens"] for h in self.helpers)
+            h_out = sum(h["output_tokens"] for h in self.helpers)
+            h_costs = [h["cost_usd"] for h in self.helpers if "cost_usd" in h]
+            out_doc["helpers"] = {"count": len(self.helpers), "input_tokens": h_in, "output_tokens": h_out,
+                                  "total_tokens": h_in + h_out,
+                                  "cost_usd": round(sum(h_costs), 6) if h_costs else None}
+            out_doc["total_with_helpers"] = {
+                "input_tokens": inp + h_in, "output_tokens": out + h_out, "total_tokens": inp + out + h_in + h_out,
+                "cost_usd": round(sum(costs) + sum(h_costs), 6) if (costs or h_costs) else None}
+        return out_doc
 
     def snapshot(self) -> dict:
         return {
