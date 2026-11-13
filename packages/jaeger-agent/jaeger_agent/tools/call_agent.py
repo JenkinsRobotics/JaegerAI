@@ -478,13 +478,14 @@ def delegate(profile: str = "", brief: str = "", context: str = "", timeout_seco
 
 @register_tool_from_function(name="transfer_to_agent", side_effect="external")
 def transfer_to_agent(agent: str = "", reason: str = "") -> dict[str, Any]:
-    """Hand this whole conversation to a teammate (Team / Auto collaboration
-    mode; OpenAI Agents SDK handoff). The chat moves to ``agent`` with its full
-    history; when you finish this turn, the teammate takes the next turn in the
-    same chat and answers in its own voice. Use when the person's request is
-    clearly that teammate's job from here on. For a check whose result only
-    you need, use delegate instead. After a successful transfer, end your turn
-    with one short line saying who takes over."""
+    """Removed. Jaeger always runs as one lead; use delegate for inner helpers."""
+    del agent, reason
+    return {
+        "ok": False,
+        "error": "transfer_to_agent is no longer available. Jaeger stays the lead; "
+                 "use delegate when a specialist should do a bounded piece of work.",
+    }
+    # The live transfer path below is intentionally unreachable.
     who = (agent or "").strip()
     if not who:
         return {"ok": False, "error": "agent is required", "teammates": _helpers()}

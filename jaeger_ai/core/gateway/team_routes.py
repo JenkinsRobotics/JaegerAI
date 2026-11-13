@@ -280,8 +280,8 @@ def register(gateway) -> None:
 
     def rooms_off() -> web.Response | None:
         if gateway._collaboration_mode() == "one_mind":
-            return web.json_response({"error": "Team rooms are off in One mind mode. Switch Collaboration mode "
-                                               "to Team or Auto in Settings → Agents to use rooms.",
+            return web.json_response({"error": "Team rooms are not available. Jaeger always runs as one lead "
+                                               "with internal helpers.",
                                       "mode": "one_mind"}, status=409)
         return None
 
@@ -452,8 +452,6 @@ def register(gateway) -> None:
 
     app = gateway.app
     app.router.add_get("/v1/team", team)
-    app.router.add_get("/v1/team/mode", get_mode)
-    app.router.add_post("/v1/team/mode", set_mode)
     app.router.add_get("/v1/team/agents/{id}/avatar", avatar)
     app.router.add_post("/v1/team/rooms", create_room)
     app.router.add_get("/v1/team/rooms/{id}", get_room)

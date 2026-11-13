@@ -487,11 +487,21 @@ class AutomationConfig(BaseModel):
         "agent",
         json_schema_extra=_setting("autonomy"),
         description=(
-            "Agency tier: 'chat' (conversational only, no tools), "
-            "'agent' (task worker, tools allowed under autonomy policy), "
-            "'jaeger' (continuous resident entity, sensors, durable proactive tasks)."
+            "Work style: 'chat' (conversational only, no tools), "
+            "'agent' (task worker, tools under the approval policy), "
+            "'plan' (read-only tools; writes a plan for you to approve, then switch to Agent to execute). "
+            "A saved 'jaeger' value is treated as 'agent'."
         ),
     )
+
+    @field_validator("interaction_tier", mode="before")
+    @classmethod
+    def _normalize_interaction_tier(cls, value: object) -> object:
+        from jaeger_ai.contract.modes import normalize_interaction_tier
+        if value is None or value == "":
+            return "agent"
+        return normalize_interaction_tier(str(value))
+
     autonomy: Literal["ask", "scoped", "auto"] = Field(
         "scoped",
         json_schema_extra=_setting("autonomy"),
@@ -505,13 +515,11 @@ class AutomationConfig(BaseModel):
     )
     collaboration_mode: Literal["one_mind", "team", "auto"] = Field(
         "one_mind",
-        json_schema_extra=_setting("autonomy"),
+        json_schema_extra=_setting("autonomy", hidden=True),
         description=(
-            "How Jaeger works with its specialist agents. 'one_mind' (default): every "
-            "message goes to Jaeger; specialists are inner helpers it delegates to and "
-            "it answers in one voice. 'team': rooms, @Name hand-offs and a roster you "
-            "chat with. 'auto': inner helpers by default, team rooms only when you open "
-            "a room or @mention an agent."
+            "Retained for compatibility. Jaeger always runs as one lead with "
+            "internal helpers (the delegate tool). Team and Auto modes have "
+            "been removed; a saved 'team' or 'auto' value is ignored."
         ),
     )
     inner_max_iterations: int = Field(
