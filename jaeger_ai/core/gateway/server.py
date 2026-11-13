@@ -1529,9 +1529,13 @@ class JaegerGatewayApp:
                     # Publish a flag only when it is new or its reasons changed:
                     # re-announcing every flagged item every 5 minutes filled
                     # ~95% of the 5,000-event replay window (events audit 2026-11-11).
+                    first_pass = "_backlog_flags_seen" not in self.__dict__
                     seen = self.__dict__.setdefault("_backlog_flags_seen", {})
                     current = {str(i["task"]["id"]): repr(i.get("reasons")) for i in flagged}
-                    fresh = [i for i in flagged if seen.get(str(i["task"]["id"])) != current[str(i["task"]["id"])]]
+                    # After a restart the first pass only learns what is already
+                    # flagged; re-announcing all of it was the boot-time flood.
+                    fresh = [] if first_pass else [
+                        i for i in flagged if seen.get(str(i["task"]["id"])) != current[str(i["task"]["id"])]]
                     seen.clear()
                     seen.update(current)
                     for item in fresh:

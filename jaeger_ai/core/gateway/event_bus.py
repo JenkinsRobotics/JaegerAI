@@ -105,6 +105,60 @@ CARD_EVENTS = frozenset({
 })
 
 
+#: Background bookkeeping events that are informational only (the owning
+#: store is the authority). They are coalesced so a sweep or reconcile pass
+#: can never flood the replay window / ring buffer and evict a live turn's
+#: tool and helper spans (2026-11-12: ~3,400 backlog.updated in one stream).
+#: name -> (identity fields, duplicate window s, max per minute)
+THROTTLED_EVENTS: dict[str, tuple[tuple[str, ...], float, int]] = {
+    "backlog.updated": (("task_id", "action", "status", "reasons"), 600.0, 20),
+}
+
+
+class _Throttle:
+    def __init__(self) -> None:
+        self._last_key: dict[tuple[str, str], tuple[str, float]] = {}
+        self._recent: dict[str, deque[float]] = {}
+        self._last_event: dict[str, "GatewayEvent"] = {}
+        self.suppressed: dict[str, int] = {}
+
+    def allow(self, event: str, data: dict[str, Any], now: float) -> bool:
+        rule = THROTTLED_EVENTS.get(event)
+        if rule is None or event not in self._last_event:
+            return True
+        fields, window, per_minute = rule
+        ident = str(data.get(fields[0]) or "")
+        key = repr(tuple(data.get(f) for f in fields))
+        prior = self._last_key.get((event, ident))
+        if prior is not None and prior[0] == key and now - prior[1] < window:
+            return self._drop(event)
+        recent = self._recent.setdefault(event, deque())
+        while recent and now - recent[0] > 60.0:
+            recent.popleft()
+        if len(recent) >= per_minute:
+            return self._drop(event)
+        return True
+
+    def _drop(self, event: str) -> bool:
+        self.suppressed[event] = self.suppressed.get(event, 0) + 1
+        return False
+
+    def record(self, evt: "GatewayEvent", now: float) -> None:
+        rule = THROTTLED_EVENTS.get(evt.event)
+        if rule is None:
+            return
+        fields = rule[0]
+        ident = str(evt.data.get(fields[0]) or "")
+        if len(self._last_key) > 10_000:
+            self._last_key.clear()
+        self._last_key[(evt.event, ident)] = (repr(tuple(evt.data.get(f) for f in fields)), now)
+        self._recent.setdefault(evt.event, deque()).append(now)
+        self._last_event[evt.event] = evt
+
+    def last(self, event: str) -> "GatewayEvent":
+        return self._last_event[event]
+
+
 @dataclass(frozen=True, slots=True)
 class GatewayEvent:
     event_id: int
@@ -148,6 +202,24 @@ class GatewayEventBus:
             store.event_listener = self.fanout
 
     def publish(self, session_id: str, event: str, data: dict[str, Any]) -> GatewayEvent:
+        if event in THROTTLED_EVENTS:
+            throttle = self.__dict__.setdefault("_throttle", _Throttle())
+            now = time.time()
+            with self._lock:
+                allowed = throttle.allow(event, data, now)
+            if not allowed:
+                return throttle.last(event)
+            evt = self._publish(session_id, event, data)
+            with self._lock:
+                throttle.record(evt, now)
+            return evt
+        return self._publish(session_id, event, data)
+
+    def throttle_stats(self) -> dict[str, int]:
+        throttle = self.__dict__.get("_throttle")
+        return dict(throttle.suppressed) if throttle is not None else {}
+
+    def _publish(self, session_id: str, event: str, data: dict[str, Any]) -> GatewayEvent:
         if self.store is not None:
             evt = _from_record(self.store.append_event(session_id, event, data))
             with self._lock:
