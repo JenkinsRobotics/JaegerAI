@@ -165,6 +165,7 @@ ALLOWED_ROOT_ITEMS = {
     "INVESTOR_DEMO_GUIDE.md",
     "Install Jaeger AI.command",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "MANIFEST.in",
     "README.md",
     "SECURITY.md",
