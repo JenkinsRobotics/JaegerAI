@@ -103,7 +103,7 @@ from .credentials import get_credential, list_credentials
 
 # Coordination / meta
 from .delegation import CAPABILITY_SUMMARY, ask_user, help_me
-from .call_agent import call_agent, delegate, get_agent_result, run_team
+from .call_agent import call_agent, delegate, get_agent_result, run_team, transfer_to_agent
 
 # Plugin awareness
 from .plugins import list_plugins, setup_plugin
@@ -220,7 +220,7 @@ __all__ = [
     # credentials
     "get_credential", "list_credentials",
     # delegation
-    "ask_user", "help_me", "CAPABILITY_SUMMARY", "call_agent", "delegate", "run_team", "get_agent_result",
+    "ask_user", "help_me", "CAPABILITY_SUMMARY", "call_agent", "delegate", "run_team", "get_agent_result", "transfer_to_agent",
     # plugins
     "list_plugins", "setup_plugin",
     # audio input
