@@ -58,8 +58,11 @@ def collect_stream(proc: subprocess.Popen, stdin: bytes | None, timeout: float,
             proc.terminate()
     def stderr_reader() -> None:
         assert proc.stderr is not None
-        while chunk := proc.stderr.read(8192):
+        while chunk := proc.stderr.read1(8192) if hasattr(proc.stderr, "read1") else proc.stderr.read(8192):
             errors.extend(chunk)
+            # CLI status/log lines are liveness too (stale detector).
+            if on_progress:
+                on_progress()
             if len(errors) > 1_048_576:
                 del errors[:-1_048_576]
     readers = [threading.Thread(target=stdout_reader, daemon=True),
