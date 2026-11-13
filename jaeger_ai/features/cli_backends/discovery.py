@@ -67,14 +67,23 @@ KNOWN_BACKENDS: tuple[BackendSpec, ...] = (
         executables=("grok",),
         # Grok's documented one-shot today takes the prompt as an argv
         # value after --single. Stdin is not the published interface.
+        # Do not pass --deny "*". Grok treats that as a permission-policy
+        # wildcard that wins over always-approve / auto-approve, then tells
+        # the model every file/list/editor call was "denied by a permission
+        # policy (deny rule on any tool matching "*")". An empty --tools
+        # allowlist still removes Grok's built-in tools so Jaeger owns
+        # execution and the existing file-access scope; the model should
+        # request those Jaeger tools through the text protocol below.
         args=(
             "--single", "{prompt}", "--output-format", "json", "--verbatim",
-            "--permission-mode", "dontAsk", "--tools", "", "--deny", "*",
+            "--permission-mode", "dontAsk", "--tools", "",
             "--disable-web-search", "--no-subagents",
             "--system-prompt-override", "You are Jaeger's model completion backend. "
-            "Follow the supplied system and conversation context. Never use native Grok "
-            "tools or search for tools. Request supplied Jaeger tools only through the "
-            "<tool_call> text protocol. Jaeger executes them and supplies their results.",
+            "Follow the supplied system and conversation context. Grok's built-in "
+            "tools are unused on this path; that is not a Jaeger permission denial. "
+            "File, editor, list, shell, and other Jaeger tools in this prompt are "
+            "available. Request them only through the <tool_call> text protocol. "
+            "Jaeger executes them under the owner's policy and returns their results.",
         ),
         prompt_mode="placeholder",
         credential_env=("XAI_API_KEY",),
