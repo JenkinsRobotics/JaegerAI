@@ -47,6 +47,11 @@ REA_READ_ONLY_TOOLS: tuple[str, ...] = (
     "verify_unknown_resolution", "compare_artifacts",
 )
 
+#: Specialists that lead triage can move a chat to keep the lead's hand-off
+#: tools: a routed chat that asks for a teammate can still reach them
+#: (``call_agent`` runs under the Gateway's delegation depth/approval caps).
+ROUTED_HANDOFF_TOOLS: tuple[str, ...] = ("call_agent", "get_agent_result")
+
 STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
     {
         "name": "surfaces",
@@ -54,7 +59,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "surfaces",
         "internal": True,
         "summary": "Mac app + WebUI chrome, nav, branding, and session UX.",
-        "allowed_tools": ("read_file", "search_files", "write_file", "patch", "terminal", "ide_context", "ide_diagnostics", "ide_open_file", "vision_analyze", "web_search", "web_extract", "update_plan", "get_time", "agent_notes"),
+        "allowed_tools": ("read_file", "search_files", "write_file", "patch", "terminal", "ide_context", "ide_diagnostics", "ide_open_file", "vision_analyze", "web_search", "web_extract", "update_plan", "get_time", "agent_notes", *ROUTED_HANDOFF_TOOLS),
         "keywords": ("webui", "menu bar", "menubar", "sidebar", "avatar", "branding", "mac app", "swift"),
     },
     {
@@ -63,7 +68,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "gateway",
         "internal": True,
         "summary": f"Spine health, agents catalog, sessions, and approvals on :{GATEWAY_PORT}.",
-        "allowed_tools": ("read_file", "search_files", "terminal", "exec_command", "system_status", "self_check", "list_background", "check_background", "web_search", "update_plan", "get_time", "calculate", "agent_notes"),
+        "allowed_tools": ("read_file", "search_files", "terminal", "exec_command", "system_status", "self_check", "list_background", "check_background", "web_search", "update_plan", "get_time", "calculate", "agent_notes", *ROUTED_HANDOFF_TOOLS),
         "keywords": ("gateway", str(GATEWAY_PORT), "sse", "approval", "approvals", "session store", "agents catalog"),
     },
     {
@@ -71,7 +76,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "display_name": "Everyday",
         "specialty": "everyday",
         "summary": "Daily-driver tasks: calendar, mail, reminders, host helpers.",
-        "allowed_tools": ("get_events", "create_event", "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "move_mail", "sweep_mail", "send_email", "lookup_contact", "todo", "notify", "list_schedules", "schedule_prompt", "get_time", "calculate", "get_weather", "web_search", "web_extract", "update_plan", "agent_notes"),
+        "allowed_tools": ("get_events", "create_event", "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "move_mail", "sweep_mail", "send_email", "lookup_contact", "todo", "notify", "list_schedules", "schedule_prompt", "get_time", "calculate", "get_weather", "web_search", "web_extract", "update_plan", "agent_notes", *ROUTED_HANDOFF_TOOLS),
         "keywords": ("calendar", "email", "mail", "inbox", "reminder", "reminders", "meeting", "schedule"),
     },
     # Project team roles. No keywords: the lead assigns them explicitly

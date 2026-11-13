@@ -115,13 +115,22 @@ def avatar_path(record: Any) -> Path | None:
 
 
 def _avatar_data_url(record: Any) -> str | None:
-    """Small pack avatars inline as a data URL (the WebUI relay is JSON-only)."""
+    """Small pack avatars inline as a data URL (no extra request per card)."""
     path = avatar_path(record)
     if path is None or path.stat().st_size > 300 * 1024:
         return None
     import base64
     mime = mimetypes.guess_type(path.name)[0] or "image/png"
     return f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+
+def _avatar_url(record: Any) -> str | None:
+    """Small avatars inline; larger ones by the avatar route (relayed by the WebUI on 8790)."""
+    inline = _avatar_data_url(record)
+    if inline or avatar_path(record) is None:
+        return inline
+    from urllib.parse import quote
+    return f"/v1/team/agents/{quote(str(record.id), safe='')}/avatar"
 
 
 def agent_card(record: Any, *, live: dict[str, dict[str, Any]], statuses: dict[str, str]) -> dict[str, Any]:
@@ -135,7 +144,7 @@ def agent_card(record: Any, *, live: dict[str, dict[str, Any]], statuses: dict[s
         "team": meta.get("team"), "description": meta.get("summary") or meta.get("specialty") or "",
         "persona": meta.get("operator_instructions") or "",
         "skills": specialist_skills(record) or [], "tools": specialist_tools(record) or [],
-        "avatar": {"seed": meta.get("avatar_seed") or record.id, "url": _avatar_data_url(record)},
+        "avatar": {"seed": meta.get("avatar_seed") or record.id, "url": _avatar_url(record)},
         "pack": "character/v1" if meta.get("character_schema") else None,
         "status": activity.get("status") or statuses.get(record.id) or "idle",
         "activity": activity or None,
@@ -157,6 +166,48 @@ def _rooms(gateway) -> list[dict[str, Any]]:
             out.append({"session_id": row["session_id"], "title": row.get("title"), "members": meta.get("room_members") or [],
                         "updated_at": row.get("updated_at"), "probe": bool(meta.get("probe")), "status": row.get("status")})
     return sorted(out, key=lambda r: r.get("updated_at") or 0, reverse=True)
+
+
+def room_handoffs(gateway, members: list[Any], *, rooms: int = 12, limit: int = 20) -> list[dict[str, Any]]:
+    """@Name hand-offs inside rooms, newest first, read back from the transcript.
+
+    A member reply that @-addresses a peer is a hand-off (same rule the room
+    runner applies, ``mentions.mentioned_peers``). It is ``completed`` when
+    that peer replied later in the same run, else ``not_taken`` (capped,
+    passed or failed). Rows match ``/v1/team`` handoffs plus ``kind: room``."""
+    from jaeger_ai.core.team.mentions import Peer, mentioned_peers
+
+    roster = [Peer(m.id, m.display_name) for m in members]
+    names = {m.id: m.display_name for m in members}
+    out: list[dict[str, Any]] = []
+    for room in _rooms(gateway)[:rooms]:
+        sid = room["session_id"]
+        try:
+            rows = list(reversed(gateway.store.list_messages(sid, limit=200)["messages"]))
+        except Exception:  # noqa: BLE001 — a listing must stay readable
+            continue
+        for index, row in enumerate(rows):
+            speaker = row.get("sender_agent_id")
+            if row.get("kind") != "room_reply" or not speaker:
+                continue
+            links = row.get("links") or {}
+            run = links.get("room_run_id")
+            later = rows[index + 1:]
+            for peer in mentioned_peers(str(row.get("content") or ""), roster, speaker):
+                answered = next((r for r in later if r.get("sender_agent_id") == peer.id
+                                 and (r.get("links") or {}).get("room_run_id") == run), None)
+                at = row.get("created_at") or row.get("timestamp")
+                out.append({
+                    "id": f"room:{sid}:{row.get('id')}:{peer.id}", "kind": "room",
+                    "from_agent_id": speaker, "to_agent_id": peer.id,
+                    "status": "completed" if answered else "not_taken",
+                    "task": f"{names.get(speaker, speaker)} → {peer.name} in “{room.get('title') or 'room'}”",
+                    "session_id": sid, "room_title": room.get("title"), "probe": room.get("probe"),
+                    "created_at": at,
+                    "updated_at": (answered or {}).get("created_at") or at,
+                })
+    out.sort(key=lambda h: h.get("created_at") or 0, reverse=True)
+    return out[:limit]
 
 
 def register(gateway) -> None:
@@ -182,11 +233,15 @@ def register(gateway) -> None:
         ids = {m.id for m in members if m.id != LEAD_ID}
         handoffs = [h for h in gateway.store.list_handoffs(limit=200)
                     if h.get("to_agent_id") in ids or h.get("from_agent_id") in ids][:20]
+        direct = [{"kind": "call_agent", **{k: h.get(k) for k in ("id", "from_agent_id", "to_agent_id", "status", "task",
+                                                                "session_id", "created_at", "updated_at")}}
+                  for h in handoffs]
+        in_rooms = await asyncio.to_thread(room_handoffs, gateway, members)
+        merged = sorted(direct + in_rooms, key=lambda h: h.get("created_at") or 0, reverse=True)[:20]
         return web.json_response({
             "agents": [agent_card(m, live=gateway._team_live, statuses=statuses) for m in members],
             "rooms": _rooms(gateway),
-            "handoffs": [{k: h.get(k) for k in ("id", "from_agent_id", "to_agent_id", "status", "task", "session_id",
-                                                "created_at", "updated_at")} for h in handoffs],
+            "handoffs": merged,
             "limits": {"room_max_turns": ROOM_MAX_TURNS, "room_max_depth": ROOM_MAX_DEPTH,
                        "room_max_per_reply": ROOM_MAX_PER_REPLY},
         })
