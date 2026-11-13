@@ -2460,8 +2460,19 @@ def _confirmation_provider(config: Any, layout: Any = None) -> Any:
     neither a tty nor a bridge (the MCP server, a headless daemon) never
     reaches that swap and keeps Console's fail-closed non-tty default —
     the "true headless daemon" case stays denied, same as before 0.9.3."""
-    mode = getattr(getattr(config, "permissions", None), "mode", "confirm")
-    if mode == "allow":
+    from jaeger_ai.core.runtime.autonomy import (
+        effective_autonomy, permissions_mode_for, sync_permissions_mode,
+    )
+    config_path = getattr(layout, "config_path", None) if layout is not None else None
+    try:
+        if config_path:
+            sync_permissions_mode(config_path)
+    except Exception:  # noqa: BLE001 — boot must not fail on a migrate
+        pass
+    mode = permissions_mode_for(effective_autonomy(config_path))
+    # Backward compatible: a legacy file that only set permissions.mode=allow
+    # is already mapped by configured_autonomy / sync_permissions_mode.
+    if mode == "allow" or getattr(getattr(config, "permissions", None), "mode", "confirm") == "allow":
         from jaeger_os.core.safety.permissions import AllowAllProvider
         return AllowAllProvider()
     return ConsoleConfirmationProvider(instance_dir=getattr(layout, "root", None))

@@ -480,14 +480,22 @@ class JaegerTUI:
         """Install the permission confirmation provider for the TUI.
 
         'confirm' mode → the spinner-aware prompt; 'allow' mode →
-        auto-approve. The mode is ``config.permissions.mode``, chosen at
-        first-boot setup and persisted, so the posture survives restarts."""
+        auto-approve. The owner-facing control is ``automation.autonomy``;
+        ``permissions.mode`` is derived from it (auto→allow, otherwise
+        confirm)."""
         from jaeger_os.core.safety.permissions import (
             AllowAllProvider, PermissionPolicy, install_policy,
         )
+        from jaeger_ai.core.runtime.autonomy import (
+            effective_autonomy, permissions_mode_for,
+        )
         from jaeger_ai.main import _pipeline
         cfg = _pipeline.get("config")
-        mode = getattr(getattr(cfg, "permissions", None), "mode", "confirm")
+        layout = _pipeline.get("layout")
+        config_path = getattr(layout, "config_path", None) if layout is not None else None
+        mode = permissions_mode_for(effective_autonomy(config_path))
+        if getattr(getattr(cfg, "permissions", None), "mode", "confirm") == "allow":
+            mode = "allow"
         provider = (AllowAllProvider() if mode == "allow"
                     else _TuiConfirmationProvider(self))
         install_policy(PermissionPolicy(confirmation=provider))
