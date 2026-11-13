@@ -357,7 +357,7 @@ export interface JaegerSource {
   clarifications?(sessionId: string): Promise<ClarificationSnapshot[]>;
   /** Read one original clarification receipt after an uncertain answer acknowledgement. */
   clarificationStatus?(sessionId: string, clarifyId: string): Promise<ClarificationSnapshot>;
-  approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
+  approve(sessionId: string, approvalId: string, approved: boolean, scope?: "once" | "session"): Promise<void>;
   /** POST /v1/sessions/{id}/clarify/{clarify_id}: resolves once; rejects on 409 stale/already resolved. */
   answerClarify?(sessionId: string, clarifyId: string, revision: number, response: string): Promise<void>;
   tasks(): Promise<Task[]>;
