@@ -177,7 +177,7 @@ SEARCH_ROUTES = frozenset({("POST", "/v1/search"), ("POST", "/v1/fetch"),
                            ("POST", "/v1/backlog"), ("POST", "/v1/backlog/{id}"), ("POST", "/v1/backlog/{id}/assign"),
                            ("POST", "/v1/backlog/import")})
 #: Lead → specialist handoff (``call_agent``): owners and jaegerd, never outside callers.
-#: ``transfer_to_agent`` (OpenAI-style handoff of the running chat, Team mode) rides the same grant.
+#: Inner helpers use ``delegate`` (and its ``call_agent`` alias) on the same grant.
 DELEGATE_ROUTES = frozenset({("POST", "/v1/agents/{id}/handoff"), ("POST", "/v1/sessions/{id}/transfer")})
 #: GET routes an outside (prefixed) caller may use; all are session-scoped.
 PREFIXED_READ_ROUTES = frozenset({

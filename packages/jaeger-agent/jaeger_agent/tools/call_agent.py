@@ -231,7 +231,7 @@ def call_agent(
     """Hand a bounded task to a teammate agent and return its evidence.
 
     ``agent_id`` is the agent's id (``native:...``) or its display name
-    (``@Jaeger Design & Style`` works). Uses Gateway ``POST /v1/agents/{id}/handoff``. Approval, timeout, cancel
+  ). Uses Gateway ``POST /v1/agents/{id}/handoff``. Approval, timeout, cancel
     and specialist failure are explicit. This is not complete until a child
     run result is persisted.
     """
@@ -272,8 +272,7 @@ def call_agent(
                          require_approval=require_approval, request_id=rid,
                          parent_run_id=parent_run_id, permitted_context=permitted_context,
                          timeout_seconds=timeout_seconds, tools=tools, project_id=project_id)
-    # The Gateway applies the owner's collaboration mode: in one mind (and in
-    # auto unless the owner @mentioned the agent) this runs as ``delegate``.
+    # call_agent is always an alias of delegate: Jaeger stays the lead.
     body["via"] = "call_agent"
     body["lead_allowed_tools"] = _lead_tools()
     status, payload = _request_json(
@@ -474,36 +473,3 @@ def delegate(profile: str = "", brief: str = "", context: str = "", timeout_seco
             return {"ok": False, "status": "failed", "error": current.get("error"), "handoff_id": handoff_id}
     return {"ok": False, "status": "timeout", "handoff_id": handoff_id,
             "error": "Helper did not finish in time; its result is not treated as done"}
-
-
-@register_tool_from_function(name="transfer_to_agent", side_effect="external")
-def transfer_to_agent(agent: str = "", reason: str = "") -> dict[str, Any]:
-    """Removed. Jaeger always runs as one lead; use delegate for inner helpers."""
-    del agent, reason
-    return {
-        "ok": False,
-        "error": "transfer_to_agent is no longer available. Jaeger stays the lead; "
-                 "use delegate when a specialist should do a bounded piece of work.",
-    }
-    # The live transfer path below is intentionally unreachable.
-    who = (agent or "").strip()
-    if not who:
-        return {"ok": False, "error": "agent is required", "teammates": _helpers()}
-    record = _resolve_helper(who)
-    if record is None:
-        return {"ok": False, "error": f"unknown teammate: {who}", "teammates": _helpers()}
-    from jaeger_agent.task_port import current_task_context
-    turn = current_task_context() or {}
-    session_id, request_id = turn.get("session_id"), turn.get("request_id")
-    if not session_id or not request_id:
-        return {"ok": False, "error": "transfer_to_agent only works inside a chat turn"}
-    status, payload = _request_json(
-        "POST", f"/v1/sessions/{quote(str(session_id), safe='')}/transfer",
-        {"to_agent_id": record.id, "request_id": request_id, "reason": (reason or "").strip()[:300]},
-        timeout=15,
-    )
-    if status >= 400 or not payload.get("ok"):
-        return {"ok": False, "status": payload.get("status") or "rejected",
-                "error": payload.get("error") or f"transfer refused (HTTP {status})"}
-    return {"ok": True, "status": "transferred", "to": payload.get("agent_name") or record.id,
-            "guidance": "End this turn now with one short line saying who takes over; do not answer the request yourself."}

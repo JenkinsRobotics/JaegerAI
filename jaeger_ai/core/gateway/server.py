@@ -2869,9 +2869,7 @@ class JaegerGatewayApp:
         collab_mode = self._collaboration_mode()
         delegate_mode = str(body.get("mode") or "").strip().lower() == "delegate"
         if not delegate_mode and str(body.get("via") or "") == "call_agent":
-            from jaeger_ai.core.runtime.collaboration import call_agent_is_delegate
-            delegate_mode = call_agent_is_delegate(
-                collab_mode, explicit_mention=self._owner_mentioned(body, target))
+            delegate_mode = True
         if delegate_mode and body.get("reply_to_handoff_id"):
             return web.json_response({"error": "An inner helper has no thread to reply to; delegate a new brief"}, status=400)
         if delegate_mode:
@@ -4227,86 +4225,12 @@ class JaegerGatewayApp:
         return web.json_response({"deleted": True})
 
     async def handle_session_transfer(self, request: web.Request) -> web.Response:
-        """POST /v1/sessions/{id}/transfer — OpenAI Agents SDK handoff, Team mode.
-
-        The running turn's agent hands the conversation to a teammate: the chat
-        moves to that agent with its full history (``session.handoff`` with
-        ``via: transfer``) and, when the current turn completes, the teammate
-        takes the next turn in the same chat and answers in its own voice.
-        Body: ``{to_agent_id, request_id, reason?}``. Refused in One mind
-        (helpers are inner thoughts there: use ``delegate``), for a turn that is
-        not running in this chat, for a disabled or non-team agent, and for a
-        hand-off child (no transfer chains inside a hand-off)."""
-        session_id = request.match_info["id"]
-        session = self.store.get_session(session_id)
-        if not session:
-            return web.json_response({"error": "Session not found"}, status=404)
-        body = await request.json() if request.can_read_body else {}
-        if not isinstance(body, dict):
-            return web.json_response({"error": "JSON object required"}, status=400)
-        mode = self._collaboration_mode()
-        if mode == "one_mind":
-            return web.json_response({"ok": False, "status": "rejected", "error":
-                "Collaboration mode is One mind: you answer every message. Use delegate(profile, brief) "
-                "to consult a helper instead of transferring the chat."}, status=409)
-        rid = str(body.get("request_id") or "").strip()
-        row = (self.store.get_request(rid) or self.store.get_request_by_turn(rid)) if rid else None
-        if not row or row.get("session_id") != session_id or row.get("status") not in {"admitted", "running"}:
-            return web.json_response({"ok": False, "error": "Only the running turn of this chat can transfer it"},
-                                     status=409)
-        meta = session.get("metadata") or {}
-        if meta.get("handoff_child"):
-            return web.json_response({"ok": False, "error": "A hand-off child cannot transfer its chat"}, status=409)
-        try:
-            target = self._registry().get_agent(str(body.get("to_agent_id") or "").strip())
-        except Exception:  # noqa: BLE001
-            target = None
-        if target is None or getattr(target, "disabled", False):
-            return web.json_response({"ok": False, "error": "Agent not found or disabled"}, status=404)
-        current = self._session_agent_id(session)
-        if target.id == current:
-            return web.json_response({"ok": False, "error": "This chat is already with that agent"}, status=409)
-        reason = str(body.get("reason") or "").strip()[:300] or None
-        self.store.update_metadata(session_id, {
-            "agent_id": target.id, "previous_agent_id": current, "handoff_reason": reason,
-            "handed_off_at": time.time(), "agent_pinned": True, "routed_by": "transfer",
-            "route_checked": True,
-        })
-        display = str(getattr(target, "display_name", "") or target.id)
-        self.event_bus.publish(session_id, "session.handoff", {
-            "session_id": session_id, "from_agent_id": current, "to_agent_id": target.id,
-            "agent": target.to_dict(), "reason": reason, "keep_history": True, "via": "transfer",
-            "request_id": row["request_id"], "collaboration_mode": mode,
-        })
-        self.__dict__.setdefault("_pending_transfers", {})[row["request_id"]] = {
-            "session_id": session_id, "to_agent_id": target.id, "display": display,
-            "from_agent_id": current, "reason": reason,
-        }
-        return web.json_response({"ok": True, "status": "transferred", "to_agent_id": target.id,
-                                  "agent_name": display, "session_id": session_id})
-
-    def _continue_after_transfer(self, request_id: str | None) -> None:
-        """Start the teammate's turn once the transferring turn completed."""
-        pending = self.__dict__.get("_pending_transfers") or {}
-        plan = pending.pop(request_id, None) if request_id else None
-        if not plan:
-            return
-        row = self.store.get_request(str(request_id)) or {}
-        if row.get("status") != "completed":
-            return  # a stopped/failed turn does not hand the next turn over
-        sid = plan["session_id"]
-        note = (f"(Handed off to {plan['display']}"
-                + (f": {plan['reason']}" if plan.get("reason") else "")
-                + ". Continue the conversation above from here.)")
-        try:
-            admitted = self.store.admit_request(
-                sid, note, request_id=f"{request_id}-transfer",
-                requested={"options": {"source": "handoff", "transfer_from_request": request_id}},
-            )
-        except Exception:  # noqa: BLE001 — the chat is already the teammate's; the owner can just write
-            logger.warning("handoff continuation not admitted for %s", request_id, exc_info=True)
-            return
-        self._start_admitted_turn(admitted, sid, note)
+        """Removed. Jaeger stays the lead; use delegate for a bounded helper run."""
+        return web.json_response(
+            {"ok": False, "error": "Chat transfer is no longer available. Jaeger stays the lead; use delegate for a helper.",
+             "status": "removed"},
+            status=410,
+        )
 
     async def handle_session_handoff(self, request: web.Request) -> web.Response:
         """Transfer a session to another agent (P6) — never fee-gated.
@@ -4826,22 +4750,6 @@ class JaegerGatewayApp:
 
     # ── Collaboration mode: inner helpers (delegate) ─────────────────────
 
-    def _owner_mentioned(self, body: dict[str, Any], target: Any) -> bool:
-        """Did the owner's asking message @mention ``target``? (auto mode: an
-        explicit @Name keeps the team hand-off; otherwise call_agent delegates)."""
-        parent = str(body.get("parent_run_id") or body.get("parent_request_id") or "")
-        row = (self.store.get_request(parent) or self.store.get_request_by_turn(parent)) if parent else None
-        text = str((row or {}).get("input_text") or "")
-        if "@" not in text:
-            return False
-        from jaeger_ai.core.team.mentions import Peer, mentioned_peers
-        name = str(getattr(target, "display_name", "") or getattr(target, "name", "") or "")
-        peers = [Peer(target.id, name)]
-        short = re.sub(r"(?i)^jaeger\s+", "", name).strip()
-        if short and short != name:
-            peers.append(Peer(target.id, short))
-        return bool(mentioned_peers(text, peers))
-
     @staticmethod
     def _delegate_tool_grant(lead_allowed: Any, requested: list[str] | None) -> list[str]:
         """Helper tools = the lead's tools minus what helpers may never use
@@ -4996,7 +4904,7 @@ class JaegerGatewayApp:
     @staticmethod
     def _names_teammate(text: str, agents: Any) -> bool:
         """True when the message asks the lead to delegate (``call_agent``) or
-        names a team agent (``@Name`` or its display name). Such a message is
+        names a helper by display name. Such a message is
         the lead's to hand off, so triage must not move it to a specialist
         that cannot call anyone."""
         low = str(text or "").lower()

@@ -1,5 +1,5 @@
-"""Team runtime helpers: @Name addressing, room transcript, and the team pack importer.
+"""Helper pack importer and related team-registry helpers.
 
-The team itself is the AgentRegistry + Gateway specialist path
-(jaeger_ai/core/gateway/team_routes.py); this package holds the pure pieces.
+The helper roster itself is the AgentRegistry plus Gateway specialist path
+(jaeger_ai/core/gateway/team_routes.py). Room @Name addressing was removed.
 """
