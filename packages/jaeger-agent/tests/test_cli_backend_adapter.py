@@ -241,3 +241,28 @@ def test_repaired_cli_call_reaches_existing_dispatch_and_approval_hook():
     assert agent.run_turn('Read fixture')=='Done'
     assert approvals==[('read_fixture',{'label':'proof'})]
     assert executed==['proof']
+
+
+def test_grok_without_delta_sink_still_reports_progress(tmp_path):
+    """Root cause of the 120s StaleCallTimeout: a grok call with no on_delta
+    used communicate(), so the stale detector saw zero progress and measured
+    wall-clock time. Grok now always streams so liveness is observable."""
+    import sys, threading
+    script = tmp_path / 'provider.py'
+    script.write_text("""import json,time
+for i in range(4):
+    print(json.dumps({'type':'stream_event','event':{'type':'content_block_delta','delta':{'type':'thinking_delta','thinking':'.'}}}),flush=True)
+    time.sleep(.2)
+print(json.dumps({'type':'result','result':'done'}),flush=True)
+""")
+    adapter = CliBackendAdapter('grok', executable=sys.executable, spec=SimpleNamespace(args=(str(script),), prompt_mode='placeholder'), timeout_s=10)
+    raw = adapter.call({'prompt': 'x'}, threading.Event(), stale_timeout=0.5)
+    assert adapter.parse_response(raw)['content'] == 'done'
+
+
+def test_first_progress_limit_never_below_cli_floor():
+    from jaeger_agent.adapters.cli_backend import CLI_FIRST_PROGRESS_FLOOR_S, _first_progress_limit
+    assert _first_progress_limit(None, 120.0, True) == CLI_FIRST_PROGRESS_FLOOR_S
+    assert _first_progress_limit(900.0, 120.0, True) == 900.0
+    assert _first_progress_limit(None, None, True) is None
+    assert _first_progress_limit(60.0, 120.0, False) is None

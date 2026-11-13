@@ -186,6 +186,21 @@ def cli_usage(stdout: str) -> dict[str, Any]:
     return best
 
 
+# Agent CLIs boot a runtime, load config and often reason before the first
+# streamed byte. Never declare "no first progress" earlier than this.
+CLI_FIRST_PROGRESS_FLOOR_S = 300.0
+
+
+def _first_progress_limit(requested: Any, stale: Any, streams: bool) -> float | None:
+    """Silence limit before the CLI's first output (``None`` = no limit)."""
+    if not streams:
+        return None
+    values = [float(v) for v in (requested, stale) if isinstance(v, (int, float)) and v > 0]
+    if not values:
+        return None
+    return max(CLI_FIRST_PROGRESS_FLOOR_S, *values)
+
+
 def _build_argv(spec: Any, executable: str, prompt: str) -> tuple[list[str], bytes | None]:
     """Return ``(argv, stdin_bytes)``. Never goes through a shell."""
     if getattr(spec, "prompt_mode", "stdin") == "stdin":
@@ -274,6 +289,14 @@ class CliBackendAdapter(ProviderAdapter):
         on_delta = kwargs.get("on_delta") if self.backend_id == "grok" else None
         on_reasoning = kwargs.get("on_reasoning") if self.backend_id == "grok" else None
         progress = CallProgress()
+        # Root cause of the 120s ``StaleCallTimeout`` on grok turns (helpers
+        # and any caller without a delta sink): the non-streaming path used
+        # ``communicate()``, which never touches the progress beacon, so the
+        # stale detector measured TOTAL elapsed time and killed every healthy
+        # CLI completion that took longer than 120s. Grok can always report
+        # progress, so stream it even when nobody renders the deltas.
+        if self.backend_id == "grok" and not callable(on_delta):
+            on_delta = lambda _text: None  # noqa: E731 — progress-only sink
         if callable(on_delta) or callable(on_reasoning):
             on_delta = on_delta or (lambda _: None)
             visible_stream = VisibleTextStream(on_delta)
@@ -308,11 +331,16 @@ class CliBackendAdapter(ProviderAdapter):
         def _abandon() -> None:
             self._kill()
 
+        # A CLI that cannot stream gives the detector nothing to observe; a
+        # silence limit would just be a wall clock. Fall back to the CLI's
+        # own process timeout (``self.timeout_s``) instead of a false stall.
+        streams = on_delta is not None
         raw = interruptible_call(
             _run,
             interrupt_event,
-            stale_timeout=kwargs.get("stale_timeout"),
-            first_progress_timeout_s=kwargs.get("first_progress_timeout_s"),
+            stale_timeout=kwargs.get("stale_timeout") if streams else None,
+            first_progress_timeout_s=_first_progress_limit(
+                kwargs.get("first_progress_timeout_s"), kwargs.get("stale_timeout"), streams),
             on_heartbeat=kwargs.get("on_heartbeat"),
             progress=progress,
             on_abandon=_abandon,
