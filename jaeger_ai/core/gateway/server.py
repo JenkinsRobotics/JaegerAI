@@ -645,52 +645,59 @@ class _GatewayToolConfirmationProvider:
         # approval card answers it; grants and autonomy shortcuts do not.
         if getattr(request, "force_prompt", False) is True:
             return self._decided(self._prompt(request))
-        if skill_name and skill_name in self._session_grants():
+        # Plan mode: write/exec tools are blocked, not offered as a card.
+        if self._plan_mode() and self._write_or_exec(request):
+            return False
+        if self._in_saved_scope(request):
             return True
-        if self._approved_task_code_step(request):
-            # Matthew, 2026-11-01: "Skip the confirmation for all code steps in approved tasks."
-            # Only code tools, only inside a durable task the owner already authorized; the sandbox
-            # limits are unchanged and chat outside a task keeps its card.
-            return True
-        # Explicit ask mode takes precedence over standing grants.
-        # Explicit session/task approvals above remain valid; force_prompt always wins.
         from jaeger_ai.core.runtime.autonomy import effective_autonomy
         try:
             mode = effective_autonomy(self.app._config_path())
         except Exception:
             mode = "ask"
+        if mode == "auto":
+            return True
         if mode == "ask" and getattr(request, "tier", None) != PermissionTier.READ_ONLY:
             return self._decided(self._prompt(request))
-        if self._write_or_exec(request) and not self._autonomy_auto():
-            # Gateway-turn policy: writes and code/shell execution get a card
-            # unless a project grant covers the target or the owner granted
-            # this session (above). Persistent per-skill "always" grants and
-            # the commissioning filesystem.write default do NOT apply here.
-            try:
-                if self.app._project_grant_allows(self.session_id, request):
-                    return True
-            except Exception:  # noqa: BLE001 — a grant check that fails means "ask"
-                logger.debug("project grant check failed", exc_info=True)
+        if mode == "scoped":
+            verdict, reason = self._review_out_of_scope(request)
+            if verdict == "approve":
+                return True
+            return self._decided(self._prompt(request, reviewer_verdict=verdict, reviewer_reason=reason))
+        if self._write_or_exec(request):
             return self._decided(self._prompt(request))
+        return self._decided(self._prompt(request))
+
+    def _plan_mode(self) -> bool:
+        from jaeger_ai.contract.modes import normalize_interaction_tier
         try:
-            if self._grants().is_granted(skill_name):
+            row = self.app.store.get_request(self.request_id) or {}
+            execution = row.get("execution") if isinstance(row.get("execution"), dict) else {}
+            tier = execution.get("interaction_tier") or (row.get("metadata") or {}).get("interaction_tier")
+            if not tier:
+                tier = self.app._current_tier()
+            return normalize_interaction_tier(tier) == "plan"
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _in_saved_scope(self, request: Any) -> bool:
+        """Standing session, skill, project, or read-only grants — 'Approve for me' auto-run."""
+        from jaeger_os.core.safety.permissions import PermissionTier
+        skill_name = str(getattr(request, "skill", "") or "")
+        if skill_name and skill_name in self._session_grants():
+            return True
+        if self._approved_task_code_step(request):
+            return True
+        try:
+            if skill_name and self._grants().is_granted(skill_name):
                 return True
-        except Exception:  # noqa: BLE001 — unreadable grants mean "ask", never "allow"
+        except Exception:  # noqa: BLE001
             pass
         try:
-            # Autonomy "auto" means no approval prompts for tiers 1-4. It is
-            # honored only when the instance config explicitly says so; the
-            # code default is "scoped" and an unreadable config reads as
-            # "ask" (core/runtime/autonomy.py). Hardline-blocked commands never
-            # reach here (the guard sits outside the tiers), and every action
-            # stays audited.
-            from jaeger_ai.core.entity.runtime import EntityRuntime
-            from jaeger_ai.core.runtime.autonomy import effective_autonomy
-            layout = getattr(EntityRuntime.get_singleton(), "layout", None)
-            if effective_autonomy(getattr(layout, "config_path", None)) == "auto":
+            if self.app._project_grant_allows(self.session_id, request):
                 return True
-        except Exception:  # noqa: BLE001 — unreadable settings mean "ask", never "allow"
-            pass
+        except Exception:  # noqa: BLE001
+            logger.debug("project grant check failed", exc_info=True)
         try:
             from jaeger_ai.core.instance.commissioning import load_authority_policy
             from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -703,12 +710,51 @@ class _GatewayToolConfirmationProvider:
                 return True
         except Exception:
             pass
+        return False
+
+    def _review_out_of_scope(self, request: Any) -> tuple[str, str]:
+        """Ask the reviewer model; always emit approval.reviewed. Failure is unsure."""
+        from jaeger_ai.core.authority.reviewer import review_action
+
+        skill = str(getattr(request, "skill", "") or "")
+        op = str(getattr(request, "operation", "") or "")
+        tool = f"{skill}.{op}" if skill else op
+        args = getattr(request, "arguments", None) or getattr(request, "params", None) or getattr(request, "input", None)
+        user_request = ""
+        model = provider = None
         try:
-            if self.app._project_grant_allows(self.session_id, request):
-                return True
-        except Exception:  # noqa: BLE001 — a grant check that fails means "ask"
-            logger.debug("project grant check failed", exc_info=True)
-        return self._decided(self._prompt(request))
+            row = self.app.store.get_request(self.request_id) or {}
+            user_request = str(row.get("input_text") or "")
+            model = row.get("model") or None
+            provider = row.get("provider") or None
+            if not model:
+                session = self.app.store.get_session(self.session_id) or {}
+                meta = session.get("metadata") or {}
+                model = session.get("model") or meta.get("model")
+                provider = provider or session.get("provider") or meta.get("provider")
+        except Exception:  # noqa: BLE001
+            pass
+        verdict, reason = review_action(
+            self.app,
+            user_request=user_request,
+            tool=tool,
+            arguments=args,
+            model=str(model) if model else None,
+            provider=str(provider) if provider else None,
+        )
+        payload = {
+            "session_id": self.session_id,
+            "request_id": self.request_id,
+            "tool": tool,
+            "verdict": verdict,
+            "reason": reason,
+        }
+        try:
+            self.app.event_bus.publish(self.session_id, "approval.reviewed", payload)
+            self.app.event_bus.publish("*", "approval.reviewed", payload)
+        except Exception:  # noqa: BLE001 — a missing event must not change the decision
+            logger.debug("approval.reviewed publish failed", exc_info=True)
+        return verdict, reason
 
     _DELETE_TOOLS = frozenset({"delete_file", "remove_file", "delete_path", "delete", "rm"})
     _EXEC_TOOLS = frozenset({"execute_code", "run_code", "python_exec"})
@@ -769,7 +815,8 @@ class _GatewayToolConfirmationProvider:
             self.app._owner_declined.add(self.request_id)
         return approved
 
-    def _prompt(self, request: Any) -> bool:
+    def _prompt(self, request: Any, reviewer_verdict: str | None = None,
+                reviewer_reason: str | None = None) -> bool:
         """Park an approval card and wait for the owner's decision."""
         loop = getattr(self.app, "_loop", None)
         if loop is None or not loop.is_running():
@@ -800,6 +847,8 @@ class _GatewayToolConfirmationProvider:
                     "target": target,
                     "summary": summary,
                     "reason": tier_name,
+                    **({"reviewer_verdict": reviewer_verdict} if reviewer_verdict else {}),
+                    **({"reviewer_reason": reviewer_reason} if reviewer_reason else {}),
                     **({"call_id": call_id} if call_id else {}),
                     **({"origin": origin} if origin else {}),
                 },
@@ -815,6 +864,8 @@ class _GatewayToolConfirmationProvider:
                 "options": APPROVAL_OPTIONS,
                 "session_id": self.session_id,
                 "request_id": self.request_id,
+                **({"reviewer_verdict": reviewer_verdict} if reviewer_verdict else {}),
+                **({"reviewer_reason": reviewer_reason} if reviewer_reason else {}),
                 **({"call_id": call_id} if call_id else {}),
             })
 
@@ -988,6 +1039,10 @@ class JaegerGatewayApp:
             sync_permissions_mode(self._config_path())
         except Exception:  # noqa: BLE001 — a config migrate never blocks startup
             logger.warning("autonomy/permissions sync skipped", exc_info=True)
+        try:
+            self._migrate_retired_interaction_tier()
+        except Exception:  # noqa: BLE001 — a config migrate never blocks startup
+            logger.warning("interaction-tier migrate skipped", exc_info=True)
         self.store.event_sink = self.event_bus.fanout  # unknown-outcome acknowledgements reach live clients
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
         #: clarify_id → future resolved with the owner's answer (GB-033).
@@ -1799,8 +1854,6 @@ class JaegerGatewayApp:
         mount_blueprint_routes(self)
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
-        self.app.router.add_get("/v1/runtime/collaboration", self.handle_get_collaboration)
-        self.app.router.add_post("/v1/runtime/collaboration", self.handle_set_collaboration)
         self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)
         self.app.router.add_get("/v1/runtime/tier", self.handle_get_tier)
         self.app.router.add_post("/v1/runtime/tier", self.handle_set_tier)
@@ -4350,8 +4403,10 @@ class JaegerGatewayApp:
             lane, _ = split_routed_model_id(str(requested["model"]))
             if lane:
                 requested["provider"] = lane
-        if "interaction_tier" not in requested:
-            requested["interaction_tier"] = self._current_tier()
+        from jaeger_ai.contract.modes import normalize_interaction_tier
+        requested["interaction_tier"] = normalize_interaction_tier(
+            requested.get("interaction_tier") or self._current_tier()
+        )
         # vNext M3 fast lane: a client may mark a turn fast_lane (voice uses
         # this); it lands in options so the executive can route it to the
         # direct cognition lane. It selects a strategy only — authority and
@@ -5014,19 +5069,13 @@ class JaegerGatewayApp:
         if not helpers:
             return ""  # no specialists: nothing to say, the request stays unadorned
         names = ", ".join(str(getattr(a, "display_name", a.id)) for a in helpers)
-        if mode == "team":
-            return ("[Collaboration: Team]\nYour teammates (" + names + ") can take a task in their own voice: "
-                    "call_agent hands them one task and their reply is shown in the chat; "
-                    "transfer_to_agent(agent, reason) hands them this whole conversation (they take the next turn "
-                    "and keep the chat). For an internal check whose result only you need, use delegate(profile, brief).")
-        lead = ("[Collaboration: One mind]\n" if mode == "one_mind" else "[Collaboration: Auto]\n")
-        return lead + (
+        return (
+            "[Collaboration: One mind]\n"
             "You are one mind. Your specialists are inner helpers, not separate voices: " + names + ". "
             "When a focused review or a context-heavy side task would help, call delegate(profile, brief, context). "
             "A helper cannot see this chat, so put what it needs in brief/context. It returns its result only to you; "
-            "then answer the person yourself, in your own voice, owning the answer. For simple things just do the work. "
-            + ("" if mode == "one_mind" else
-               "If the person explicitly @mentions an agent, call_agent hands that agent the task in its own voice.")).strip()
+            "then answer the person yourself, in your own voice, owning the answer. For simple things just do the work."
+        )
 
     def _one_mind_front_door(self, session: dict[str, Any] | None, agent_id: str | None,
                              agent: Any = None):
@@ -6148,12 +6197,23 @@ class JaegerGatewayApp:
             model = "configured"
             response_text: str | None = None
 
+            from jaeger_ai.contract.modes import (
+                normalize_interaction_tier, plan_mode_system_prompt,
+            )
+            early_tier = normalize_interaction_tier(
+                (execution or {}).get("interaction_tier") or self._current_tier()
+            )
+            if early_tier == "plan":
+                system_prompt = plan_mode_system_prompt(system_prompt)
+                execution = self._plan_mode_execution(execution)
             text_only = (session or {}).get("metadata", {}).get("execution_mode") == "text_only"
             from jaeger_ai.core.runtime.autonomous_runner import is_actionable_request
             actionable = bool(
                 (session or {}).get("metadata", {}).get("actionable")
                 or is_actionable_request(request_text)
             )
+            if early_tier == "chat":
+                actionable = False
 
             loop = asyncio.get_running_loop()
 
@@ -6250,7 +6310,10 @@ class JaegerGatewayApp:
             from jaeger_ai.core.entity.runtime import EntityRuntime
             runtime = EntityRuntime.get_singleton()
 
-            tier = (execution or {}).get("interaction_tier") or self._current_tier()
+            from jaeger_ai.contract.modes import normalize_interaction_tier
+            tier = normalize_interaction_tier(
+                (execution or {}).get("interaction_tier") or self._current_tier()
+            )
             # vNext M3 fast lane: turns on a voice-* session are spoken
             # conversation; the executive routes them to DIRECT_RESPONSE
             # unless the utterance asks for work. Authority and verification
@@ -7567,13 +7630,8 @@ class JaegerGatewayApp:
         return web.json_response({"autonomy": mode, "options": list(AUTONOMY)})
 
     def _collaboration_mode(self) -> str:
-        """Saved collaboration mode: one_mind (default) | team | auto."""
-        from jaeger_ai.core.runtime.collaboration import configured_mode
-        try:
-            return configured_mode(self._config_path())
-        except Exception:  # noqa: BLE001 — unreadable → the narrow default
-            from jaeger_ai.core.runtime.collaboration import DEFAULT
-            return DEFAULT
+        """Jaeger always runs as one lead with internal helpers."""
+        return "one_mind"
 
     async def handle_get_collaboration(self, request: web.Request) -> web.Response:
         """GET /v1/runtime/collaboration: one_mind | team | auto (saved setting)."""
@@ -7581,9 +7639,13 @@ class JaegerGatewayApp:
         return web.json_response(snapshot(self._collaboration_mode()))
 
     async def handle_set_collaboration(self, request: web.Request) -> web.Response:
-        """POST /v1/runtime/collaboration ``{"mode": "one_mind|team|auto"}``: saved to
-        the instance config (``automation.collaboration_mode``); the next message,
-        delegation and room post read it. Publishes ``collaboration.mode.changed``."""
+        """Removed. Collaboration is always one lead with internal helpers."""
+        return web.json_response(
+            {"error": "Collaboration mode is no longer a setting. Jaeger always runs as one lead with internal helpers.",
+             "mode": "one_mind"},
+            status=410,
+        )
+        # Unreachable: previous setter kept below only as a reference.
         from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
         from jaeger_ai.core.runtime.collaboration import MODES, snapshot
 
@@ -7608,26 +7670,77 @@ class JaegerGatewayApp:
         self.event_bus.publish("*", "collaboration.mode.changed", {"mode": mode, "previous": previous})
         return web.json_response(snapshot(mode))
 
+    def _migrate_retired_interaction_tier(self) -> None:
+        """Rewrite a saved 'jaeger' run mode to Agent (resident mode was removed)."""
+        from jaeger_ai.contract.modes import normalize_interaction_tier
+        from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+
+        path = self._config_path()
+        if path is None or not Path(path).is_file():
+            return
+        config = load_yaml(Path(path), Config)
+        raw = getattr(getattr(config, "automation", None), "interaction_tier", None)
+        wanted = normalize_interaction_tier(raw)
+        if raw == wanted:
+            return
+        config.automation.interaction_tier = wanted
+        dump_yaml(Path(path), config)
+
     def _current_tier(self) -> str:
-        """Return the active interaction tier ('chat', 'agent', 'jaeger')."""
+        """Return the active work style ('chat', 'agent', or 'plan')."""
+        from jaeger_ai.contract.modes import DEFAULT_INTERACTION_TIER, normalize_interaction_tier
+
         path = self._config_path()
         if path is not None and Path(path).is_file():
             try:
-                from jaeger_ai.contract.modes import INTERACTION_TIERS
                 from jaeger_ai.core.instance.schemas import Config, load_yaml
 
                 cfg = load_yaml(Path(path), Config)
-                tier = getattr(cfg.automation, "interaction_tier", "agent")
-                if tier in INTERACTION_TIERS:
-                    return tier
+                return normalize_interaction_tier(
+                    getattr(cfg.automation, "interaction_tier", DEFAULT_INTERACTION_TIER)
+                )
             except Exception:
                 pass
-        return "agent"
+        return DEFAULT_INTERACTION_TIER
+
+    def _plan_mode_execution(self, execution: dict[str, Any] | None) -> dict[str, Any]:
+        """Narrow this turn's tool grant to Plan-mode read/inspect tools."""
+        from jaeger_ai.contract.modes import plan_tool_allowed
+
+        current = dict(execution or {})
+        grant = current.get("allowed_tools")
+        if grant is None:
+            names = self._catalog_tool_names()
+        else:
+            names = [str(t) for t in grant]
+        current["allowed_tools"] = [name for name in names if plan_tool_allowed(name)]
+        current["interaction_tier"] = "plan"
+        return current
+
+    def _catalog_tool_names(self) -> list[str]:
+        try:
+            from jaeger_agent.skill_registry.tool_discovery import catalog
+            rows = catalog()
+            names = []
+            for row in rows or []:
+                name = getattr(row, "name", None) or (row.get("name") if isinstance(row, dict) else None)
+                if name:
+                    names.append(str(name))
+            if names:
+                return names
+        except Exception:  # noqa: BLE001
+            logger.debug("plan-mode tool catalog unavailable", exc_info=True)
+        # Conservative read-only fallback if discovery fails.
+        return [
+            "read_file", "list_dir", "list_directory", "search_files", "grep",
+            "glob", "web_search", "retrieve", "memory_get", "get_file",
+        ]
 
     async def handle_get_tier(self, request: web.Request) -> web.Response:
-        """GET /v1/runtime/tier: active agency tier ('chat' | 'agent' | 'jaeger')."""
+        """GET /v1/runtime/tier: active work style ('chat' | 'agent' | 'plan')."""
         from jaeger_ai.contract.modes import INTERACTION_TIERS, TIER_DESCRIPTIONS
 
+        self._migrate_retired_interaction_tier()
         tier = self._current_tier()
         return web.json_response({
             "tier": tier,
@@ -7636,17 +7749,24 @@ class JaegerGatewayApp:
         })
 
     async def handle_set_tier(self, request: web.Request) -> web.Response:
-        """POST /v1/runtime/tier ``{"tier": "chat"|"agent"|"jaeger"}``: save agency tier."""
-        from jaeger_ai.contract.modes import INTERACTION_TIERS
+        """POST /v1/runtime/tier ``{"tier": "chat"|"agent"|"plan"}``: save work style.
+
+        A legacy ``jaeger`` value is accepted and stored as ``agent``.
+        """
+        from jaeger_ai.contract.modes import (
+            INTERACTION_TIERS, RETIRED_INTERACTION_TIERS, TIER_DESCRIPTIONS,
+            normalize_interaction_tier,
+        )
         from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
 
         try:
             body = await request.json()
         except Exception:
             return web.json_response({"error": "Body must be JSON"}, status=400)
-        tier = str((body or {}).get("tier") or "").strip().lower() if isinstance(body, dict) else ""
-        if tier not in INTERACTION_TIERS:
+        raw = str((body or {}).get("tier") or "").strip().lower() if isinstance(body, dict) else ""
+        if raw not in INTERACTION_TIERS and raw not in RETIRED_INTERACTION_TIERS:
             return web.json_response({"error": f"tier must be one of {list(INTERACTION_TIERS)}"}, status=400)
+        tier = normalize_interaction_tier(raw)
         path = self._config_path()
         if path is None or not Path(path).is_file():
             return web.json_response({"error": "No instance config to save to"}, status=409)
@@ -7654,7 +7774,11 @@ class JaegerGatewayApp:
         config.automation.interaction_tier = tier
         dump_yaml(Path(path), config)
         self.event_bus.publish("*", "runtime.tier.changed", {"tier": tier})
-        return web.json_response({"tier": tier, "options": list(INTERACTION_TIERS)})
+        return web.json_response({
+            "tier": tier,
+            "options": list(INTERACTION_TIERS),
+            "descriptions": dict(TIER_DESCRIPTIONS),
+        })
 
     async def handle_channels(self, request: web.Request) -> web.Response:
         from jaeger_ai.features.channels.status import snapshot
@@ -8315,8 +8439,8 @@ class JaegerGatewayApp:
                 tasks = [t for t in tasks if t.get('agent_id') == agent_filter]
             return web.json_response({'tasks': tasks})
         tier = self._current_tier()
-        if tier == "chat":
-            return web.json_response({'error': 'Task submission is disabled in Chat mode'}, status=403)
+        if tier in {"chat", "plan"}:
+            return web.json_response({'error': 'Task submission is disabled in Chat and Plan modes'}, status=403)
         body = await request.json()
         parent = self.store.get_session(str(body.get('session_id') or ''))
         if parent is None:

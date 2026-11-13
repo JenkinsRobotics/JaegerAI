@@ -621,11 +621,12 @@ class BackgroundProducers:
             print(f"[background] cron speak failed: {exc}", flush=True)
 
     def _current_tier(self, cfg: Any) -> str:
+        from jaeger_ai.contract.modes import normalize_interaction_tier
         tier = getattr(self.sink, "current_tier", None)
         if callable(tier):
-            return str(tier() or "agent")
+            return normalize_interaction_tier(tier())
         try:
-            return str(cfg.automation.interaction_tier)
+            return normalize_interaction_tier(getattr(cfg.automation, "interaction_tier", None))
         except Exception:  # noqa: BLE001
             return "agent"
 

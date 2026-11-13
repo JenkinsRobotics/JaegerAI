@@ -51,7 +51,7 @@ EVENT_TYPES = frozenset({
     # Approvals — the approval card. ``approval.request`` carries
     # {approval_id, kind, prompt, options, session_id}; resolve via
     # POST /v1/approvals/{id} which emits ``approval.resolved``.
-    "approval.request", "approval.resolved",
+    "approval.request", "approval.reviewed", "approval.resolved",
     # Human-in-the-loop interrupt: the run is parked on an approval
     # (request status awaiting_approval) and resumes in place on a decision.
     "run.interrupted", "run.resumed",

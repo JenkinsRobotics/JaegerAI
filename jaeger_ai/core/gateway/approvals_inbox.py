@@ -133,6 +133,11 @@ def project(row: dict) -> dict:
         "revision": int(meta.get("revision") or 1),
         "reason": meta.get("decision_reason"),
         "decided_by_device": meta.get("decided_by_device"),
+        "reviewer_verdict": meta.get("reviewer_verdict"),
+        "reviewer_reason": meta.get("reviewer_reason"),
+        "tool": meta.get("tool"),
+        "target": meta.get("target"),
+        "task": meta.get("summary") or row.get("prompt") or "",
     }
 
 

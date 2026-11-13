@@ -129,11 +129,10 @@ def _normalize_requested(requested: dict[str, Any] | None) -> dict[str, Any]:
             if value:
                 out[key] = value
         elif key == "interaction_tier":
+            from jaeger_ai.contract.modes import normalize_interaction_tier
             tier_val = str(value).strip().lower()
-            if tier_val in ("chat", "agent", "jaeger"):
-                out[key] = tier_val
-            elif tier_val:
-                raise ValueError(f"interaction_tier must be one of ['chat', 'agent', 'jaeger'], got '{tier_val}'")
+            if tier_val:
+                out[key] = normalize_interaction_tier(tier_val)
         else:
             text = str(value).strip()
             if text:
