@@ -3180,6 +3180,9 @@ class JaegerGatewayApp:
         }
         if finished:
             tokens = rmeta.get("tokens") if isinstance(rmeta.get("tokens"), dict) else None
+            timing = getattr(self, "_turn_timings", {}).get(origin[1])
+            if timing is not None and hasattr(timing, "helper_done"):
+                timing.helper_done(hid, tokens, status)
             started = record.get("created_at")
             payload.update({
                 "ok": status == "completed", "summary": str(result.get("summary") or "")[:4000],
@@ -6555,6 +6558,17 @@ class JaegerGatewayApp:
         record_entity_event: bool = True,
     ) -> None:
         session_status = "idle" if status in {"completed", "cancelled"} else status
+        if "timing" not in result:
+            # Usage/cost on EVERY terminal run (failed, cancelled, unknown),
+            # not only on a completed turn.
+            timing = self._turn_timings.get(request_id)
+            if timing is not None:
+                try:
+                    if timing.turn_finish_ms is None:
+                        timing.turn_finish_ms = timing.now()
+                    result = {**result, "timing": timing.snapshot()}
+                except Exception:  # noqa: BLE001 — timing never blocks the terminal write
+                    pass
         if assistant_text is None and status != "completed":
             notification = _proactive_notification_payload(session_id, request_id, status, result)
             if notification is not None:

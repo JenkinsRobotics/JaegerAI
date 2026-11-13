@@ -95,13 +95,27 @@ def spans_for_run(events: Iterable[dict[str, Any]], run_id: str, *, session_id: 
         elif kind in ("run", "subagent"):
             a["gen_ai.agent.name"] = data.get("display_name") or data.get("agent_name") or a.get("gen_ai.agent.name")
             a["gen_ai.agent.id"] = data.get("agent_id") or a.get("gen_ai.agent.id")
-            if event == "turn.finish" and isinstance((data.get("timing") or {}).get("usage"), dict):
+            if event in ("delegate.finished", "delegate.failed") and isinstance(data.get("tokens"), dict):
+                t = data["tokens"]
+                if t.get("reported"):
+                    a["gen_ai.usage.input_tokens"] = int(t.get("prompt") or 0)
+                    a["gen_ai.usage.output_tokens"] = int(t.get("completion") or 0)
+                if isinstance(t.get("cost_usd"), (int, float)):
+                    a["jaeger.cost_usd"] = float(t["cost_usd"])
+            if event in ("turn.failed", "turn.cancelled", "turn.unknown") and data.get("error"):
+                a["error.type"] = str(data.get("error"))[:120]
+            if event in ("turn.finish", "turn.failed", "turn.cancelled", "turn.unknown") \
+                    and isinstance((data.get("timing") or {}).get("usage"), dict):
                 u = data["timing"]["usage"]
                 if u.get("reported"):
                     a["gen_ai.usage.input_tokens"] = u.get("input_tokens")
                     a["gen_ai.usage.output_tokens"] = u.get("output_tokens")
                 if isinstance(u.get("cost_usd"), (int, float)):
                     a["jaeger.cost_usd"] = float(u["cost_usd"])
+                helpers = u.get("helpers") if isinstance(u.get("helpers"), dict) else None
+                if helpers:
+                    a["jaeger.helpers.count"] = int(helpers.get("count") or 0)
+                    a["jaeger.helpers.total_tokens"] = int(helpers.get("total_tokens") or 0)
     tid = trace_id(run_id)
     out = []
     for key in order:
