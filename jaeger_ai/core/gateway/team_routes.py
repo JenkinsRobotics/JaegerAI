@@ -254,6 +254,7 @@ def register(gateway) -> None:
         started = time.time()
         turns = 0
         status = "succeeded"
+        outcomes: list[str] = []
         try:
             row = gateway.store.get_session(sid) or {}
             meta = row.get("metadata") or {}
@@ -274,8 +275,12 @@ def register(gateway) -> None:
                     continue
                 turns += 1
                 turn_id = f"rt_{uuid.uuid4().hex[:12]}"
-                await member_turn(sid, run_id, turn_id, member, depth, from_id, from_span, members, roster, by_id,
-                                  queue, room_title=str(row.get("title") or "Team room"))
+                outcomes.append(await member_turn(sid, run_id, turn_id, member, depth, from_id, from_span, members,
+                                                  roster, by_id, queue, room_title=str(row.get("title") or "Team room")))
+            if outcomes and "failed" in outcomes and not any(o in {"succeeded", "passed"} for o in outcomes):
+                status = "failed"
+            elif "failed" in outcomes:
+                status = "partial"
         except Exception as exc:  # noqa: BLE001 — a room failure is reported, never kills the Gateway
             status = "failed"
             logger.exception("room %s failed", sid)
@@ -287,7 +292,7 @@ def register(gateway) -> None:
             gateway._running_tasks.pop(run_id, None)
 
     async def member_turn(sid, run_id, turn_id, member, depth, from_id, from_span, members, roster, by_id, queue,
-                          *, room_title: str) -> None:
+                          *, room_title: str) -> str:
         from jaeger_ai.core.team.mentions import is_pass, mentioned_peers, room_transcript, room_turn_message
         bus = gateway.event_bus
         names = _names(members)
@@ -319,13 +324,13 @@ def register(gateway) -> None:
             bus.publish(sid, "room.turn", {**common, "status": "failed", "error": f"{type(exc).__name__}: {exc}"[:400],
                                            "elapsed_s": round(time.time() - started, 3)})
             gateway._team_live.pop(member.id, None)
-            return
+            return "failed"
         finally:
             mirror.unbind(child)
         gateway._team_live.pop(member.id, None)
         if is_pass(reply):
             bus.publish(sid, "room.turn", {**common, "status": "passed", "elapsed_s": round(time.time() - started, 3)})
-            return
+            return "passed"
         mid = gateway.store.append_message(sid, "assistant", reply, kind="room_reply", sender_agent_id=member.id,
                                            links={"room_run_id": run_id, "turn_id": turn_id, "child_session_id": child})
         bus.publish(sid, "agent.message", {**common, "text": reply[:4000], "message_id": mid, "backend": backend})
@@ -346,6 +351,7 @@ def register(gateway) -> None:
             bus.publish(sid, "policy.decision", {"request_id": run_id, "decision": "allow", "tool": "@mention",
                                                  "policy": "room hand-off", "reason": f"{member.display_name} → {peer.name}"})
             queue.append((by_id[peer.id], depth + 1, member.id, turn_id))
+        return "succeeded"
 
     app = gateway.app
     app.router.add_get("/v1/team", team)

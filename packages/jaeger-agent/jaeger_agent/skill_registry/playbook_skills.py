@@ -46,6 +46,17 @@ def skill_scope(names):
         _SKILL_SCOPE.reset(token)
 
 
+def bind_skill_scope(names) -> None:
+    """Scope the rest of the current asyncio task (a specialist's own turn task).
+
+    Unlike ``skill_scope`` there is no reset: the binding ends with the task,
+    and ``asyncio.to_thread`` copies it into the turn's worker threads. The
+    Gateway's specialist path calls this; it was dropped in the v0.13 package
+    move, which made every specialist turn fail with ImportError.
+    """
+    _SKILL_SCOPE.set(None if names is None else frozenset(str(n).lower() for n in names))
+
+
 def _in_scope(skill: PlaybookSkill) -> bool:
     scope = active_skill_scope()
     return scope is None or skill.name.lower() in scope
