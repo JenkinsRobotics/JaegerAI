@@ -164,7 +164,7 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
         {showPanel && <div className="jg-sheet__page">
           {!inline && <button type="button" className="jg-sheet__close" aria-label="Close settings" onClick={onClose}><Icon name="close" size={16} /></button>}
           {!inline && <h2 className="jg-sheet__title">{PANEL_LABEL[tab]}</h2>}
-          {tab === "appearance" && <>{header("Appearance", "Theme, feel, app icon and text.")}<AppearancePanel appearance={appearance} onAppearance={(m) => { setAppearance(m); applyAppearance(m); }} Row={Row} Section={Section} /></>}
+          {tab === "appearance" && <>{header("Appearance", "Theme, accent, app icon and text.")}<AppearancePanel appearance={appearance} onAppearance={(m) => { setAppearance(m); applyAppearance(m); }} Row={Row} Section={Section} /></>}
           {tab === "general" && <>{header("General", "How chat behaves on this device.")}
             <Anchor id="device"><DevicePreferencesPanel/></Anchor>
             <Section title="Chat" anchor="stream-style">
@@ -201,7 +201,7 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
             </Section>
             <Section title="Where your data lives" anchor="storage">
               <Row label="WebUI state" hint="Documents, Studio, avatars, research jobs and settings files."><span className="jg-sheet__value">On this Mac, ~/.jaeger</span></Row>
-              <Row label="This browser" hint="Theme, feel, icon, panel layout and drafts."><span className="jg-sheet__value">This device only</span></Row>
+              <Row label="This browser" hint="Theme, accent, icon, panel layout and drafts."><span className="jg-sheet__value">This device only</span></Row>
             </Section>
           </>}
           {tab === "machine" && <>{header("Machine & devices", "This Mac: computer control, clipboard and the gateway.")}

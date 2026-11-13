@@ -1,4 +1,4 @@
-/** Settings › Appearance (TAB-01 §3): layout preset, theme, feel, app icon (+ custom upload), text size, density. Tokens only. */
+/** Settings › Appearance (TAB-01 §3): layout preset, theme, accent, app icon (+ custom upload), text size, density. Tokens only. */
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { applyDensity, applyFeel, applyIcon, BUILTIN_ICONS, customIcons, FEELS, iconProblem, saveCustomIcons, storedDensity, storedFeel, storedIcon, type Density, type Feel, type IconChoice } from "./appearance";
 import { choosePreset, PRESETS, usePreset } from "../shell/layoutPresets";
@@ -66,8 +66,8 @@ export function AppearancePanel({ appearance, onAppearance, Row, Section }: { ap
           items={[{ id: "light", label: "Light" }, { id: "dark", label: "Dark" }, { id: "system", label: "System" }] as const} render={(i) => i.label} />
       </Row>
     </Section>
-    <Section title="Feel" anchor="feel">
-      <RadioGrid label="Feel" className="jg-set-feels" value={feel} items={FEELS} onPick={(f) => { setFeel(f); applyFeel(f); }}
+    <Section title="Accent color" anchor="feel">
+      <RadioGrid label="Accent color" className="jg-set-feels" value={feel} items={FEELS} onPick={(f) => { setFeel(f); applyFeel(f); }}
         render={(i, on) => <><span className="jg-set-feel__swatch" data-feel-preview={i.id} aria-hidden="true"><i /><i /><i /></span><span>{i.label}</span>{on && <span className="jg-set-check" aria-hidden="true">✓</span>}</>} />
     </Section>
     <Section title="Logo" anchor="logo">
@@ -78,7 +78,7 @@ export function AppearancePanel({ appearance, onAppearance, Row, Section }: { ap
         <label className="jg-u-btn">Upload logo…<input type="file" hidden accept="image/svg+xml,image/png,image/webp,image/jpeg" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setLogoMsg({ tone: "ok", text: "Checking…" }); void uploadCustomLogo(f).then(() => setLogoMsg({ tone: "ok", text: "Custom logo applied on every device" }), (err: Error) => setLogoMsg({ tone: "bad", text: err.message })); } e.target.value = ""; }} /></label>
       </div>
       {logoMsg && <p className={logoMsg.tone === "bad" ? "jg-u-error" : "jg-sheet__hint"} role="status">{logoMsg.text}</p>}
-      <p className="jg-sheet__hint">The mark on the Chat screen and in the top bar. Built-in marks follow your layout, feel and theme colors. Uploads: SVG, PNG, WebP or JPEG under 200 KB; SVGs are cleaned of scripts and links.</p>
+      <p className="jg-sheet__hint">The mark on the Chat screen and in the top bar. Built-in marks follow your layout, accent and theme colors. Uploads: SVG, PNG, WebP or JPEG under 200 KB; SVGs are cleaned of scripts and links.</p>
     </Section>
     <Section title="App icon" anchor="icon">
       <RadioGrid label="App icon" className="jg-set-icons" value={icon} items={icons} onPick={(id) => { setIcon(id); applyIcon(id); }}
