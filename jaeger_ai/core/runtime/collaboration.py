@@ -1,17 +1,10 @@
-"""Collaboration mode — how Jaeger works with its specialist agents.
+"""How Jaeger works with specialist helpers.
 
-Three modes, saved as ``automation.collaboration_mode`` in the instance config:
-
-  one_mind — (default, ARES) every message goes to the single Jaeger identity.
-             Specialists are *inner helpers*: the lead calls them with the
-             ``delegate`` tool, each runs in a fresh context from a brief, returns
-             only a result, and the lead answers in its own voice. Team rooms and
-             @Name hand-offs are off; ``call_agent`` is an alias of ``delegate``.
-  team     — opt-in team of agents: rooms, @Name hand-offs, a roster you chat
-             with, ``call_agent`` hands the turn to a teammate (unchanged).
-  auto     — the lead decides per task. It delegates internally by default; team
-             behaviour (rooms, a teammate answering in its own voice) is used only
-             when the owner explicitly opens a room or @mentions an agent.
+Jaeger always runs as one lead. Specialists are inner helpers: the lead calls
+them with ``delegate`` (``call_agent`` is an alias), each runs in a fresh
+context from a brief, returns only a result, and the lead answers in its own
+voice. Team rooms, @Name hand-offs, and chat transfers have been removed.
+A saved ``automation.collaboration_mode`` of ``team`` or ``auto`` is ignored.
 
 The helper contract follows Hermes Agent's ``delegate_task`` (MIT,
 NousResearch/hermes-agent ``tools/delegate_tool.py``): fresh child context, a
@@ -122,13 +115,11 @@ def snapshot(mode: str) -> dict[str, Any]:
     }
 
 
-def call_agent_is_delegate(mode: str, *, explicit_mention: bool) -> bool:
-    """Does a ``call_agent`` request run as an inner helper (True) or a team hand-off?"""
-    if mode == "team":
-        return False
-    if mode == "auto":
-        return not explicit_mention
+def call_agent_is_delegate(mode: str, *, explicit_mention: bool = False) -> bool:
+    """call_agent is always an alias of delegate. Rooms and chat transfers are gone."""
+    del mode, explicit_mention
     return True
+
 
 
 def helper_prompt(*, display_name: str, specialty: str, brief: str, context: str = "",

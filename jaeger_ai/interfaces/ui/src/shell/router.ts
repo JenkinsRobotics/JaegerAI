@@ -17,7 +17,7 @@ export const PAGES: readonly PageId[] = [...PRIMARY_PAGES, "library", "automatio
 
 /** Sub-tabs of merged pages, in display order; the first is the default. */
 export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: string }[]>> = {
-  agents: [{ id: "roster", title: "Agents" }, { id: "team", title: "Team" }, { id: "characters", title: "Characters" }, { id: "knowledge", title: "Memory & Skills" }],
+  agents: [{ id: "roster", title: "Agents" }, { id: "characters", title: "Characters" }, { id: "knowledge", title: "Memory & Skills" }],
   // Separate record sources and actions remain intact until the Milestone 4 board projection.
   work: [{ id: "pipeline", title: "Pipeline" }, { id: "process", title: "Process" }, { id: "backlog", title: "Backlog" }, { id: "tasks", title: "Tasks" }, { id: "production", title: "Production" }, { id: "calendar", title: "Calendar" }, { id: "youtube", title: "YouTube" }],
   research: [{ id: "runs", title: "Research" }, { id: "documents", title: "Documents" }, { id: "workspace", title: "Workspace" }],
@@ -61,7 +61,7 @@ export function canonicalPath(pathname: string, search = ""): string | null {
   const moved: Record<string, string> = {
     "/home/widgets": "/settings/widgets", "/home/overview": "/work", "/home": "/work",
     "/models/library": "/settings/models/library", "/models/compare": "/settings/models/compare", "/models/usage": "/settings/models/usage", "/models": "/settings/models/library",
-    "/agents/hermes": "/settings/integrations/hermes", "/agents/openclaw": "/settings/integrations/openclaw",
+    "/agents/team": "/agents/roster", "/agents/hermes": "/settings/integrations/hermes", "/agents/openclaw": "/settings/integrations/openclaw",
     "/work/workspace": "/research/workspace", "/work/checkpoints": "/settings/checkpoints",
     "/research/youtube": "/work/youtube", "/research/knowledge": "/agents/knowledge", "/research/sharepoint": "/settings/integrations/sharepoint",
   };
