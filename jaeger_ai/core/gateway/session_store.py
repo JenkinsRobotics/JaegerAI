@@ -196,6 +196,34 @@ def _channel_message_view(extra: dict[str, Any]) -> dict[str, str]:
     return {key: extra[key] for key in ('channel_id','provider_conversation_id','external_message_id','ingress_author_id','authority') if isinstance(extra.get(key),str)}
 
 
+GENERIC_SESSION_TITLES = {
+    "",
+    "new conversation",
+    "new chat",
+    "jaeger stable chat",
+    "chat with jaeger",
+    "untitled conversation",
+    "untitled",
+}
+
+
+def is_generic_session_title(title: str | None, metadata: dict[str, Any] | None = None) -> bool:
+    meta = metadata or {}
+    if isinstance(meta.get("chat_organization"), dict) and meta["chat_organization"].get("manual_title"):
+        return False
+    return (title or "").strip().lower() in GENERIC_SESSION_TITLES
+
+
+def title_from_user_text(content: str) -> str:
+    line = " ".join((content or "").split())
+    if not line:
+        return ""
+    if len(line) > 60:
+        trimmed = line[:60].rsplit(" ", 1)[0].rstrip(".,;:")
+        line = (trimmed or line[:60]).rstrip() + "…"
+    return line[:200]
+
+
 def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
     """One transcript row in the sessions-contract shape (plus the legacy keys)."""
     keys = m.keys() if hasattr(m, "keys") else []
@@ -1042,6 +1070,20 @@ class GatewaySessionStore:
                 "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
                 (now, session_id),
             )
+            if role == "user" and kind == "message" and (content or "").strip():
+                session_row = db.execute(
+                    "SELECT title, metadata_json FROM sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if session_row is not None and is_generic_session_title(
+                    session_row["title"], _row_meta(session_row["metadata_json"])
+                ):
+                    auto_title = title_from_user_text(content)
+                    if auto_title:
+                        db.execute(
+                            "UPDATE sessions SET title = ? WHERE session_id = ?",
+                            (auto_title, session_id),
+                        )
             msg_id = cursor.lastrowid or 0
             if emit:
                 row = db.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()

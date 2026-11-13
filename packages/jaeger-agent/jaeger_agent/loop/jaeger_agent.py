@@ -163,6 +163,30 @@ def _default_turn_start_hook() -> TurnStartHook | None:
 
 
 
+def _policy_blocks_model(exc: BaseException) -> bool:
+    return type(exc).__name__ == "ModelPolicyError" or "ModelPolicyError" in f"{type(exc).__name__}: {exc}"
+
+
+def _local_adapter_url(adapter: Any) -> str:
+    return str(getattr(adapter, "base_url", "") or "")
+
+
+def _fallback_reachable(adapter: Any) -> bool:
+    """Skip a fallback that is obviously down (local Ollama with nothing listening)."""
+    url = _local_adapter_url(adapter).lower()
+    local = any(token in url for token in ("127.0.0.1", "localhost", "0.0.0.0", "::1"))
+    if not local:
+        return True
+    health = getattr(adapter, "health_check", None)
+    if not callable(health):
+        return True
+    try:
+        result = health()
+    except Exception:
+        return False
+    return bool(isinstance(result, dict) and result.get("ok", True))
+
+
 def _emit_fallback(adapters: list[Any], failed: Any, reason: str) -> None:
     """Report walking the adapter chain (or running out of it)."""
     from jaeger_agent import live as _live
@@ -1921,6 +1945,10 @@ class JaegerAgent:
         overflow_tightened = False
         original_budget = self.context_guard.budget if self.context_guard is not None else None
         for adapter in adapters:
+            if last_exc is not None and not _fallback_reachable(adapter):
+                from jaeger_agent import live as _live
+                _live.emit("reliability.fallback_skipped", {"adapter": getattr(adapter, "describe", lambda: type(adapter).__name__)(), "reason": "unreachable"})
+                continue
             if original_budget is not None:
                 from dataclasses import replace
                 window = getattr(adapter, "context_window", None) or original_budget.ctx_window
@@ -2038,18 +2066,8 @@ class JaegerAgent:
                     from jaeger_agent import live as _live
                     _live.emit("reliability.timeout", {"what": "model call", "adapter": adapter.describe(),
                                                        "after_s": self.stale_call_timeout_s})
-                    self.callbacks.on_thinking(
-                        f"[adapter {adapter.describe()} stalled after "
-                        f"{self.stale_call_timeout_s:.0f}s; "
-                        f"try ``jaeger kill`` from another terminal "
-                        f"if the TUI feels stuck]"
-                    )
                     if attempt < self._STALE_RETRIES and not self._interrupt_event.is_set():
                         attempt += 1
-                        self.callbacks.on_thinking(
-                            f"[adapter {adapter.describe()} stalled — "
-                            f"retry {attempt}/{self._STALE_RETRIES}]"
-                        )
                         _live.emit("reliability.retry", {"adapter": adapter.describe(), "kind": "stalled",
                                                          "attempt": attempt, "of": self._STALE_RETRIES})
                         continue
@@ -2083,21 +2101,14 @@ class JaegerAgent:
                         _live.emit("reliability.retry", {"adapter": adapter.describe(), "kind": str(kind).lower(),
                                                          "attempt": attempt, "of": cap, "delay_s": round(delay, 2),
                                                          "error": type(exc).__name__})
-                        self.callbacks.on_thinking(
-                            f"[adapter {adapter.describe()} "
-                            f"{kind.lower().replace('_', ' ')} — retry "
-                            f"{attempt}/{cap} in {delay:.1f}s]"
-                        )
                         # Wait ON the interrupt event so a barge-in cuts
                         # the backoff short instead of sleeping through.
                         if self._interrupt_event.wait(delay):
                             self.last_halt_reason = "interrupted"
                             return {"role": "assistant", "content": None}
                         continue
-                    self.callbacks.on_thinking(
-                        f"[adapter {adapter.describe()} failed: "
-                        f"{type(exc).__name__} ({kind.lower()})]"
-                    )
+                    if _policy_blocks_model(exc):
+                        raise
                     _emit_fallback(adapters, adapter, f"{type(exc).__name__} ({kind.lower()})")
                     break  # next adapter
         # Every adapter raised — surface the last exception so the
