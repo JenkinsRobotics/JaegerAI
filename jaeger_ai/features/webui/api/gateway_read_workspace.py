@@ -26,10 +26,20 @@ def gateway_read_workspace(session_id: str) -> Path:
     except Exception as exc:
         raise KeyError(session_id) from exc
     if (not isinstance(row, dict) or row.get("session_id") != session_id
-            or not _profiles_match(row.get("profile"), get_active_profile_name())
-            or not row.get("workspace")):
+            or not _profiles_match(row.get("profile"), get_active_profile_name())):
+        raise KeyError(session_id)
+    workspace = row.get("workspace") or ""
+    if not workspace:
+        # Gateway sessions may have an empty workspace column. Fall back
+        # to the last trusted WebUI workspace rather than 404ing.
+        try:
+            from .workspace import get_last_workspace
+            workspace = get_last_workspace() or ""
+        except Exception:
+            workspace = ""
+    if not workspace:
         raise KeyError(session_id)
     try:
-        return resolve_trusted_workspace(row["workspace"])
+        return resolve_trusted_workspace(workspace)
     except (ValueError, OSError) as exc:
         raise KeyError(session_id) from exc

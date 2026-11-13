@@ -7169,27 +7169,12 @@ def _handle_list_dir(handler, parsed):
         return bad(handler, "session_id is required")
     webui_session = None
     try:
-        s = get_session(sid)
-        webui_session = s
+        s = get_session_for_file_ops(sid)
+        from api.models import _ExternalSessionView
+        webui_session = None if isinstance(s, _ExternalSessionView) else s
         workspace = s.workspace
     except KeyError:
-        # Fallback for CLI sessions not loaded in WebUI memory
-        try:
-            cli_meta = None
-            for cs in get_cli_sessions():
-                if cs["session_id"] == sid:
-                    cli_meta = cs
-                    break
-            if not cli_meta:
-                from .gateway_read_workspace import gateway_read_workspace
-                try:
-                    workspace = gateway_read_workspace(sid)
-                except KeyError:
-                    return bad(handler, "Session not found", 404)
-            else:
-                workspace = cli_meta.get("workspace", "")
-        except Exception:
-            return bad(handler, "Session not found", 404)
+        return bad(handler, "Session not found", 404)
     try:
         if webui_session is None:
             workspace = resolve_trusted_workspace(workspace)
