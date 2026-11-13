@@ -23,12 +23,15 @@ logger = logging.getLogger("hermes.webui")
 
 
 def _get_session(session_id: str):
+    """Resolve a WebUI, state.db, or Gateway session for workspace routes."""
     try:
-        from api.models import get_session
-        return get_session(session_id)
+        from api.models import get_session_for_file_ops
+        return get_session_for_file_ops(session_id)
+    except KeyError:
+        raise
     except Exception:
-        from .models import get_session
-        return get_session(session_id)
+        from .models import get_session_for_file_ops
+        return get_session_for_file_ops(session_id)
 
 
 def _git_session(handler: Any, session_id: str):

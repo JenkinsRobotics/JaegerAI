@@ -5708,8 +5708,14 @@ def get_session_for_file_ops(sid: str):
     try:
         session = get_session(sid, metadata_only=True)
     except KeyError:
-        if state_db_has_session(sid):
-            return _ExternalSessionView(str(sid), str(get_last_workspace()))
+        try:
+            from .gateway_read_workspace import gateway_read_workspace
+            return _ExternalSessionView(str(sid), str(gateway_read_workspace(sid)))
+        except KeyError:
+            pass
+        last = str(get_last_workspace() or "")
+        if state_db_has_session(sid) and last:
+            return _ExternalSessionView(str(sid), last)
         raise
 
     from api.profiles import _profiles_match, get_active_profile_name
