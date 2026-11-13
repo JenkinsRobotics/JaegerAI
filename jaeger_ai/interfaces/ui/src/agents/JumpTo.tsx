@@ -11,6 +11,7 @@ import { AgentAvatar } from "./AgentAvatar";
 import { label } from "./agentsLogic";
 
 export interface JumpAction { id: string; label: string; shortcut?: string; run: () => void; /** Second line, e.g. a page or character description. */ hint?: string }
+export interface JumpChat { sessionId: string; title: string; agentId?: string; preview?: string }
 
 /** Fuzzy score (merged from the Apple UI's SearchPalette): substring hits rank by position, otherwise every
  * query character must appear in order. 0 = no match. */
@@ -22,7 +23,10 @@ export function fuzzyMatch(query: string, text: string): number {
   for (let ti = 0; ti < t.length && qi < q.length; ti++) if (t[ti] === q[qi]) { score += 10; qi++; }
   return qi === q.length ? score : 0;
 }
-type Row = { kind: "agent"; id: string; label: string; agent: Agent } | { kind: "action"; id: string; label: string; action: JumpAction };
+type Row =
+  | { kind: "agent"; id: string; label: string; agent: Agent }
+  | { kind: "chat"; id: string; label: string; chat: JumpChat }
+  | { kind: "action"; id: string; label: string; action: JumpAction };
 
 /** One line under the name: the agent's own description when it has one, else its latest activity, else its role. */
 export function describe(agent: Agent, summary?: AgentSummary): string {
@@ -31,9 +35,10 @@ export function describe(agent: Agent, summary?: AgentSummary): string {
   return summary?.last_preview?.trim() || (agent.role ? `${agent.role[0].toUpperCase()}${agent.role.slice(1)}` : "");
 }
 
-export function JumpTo({ open, agents, actions, onAgent, onClose, summaries = [], seen = {}, currentAgentId }: {
+export function JumpTo({ open, agents, actions, onAgent, onClose, summaries = [], seen = {}, currentAgentId, chats = [], onChat }: {
   open: boolean; agents: Agent[]; actions: JumpAction[]; onAgent: (agentId: string) => void; onClose: () => void;
   summaries?: AgentSummary[]; seen?: Record<string, number>; currentAgentId?: string;
+  chats?: JumpChat[]; onChat?: (chat: JumpChat) => void;
 }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
@@ -45,20 +50,23 @@ export function JumpTo({ open, agents, actions, onAgent, onClose, summaries = []
     const desc = (a: Agent) => describe(a, summaries.find((x) => x.id === a.id));
     const agentScore = (a: Agent) => Math.max(fuzzyMatch(q, label(a)), q.length > 2 && desc(a).toLowerCase().includes(q.toLowerCase()) ? 1 : 0);
     const actionScore = (a: JumpAction) => Math.max(fuzzyMatch(q, a.label), q.length > 2 && a.hint?.toLowerCase().includes(q.toLowerCase()) ? 1 : 0);
+    const chatScore = (c: JumpChat) => Math.max(fuzzyMatch(q, c.title), q.length > 2 && (c.preview ?? "").toLowerCase().includes(q.toLowerCase()) ? 1 : 0);
     const byScore = <T,>(items: T[], score: (t: T) => number) => q ? items.map((t) => [t, score(t)] as const).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([t]) => t) : items;
     return [
       ...byScore(agents, agentScore).map((a) => ({ kind: "agent" as const, id: a.id, label: label(a), agent: a })),
+      ...byScore(chats, chatScore).map((c) => ({ kind: "chat" as const, id: c.sessionId, label: c.title, chat: c })),
       ...byScore(actions, actionScore).map((a) => ({ kind: "action" as const, id: a.id, label: a.label, action: a })),
     ];
-  }, [query, agents, actions, summaries]);
+  }, [query, agents, actions, summaries, chats]);
   if (!open) return null;
-  const pick = (row: Row) => { onClose(); if (row.kind === "agent") onAgent(row.id); else row.action.run(); };
+  const pick = (row: Row) => { onClose(); if (row.kind === "agent") onAgent(row.id); else if (row.kind === "chat") onChat?.(row.chat); else row.action.run(); };
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") { e.preventDefault(); setIndex((i) => Math.min(rows.length - 1, i + 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setIndex((i) => Math.max(0, i - 1)); }
     else if (e.key === "Enter" && rows[index]) { e.preventDefault(); pick(rows[index]); }
     else if (e.key === "Escape") { e.preventDefault(); onClose(); }
   };
+  const firstChat = rows.findIndex((r) => r.kind === "chat");
   const firstAction = rows.findIndex((r) => r.kind === "action");
   return (
     <div className="jg-palette__scrim" onMouseDown={onClose}>
@@ -73,16 +81,16 @@ export function JumpTo({ open, agents, actions, onAgent, onClose, summaries = []
           {rows.length === 0 && <p className="jg-palette__empty">No matches for "{query.trim()}"</p>}
           {rows.map((row, i) => {
             const summary = row.kind === "agent" ? summaries.find((x) => x.id === row.id) : undefined;
-            const description = row.kind === "agent" ? describe(row.agent, summary) : row.action.hint ?? "";
+            const description = row.kind === "agent" ? describe(row.agent, summary) : row.kind === "chat" ? (row.chat.preview ?? "Chat") : row.action.hint ?? "";
             const unread = row.kind === "agent" && row.id !== currentAgentId
               && isUnread(row.id, summary?.last_activity_at ?? 0, seen, summary?.unseen);
             return (
               <div key={`${row.kind}:${row.id}`}>
-                {i === firstAction && i > 0 && <div className="jg-palette__sep" role="separator" />}
+                {((i === firstChat && i > 0) || (i === firstAction && i > 0)) && <div className="jg-palette__sep" role="separator" />}
                 <div id={`jg-palette-${i}`} role="option" aria-selected={i === index}
                   className={`jg-palette__row${i === index ? " is-active" : ""}${description ? " has-desc" : ""}`}
                   onMouseEnter={() => setIndex(i)} onClick={() => pick(row)}>
-                  {row.kind === "agent" ? <AgentAvatar id={row.agent.id} name={row.label} size={24} /> : <Icon name="chevron-right" size={14} className="jg-palette__icon" />}
+                  {row.kind === "agent" ? <AgentAvatar id={row.agent.id} name={row.label} size={24} /> : <Icon name={row.kind === "chat" ? "search" : "chevron-right"} size={14} className="jg-palette__icon" />}
                   <span className="jg-palette__text">
                     <span className="jg-palette__label">{row.label}</span>
                     {description && <span className="jg-palette__desc">{description}</span>}

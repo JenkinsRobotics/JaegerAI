@@ -1,7 +1,7 @@
 import {displayDate, displayDayDistance} from "../settings/devicePreferences";
 /* An agent's chats in the sidebar (Grok Bot: every chat keeps a row, a fresh
  * chat never hides the old one). Pure helpers + the per-agent loader. */
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { JaegerSource } from "../api/source";
 import type { SessionRow } from "../api/types";
 
@@ -42,14 +42,38 @@ export function shortTime(seconds: number | undefined, now = Date.now()): string
  * rename, archive) and on the roster poll. */
 export function useAgentChats(source: JaegerSource, agentId: string | undefined, version: number) {
   const [rows, setRows] = useState<SessionRow[]>([]);
-  const load = useCallback(() => {
-    if (!agentId) { setRows([]); return () => {}; }
+  useEffect(() => {
+    if (!agentId) { setRows([]); return; }
     let live = true;
-    source.sessions({ agent_id: agentId }).then((r) => { if (live) setRows(r); }, () => { if (live) setRows([]); });
-    return () => { live = false; };
-  }, [source, agentId]);
-  useEffect(() => load(), [load, version]);
+    const read = () => {
+      source.sessions({ agent_id: agentId }).then((r) => { if (live) setRows(r); }, () => { if (live) setRows([]); });
+    };
+    read();
+    const poll = setInterval(read, 15_000);
+    const onVis = () => { if (document.visibilityState === "visible") read(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { live = false; clearInterval(poll); document.removeEventListener("visibilitychange", onVis); };
+  }, [source, agentId, version]);
   return rows;
+}
+
+
+export function groupChatsByDate(rows: SessionRow[], now = Date.now()): { label: string; rows: SessionRow[] }[] {
+  const groups: { label: string; match: (days: number) => boolean }[] = [
+    { label: "Today", match: (d) => d === 0 },
+    { label: "Yesterday", match: (d) => d === 1 },
+    { label: "Previous 7 days", match: (d) => d > 1 && d <= 7 },
+    { label: "Previous 30 days", match: (d) => d > 7 && d <= 30 },
+    { label: "Older", match: () => true },
+  ];
+  const buckets = groups.map((g) => ({ label: g.label, rows: [] as SessionRow[] }));
+  for (const row of rows) {
+    const at = activityAt(row);
+    const days = at ? displayDayDistance(at * 1000, now) : Number.POSITIVE_INFINITY;
+    const i = groups.findIndex((g) => g.match(days));
+    buckets[i < 0 ? buckets.length - 1 : i].rows.push(row);
+  }
+  return buckets.filter((b) => b.rows.length);
 }
 
 export { activityAt };

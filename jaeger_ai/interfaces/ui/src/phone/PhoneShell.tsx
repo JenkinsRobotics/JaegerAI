@@ -62,10 +62,11 @@ function Pressable({ onLong, children, ...rest }: { onLong?: (x: number, y: numb
   return <button type="button" {...rest} {...useLongPress(onLong)}>{children}</button>;
 }
 
-export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSettings, statusOk, onAgentMenu }: {
+export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSettings, statusOk, onAgentMenu, chats = [], openChatId, onOpenChat }: {
   state: Pick<AgentsState, "agents" | "summaries" | "seen"> & { sections?: AgentsState["sections"] }; userInitials: string; statusOk: boolean;
   onOpen: (agentId: string) => void; onSearch: () => void; onNew: (anchor: HTMLElement) => void; onSettings: () => void;
   onAgentMenu?: (agentId: string, x: number, y: number) => void;
+  chats?: { sessionId: string; title: string; time?: string }[]; openChatId?: string; onOpenChat?: (sessionId: string) => void;
 }) {
   const rows = sidebarRows(state.agents, state.summaries);
   const all = [...(rows.lead ? [rows.lead] : []), ...rows.specialists];
@@ -93,6 +94,17 @@ export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSett
           </span>
           <span className="jg-plead__name">{label(lead.agent)}</span>
         </Pressable>
+      )}
+      {chats.length > 0 && onOpenChat && (
+        <nav className="jg-pchats" aria-label="Chats">
+          {chats.map((chat) => (
+            <button key={chat.sessionId} type="button" className={`jg-pchat${chat.sessionId === openChatId ? " is-open" : ""}`}
+              aria-current={chat.sessionId === openChatId ? "page" : undefined} onClick={() => onOpenChat(chat.sessionId)}>
+              <span className="jg-pchat__title">{chat.title}</span>
+              {chat.time && <span className="jg-pchat__time">{chat.time}</span>}
+            </button>
+          ))}
+        </nav>
       )}
       <nav className="jg-prows" aria-label="Agents">
         {groupRows(specialists, state.sections ?? []).map((g) => [
