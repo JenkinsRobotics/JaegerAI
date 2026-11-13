@@ -98,7 +98,16 @@ NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S",
 OWNER_RUN_SESSION_PREFIX = "owner:"
 
 # How long a tool call waits for the operator before it is refused.
-APPROVAL_WAIT_S = 300.0
+# How long a run stays interrupted on an approval card before the call is
+# refused. Override with JAEGER_APPROVAL_WAIT_S (seconds, min 10).
+def _approval_wait_s() -> float:
+    try:
+        return max(10.0, float(os.environ.get("JAEGER_APPROVAL_WAIT_S") or 300.0))
+    except ValueError:
+        return 300.0
+
+
+APPROVAL_WAIT_S = _approval_wait_s()
 #: How long a parked clarify form waits for the owner before the turn falls back to plain text.
 CLARIFY_WAIT_S = 600.0
 
@@ -821,6 +830,17 @@ class _GatewayToolConfirmationProvider:
         loop.call_soon_threadsafe(_arm)
         scope = self.app._cancellations.get(self.request_id)
         deadline = time.monotonic() + APPROVAL_WAIT_S
+        self.app._run_interrupted(self.session_id, self.request_id, aid, {
+            "tool": f"{skill}.{op}" if skill else op, "target": target,
+            "call_id": call_id, "expires_in_s": APPROVAL_WAIT_S})
+        try:
+            return self._await_decision(box, aid, scope, deadline, skill, request)
+        finally:
+            row = self.app.store.get_approval(aid) or {}
+            self.app._run_resumed(self.session_id, self.request_id, aid, row.get("decision") or "expired")
+
+    def _await_decision(self, box: dict[str, Any], aid: str, scope: Any, deadline: float,
+                        skill: str, request: Any) -> bool:
         while not box["done"].wait(timeout=0.05):
             if scope is not None and scope.cancelled:
                 # Cancelled while parked: close the approval (first writer
@@ -3059,6 +3079,32 @@ class JaegerGatewayApp:
                     "agent_id": record.get("to_agent_id"), "from_agent_id": record.get("from_agent_id"),
                     "agent_name": (record.get("metadata") or {}).get("target_display"),
                     "status": record.get("status"), "text": str(result.get("summary") or "")[:4000]})
+
+    def _run_interrupted(self, session_id: str, request_id: str, approval_id: str,
+                         data: dict[str, Any]) -> None:
+        """Human-in-the-loop interrupt (LangGraph ``interrupt`` / OpenAI Agents
+        ``interruptions``): the run is parked on an approval and resumes in
+        place, same request and same loop, when the owner decides."""
+        try:
+            row = self.store.get_request(request_id) or {}
+            if row.get("status") in {"admitted", "running"}:
+                self.store.mark_request_status(request_id, "awaiting_approval")
+            self.event_bus.publish(session_id, "run.interrupted", {
+                "request_id": request_id, "approval_id": approval_id, "reason": "approval",
+                **{k: v for k, v in data.items() if v is not None}})
+        except Exception:  # noqa: BLE001 — the card itself is already armed
+            logger.debug("run.interrupted not recorded", exc_info=True)
+
+    def _run_resumed(self, session_id: str, request_id: str, approval_id: str, decision: str) -> None:
+        try:
+            row = self.store.get_request(request_id) or {}
+            if row.get("status") == "awaiting_approval":
+                self.store.mark_request_status(request_id, "running")
+            self.event_bus.publish(session_id, "run.resumed", {
+                "request_id": request_id, "approval_id": approval_id, "decision": decision,
+                "approved": decision not in {"deny", "expired", "cancelled", None}})
+        except Exception:  # noqa: BLE001
+            logger.debug("run.resumed not recorded", exc_info=True)
 
     def _fail_orphaned_helpers(self) -> int:
         """Inner helpers that were running when the previous gateway process

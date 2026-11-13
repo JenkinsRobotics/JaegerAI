@@ -52,6 +52,9 @@ EVENT_TYPES = frozenset({
     # {approval_id, kind, prompt, options, session_id}; resolve via
     # POST /v1/approvals/{id} which emits ``approval.resolved``.
     "approval.request", "approval.resolved",
+    # Human-in-the-loop interrupt: the run is parked on an approval
+    # (request status awaiting_approval) and resumes in place on a decision.
+    "run.interrupted", "run.resumed",
     # Clarify cards — a mid-turn question the operator answers in place.
     # ``clarify.request`` carries {clarify_id, run_id, question, choices,
     # session_id}; the answer rides POST /v1/sessions/{id}/turns as a normal
