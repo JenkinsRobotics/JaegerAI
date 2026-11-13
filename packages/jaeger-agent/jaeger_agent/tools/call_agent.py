@@ -319,7 +319,14 @@ def get_agent_result(handoff_id: str) -> dict[str, Any]:
     if status >= 400 or payload.get("error"):
         return {"ok": False, **payload}
     done = payload.get("status") == "completed" and payload.get("result", {}).get("ok") is True
-    return {"ok": done, "completed": done, "handoff": payload,
+    # Only what the lead needs: the record's bookkeeping (tool grants, parent
+    # bindings, model choice) is large and stays on the Gateway.
+    handoff = {k: payload.get(k) for k in ("id", "status", "from_agent_id", "to_agent_id", "task",
+                                           "created_at", "updated_at") if k in payload}
+    meta = payload.get("metadata") or {}
+    if meta.get("collaboration") == "delegate":
+        handoff["kind"] = "delegate"
+    return {"ok": done, "completed": done, "handoff": handoff,
             "status": payload.get("status"), "result": payload.get("result", {})}
 
 

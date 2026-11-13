@@ -41,9 +41,14 @@ def test_call_agent_alias_follows_the_mode():
 def test_helper_prompt_is_one_mind_and_memory_is_read_only():
     text = collab.helper_prompt(display_name="Design & Style", specialty="design", brief="Review the header",
                                 memory_excerpt="- favorite_color = blue", tools=["read_file"])
-    assert "inner helper" in text and "never address the person" in text and "Review the header" in text
+    assert "inner helper" in text and "result goes only to Jaeger" in text and "Review the header" in text
     assert "read-only" in text and "favorite_color" in text and "read_file" in text
     assert "token" not in collab.scrub_excerpt("- github_token = abc\n- color = blue")
+    # The helper's own rules must not read as a privacy request to the
+    # sensitivity gate, or the helper is pinned to a local model.
+    from jaeger_ai.core.models.router import classify
+    assert classify(collab.helper_prompt(display_name="D", specialty="design", brief="Review a label",
+                                         memory_excerpt="", tools=["read_file"]))[0] == "public"
 
 
 def test_trace_draws_a_helper_node_under_the_asking_tool_call():
@@ -146,7 +151,7 @@ async def test_one_mind_delegate_runs_an_inner_helper_and_returns_only_to_the_le
     assert done["status"] == "completed"
     assert done["result"]["metadata"]["tokens"]["total"] == 150
     prompt = calls[0]["text"]
-    assert "inner helper" in prompt and "Header is 48px tall" in prompt and "never address the person" in prompt
+    assert "inner helper" in prompt and "Header is 48px tall" in prompt and "result goes only to Jaeger" in prompt
     assert set(calls[0]["tools"]) <= {"read_file", "search_files"}
     events = gateway.store.replay_events(sid, 0, session_only=True)["events"]
     names = [e["event"] for e in events]
