@@ -178,8 +178,9 @@ def register(gateway) -> None:
         except Exception:  # noqa: BLE001
             statuses = {}
         members = await asyncio.to_thread(team_members, gateway)
-        ids = {m.id for m in members}
-        handoffs = [h for h in gateway.store.list_handoffs(limit=60)
+        # Hand-offs that involve a team member (not the lead's other specialists).
+        ids = {m.id for m in members if m.id != LEAD_ID}
+        handoffs = [h for h in gateway.store.list_handoffs(limit=200)
                     if h.get("to_agent_id") in ids or h.get("from_agent_id") in ids][:20]
         return web.json_response({
             "agents": [agent_card(m, live=gateway._team_live, statuses=statuses) for m in members],
