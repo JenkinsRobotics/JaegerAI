@@ -1020,6 +1020,10 @@ class JaegerGatewayApp:
         expired_forms = self.store.expire_orphaned_clarify()
         if expired_forms:
             logger.info("Expired %d clarify forms orphaned by the previous process", expired_forms)
+        try:
+            self._fail_orphaned_helpers()
+        except Exception:  # noqa: BLE001 — recovery must not block startup
+            logger.warning("orphaned helper recovery failed", exc_info=True)
         runtime_for_producers = None
         try:
             from jaeger_ai.core.entity.ownership import EntityRuntimeMode
@@ -3056,6 +3060,29 @@ class JaegerGatewayApp:
                     "agent_name": (record.get("metadata") or {}).get("target_display"),
                     "status": record.get("status"), "text": str(result.get("summary") or "")[:4000]})
 
+    def _fail_orphaned_helpers(self) -> int:
+        """Inner helpers that were running when the previous gateway process
+        died can never finish: close them as failed and emit their terminal
+        span so no delegate node is left open forever."""
+        count = 0
+        for row in self.store.list_handoffs(limit=500):
+            meta = row.get("metadata") or {}
+            if meta.get("collaboration") != "delegate":
+                continue
+            if row.get("status") not in {"admitted", "approved", "running"}:
+                continue
+            saved = self.store.save_handoff({
+                **row, "status": "failed",
+                "result": {"ok": False, "status": "failed",
+                           "summary": "Gateway restarted while this helper was running; it did not finish",
+                           "metadata": {"execution_unknown": False, "orphaned_by_restart": True}},
+            })
+            self._publish_handoff("agent.handoff.finished", saved)
+            count += 1
+        if count:
+            logger.info("Closed %d inner helpers orphaned by the previous process", count)
+        return count
+
     def _publish_delegate(self, event: str, record: dict[str, Any]) -> None:
         """An inner helper's lifecycle (one-mind collaboration).
 
@@ -3073,6 +3100,18 @@ class JaegerGatewayApp:
         finished = event == "agent.handoff.finished"
         name = "delegate.started" if not finished else (
             "delegate.finished" if status == "completed" else "delegate.failed")
+        hid = str(record.get("id") or "")
+        emitted = self.__dict__.setdefault("_delegate_terminal_emitted", set())
+        if finished:
+            # Exactly one terminal span per helper, whichever path ends it
+            # (executor, cancel cascade, Stop, restart recovery).
+            if hid in emitted:
+                return
+            emitted.add(hid)
+            if len(emitted) > 5000:
+                emitted.clear()
+        elif hid in emitted:
+            return  # a late "started" after the terminal event would reopen the node
         origin = self._origin_turn(record)
         if not origin:
             return
@@ -7838,6 +7877,19 @@ class JaegerGatewayApp:
                 },
             })
             self._publish_handoff("agent.handoff.finished", saved)
+        except asyncio.CancelledError:
+            # Stop / parent cancel cancels this task. Without this branch the
+            # row stayed "running" forever and no delegate.finished/failed
+            # was ever emitted (live: 4 delegate.started, 2 finished).
+            current = self.store.get_handoff(handoff_id) or record
+            if current.get("status") not in {"completed", "failed", "cancelled", "denied", "execution_unknown"}:
+                saved = self.store.save_handoff({
+                    **current, "status": "cancelled",
+                    "result": {"ok": False, "status": "cancelled", "summary": "Stopped before the helper finished",
+                               "metadata": {"cancellation_confirmed": True, "confirmation_scope": "task_cancelled"}},
+                })
+                self._publish_handoff("agent.handoff.finished", saved)
+            raise
         except Exception as exc:  # noqa: BLE001 — specialist failure must not kill the gateway
             logger.exception("specialist handoff failed: %s", exc)
             saved = self.store.save_handoff({
