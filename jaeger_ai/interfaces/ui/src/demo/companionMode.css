@@ -1,7 +1,0 @@
-.jg-companion-mode { position:relative; min-width:0; }
-.jg-stable-demo__context .jg-companion-mode__trigger { width:auto; font-size:21px; color:var(--jg-color-text); }
-.jg-companion-mode__options { position:absolute; top:calc(100% + 8px); left:0; width:260px; max-width:calc(100vw - 110px); z-index:20; padding:6px; border:1px solid var(--jg-color-border); border-radius:18px; background:var(--jg-color-elevated); box-shadow:0 12px 32px var(--jg-color-shadow); }
-.jg-stable-demo__context .jg-companion-mode__options button { justify-content:space-between; font-size:16px; }
-.jg-companion-mode__options button[aria-pressed="true"] { background:var(--jg-color-active); }
-.jg-companion-mode__options strong,.jg-companion-mode__options small { display:block; }
-.jg-companion-mode__options small { margin-top:4px; font-size:12px; line-height:1.5; color:var(--jg-color-text-secondary); letter-spacing:0; }
