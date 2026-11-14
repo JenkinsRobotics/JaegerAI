@@ -516,7 +516,7 @@ def parse_cli_usage_limit(text: str) -> str | None:
         r"(?:until|resets?(?:\s+on)?|reset at|after)\s+"
         r"((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?"
         r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}"
-        r"(?:,?\s*\d{4})?(?:\s+[0-9]{1,2}:[0-9]{2}\s*(?:AM|PM))?)",
+        r"(?:,?\s*\d{4})?(?:,?\s+[0-9]{1,2}:[0-9]{2}\s*(?:AM|PM))?)",
         blob,
         re.I,
     )
@@ -559,7 +559,7 @@ def discover_subscription_clis() -> list[dict[str, Any]]:
                 if datetime.now(pacific) < known_until:
                     cached = "Nov 16, 2026, 8:03 PM PT"
             if cached:
-                reason = parse_cli_usage_limit(f"usage limit until {cached}") or f"limit reached until {cached}"
+                reason = ("limit reached until " + cached) if not cached.lower().startswith("limit reached") else cached
                 reachable = False
                 status = "limit_reached"
         rows.append({
