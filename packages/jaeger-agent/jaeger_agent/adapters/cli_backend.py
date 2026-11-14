@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Jaeger MCP tools (read_file, web_search): --disallowed-tools matches
 # the short name and would hide Jaeger's own tool.
 _GROK_BUILTIN_TOOLS = (
-    "run_terminal_command", "search_replace", "list_dir", "grep",
+    "run_terminal_command", "read_file", "search_replace", "list_dir", "grep",
     "kill_command_or_subagent", "todo_write", "get_command_or_subagent_output",
     "scheduler_create", "scheduler_delete", "scheduler_list", "monitor",
     "search_tool", "use_tool", "workflow", "enter_plan_mode", "exit_plan_mode",
@@ -407,16 +407,15 @@ class CliBackendAdapter(ProviderAdapter):
                     "--system-prompt-override",
                     "You are Jaeger's language model. Follow the System "
                     "section and the current request. Use only Jaeger MCP "
-                    "tools for file, shell, web, and other work. Do not "
-                    "use built-in file or editor tools. The CLI cache "
-                    "directory is not the workspace.",
+                    "tools. To list the current workspace, call "
+                    "list_skill_dir with path '.'. To read a file, call "
+                    "the Jaeger read_file tool. For shell, call terminal. "
+                    "Do not use built-in file, editor, X search, or web "
+                    "tools. The CLI cache directory is not the workspace.",
                 ])
                 child_argv.extend(["--disallowed-tools", ",".join(_GROK_BUILTIN_TOOLS)])
                 if "--no-plan" not in child_argv:
                     child_argv.append("--no-plan")
-                # Backstop: don't let a confused tool loop run forever.
-                if "--max-turns" not in child_argv:
-                    child_argv.extend(["--max-turns", "8"])
             # Keep the process-global MCP server running between turns.
             return self._spawn(
                 child_argv, spawn_stdin, spec,
@@ -553,6 +552,9 @@ class CliBackendAdapter(ProviderAdapter):
                     "The Gemini CLI is no longer supported for individual Gemini Code Assist "
                     "accounts. Google asks you to use Antigravity instead (https://antigravity.google)."
                 )
+            if "max turns reached" in err.lower() or "timed out" in err.lower():
+                from jaeger_ai.core.models.request_policy import ModelPolicyError
+                raise ModelPolicyError("took too long — Retry")
             raise RuntimeError(f"CLI backend {self.backend_id!r} exited with status {self._proc.returncode}: "
                                + err[-2000:])
         text = stdout.decode("utf-8", errors="replace")

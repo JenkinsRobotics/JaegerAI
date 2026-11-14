@@ -444,7 +444,9 @@ def file_read(path: str, offset: int = 0, limit: int | None = None, column: int 
     if not target.exists():
         return {"read": False, "error": "not found", "path": path}
     if target.is_dir():
-        return {"read": False, "error": "is a directory", "path": path}
+        # A "list the workspace" turn sometimes hits read_file on a
+        # directory. Return the listing so the call still succeeds.
+        return list_skill_dir(str(target))
 
     rel = _display_path(target, layout)
     off = max(0, int(offset or 0))
