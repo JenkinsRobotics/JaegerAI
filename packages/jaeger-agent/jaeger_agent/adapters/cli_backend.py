@@ -500,6 +500,14 @@ class CliBackendAdapter(ProviderAdapter):
             if limit:
                 from jaeger_ai.core.models.request_policy import ModelPolicyError
                 raise ModelPolicyError(limit)
+            if self.backend_id == "gemini" and (
+                "IneligibleTierError" in err or "no longer supported for Gemini" in err
+            ):
+                from jaeger_ai.core.models.request_policy import ModelPolicyError
+                raise ModelPolicyError(
+                    "The Gemini CLI is no longer supported for individual Gemini Code Assist "
+                    "accounts. Google asks you to use Antigravity instead (https://antigravity.google)."
+                )
             raise RuntimeError(f"CLI backend {self.backend_id!r} exited with status {self._proc.returncode}: "
                                + err[-2000:])
         text = stdout.decode("utf-8", errors="replace")
