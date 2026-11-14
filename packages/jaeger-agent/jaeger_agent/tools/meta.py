@@ -96,4 +96,14 @@ def list_tools(query: str = '', limit: int = 5, source: str = '') -> dict[str, A
     return out
 
 
-__all__ = ['describe_tool', 'load_tools', 'list_tools']
+@register_tool_from_function(permission_tier='READ_ONLY', side_effect='read')
+def tool_search(query: str, limit: int = 8) -> dict[str, Any]:
+    """Search the full tool catalog by task or name. Returns ranked, loadable
+    tool names plus availability. Use load_tools(tools=[name]) or
+    load_tools(name=<toolset>) to make matches visible on the next step.
+    Search does not execute tools or grant permission.
+    """
+    return list_tools(query=query, limit=limit)
+
+
+__all__ = ['describe_tool', 'load_tools', 'list_tools', 'tool_search']

@@ -350,42 +350,40 @@ class CliBackendAdapter(ProviderAdapter):
             # Full schemas and history exceed macOS argv limits. Keep the
             # prompt private and out of process listings; delete on exit.
             # The same workdir holds the per-turn Jaeger MCP config.
-            with tempfile.TemporaryDirectory(prefix="jaeger-completion-") as folder:
-                live_prompt = prompt
-                child_argv = list(argv)
-                spawn_stdin = stdin_bytes
-                prompt_file = None
-                if self.backend_id == "grok" and "--single" in child_argv:
-                    prompt_file = os.path.join(folder, "prompt.txt")
-                    index = child_argv.index("--single")
-                    child_argv[index:index + 2] = ["--prompt-file", prompt_file]
-                    child_argv.extend(["--cwd", folder])
-                child_argv, extra_env, mcp, text_fallback = attach_cli_mcp(
-                    self.backend_id, child_argv, folder, tools, execute if callable(execute) else None,
+            from .cli_turn_mcp import stable_cli_workdir
+            folder = stable_cli_workdir(self.backend_id)
+            live_prompt = prompt
+            child_argv = list(argv)
+            spawn_stdin = stdin_bytes
+            prompt_file = None
+            if self.backend_id == "grok" and "--single" in child_argv:
+                prompt_file = os.path.join(folder, "prompt.txt")
+                index = child_argv.index("--single")
+                child_argv[index:index + 2] = ["--prompt-file", prompt_file]
+                child_argv.extend(["--cwd", folder])
+            child_argv, extra_env, mcp, text_fallback = attach_cli_mcp(
+                self.backend_id, child_argv, folder, tools, execute if callable(execute) else None,
+            )
+            if text_fallback and tools:
+                live_prompt = flatten_messages(
+                    getattr(self, "_pending_messages", []) or [],
+                    tools,
+                    getattr(self, "_pending_system", "") or "",
                 )
-                if text_fallback and tools:
-                    live_prompt = flatten_messages(
-                        getattr(self, "_pending_messages", []) or [],
-                        tools,
-                        getattr(self, "_pending_system", "") or "",
-                    )
-                    if spawn_stdin is not None:
-                        spawn_stdin = live_prompt.encode("utf-8")
-                try:
-                    if prompt_file:
-                        with open(prompt_file, "w", encoding="utf-8") as handle:
-                            os.chmod(prompt_file, 0o600)
-                            handle.write(live_prompt)
-                    return self._spawn(
-                        child_argv, spawn_stdin, spec,
-                        on_delta=on_delta, on_reasoning=on_reasoning,
-                        on_progress=progress.touch,
-                        cwd=folder,
-                        extra_env=extra_env,
-                    )
-                finally:
-                    if mcp is not None:
-                        mcp.stop()
+                if spawn_stdin is not None:
+                    spawn_stdin = live_prompt.encode("utf-8")
+            if prompt_file:
+                with open(prompt_file, "w", encoding="utf-8") as handle:
+                    os.chmod(prompt_file, 0o600)
+                    handle.write(live_prompt)
+            # Keep the process-global MCP server running between turns.
+            return self._spawn(
+                child_argv, spawn_stdin, spec,
+                on_delta=on_delta, on_reasoning=on_reasoning,
+                on_progress=progress.touch,
+                cwd=folder,
+                extra_env=extra_env,
+            )
 
         def _abandon() -> None:
             self._kill()
@@ -410,6 +408,44 @@ class CliBackendAdapter(ProviderAdapter):
         if visible_stream is not None:
             visible_stream.finish()
         return raw
+
+
+    def warmup(self) -> None:
+        """Pre-start the loopback MCP server and the Grok leader, if installed."""
+        from .cli_turn_mcp import (
+            GROK_LEADER_SOCKET, acquire_cli_mcp, grok_leader_argv, stable_cli_workdir,
+        )
+        spec = self._load_spec()
+        folder = stable_cli_workdir(self.backend_id)
+
+        def _noop_execute(tool: Any, args: dict[str, Any]) -> str:
+            return ""
+
+        try:
+            acquire_cli_mcp(self.backend_id, [], _noop_execute)
+        except Exception:  # noqa: BLE001 — warmup is best-effort
+            return
+        if self.backend_id != "grok":
+            return
+        executable = self._executable or ""
+        if not executable:
+            return
+        argv = [executable, *grok_leader_argv(), "--cwd", folder, "doctor"]
+        env = os.environ.copy()
+        env["GROK_LEADER_SOCKET"] = str(GROK_LEADER_SOCKET)
+        env["GROK_FOLDER_TRUST"] = "0"
+        try:
+            subprocess.run(
+                argv,
+                cwd=folder,
+                env=env,
+                timeout=20,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _spawn(
         self,
@@ -455,8 +491,16 @@ class CliBackendAdapter(ProviderAdapter):
             self._kill()
             raise
         if self._proc.returncode:
+            err = stderr.decode("utf-8", errors="replace")
+            try:
+                from jaeger_ai.core.models.discovery import parse_cli_usage_limit
+                limit = parse_cli_usage_limit(err)
+            except Exception:  # noqa: BLE001
+                limit = None
+            if limit:
+                raise RuntimeError(limit)
             raise RuntimeError(f"CLI backend {self.backend_id!r} exited with status {self._proc.returncode}: "
-                               + stderr.decode("utf-8", errors="replace")[-2000:])
+                               + err[-2000:])
         text = stdout.decode("utf-8", errors="replace")
         return {
             "stdout": text,

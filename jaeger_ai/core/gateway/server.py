@@ -8659,6 +8659,13 @@ async def run_gateway_forever(
     global _BOUND_GATEWAY_PORT
     _BOUND_GATEWAY_PORT = int(port)
     print(f"[jaeger-gateway] Listening on http://{host}:{port}", flush=True)
+    def _warmup_cli_brains() -> None:
+        try:
+            from jaeger_agent.adapters.cli_backend import CliBackendAdapter
+            CliBackendAdapter("grok").warmup()
+        except Exception:
+            logger.debug("CLI brain warmup skipped", exc_info=True)
+    threading.Thread(target=_warmup_cli_brains, name="jaeger-cli-warmup", daemon=True).start()
     if getattr(gateway, "_pending_recovery_report", False):
         try:
             gateway._preserve_unknown_requests()
