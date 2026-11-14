@@ -61,7 +61,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "code": (r"\b(code|python|swift|javascript|typescript|shell|terminal|command|test suite|debug|package|disk|system|process|cpu|memory usage|df|ls|cat|ps|kill|curl|git|ping|port)\b",),
     "containers": (r"\b(container|containers|containerized)\b",),
     "media": (r"\b(image|video|audio|speech|voice|camera|microphone|listen)\b",),
-    "web": (r"\b(weather|forecast|twitter|tweets?|x\.com|x search)\b",),
+    "web": (r"\b(weather|forecast|twitter|tweets?|x\.com|x_search|x search|search x)\b",),
     "sessions": (r"\b(conversation|session|chat history)\b",),
     "board": (r"\b(board|kanban|card)\b",),
     "agent_notes": (r"\b(notes?|remember|preferences?|keep track)\b",),
@@ -117,8 +117,8 @@ CORE: frozenset[str] = frozenset({
     "read_file", "write_file", "patch", "search_files", "list_skill_dir",
     # Shell and code.
     "terminal", "execute_code",
-    # Web.
-    "web_search", "web_extract",
+    # Web and X (Twitter) search.
+    "web_search", "web_extract", "x_search",
     # Meta: find and load everything else on demand.
     "list_tools", "load_tools", "describe_tool", "tool_search",
     # A few everyday helpers.
@@ -195,7 +195,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "web": frozenset({
         # ``web_search`` and ``web_extract`` are in CORE; weather and
         # X search load on intent so they don't bloat everyday routing.
-        "get_weather", "x_search",
+        "get_weather",
     }),
     "memory_granular": frozenset({
         # The pre-umbrella granular memory tools — kept registered so
