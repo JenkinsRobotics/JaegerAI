@@ -128,6 +128,51 @@ def flatten_messages(
     return "\n\n".join(parts).strip() or "(no input)"
 
 
+
+def _extract_pipe_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse Grok's ``<|tool_call|>name\\nkey=value`` text envelopes."""
+    import re
+    import uuid
+    pattern = re.compile(
+        r"<\|?tool_call\|?>\s*([A-Za-z_][A-Za-z0-9_]*)\s*(.*?)\s*"
+        r"(?:<\|?/tool_call\|?>|</\|?tool_call\|?>|</tool_call>)",
+        re.DOTALL,
+    )
+    calls: list[dict[str, Any]] = []
+    for match in pattern.finditer(text or ""):
+        name = match.group(1).strip()
+        body = (match.group(2) or "").strip()
+        args: dict[str, Any] = {}
+        if body.startswith("{") or body.startswith("["):
+            try:
+                parsed = json.loads(body)
+                if isinstance(parsed, dict):
+                    args = parsed
+            except ValueError:
+                args = {}
+        if not args:
+            for line in body.splitlines():
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if key:
+                    args[key] = value.strip().strip('"').strip("'")
+        if name:
+            calls.append({"id": f"cli_{uuid.uuid4().hex[:12]}", "name": name, "arguments": args})
+    return calls
+
+
+def _strip_pipe_tool_calls(text: str) -> str:
+    import re
+    pattern = re.compile(
+        r"<\|?tool_call\|?>\s*[A-Za-z_][A-Za-z0-9_]*\s*.*?\s*"
+        r"(?:<\|?/tool_call\|?>|</\|?tool_call\|?>|</tool_call>)",
+        re.DOTALL,
+    )
+    return pattern.sub("", text or "")
+
+
 def parse_cli_text(stdout: str, stderr: str = "") -> str:
     """Extract assistant text from CLI stdout. JSON if present, else raw."""
     clean = (stdout or "").strip()
@@ -407,16 +452,20 @@ class CliBackendAdapter(ProviderAdapter):
                 # session in the stable cwd stacked prior turns into a
                 # 20k–80k prompt. Start a fresh session every turn.
                 child_argv.extend(["--session-id", str(uuid.uuid4())])
-                child_argv.extend([
-                    "--system-prompt-override",
+                tool_names = ", ".join(
+                    str(getattr(tool, "name", "") or "")
+                    for tool in tools
+                    if getattr(tool, "name", "")
+                )
+                override = (
                     "You are Jaeger's language model. Follow the System "
-                    "section and the current request. Use only Jaeger MCP "
-                    "tools. To list the current workspace, call "
-                    "list_skill_dir with path '.'. To read a file, call "
-                    "the Jaeger read_file tool. For shell, call terminal. "
-                    "Do not use built-in file, editor, X search, or web "
-                    "tools. The CLI cache directory is not the workspace.",
-                ])
+                    "section and the current request. Use only these Jaeger "
+                    "MCP tools: " + (tool_names or "list_skill_dir, read_file, terminal")
+                    + ". To list the current workspace, call list_skill_dir "
+                    "with path '.'. Do not use built-in file, editor, X search, "
+                    "or web tools. The CLI cache directory is not the workspace."
+                )
+                child_argv.extend(["--system-prompt-override", override])
                 child_argv.extend(["--disallowed-tools", ",".join(_GROK_BUILTIN_TOOLS)])
                 if "--no-plan" not in child_argv:
                     child_argv.append("--no-plan")
@@ -613,6 +662,15 @@ class CliBackendAdapter(ProviderAdapter):
                 str(payload.get("stdout") or ""),
                 str(payload.get("stderr") or ""),
             )
+        from jaeger_agent.dialects import extract_tool_calls
+        tool_calls = list(extract_tool_calls(text) or [])
+        if not tool_calls:
+            tool_calls = _extract_pipe_tool_calls(text)
+        if tool_calls:
+            text = _strip_pipe_tool_calls(text).strip()
+            message: dict[str, Any] = {"role": "assistant", "content": text or None}
+            message["tool_calls"] = tool_calls
+            return message  # type: ignore[return-value]
         return Message(role="assistant", content=text, finish_reason="stop")
 
     def supports(self, feature: str) -> bool:

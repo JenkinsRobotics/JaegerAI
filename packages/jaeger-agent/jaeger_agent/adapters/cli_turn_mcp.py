@@ -487,6 +487,14 @@ def attach_cli_mcp(
         # and is not this turn's loopback server).
         extra_env["GROK_CLAUDE_MCPS_ENABLED"] = "0"
         extra_env["GROK_CURSOR_MCPS_ENABLED"] = "0"
+        extra_env["GROK_CLAUDE_SKILLS_ENABLED"] = "0"
+        extra_env["GROK_CURSOR_SKILLS_ENABLED"] = "0"
+        extra_env["GROK_CLAUDE_AGENTS_ENABLED"] = "0"
+        extra_env["GROK_CURSOR_AGENTS_ENABLED"] = "0"
+        extra_env["GROK_CLAUDE_RULES_ENABLED"] = "0"
+        extra_env["GROK_CURSOR_RULES_ENABLED"] = "0"
+        extra_env["GROK_CLAUDE_HOOKS_ENABLED"] = "0"
+        extra_env["GROK_CURSOR_HOOKS_ENABLED"] = "0"
         for flag in grok_leader_argv():
             if flag not in child:
                 child.append(flag)
