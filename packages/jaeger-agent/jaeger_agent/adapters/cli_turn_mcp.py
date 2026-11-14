@@ -1,4 +1,4 @@
-"""Per-turn loopback MCP server for CLI brains (Grok, Claude, Codex, Gemini, Antigravity, Hermes).
+"""Loopback MCP server for CLI brains (Grok, Claude, Codex, Gemini, Antigravity).
 
 Industry-standard path: the CLI talks to Jaeger tools as real MCP tools.
 Each ``tools/call`` is executed by the same Jaeger tool executor the
@@ -25,7 +25,7 @@ from jaeger_os.core.tools.tool_schema import ToolDef
 
 logger = logging.getLogger(__name__)
 
-MCP_BACKENDS = frozenset({"grok", "claude", "codex", "gemini", "agy", "hermes"})
+MCP_BACKENDS = frozenset({"grok", "claude", "codex", "gemini", "agy"})
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_-]+")
 
 ExecuteTool = Callable[[ToolDef, dict[str, Any]], Any]
@@ -245,6 +245,11 @@ class TurnToolMcp:
         # Token lives only in this 0600 file next to the prompt, same as
         # the existing prompt.txt privacy rule. Never log it.
         body = (
+            # Project-only: enable a Jaeger leader socket without writing
+            # the operator's ~/.grok/config.toml.
+            "[cli]\n"
+            "use_leader = true\n"
+            "\n"
             "[mcp_servers.jaeger]\n"
             f'url = "{self.url}"\n'
             f'headers = {{ Authorization = "Bearer {self.token}" }}\n'
@@ -345,6 +350,70 @@ class TurnToolMcp:
         ]
 
 
+
+import os
+from pathlib import Path as _Path
+
+_POOL_LOCK = threading.Lock()
+_POOL: dict[str, "TurnToolMcp"] = {}
+_STABLE_ROOT = _Path.home() / ".cache" / "jaeger" / "cli-workdir"
+GROK_LEADER_SOCKET = _Path.home() / ".grok" / "leader-jaeger.sock"
+
+
+class _ExecuteHolder:
+    """Mutable execute + tool map so a reused MCP server tracks the live turn."""
+
+    def __init__(self) -> None:
+        self.execute: ExecuteTool | None = None
+        self.tools: dict[str, ToolDef] = {}
+        self.lock = threading.Lock()
+
+    def __call__(self, tool: ToolDef, args: dict[str, Any]) -> Any:
+        fn = self.execute
+        if fn is None:
+            raise RuntimeError("CLI MCP executor is not attached to a turn")
+        # Prefer the currently registered tool of this name so a refreshed
+        # schema/handler still hits the live approval/session closure.
+        live = self.tools.get(getattr(tool, "name", "")) or tool
+        return fn(live, args)
+
+
+def stable_cli_workdir(backend_id: str) -> str:
+    """Persistent per-backend cwd so MCP config can be reused across turns."""
+    folder = _STABLE_ROOT / (backend_id or "cli")
+    folder.mkdir(parents=True, exist_ok=True)
+    os.chmod(folder, 0o700)
+    return str(folder)
+
+
+def acquire_cli_mcp(backend_id: str, tools: list[ToolDef], execute: ExecuteTool) -> TurnToolMcp:
+    """Reuse a process-global MCP server; refresh the execute closure every turn."""
+    with _POOL_LOCK:
+        server = _POOL.get(backend_id)
+        if server is None or not server.url:
+            server = TurnToolMcp()
+            holder = _ExecuteHolder()
+            holder.execute = execute
+            holder.tools = {t.name: t for t in tools}
+            server._holder = holder  # type: ignore[attr-defined]
+            server.start(tools, holder)
+            _POOL[backend_id] = server
+        else:
+            holder = getattr(server, "_holder", None)
+            if holder is None:
+                holder = _ExecuteHolder()
+                server._holder = holder  # type: ignore[attr-defined]
+            holder.execute = execute
+            holder.tools = {t.name: t for t in tools}
+        return server
+
+
+def grok_leader_argv() -> list[str]:
+    """Jaeger-specific leader socket; never touches the user's default socket."""
+    GROK_LEADER_SOCKET.parent.mkdir(parents=True, exist_ok=True)
+    return ["--leader-socket", str(GROK_LEADER_SOCKET)]
+
+
 def attach_cli_mcp(
     backend_id: str,
     argv: list[str],
@@ -359,9 +428,8 @@ def attach_cli_mcp(
     """
     if backend_id not in MCP_BACKENDS or not tools or execute is None:
         return argv, {}, None, bool(tools)
-    server = TurnToolMcp()
     try:
-        server.start(tools, execute)
+        server = acquire_cli_mcp(backend_id, tools, execute)
     except Exception as exc:  # noqa: BLE001
         logger.warning("CLI native MCP unavailable (%s); using text tool protocol", type(exc).__name__)
         return argv, {}, None, True
@@ -373,15 +441,18 @@ def attach_cli_mcp(
     if backend_id == "grok":
         if folder:
             server.write_grok_config(folder)
-        # Load the project MCP config in the temp cwd without writing the
-        # owner's trusted_folders.toml.
+        # Load the project MCP config in the stable cwd without writing the
+        # owner's trusted_folders.toml or ~/.grok/config.toml.
         extra_env["GROK_FOLDER_TRUST"] = "0"
+        extra_env["GROK_LEADER_SOCKET"] = str(GROK_LEADER_SOCKET)
+        for flag in grok_leader_argv():
+            if flag not in child:
+                child.append(flag)
     elif backend_id == "claude":
         if folder:
             config_path = server.write_claude_config(folder)
             child.extend(["--mcp-config", config_path, "--strict-mcp-config"])
         else:
-            server.stop()
             return argv, {}, None, True
     elif backend_id == "codex":
         child.extend(server.codex_argv())
@@ -390,13 +461,13 @@ def attach_cli_mcp(
         if folder:
             server.write_gemini_config(folder)
         else:
-            server.stop()
             return argv, {}, None, True
+        # Headless trusted-folder (Gemini CLI exit 55).
+        extra_env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
     elif backend_id == "agy":
         if folder:
             server.write_agy_config(folder)
         else:
-            server.stop()
             return argv, {}, None, True
     elif backend_id == "hermes":
         if folder:
@@ -404,6 +475,5 @@ def attach_cli_mcp(
             extra_env["HERMES_CONFIG_PATH"] = config_path
             extra_env["HERMES_CONFIG"] = config_path
         else:
-            server.stop()
             return argv, {}, None, True
     return child, extra_env, server, False

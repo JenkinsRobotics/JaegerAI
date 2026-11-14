@@ -105,7 +105,9 @@ def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
 
     from jaeger_agent.skill_registry.tool_selection import ToolSelection, selection_scope
     full_tools = os.environ.get("JAEGER_FULL_TOOLS", "").strip().lower() in {"1", "true", "yes", "on"}
-    scope_tools = is_local_client(client) and not full_tools
+    # Industry standard: a small CORE plus load_tools, for every brain
+    # (CLI/cloud included). Local-only scoping left ~170 tools on Grok turns.
+    scope_tools = not full_tools
     with _lock, selection_scope(ToolSelection(scoped=True if scope_tools else None)):
         pipeline = main._pipeline
         if _owns_pipeline is None:

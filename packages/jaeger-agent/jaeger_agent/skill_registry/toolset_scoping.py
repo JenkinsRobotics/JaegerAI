@@ -113,45 +113,18 @@ def infer_toolsets(text: str) -> set[str]:
 # local model routes over distinct named tools better than one tool's
 # action parameter (measured: the kanban umbrella hurt board filing).
 CORE: frozenset[str] = frozenset({
-    # Time and math — the cheapest, most-routed pair.
-    "get_time", "calculate",
-    # Files — read + write; ``patch``/``search_files``/``append_file``/
-    # ``delete_file`` are in the ``files`` toolset and load on intent.
-    "read_file", "write_file",
-    # Code execution — high-value; was loadable before, now CORE.
-    "execute_code",
-    # Web — the two everyday primitives. ``get_weather`` is loadable
-    # via the ``web`` toolset for users that don't want it bloating
-    # routing on quiet days.
+    # Files: read / write / edit / search.
+    "read_file", "write_file", "patch", "search_files",
+    # Shell and code.
+    "terminal", "execute_code",
+    # Web.
     "web_search", "web_extract",
-    # Memory — umbrella + ``recall`` (the everyday read). The other
-    # granular verbs (forget / list_facts / search_memory) load via the
-    # ``memory_granular`` toolset. ``recall`` is CORE because scoped runs
-    # showed the umbrella alone lost the plain "what did I say" cases.
-    "memory", "recall", "record_insight", "recall_insight",
-    # Tasks + board. Individual board verbs (a local model routes over
-    # distinct named tools better than one ``action=`` umbrella); the
-    # common two are CORE, the rest load via the ``board`` toolset.
-    "todo", "board_add", "board_view",
-    # Skill discovery (umbrella) + the enum-callable use_skill + delegation.
-    # Heavy procedures live behind ``skill(view)`` / ``use_skill(name=…)``.
-    "list_skills", "use_skill", "delegate_task",
-    # User interaction.
-    "clarify", "help_me",
-    # Meta — the search + activate primitives, always visible so the model
-    # can FIND any tool (list_tools) and bring it in (load_tools) without
-    # ever force-fitting a visible tool for one it hasn't looked up.
-    "list_tools", "load_tools", "describe_tool",
-    # Mail.app reads — CORE so "organize my inbox" hits list_mail instead
-    # of execute_code + guessed AppleScript (the 60-tool hang).
-    "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage",
-    # ``self_check`` (the agent's doctor) lives in the ``diagnostics``
-    # toolset, not CORE — loaded on demand like ``run_benchmark``. The
-    # old ``system_health`` was kept out entirely because "do a self
-    # check" stalled in prefill (the model dithered between
-    # ``system_health`` and ``system_status``). The 2026-06-20 rename to
-    # ``self_check`` + this generation's engine/gemma fixes removed that:
-    # "do a self check" now routes in ~0.2s TTFT.
+    # Meta: find and load everything else on demand.
+    "list_tools", "load_tools", "describe_tool", "tool_search",
+    # A few everyday helpers.
+    "memory", "recall", "todo", "clarify",
+    "list_skills", "delegate_task",
+    "get_time", "calculate",
 })
 
 
@@ -191,13 +164,15 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # ``read_file`` and ``write_file`` are in CORE; the rest of
         # the file surface (patch, append, delete, search, list_dir,
         # move, copy) loads on intent.
-        "append_file", "delete_file", "patch", "search_files",
+        # patch / search_files are CORE; the rest loads on intent.
+        "append_file", "delete_file",
         "list_skill_dir", "move_file", "copy_file",
     }),
     "code": frozenset({
         # ``execute_code`` is in CORE; heavy/risky code surfaces load
         # on intent (terminal, ssh, venv, dep install).
-        "run_in_venv", "terminal", "remote_terminal",
+        # terminal is CORE; heavy/risky surfaces load on intent.
+        "run_in_venv", "remote_terminal",
         "install_package", "list_venv_packages",
         # Long-running command sessions (start, poll/type, kill).
         "exec_command", "write_stdin", "kill_command",
@@ -489,9 +464,10 @@ def register_mcp_server_toolset(name: str, tools: list[str], *, gated: bool = Fa
     members = frozenset(tools)
     _MCP_SERVER_TOOLS[name] = members
     _MCP_TOOLS.update(members)
+    # Always a loadable toolset so scoping does not fail-open MCP tools.
+    register_skill_toolset(name, list(members), f"the {name} MCP server")
     if gated:
         _GATED_MCP_TOOLS.update(members)
-        register_skill_toolset(name, list(members), f"the {name} MCP server")
 
 
 def unregister_mcp_server_toolset(name: str) -> None:
@@ -615,7 +591,10 @@ def scoped_tool_visible(name: str) -> bool:
     for ts in active_groups():
         if name in _members(ts):
             return True
-    # Fail-open: a tool that belongs to NO toolset is never hidden.
+    # MCP tools that are not in an active toolset stay hidden.
+    if name in _MCP_TOOLS:
+        return False
+    # Fail-open: a built-in that belongs to NO toolset is never hidden.
     in_any = (any(name in m for m in TOOLSETS.values())
               or any(name in m for m in _SKILL_TOOLSETS.values()))
     return not in_any
