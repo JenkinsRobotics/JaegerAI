@@ -216,7 +216,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "ide": frozenset({"ide_context", "ide_open_file", "ide_diagnostics"}),
     "sessions": frozenset({"session_organize","session_search"}),
     "board": frozenset({
-        # board_add / board_view are CORE; the rest load on intent.
+        # add/view used to live in CORE; they now load on intent with the rest.
+        "board_add", "board_view",
         "board_move", "board_update", "board_delete",
     }),
     # Multi-agent coordination (ported from hermes-agent). Deliberately a
@@ -246,8 +247,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "set_name", "update_soul",
     }),
     "skills": frozenset({
-        # Skill authoring + the Deep Think queue. ``skill`` umbrella
-        # is in CORE; the lower-level operators load here.
+        # Skill authoring + the Deep Think queue. ``list_skills`` stays
+        # in CORE; ``use_skill`` and the lower-level operators load here.
+        "use_skill",
         "reload_skills", "package_skill", "benchmark_skill",
         "propose_deep_think_task", "list_deep_think_queue",
         "queue_background_task", "background_task_status",
@@ -293,7 +295,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "media_control": frozenset({"media_control", "now_playing"}),
     "ocr": frozenset({"ocr_file"}),
     "delegates": frozenset({"list_delegate_runtimes", "delegate", "call_agent", "get_agent_result", "run_team",
-                            "transfer_to_agent"}),
+                            "transfer_to_agent", "help_me"}),
     "finance": frozenset({
         "finance_summary", "finance_audit", "finance_transactions",
         "finance_inbox", "finance_sync", "finance_briefing",
@@ -324,7 +326,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "frameworks": "read other agent frameworks' history/memory and hand them tasks (owner-granted)",
     "ide": "the operator's editor: open a file at a line, list Problems, read what is open",
     "sessions": "search and inspect canonical conversation history",
-    "board": "board_move / board_update / board_delete (board_add + board_view are CORE)",
+    "board": "board_add / board_view / board_move / board_update / board_delete",
     "kanban": "multi-agent worker/orchestrator protocol — claim, heartbeat, "
               "block, review, link and attach on shared board cards",
     "scheduling": "schedule, list, cancel cron prompts",
