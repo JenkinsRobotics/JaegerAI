@@ -190,7 +190,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "kanban": ToolsetDef(
         description="Cross-session kanban board for durable work (individual verbs).",
-        tools=_tools(_core("board_add", "board_view"), _scoping("board")),
+        tools=_tools(_scoping("board")),
         includes=[],
     ),
     "browser": ToolsetDef(
@@ -203,7 +203,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "Inspect, package, benchmark, reload skills; the usage journal "
             "+ review loop; the deep-think queue."
         ),
-        tools=_tools(_core("list_skills", "use_skill"), _scoping("skills")),
+        tools=_tools(_core("list_skills"), _scoping("skills")),
         includes=[],
     ),
     "media": ToolsetDef(
@@ -226,7 +226,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "delegate": ToolsetDef(
         description="Hand off subtasks to a fresh agent, clarify, or ask for help.",
-        tools=_tools(_core("delegate_task", "clarify", "help_me")),
+        tools=_tools(_core("delegate_task", "clarify"), _pick("delegates", "help_me")),
         includes=[],
     ),
     "comm": ToolsetDef(
