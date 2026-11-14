@@ -186,7 +186,7 @@ def _strip_pipe_tool_calls(text: str) -> str:
     )
     out = pattern.sub("", text or "")
     out = re.sub(r"<function_calls>\s*.*?\s*</function_calls>", "", out, flags=re.DOTALL)
-    out = re.sub(r"<invoke\s+name="[^"]+">\s*.*?\s*</invoke>", "", out, flags=re.DOTALL)
+    out = re.sub(r'<invoke\s+name="[^"]+">\s*.*?\s*</invoke>', '', out, flags=re.DOTALL)
     return out
 
 
