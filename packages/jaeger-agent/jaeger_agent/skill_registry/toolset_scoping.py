@@ -202,6 +202,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # entries still work, but hidden from default routing in
         # favour of the umbrella ``memory(action=…)`` (in CORE).
         "remember", "recall", "forget", "list_facts", "search_memory",
+        "record_insight", "recall_insight",
     }),
     # Planning primitives (Codex ``update_plan`` / ``wait``): stateless display
     # of the model's plan and a cancellable bounded pause.
@@ -260,7 +261,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # Task-level after-action reflection (the REFLECT loop step).
         "reflect",
     }),
-    "computer_use": frozenset({"computer_use", "browser"}),
+    "computer_use": frozenset({"computer_use", "browser", "computer_look"}),
     "credentials": frozenset({
         "get_credential", "list_credentials", "set_credential", "request_secret",
     }),
@@ -268,6 +269,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "email": frozenset({
         "send_email", "move_mail", "batch_move",
         "sweep_mail", "schedule_inbox_sweeper",
+        "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage",
     }),
     "smart_home": frozenset({
         # Home Assistant plugin tools (jaeger_os/plugins/homeassistant) —
@@ -293,7 +295,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "notifications": frozenset({"notify"}),
     "system_control": frozenset({"system_control"}),
     "media_control": frozenset({"media_control", "now_playing"}),
-    "ocr": frozenset({"ocr_file"}),
+    "ocr": frozenset({"ocr_file", "ocr_window", "see_screen"}),
     "delegates": frozenset({"list_delegate_runtimes", "delegate", "call_agent", "get_agent_result", "run_team",
                             "transfer_to_agent", "help_me"}),
     "finance": frozenset({
@@ -336,7 +338,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "computer_use": "Mac-driving + browser automation",
     "credentials": "list, read, and save stored credentials",
     "plugins": "list, set up + activate plugins; send messages",
-    "email": "Mail.app writes: move_mail / batch_move / sweep_mail + send_email",
+    "email": "Mail.app: list/read/plan, send, move, batch_move, sweep",
     "smart_home": "Home Assistant — list/read smart-home devices, call services",
     "people": "person index — profiles of people you know (name/likes/access)",
     "models": "list/download models; set_mode (normal/high/deep-sleep); "
@@ -351,7 +353,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "notifications": "show a macOS notification banner",
     "system_control": "volume, brightness, dark mode, do-not-disturb, prevent-sleep",
     "media_control": "control + read Music.app/Spotify playback",
-    "ocr": "extract text from an image or PDF (Vision framework)",
+    "ocr": "extract text from an image, PDF, or the frontmost window",
     "delegates": "think with inner helpers (delegate), inspect runtimes, request specialist handoffs",
     "finance": "inspect financial summaries, audit results and transactions",
     "missions": "create and track durable missions, goals, and plan steps",

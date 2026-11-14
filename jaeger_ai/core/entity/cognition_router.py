@@ -155,10 +155,10 @@ def with_background(request: str, context: Mapping[str, Any], *, lessons: str = 
     try:
         context_limit = max(
             0,
-            min(65_536, int(12_000 if raw_context_limit is None else raw_context_limit)),
+            min(4_000, int(4_000 if raw_context_limit is None else raw_context_limit)),
         )
     except (TypeError, ValueError):
-        context_limit = 12_000
+        context_limit = 4_000
     parts: list[str] = []
     used = 0
 

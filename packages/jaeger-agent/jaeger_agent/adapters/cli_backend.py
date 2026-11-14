@@ -376,6 +376,19 @@ class CliBackendAdapter(ProviderAdapter):
                 with open(prompt_file, "w", encoding="utf-8") as handle:
                     os.chmod(prompt_file, 0o600)
                     handle.write(live_prompt)
+            if self.backend_id == "grok":
+                import uuid
+                # Jaeger already sends the conversation. A reused Grok
+                # session in the stable cwd stacked prior turns into a
+                # 20k–80k prompt. Start a fresh session every turn.
+                child_argv.extend(["--session-id", str(uuid.uuid4())])
+                child_argv.extend([
+                    "--system-prompt-override",
+                    "You are Jaeger's language model. Follow the System "
+                    "section and the current request. Use only Jaeger MCP "
+                    "tools for file, shell, web, and other work. Do not "
+                    "use built-in file or editor tools.",
+                ])
             # Keep the process-global MCP server running between turns.
             return self._spawn(
                 child_argv, spawn_stdin, spec,
@@ -413,18 +426,14 @@ class CliBackendAdapter(ProviderAdapter):
     def warmup(self) -> None:
         """Pre-start the loopback MCP server and the Grok leader, if installed."""
         from .cli_turn_mcp import (
-            GROK_LEADER_SOCKET, acquire_cli_mcp, grok_leader_argv, stable_cli_workdir,
+            GROK_LEADER_SOCKET, grok_leader_argv, stable_cli_workdir,
         )
         spec = self._load_spec()
         folder = stable_cli_workdir(self.backend_id)
 
-        def _noop_execute(tool: Any, args: dict[str, Any]) -> str:
-            return ""
-
-        try:
-            acquire_cli_mcp(self.backend_id, [], _noop_execute)
-        except Exception:  # noqa: BLE001 — warmup is best-effort
-            return
+        # Do not start the MCP server with an empty catalog. A reused
+        # empty server left Grok with no Jaeger tools. The first real
+        # turn starts MCP with the scoped tool set.
         if self.backend_id != "grok":
             return
         executable = self._executable or ""

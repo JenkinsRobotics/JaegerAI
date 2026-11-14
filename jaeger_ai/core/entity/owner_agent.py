@@ -49,7 +49,8 @@ def background_budget_tokens(cfg: Any, *, model=None, provider=None) -> int:
     owner = str(provider or lane or (ext.provider if ext.enabled else 'local')).lower()
     name = str(name or (ext.model if ext.enabled else 'local')).lower()
     local = owner in (LOCAL_PROVIDERS | {'ollama-local', 'huggingface', 'hf', 'in-process'})
-    return 1024 if local and not name.endswith((':cloud', '-cloud')) else 4096
+    # Enough for a few relevant memories; the rest stays reachable via tools.
+    return 1024
 
 
 def is_local_client(client: Any) -> bool:
