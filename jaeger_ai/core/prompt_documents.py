@@ -43,8 +43,8 @@ from typing import Any
 # imperatives — the model attends most to the start of the prompt, and a
 # 10K-char soul.md pushed MANDATORY_TOOL_RULES into low-attention
 # territory in benchmarks.
-SOUL_MAX_CHARS = 4_000
-DIRECTIVES_MAX_CHARS = 8_000
+SOUL_MAX_CHARS = 2_500
+DIRECTIVES_MAX_CHARS = 2_000
 
 # Uppercase is canonical — the convention every agent runtime that reads
 # these files uses. The lowercase spellings stay resolvable because
@@ -181,7 +181,7 @@ def _insert_after(fragments: list, anchor: str, fragment: Any) -> None:
 
 
 CROSS_AGENT_FRAGMENT = "cross_agent_memory"
-CROSS_AGENT_MAX_CHARS = 2_500
+CROSS_AGENT_MAX_CHARS = 800
 
 
 def load_cross_agent_memory(cap: int = CROSS_AGENT_MAX_CHARS) -> str:
@@ -200,6 +200,16 @@ def load_cross_agent_memory(cap: int = CROSS_AGENT_MAX_CHARS) -> str:
         return ""
     try:
         content = person_md.read_text(encoding="utf-8").strip()
+        if not content:
+            return ""
+        # Drop raw tool-result dumps that used to crowd the identity prompt.
+        keep = []
+        for line in content.splitlines():
+            low = line.lower()
+            if "tool_result" in low or "tool_use_id" in low or "error: domain" in low:
+                continue
+            keep.append(line)
+        content = "\n".join(keep).strip()
         if not content:
             return ""
         if len(content) > cap:
@@ -312,7 +322,7 @@ def register_context_documents() -> bool:
 
 
 OPERATOR_CONTEXT_FRAGMENT = "operator_context"
-OPERATOR_CONTEXT_MAX_CHARS = 2_000
+OPERATOR_CONTEXT_MAX_CHARS = 800
 
 
 def load_operator_context(cap: int = OPERATOR_CONTEXT_MAX_CHARS) -> str:
@@ -337,7 +347,7 @@ def load_operator_context(cap: int = OPERATOR_CONTEXT_MAX_CHARS) -> str:
 
 
 INSTANCE_FACTS_FRAGMENT = "instance_facts"
-INSTANCE_FACTS_MAX_CHARS = 2_500
+INSTANCE_FACTS_MAX_CHARS = 800
 
 
 def load_instance_facts(layout: Any, cap: int = INSTANCE_FACTS_MAX_CHARS) -> str:

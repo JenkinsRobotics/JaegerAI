@@ -113,8 +113,8 @@ def infer_toolsets(text: str) -> set[str]:
 # local model routes over distinct named tools better than one tool's
 # action parameter (measured: the kanban umbrella hurt board filing).
 CORE: frozenset[str] = frozenset({
-    # Files: read / write / edit / search.
-    "read_file", "write_file", "patch", "search_files",
+    # Files: read / write / edit / search / list.
+    "read_file", "write_file", "patch", "search_files", "list_skill_dir",
     # Shell and code.
     "terminal", "execute_code",
     # Web.
@@ -166,7 +166,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # move, copy) loads on intent.
         # patch / search_files are CORE; the rest loads on intent.
         "append_file", "delete_file",
-        "list_skill_dir", "move_file", "copy_file",
+        "move_file", "copy_file",
     }),
     "code": frozenset({
         # ``execute_code`` is in CORE; heavy/risky code surfaces load

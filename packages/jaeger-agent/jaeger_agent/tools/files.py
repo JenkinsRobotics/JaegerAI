@@ -512,11 +512,11 @@ def file_read(path: str, offset: int = 0, limit: int | None = None, column: int 
 
 
 def list_skill_dir(path: str = ".") -> dict[str, Any]:
-    """List a directory's contents. Defaults to the instance's skills/
-    dir; pass any path — a repo subdirectory, an absolute path — to list
-    elsewhere. Use it to explore the codebase or to discover existing
-    skills before adding a new version (so the agent picks the right
-    _vN suffix)."""
+    """List files and folders in a directory, names and types.
+
+    Default path ``.`` is the current workspace (the bound project),
+    not the CLI cache and not skills/. Pass another path to list there.
+    This is the tool for "list the files in the current workspace"."""
     layout = _require_layout()
     try:
         from jaeger_agent.core.workspace import _redirect_cli_cache_path, get_project_root, get_effective_workspace_dir

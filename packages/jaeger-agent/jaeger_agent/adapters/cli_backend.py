@@ -37,15 +37,24 @@ logger = logging.getLogger(__name__)
 
 # --tools "" does not actually disable Grok built-ins (they still appear
 # in tool_definitions.json and add ~12k tokens). Deny them by name so
-# only Jaeger MCP tools remain.
+# only Jaeger MCP tools remain. Do not list names that collide with
+# Jaeger MCP tools (read_file, web_search): --disallowed-tools matches
+# the short name and would hide Jaeger's own tool.
 _GROK_BUILTIN_TOOLS = (
-    "run_terminal_command", "read_file", "search_replace", "list_dir", "grep",
+    "run_terminal_command", "search_replace", "list_dir", "grep",
     "kill_command_or_subagent", "todo_write", "get_command_or_subagent_output",
     "scheduler_create", "scheduler_delete", "scheduler_list", "monitor",
     "search_tool", "use_tool", "workflow", "enter_plan_mode", "exit_plan_mode",
     "ask_user_question", "send_feedback", "image_gen", "image_edit",
     "image_to_video", "reference_to_video", "write",
+    # Vendor backend tools (--disable-web-search does not cover these).
+    "x_keyword_search", "x_semantic_search", "x_user_search",
+    "x_thread_fetch", "x_search", "web_fetch", "code_interpreter",
 )
+
+# Wall-clock cap so a vendor-tool spin cannot hang the chat turn.
+# "took too long — Retry" is the operator-facing copy.
+_CLI_HARD_TURN_TIMEOUT_S = 120.0
 
 _SAFE_ENV = frozenset({
     "COLORTERM",
@@ -403,6 +412,11 @@ class CliBackendAdapter(ProviderAdapter):
                     "directory is not the workspace.",
                 ])
                 child_argv.extend(["--disallowed-tools", ",".join(_GROK_BUILTIN_TOOLS)])
+                if "--no-plan" not in child_argv:
+                    child_argv.append("--no-plan")
+                # Backstop: don't let a confused tool loop run forever.
+                if "--max-turns" not in child_argv:
+                    child_argv.extend(["--max-turns", "8"])
             # Keep the process-global MCP server running between turns.
             return self._spawn(
                 child_argv, spawn_stdin, spec,
@@ -482,6 +496,12 @@ class CliBackendAdapter(ProviderAdapter):
         extra_env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         env = self._environment(spec, extra_env)
+        try:
+            hard = float(os.environ.get("JAEGER_CLI_TURN_TIMEOUT_S") or _CLI_HARD_TURN_TIMEOUT_S)
+        except (TypeError, ValueError):
+            hard = _CLI_HARD_TURN_TIMEOUT_S
+        if hard > 0:
+            self.timeout_s = min(self.timeout_s or hard, hard)
         popen_kwargs: dict[str, Any] = {
             "args": argv,
             "stdin": subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
@@ -506,10 +526,12 @@ class CliBackendAdapter(ProviderAdapter):
         except subprocess.TimeoutExpired:
             self._kill()
             if on_delta is None:
-                self._proc.communicate()
-            raise TimeoutError(
-                f"CLI backend {self.backend_id!r} timed out after {self.timeout_s:.0f}s"
-            ) from None
+                try:
+                    self._proc.communicate()
+                except Exception:
+                    pass
+            from jaeger_ai.core.models.request_policy import ModelPolicyError
+            raise ModelPolicyError("took too long — Retry") from None
         except BaseException:
             self._kill()
             raise
