@@ -38,8 +38,9 @@ class OllamaAdapter(OpenAIAdapter):
         return self._metadata_value
 
     def _hosted(self):
-        return (urlparse(self._native_root).hostname == "ollama.com"
-                or self.model.lower().endswith((":cloud", "-cloud")))
+        # Direct ollama.com API only. :cloud tags on the signed-in local
+        # app use native /api/chat through 127.0.0.1:11434.
+        return urlparse(self._native_root).hostname == "ollama.com"
 
     def _native_body(self, formatted, metadata):
         messages = copy.deepcopy(formatted["messages"])

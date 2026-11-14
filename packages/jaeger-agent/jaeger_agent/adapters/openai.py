@@ -428,6 +428,10 @@ class OpenAIAdapter(ProviderAdapter):
         is no longer killed at the 30s HTTP default), the SDK read
         timeout sees continuous bytes, and an interrupt closes the
         stream so the server stops generating."""
+        # The agent loop passes execute_tool for CLI MCP backends. It is
+        # not an OpenAI chat-completions argument; leaking it here raises
+        # TypeError and the turn silently falls back to another model.
+        kwargs.pop("execute_tool", None)
         client = self._ensure_client()
         api_kwargs = {**formatted, **kwargs}
         if first_progress_timeout_s is not None and self.provider != "local-llama":

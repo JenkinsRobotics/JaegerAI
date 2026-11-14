@@ -194,11 +194,12 @@ def _adapter_for_client(
                 reasoning_effort=effort,
                 thinking_budget_tokens=getattr(ext, "thinking_budget_tokens", None),
             )
-        # Local Ollama needs its native runtime controls. Other providers and
-        # hosted Ollama retain their existing OpenAI-compatible wire protocol.
+        # Local Ollama, including :cloud tags served by the signed-in
+        # local app, uses native /api/chat. The direct ollama.com API
+        # (OllamaAdapter._hosted) keeps the OpenAI-compatible protocol.
         adapter_class = OpenAIAdapter
         adapter_options = {}
-        if provider == "ollama":
+        if provider in {"ollama", "ollama-cloud"}:
             from jaeger_agent.adapters.ollama import OllamaAdapter
             adapter_class = OllamaAdapter
             adapter_options["reasoning_policy"] = getattr(ext, "reasoning_effort", None)
