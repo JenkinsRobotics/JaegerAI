@@ -160,6 +160,20 @@ def _extract_pipe_tool_calls(text: str) -> list[dict[str, Any]]:
                     args[key] = value.strip().strip('"').strip("'")
         if name:
             calls.append({"id": f"cli_{uuid.uuid4().hex[:12]}", "name": name, "arguments": args})
+    # Anthropic-style XML that Grok also emits.
+    invoke = re.compile(
+        r'<invoke\s+name="([^"]+)">\s*(.*?)\s*</invoke>',
+        re.DOTALL,
+    )
+    param = re.compile(
+        r'<parameter\s+name="([^"]+)">\s*(.*?)\s*</parameter>',
+        re.DOTALL,
+    )
+    for match in invoke.finditer(text or ""):
+        name = match.group(1).strip()
+        args = {k.strip(): v.strip() for k, v in param.findall(match.group(2) or "") if k.strip()}
+        if name:
+            calls.append({"id": f"cli_{uuid.uuid4().hex[:12]}", "name": name, "arguments": args})
     return calls
 
 
@@ -170,7 +184,10 @@ def _strip_pipe_tool_calls(text: str) -> str:
         r"(?:<\|?/tool_call\|?>|</\|?tool_call\|?>|</tool_call>)",
         re.DOTALL,
     )
-    return pattern.sub("", text or "")
+    out = pattern.sub("", text or "")
+    out = re.sub(r"<function_calls>\s*.*?\s*</function_calls>", "", out, flags=re.DOTALL)
+    out = re.sub(r"<invoke\s+name="[^"]+">\s*.*?\s*</invoke>", "", out, flags=re.DOTALL)
+    return out
 
 
 def parse_cli_text(stdout: str, stderr: str = "") -> str:
