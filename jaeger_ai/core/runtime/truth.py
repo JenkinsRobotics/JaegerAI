@@ -363,7 +363,10 @@ def capability_snapshot(instance_root: Path | None = None) -> dict[str, Any]:
         for m in provider.get("models") or []:
             if str((m.get("certifications") or {}).get("VISION") or "").upper() == "PASS":
                 vision_certified = True
-    ollama_ok = any(p.get("id") == "ollama" and p.get("reachable") for p in models.get("providers") or [])
+    providers_ready = any(
+        p.get("reachable") or p.get("configured")
+        for p in models.get("providers") or []
+    )
     return {
         "identity": {
             "supported": True,
@@ -383,7 +386,7 @@ def capability_snapshot(instance_root: Path | None = None) -> dict[str, Any]:
         "providers": {
             "supported": True,
             "configured": True,
-            "available": ollama_ok,
+            "available": providers_ready,
             "inventory": models,
         },
         "models": {
@@ -434,6 +437,59 @@ def _tool_capability_summary() -> str:
         return ""
 
 
+
+_PROVIDER_PROMPT_LABELS = {
+    "ollama": "Local Ollama",
+    "ollama-cloud": "Ollama Cloud",
+    "grok": "Grok",
+    "xai": "Grok",
+    "chatgpt": "Codex (ChatGPT)",
+    "codex": "Codex (ChatGPT)",
+    "gemini": "Gemini",
+    "lmstudio": "LM Studio",
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+}
+
+
+def _provider_status_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """Compact, honest provider status for the system prompt.
+
+    Unconfigured cloud families are omitted. Configured-but-limited or
+    unreachable providers keep their reason so the model does not claim
+    they are missing.
+    """
+    order = ("grok", "xai", "ollama-cloud", "chatgpt", "codex", "gemini", "ollama", "lmstudio", "openai", "anthropic")
+    ranked = {key: i for i, key in enumerate(order)}
+    merged: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        ident = str(row.get("id") or "")
+        label = _PROVIDER_PROMPT_LABELS.get(ident)
+        if not label:
+            if not (row.get("configured") or row.get("reachable")):
+                continue
+            label = str(row.get("display_name") or ident)
+        status = "ready" if row.get("reachable") else (
+            str(row.get("reason") or "").strip() or (
+                "configured" if row.get("configured") else ""
+            )
+        )
+        if not status:
+            continue
+        if row.get("configured") and not row.get("reachable") and row.get("reason"):
+            status = str(row.get("reason")).strip()
+        prev = merged.get(label)
+        # Prefer a ready row over a limited/unavailable alias (Grok CLI vs xAI API).
+        score = (2 if row.get("reachable") else 1 if row.get("configured") else 0, -ranked.get(ident, 99))
+        prev_score = prev["score"] if prev else (-1, 0)
+        if prev is None or score > prev_score:
+            merged[label] = {"status": status, "score": score, "rank": ranked.get(ident, 50)}
+    return [
+        f"{label}: {row['status']}"
+        for label, row in sorted(merged.items(), key=lambda item: (item[1]["rank"], item[0]))
+    ]
+
+
 def capability_prompt_block(instance_root: Path | None = None) -> str:
     snap = capability_snapshot(instance_root)
     active = (snap.get("models") or {}).get("active") or {}
@@ -441,12 +497,7 @@ def capability_prompt_block(instance_root: Path | None = None) -> str:
         f"{row['display_name']} ({'ready' if row.get('available') else 'unavailable'})"
         for row in ((snap.get("frameworks") or {}).get("rows") or [])
     ]
-    providers = []
-    for p in ((snap.get("providers") or {}).get("inventory") or {}).get("providers") or []:
-        if p.get("reachable"):
-            providers.append(p["display_name"])
-        else:
-            providers.append(f"{p['display_name']}=unavailable")
+    providers = _provider_status_lines(((snap.get("providers") or {}).get("inventory") or {}).get("providers") or [])
     vision = snap.get("vision") or {}
     block = (
         "# Runtime truth (authoritative; do not invent providers or frameworks):\n"
@@ -455,10 +506,12 @@ def capability_prompt_block(instance_root: Path | None = None) -> str:
         f"- active_provider={active.get('provider')}\n"
         f"- active_model={active.get('model')}\n"
         f"- frameworks: {', '.join(frameworks)}\n"
-        f"- providers: {', '.join(providers)}\n"
+        f"- language-model providers: {'; '.join(providers) or 'none configured'}\n"
         f"- vision_available={bool(vision.get('available'))}"
         f" reason={vision.get('reason') or 'certified'}\n"
-        "- Do not present unsupported or unconfigured providers as currently available."
+        "- When asked what models or providers you can use, report the language-model "
+        "provider list above, including any limits. Do not say providers are "
+        "unconfigured when they are listed as ready, configured, or limited."
     )
     # Do not dump the full inventory into every prompt. That text told the
     # model it had tools it could not call this turn, and a Grok turn

@@ -16,7 +16,7 @@ import { ApprovalTray } from "../unified/ApprovalTray";
 import { ToastProvider } from "../unified/ui";
 import "../unified/unified.css";
 import "../unified/design.css";
-import { groupChatsByDate } from "../agents/chats";
+import { chatTitle, groupChatsByDate, visibleChats } from "../agents/chats";
 import { ConversationSummary } from "./ConversationSummary";
 import { ConversationWorkPanel, type WorkView } from "./ConversationWorkPanel";
 import { sendJson } from "../unified/webui";
@@ -67,12 +67,13 @@ function ConversationRow({ row, active, pinned, selecting, selected, projects, o
   onRename(title: string): void; onArchive(): void; onDelete(): void;
   onMove(projectId: string | null): void; onCreateProject(name: string): void;
 }) {
-  const title = row.title || "Untitled conversation";
-  const generic = !row.title || ["Jaeger stable chat", "New conversation"].includes(row.title);
+  const title = chatTitle(row);
   const [menu, setMenu] = useState<RowMenuMode | null>(null);
   const [draft, setDraft] = useState(title);
   const [projectName, setProjectName] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
+  const press = useRef<{ timer?: number; x: number; y: number; opened?: boolean } | null>(null);
+  const openMenu = (mode: RowMenuMode = "main") => { setDraft(title); setProjectName(""); setMenu(mode); };
   useEffect(() => {
     if (!menu) return;
     const close = (event: MouseEvent) => {
@@ -83,12 +84,40 @@ function ConversationRow({ row, active, pinned, selecting, selected, projects, o
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", onKey); };
   }, [menu]);
-  return <div className="jg-stable-demo__session-row" data-selected={selected || undefined} data-menu={menu || undefined}>
+  const cancelPress = () => {
+    if (press.current?.timer) window.clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" || event.button !== 0) return;
+    press.current = {
+      x: event.clientX,
+      y: event.clientY,
+      timer: window.setTimeout(() => {
+        if (press.current) press.current.opened = true;
+        openMenu();
+      }, 450),
+    };
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!press.current) return;
+    if (Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > 12) cancelPress();
+  };
+  const onPointerUp = () => {
+    const opened = press.current?.opened;
+    cancelPress();
+    if (opened) return;
+  };
+  const onTitleClick = () => {
+    if (press.current?.opened) { cancelPress(); return; }
+    onOpen();
+  };
+  return <div className="jg-stable-demo__session-row" data-selected={selected || undefined} data-active={active || undefined} data-menu={menu || undefined} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={cancelPress} onContextMenu={event => { event.preventDefault(); openMenu(); }}>
     {selecting && <label className="jg-stable-demo__session-check"><input type="checkbox" aria-label={`Select ${title}`} checked={selected} onChange={onSelect} /></label>}
-    <button className="jg-stable-demo__session-title" type="button" title={title} aria-current={active ? "true" : undefined} onClick={onOpen}>{row.unread && <span className="jg-stable-demo__unread" aria-label="Unread" />}{title}{generic && <small className="jg-stable-demo__session-id">{row.session_id.slice(-8)}</small>}</button>
+    <button className="jg-stable-demo__session-title" type="button" title={title} aria-current={active ? "true" : undefined} onClick={onTitleClick}>{row.unread && <span className="jg-stable-demo__unread" aria-label="Unread" />}{title}</button>
     {!selecting && <span className="jg-stable-demo__session-actions">
-      <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`} title={pinned ? "Unpin" : "Pin"} onClick={onPin}><Pin size={14} /></button>
-      <button type="button" aria-label={`Conversation actions for ${title}`} title="Conversation actions" aria-haspopup="menu" aria-expanded={menu !== null} onClick={() => { setDraft(title); setProjectName(""); setMenu(menu ? null : "main"); }}><MoreHorizontal size={14} /></button>
+      <button type="button" data-action="pin" aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`} title={pinned ? "Unpin" : "Pin"} onClick={onPin}><Pin size={14} /></button>
+      <button type="button" aria-label={`Conversation actions for ${title}`} title="Conversation actions" aria-haspopup="menu" aria-expanded={menu !== null} onClick={() => { menu ? setMenu(null) : openMenu(); }}><MoreHorizontal size={14} /></button>
       {menu && <div ref={menuRef} className="jg-stable-demo__row-menu" role="menu" aria-label={`Actions for ${title}`}>
         {menu === "rename" ? <form className="jg-stable-demo__rename" onSubmit={event => { event.preventDefault(); const next = draft.trim(); if (next) { onRename(next); setMenu(null); } }}>
           <label htmlFor={`jaeger-row-rename-${row.session_id}`}>Conversation name</label>
@@ -104,6 +133,7 @@ function ConversationRow({ row, active, pinned, selecting, selected, projects, o
             <div><button type="submit" disabled={!projectName.trim()}>Create and move</button></div>
           </form>
         </> : <>
+          <button role="menuitem" type="button" onClick={() => { onPin(); setMenu(null); }}><Pin size={15} />{pinned ? "Unpin" : "Pin"}</button>
           <button role="menuitem" type="button" onClick={() => setMenu("rename")}><Pencil size={15} />Rename</button>
           <button role="menuitem" type="button" onClick={() => setMenu("move")}><FolderOpen size={15} />Move to project</button>
           <button role="menuitem" type="button" onClick={() => { onArchive(); setMenu(null); }}><FolderOpen size={15} />Archive</button>
@@ -396,7 +426,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   };
   const currentRow = recent.find(row => row.session_id === session) ?? (selectedRow?.session_id === session ? selectedRow : undefined);
   const currentTitle = organization?.sessions.find(row=>row.session_id===session)?.title || currentRow?.title || "New chat";
-  const headerTitle = isGenericTitle(currentTitle) ? (currentRow?.last_message_preview ? titleFromMessage(currentRow.last_message_preview) : "New chat") : currentTitle;
+  const headerTitle = currentRow ? chatTitle({ ...currentRow, title: currentTitle }) : (isGenericTitle(currentTitle) ? "New chat" : currentTitle);
   useEffect(() => {
     if (!session || !isGenericTitle(currentTitle) || source.kind !== "live") return;
     let live = true;
@@ -570,7 +600,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   };
   const agent = agents.find(a => a.id === (currentRow?.agent_id || "native:jaeger"));
   const organized=new Map(organization?.sessions.map(row=>[row.session_id,row]));
-  const visibleRows=recent.filter(row=>!organized.get(row.session_id)?.archived).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title})).sort((a,b)=>sessionActivity(b)-sessionActivity(a));
+  const visibleRows=visibleChats(recent.filter(row=>!organized.get(row.session_id)?.archived).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title})), session);
   const pinnedRows = visibleRows.filter(row => pinnedSessions.has(row.session_id));
   const unpinnedRows = visibleRows.filter(row => !pinnedSessions.has(row.session_id));
   const projectDefs=(organization?.groups||[]).filter(g=>g.kind==="project");
