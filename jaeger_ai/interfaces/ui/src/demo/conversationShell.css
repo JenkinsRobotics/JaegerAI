@@ -35,13 +35,13 @@ html[data-jaeger-host=macos] .jg-stable-demo__header { padding-left:max(12px,var
 .jg-stable-demo__rail button, .jg-stable-demo__more, .jg-stable-demo__more summary { width:40px; height:40px; min-height:40px; border-radius:10px; }
 .jg-stable-demo__rail nav { gap:5px; }
 .jg-stable-demo__context { padding:12px 10px; border-left:1px solid var(--jg-color-border); }
-.jg-stable-demo__brand { padding:0 4px 10px; min-height:34px; font-size:18px; }
+.jg-stable-demo__brand { padding:0 4px 8px; min-height:32px; }
+.jg-stable-demo__wordmark { font-size:15px; }
 .jg-stable-demo__context :is(button,a) { min-height:34px; padding:7px 9px; border-radius:8px; }
 .jg-stable-demo__session-section + .jg-stable-demo__session-section { margin-top:18px; }
 .jg-stable-demo__recents { margin-top:8px; scrollbar-width:thin; }
 .jg-stable-demo__context-footer { font-size:12px; }
 .jg-stable-demo__connection { padding:9px 6px; font-size:11px; }
-.jg-stable-demo__appearance { padding:6px; font-size:12px; }
 .jg-stable-demo__main { grid-row:2; grid-column:2; }
 .jg-stable-demo__inspector { grid-row:2; grid-column:3; position:relative; }
 .jg-stable-demo .jg-chat__column { width:min(800px,100%); padding:28px clamp(18px,3vw,44px); }

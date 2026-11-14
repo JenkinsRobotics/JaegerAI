@@ -165,12 +165,13 @@ export class MockSource implements JaegerSource {
     template: async (id) => { this.calls.push(["template", id]); const a = MOCK_AGENTS.find((x) => x.id === id); return { name: a?.name, display_name: a?.display_name, skills: a?.skills ?? [] }; },
   };
   async agentsSummary() { return MOCK_SUMMARY; }
-  async sessions(query: { agent_id?: string } = {}): Promise<SessionRow[]> {
+  async sessions(query: { agent_id?: string; q?: string } = {}): Promise<SessionRow[]> {
+    const term = query.q?.trim().toLowerCase();
     return MOCK_SUMMARY.filter((s) => (!query.agent_id || s.id === query.agent_id) && !this.deletedSessions.has(s.session_id!)).map((s) => ({
       session_id: s.session_id!, agent_id: s.id, title: MOCK_TRANSCRIPTS[s.session_id!]?.title ?? s.display_name,
       last_message_preview: s.last_preview, last_activity_at: s.last_activity_at ?? undefined, updated_at: s.last_activity_at ?? undefined,
       workspace: s.id === "native:jaeger" ? "/Users/demo/Projects/JaegerAI" : undefined,
-    }));
+    })).filter((row) => !term || `${row.title ?? ""} ${row.last_message_preview ?? ""} ${row.workspace ?? ""} ${row.session_id}`.toLowerCase().includes(term));
   }
   async session(id: string): Promise<SessionDetail> {
     return { session_id: id, title: MOCK_TRANSCRIPTS[id]?.title ?? name(id.replace(/^s-/, "")), messages: [], last_event_id: this.eventId };

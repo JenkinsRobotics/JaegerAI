@@ -265,9 +265,13 @@ export class GatewayClient implements JaegerSource {
   async agentsSummary(): Promise<AgentSummary[]> {
     return (await this.json<{ agents?: AgentSummary[] }>("/v1/agents/summary")).agents ?? [];
   }
-  async sessions(query: { agent_id?: string } = {}): Promise<SessionRow[]> {
-    const qs = query.agent_id ? `?agent_id=${encodeURIComponent(query.agent_id)}` : "";
-    return (await this.json<{ sessions?: SessionRow[] }>(`/v1/sessions${qs}`)).sessions ?? [];
+  async sessions(query: { agent_id?: string; q?: string } = {}): Promise<SessionRow[]> {
+    const qs = new URLSearchParams();
+    if (query.agent_id) qs.set("agent_id", query.agent_id);
+    const term = query.q?.trim();
+    if (term) qs.set("q", term);
+    const suffix = qs.size ? `?${qs}` : "";
+    return (await this.json<{ sessions?: SessionRow[] }>(`/v1/sessions${suffix}`)).sessions ?? [];
   }
   session(id: string) { return this.json<SessionDetail>(`/v1/sessions/${encodeURIComponent(id)}`); }
   createSession(body: { agent_id?: string; title?: string }) {
