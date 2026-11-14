@@ -69,14 +69,14 @@ KNOWN_BACKENDS: tuple[BackendSpec, ...] = (
         executables=("grok",),
         # Grok's documented one-shot today takes the prompt as an argv
         # value after --single. Stdin is not the published interface.
-        # --tools "" keeps Grok's built-in file/editor tools off so Jaeger
-        # owns execution and the existing file-access scope. Do not pass
-        # --deny "*": that wildcard wins over auto-approve and reports every
-        # call as denied. Permission mode and the per-turn Jaeger MCP server
-        # are attached by CliBackendAdapter.
+        # Do not pass --tools "": it was meant to drop built-ins but also
+        # kept MCP tools out of the model request, so Grok wrote a text
+        # tool_call instead of invoking Jaeger MCP. Built-ins are denied
+        # by --disallowed-tools and GROK_BACKEND_SEARCH=0 in the adapter.
+        # Do not pass --deny "*": that wildcard wins over auto-approve
+        # and reports every call as denied.
         args=(
             "--single", "{prompt}", "--output-format", "json", "--verbatim",
-            "--tools", "",
             "--disable-web-search", "--no-subagents", "--no-plan",
         ),
         prompt_mode="placeholder",
