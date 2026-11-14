@@ -25,9 +25,17 @@ class OllamaAdapter(OpenAIAdapter):
 
     @property
     def _native_root(self):
-        return (self.base_url or "http://localhost:11434/v1").rstrip("/").removesuffix("/v1")
+        root = (self.base_url or "http://localhost:11434/v1").rstrip("/")
+        for suffix in ("/v1", "/api"):
+            if root.endswith(suffix):
+                root = root[:-len(suffix)]
+                break
+        return root
 
     def _metadata(self):
+        if urlparse(self._native_root).hostname == "ollama.com":
+            # Direct cloud chat does not need /api/show; skip a failing probe.
+            return self._metadata_value or {}
         if self._metadata_value is None:
             import httpx
             headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
@@ -38,9 +46,8 @@ class OllamaAdapter(OpenAIAdapter):
         return self._metadata_value
 
     def _hosted(self):
-        # Direct ollama.com API only. :cloud tags on the signed-in local
-        # app use native /api/chat through 127.0.0.1:11434.
-        return urlparse(self._native_root).hostname == "ollama.com"
+        # Native /api/chat is used for both local Ollama and ollama.com.
+        return False
 
     def _native_body(self, formatted, metadata):
         messages = copy.deepcopy(formatted["messages"])
@@ -74,19 +81,26 @@ class OllamaAdapter(OpenAIAdapter):
         options.update({key: formatted[key] for key in ("temperature", "top_p") if key in formatted})
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx
-        body = {"model": self.model, "messages": messages, "stream": True, "options": options}
+        try:
+            from jaeger_ai.core.models.router import ollama_cloud_api_model
+            model_name = ollama_cloud_api_model(self.model) if self.provider == "ollama-cloud" else self.model
+        except Exception:
+            model_name = self.model
+        body = {"model": model_name, "messages": messages, "stream": True, "options": options}
         if formatted.get("tools"):
             body["tools"] = formatted["tools"]
         effort = formatted.get("reasoning_effort")
         values = (metadata.get("thinking") or {}).get("values", [])
-        if effort == "none":
+        if effort in {None, "", "auto", "provider"}:
+            pass
+        elif effort == "none":
             if values and False not in values:
                 raise ValueError(f"{self.model} does not support disabling thinking; supported: {values}")
             body["think"] = False
-        elif effort and effort in values:
+        elif effort in values:
             body["think"] = effort
-        elif effort:
-            raise ValueError(f"{self.model} does not support reasoning effort {effort!r}; supported thinking values: {values or 'unknown'}")
+        elif values:
+            raise ValueError(f"{self.model} does not support reasoning effort {effort!r}; supported thinking values: {values}")
         self.effective_thinking = body.get("think", (metadata.get("thinking") or {}).get("default"))
         return body
 

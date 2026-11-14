@@ -278,14 +278,13 @@ def validate_external_provider(ext: ExternalModelConfig, api_key: str) -> str:
     if ext.provider in _OPENAI_COMPATIBLE:
         _placeholder = {"lmstudio": "lm-studio", "ollama": "ollama", "vllm": "vllm"}
         if ext.provider == "ollama-cloud":
-            try:
-                from jaeger_ai.core.models.router import ollama_cloud_uses_direct_api
-                direct = ollama_cloud_uses_direct_api()
-            except Exception:
-                direct = bool(api_key)
-            if not direct:
-                # Signed-in local Ollama app; same placeholder as local Ollama.
-                return api_key or "ollama"
+            key = api_key
+            if not key:
+                raise ExternalModelError(
+                    "provider 'ollama-cloud' needs an API key — set "
+                    "OLLAMA_API_KEY in ~/.jaeger/secrets.env"
+                )
+            return key
         key = api_key or _placeholder.get(ext.provider, "")
         if not key:
             # ``_CONVENTIONAL_ENV`` holds a TUPLE of aliases per provider;

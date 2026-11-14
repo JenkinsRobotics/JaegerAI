@@ -113,6 +113,18 @@ OLLAMA_CLOUD_API = "https://ollama.com/api"
 OLLAMA_CLOUD_OPENAI = "https://ollama.com/v1"
 
 
+
+def ollama_cloud_api_model(name: str) -> str:
+    """Drop the ``:cloud`` / ``-cloud`` suffix the direct API does not accept."""
+    raw = (name or "").strip()
+    lower = raw.lower()
+    if lower.endswith(":cloud"):
+        return raw[:-len(":cloud")]
+    if lower.endswith("-cloud"):
+        return raw[:-len("-cloud")]
+    return raw
+
+
 def ollama_cloud_uses_direct_api() -> bool:
     """True only when ~/.jaeger/secrets.env has an Ollama API key."""
     try:
@@ -159,16 +171,13 @@ def ensure_local_ollama(*, timeout_s: float = 25.0) -> bool:
 
 
 def resolve_ollama_cloud_base_url(*, openai_compat: bool = True) -> str:
-    """Ollama Cloud endpoint.
+    """Ollama Cloud endpoint: ``https://ollama.com/api`` with a Bearer key.
 
-    Primary route: the local Ollama app at 127.0.0.1:11434, which stays
-    signed in to the operator's ollama.com account and serves ``:cloud``
-    tags. The direct ``https://ollama.com/api`` path is used only when
-    ``~/.jaeger/secrets.env`` has ``OLLAMA_API_KEY``.
+    The local Ollama app is not used for cloud models. ``openai_compat``
+    selects the /v1 alias some OpenAI clients still send; native chat
+    uses ``/api/chat`` under ``OLLAMA_CLOUD_API``.
     """
-    if ollama_cloud_uses_direct_api():
-        return OLLAMA_CLOUD_OPENAI if openai_compat else OLLAMA_CLOUD_API
-    return resolve_ollama_base_url(openai_compat=openai_compat)
+    return OLLAMA_CLOUD_OPENAI if openai_compat else OLLAMA_CLOUD_API
 
 
 def normalize_ollama_provider(provider: str) -> str:
@@ -199,7 +208,7 @@ class EndpointResolver:
 # ---------------------------------------------------------------------------
 
 _PATTERNS_PATH = Path(__file__).with_name("sensitivity_patterns.yaml")
-_DEFAULT_CLOUD = "glm-5.3-flash:cloud"
+_DEFAULT_CLOUD = "glm-5.3-flash"
 
 # Built-in fallback sensitivity keywords if YAML is absent
 _DEFAULT_PRIVATE_KEYWORDS = [
@@ -389,7 +398,9 @@ def _infer_provider_for_model(model_name: str) -> str | None:
         return None
     raw = model_name.strip().lower()
     bare = raw.rsplit("/", 1)[-1]
-    if ":" in bare or bare.endswith((":cloud", "-cloud")):
+    if bare.endswith((":cloud", "-cloud")):
+        return "ollama-cloud"
+    if ":" in bare:
         return "ollama"
     if bare.startswith(("gpt-", "o1-", "o3-", "chatgpt-", "text-embedding-")):
         return "openai"
@@ -441,13 +452,10 @@ def select_client(default: Any, config: Any, layout: Any, model: str | None = No
 
     if owner != ext.provider or not ext.enabled:
         if owner == "ollama-cloud":
-            ext.base_url = resolve_ollama_cloud_base_url()
-            if ollama_cloud_uses_direct_api():
-                ext.api_key_credential = _CREDENTIALS.get(owner, "ollama_cloud_api_key")
-                ext.api_key_env = "OLLAMA_API_KEY"
-            else:
-                ext.api_key_credential = ""
-                ext.api_key_env = ""
+            ext.base_url = resolve_ollama_cloud_base_url(openai_compat=False)
+            ext.api_key_credential = _CREDENTIALS.get(owner, "ollama_cloud_api_key")
+            ext.api_key_env = "OLLAMA_API_KEY"
+            selected = ollama_cloud_api_model(selected)
         elif owner == "ollama":
             ext.base_url = resolve_ollama_base_url()
             ext.api_key_credential = ""
@@ -457,13 +465,10 @@ def select_client(default: Any, config: Any, layout: Any, model: str | None = No
             ext.api_key_credential = _CREDENTIALS.get(owner, "")
             ext.api_key_env = ""
     elif owner == "ollama-cloud":
-        ext.base_url = resolve_ollama_cloud_base_url()
-        if ollama_cloud_uses_direct_api():
-            ext.api_key_credential = ext.api_key_credential or _CREDENTIALS.get(owner, "ollama_cloud_api_key")
-            ext.api_key_env = ext.api_key_env or "OLLAMA_API_KEY"
-        else:
-            ext.api_key_credential = ""
-            ext.api_key_env = ""
+        ext.base_url = resolve_ollama_cloud_base_url(openai_compat=False)
+        ext.api_key_credential = ext.api_key_credential or _CREDENTIALS.get(owner, "ollama_cloud_api_key")
+        ext.api_key_env = ext.api_key_env or "OLLAMA_API_KEY"
+        selected = ollama_cloud_api_model(selected)
     elif owner == "ollama":
         current_base = str(getattr(ext, "base_url", "") or "").strip().lower()
         needs_repair = (

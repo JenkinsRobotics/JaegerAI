@@ -194,9 +194,8 @@ def _adapter_for_client(
                 reasoning_effort=effort,
                 thinking_budget_tokens=getattr(ext, "thinking_budget_tokens", None),
             )
-        # Local Ollama, including :cloud tags served by the signed-in
-        # local app, uses native /api/chat. The direct ollama.com API
-        # (OllamaAdapter._hosted) keeps the OpenAI-compatible protocol.
+        # Local Ollama and Ollama Cloud both use native /api/chat.
+        # Cloud models go to https://ollama.com/api with Bearer auth.
         adapter_class = OpenAIAdapter
         adapter_options = {}
         if provider in {"ollama", "ollama-cloud"}:

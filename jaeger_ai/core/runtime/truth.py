@@ -212,33 +212,28 @@ def provider_model_inventory(instance_root: Path | None = None) -> dict[str, Any
     )
     from jaeger_ai.core.models.router import ollama_cloud_uses_direct_api
     from jaeger_ai.core.secrets_env import ollama_api_key
-    daemon_cloud = [
-        row for row in list(ollama.get("models") or [])
-        if str(row.get("name") or "").endswith(":cloud")
-        or str(row.get("name") or "").endswith("-cloud")
-        or row.get("remote_host")
+    from jaeger_ai.core.models.router import ollama_cloud_api_model
+    api_cloud = discover_ollama_cloud(ollama_api_key()) if ollama_cloud_uses_direct_api() else {"online": False, "models": [], "status": "needs_api_key", "detail": "needs API key"}
+    names = [
+        ollama_cloud_api_model(str(m.get("name") or ""))
+        for m in (api_cloud.get("models") or [])
     ]
-    names = [str(r.get("name") or "") for r in daemon_cloud]
-    if ollama_cloud_uses_direct_api():
-        api_cloud = discover_ollama_cloud(ollama_api_key())
-        names.extend(str(m.get("name") or "") for m in (api_cloud.get("models") or []))
     merged = _merge_ollama_cloud_names(names, OLLAMA_CLOUD_CURATED)
-    by_name = {str(r.get("name") or ""): r for r in daemon_cloud}
-    cloud_rows = []
-    for name in merged:
-        if name in by_name:
-            cloud_rows.append(by_name[name])
-        else:
-            cloud_rows.append({"name": name, "id": name})
+    cloud_rows = [{"name": name, "id": name} for name in merged if name]
+    if ollama_cloud_uses_direct_api():
+        cloud_reason = None if api_cloud.get("online") else str(api_cloud.get("detail") or "Ollama Cloud is unreachable")
+        cloud_reachable = bool(api_cloud.get("online"))
+    else:
+        cloud_reason = "needs API key"
+        cloud_reachable = False
     providers.append({
         "id": "ollama-cloud",
         "display_name": "Ollama Cloud",
         "location": "cloud",
         "supported": True,
-        "configured": True,
-        "reachable": True,
-        "reason": None if ollama.get("online") or ollama_cloud_uses_direct_api()
-        else "Ollama app will start when you use a cloud model",
+        "configured": ollama_cloud_uses_direct_api(),
+        "reachable": cloud_reachable,
+        "reason": cloud_reason,
         "models": _models(cloud_rows),
     })
     for row in discover_subscription_clis():

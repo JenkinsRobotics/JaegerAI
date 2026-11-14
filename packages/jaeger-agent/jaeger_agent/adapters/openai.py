@@ -16,7 +16,7 @@ The ten providers in ``KNOWN_PROVIDERS``:
   • ``groq``          hosted inference
   • ``deepseek``      hosted; streams reasoning as ``reasoning_content``
   • ``together``      hosted inference
-  • ``ollama-cloud``  local signed-in Ollama app for :cloud tags;
+  • ``ollama-cloud``  https://ollama.com/api with Bearer auth;
                       https://ollama.com/v1 only when an API key is set
   • ``ollama``        localhost:11434/v1 — placeholder key accepted
   • ``lmstudio``      localhost:1234/v1 — placeholder key accepted
@@ -387,7 +387,7 @@ class OpenAIAdapter(ProviderAdapter):
         """
         self.last_reasoning_retry = False
         url = (self.base_url or "").lower()
-        if self.provider in {"ollama", "ollama-cloud"} and (
+        if self.provider == "ollama" and (
             "127.0.0.1" in url or "localhost" in url
         ):
             from jaeger_ai.core.models.router import ensure_local_ollama
