@@ -498,7 +498,8 @@ class CliBackendAdapter(ProviderAdapter):
             except Exception:  # noqa: BLE001
                 limit = None
             if limit:
-                raise RuntimeError(limit)
+                from jaeger_ai.core.models.request_policy import ModelPolicyError
+                raise ModelPolicyError(limit)
             raise RuntimeError(f"CLI backend {self.backend_id!r} exited with status {self._proc.returncode}: "
                                + err[-2000:])
         text = stdout.decode("utf-8", errors="replace")
@@ -538,6 +539,8 @@ class CliBackendAdapter(ProviderAdapter):
         env = {key: value for key, value in os.environ.items() if key in allowed}
         if extra_env:
             env.update({key: value for key, value in extra_env.items() if value is not None})
+        if self.backend_id == "gemini":
+            env.setdefault("GEMINI_CLI_TRUST_WORKSPACE", "true")
         return env
 
     def parse_response(self, raw: Any) -> Message:

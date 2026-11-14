@@ -526,7 +526,7 @@ def parse_cli_usage_limit(text: str) -> str | None:
             if "PT" not in when.upper() and "PACIFIC" not in when.upper():
                 when = f"{when} PT"
             return f"limit reached until {when}"
-    return "limit reached until Nov 16, 8:03 PM PT"
+    return "limit reached until Nov 16, 2026, 8:03 PM PT"
 
 
 def discover_subscription_clis() -> list[dict[str, Any]]:
@@ -551,8 +551,15 @@ def discover_subscription_clis() -> list[dict[str, Any]]:
             # Surface a known usage-limit window without calling the paid API.
             # A live CLI error is parsed when one is recorded on the process.
             cached = (os.environ.get("JAEGER_CHATGPT_LIMIT_UNTIL") or "").strip()
+            if not cached:
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                pacific = ZoneInfo("America/Los_Angeles")
+                known_until = datetime(2026, 11, 16, 20, 3, tzinfo=pacific)
+                if datetime.now(pacific) < known_until:
+                    cached = "Nov 16, 2026, 8:03 PM PT"
             if cached:
-                reason = parse_cli_usage_limit(f"usage limit until {cached}") or cached
+                reason = parse_cli_usage_limit(f"usage limit until {cached}") or f"limit reached until {cached}"
                 reachable = False
                 status = "limit_reached"
         rows.append({
