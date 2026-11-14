@@ -76,11 +76,16 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
     lane, name = split_routed_model_id(model or "")
     owner = str(provider or lane or config.external_model.provider).strip().lower()
     owner = {"ollama-local": "ollama", "ollama_cloud": "ollama-cloud", "ollamacloud": "ollama-cloud"}.get(owner, owner)
+    _CLI_LANES = {"grok": "grok", "chatgpt": "codex", "codex": "codex", "gemini": "gemini", "agy": "agy", "claude": "claude"}
     selected_lane = owner
-    # Product Ollama cloud lanes use the configured daemon subscription. A
-    # directly configured hosted endpoint remains a distinct explicit route.
-    if owner == "ollama-cloud" and config.external_model.provider != "ollama-cloud":
-        owner = "ollama"
+    if owner in _CLI_LANES:
+        if not name or name in {"default", owner, "chatgpt"}:
+            name = _CLI_LANES[owner]
+        elif name.startswith("cli:"):
+            name = name.split(":", 1)[1]
+        owner = "cli"
+    # Ollama Cloud primarily uses the signed-in local Ollama app.
+    # The direct ollama.com API is used only when an API key is present.
     if owner in {"huggingface", "hf", "in-process"}:
         owner = "local"
     if not name or name in {"default", "jaeger", "none"}:
@@ -104,8 +109,25 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
         ext.base_url = _BASE_URLS.get(owner, "")
         ext.api_key_credential = _CREDENTIALS.get(owner, "")
         ext.api_key_env = ""
-    if owner == "ollama" and not ext.base_url:
-        ext.base_url = "http://127.0.0.1:11434/v1"
+    if owner == "ollama-cloud":
+        from jaeger_ai.core.models.router import (
+            ensure_local_ollama, ollama_cloud_uses_direct_api, resolve_ollama_cloud_base_url,
+        )
+        if not ollama_cloud_uses_direct_api() and not ensure_local_ollama():
+            raise ModelPolicyError("Starting Ollama… didn't finish. Open the Ollama app and try again.")
+        ext.base_url = resolve_ollama_cloud_base_url()
+        if ollama_cloud_uses_direct_api():
+            ext.api_key_credential = ext.api_key_credential or "ollama_cloud_api_key"
+            ext.api_key_env = ext.api_key_env or "OLLAMA_API_KEY"
+        else:
+            ext.api_key_credential = ""
+            ext.api_key_env = ""
+    elif owner in {"ollama", "ollama-local"}:
+        from jaeger_ai.core.models.router import ensure_local_ollama, resolve_ollama_base_url
+        if not ensure_local_ollama():
+            raise ModelPolicyError("Starting Ollama… didn't finish. Open the Ollama app and try again.")
+        if not ext.base_url:
+            ext.base_url = resolve_ollama_base_url()
     if owner != ext.provider or name != ext.model:
         ext.ctx = 0
         # An unrelated provider's output allowance is not this model's

@@ -109,10 +109,74 @@ def resolve_ollama_base_url(*, openai_compat: bool = True) -> str:
     return f"{root}/v1" if openai_compat else root
 
 
+OLLAMA_CLOUD_API = "https://ollama.com/api"
+OLLAMA_CLOUD_OPENAI = "https://ollama.com/v1"
+
+
+def ollama_cloud_uses_direct_api() -> bool:
+    """True only when ~/.jaeger/secrets.env has an Ollama API key."""
+    try:
+        from jaeger_ai.core.secrets_env import ollama_api_key
+        return bool(ollama_api_key())
+    except Exception:
+        return False
+
+
+def ensure_local_ollama(*, timeout_s: float = 25.0) -> bool:
+    """Make sure the local Ollama app is listening on :11434.
+
+    If it is down, start it with ``open -a Ollama`` and wait. Emits
+    ``Starting Ollama…`` on the live turn stream when a start is needed.
+    Returns True when the daemon is reachable.
+    """
+    import subprocess
+    import sys
+    import time
+
+    if _reachable("127.0.0.1", _DEFAULT_OLLAMA_PORT) or _reachable("localhost", _DEFAULT_OLLAMA_PORT):
+        return True
+    try:
+        from jaeger_agent import live
+        live.emit("turn.progress", {"message": "Starting Ollama…"})
+    except Exception:
+        pass
+    if sys.platform == "darwin":
+        try:
+            subprocess.Popen(
+                ["open", "-a", "Ollama"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            return False
+    deadline = time.monotonic() + max(1.0, float(timeout_s))
+    while time.monotonic() < deadline:
+        if _reachable("127.0.0.1", _DEFAULT_OLLAMA_PORT) or _reachable("localhost", _DEFAULT_OLLAMA_PORT):
+            return True
+        time.sleep(0.4)
+    return False
+
+
+def resolve_ollama_cloud_base_url(*, openai_compat: bool = True) -> str:
+    """Ollama Cloud endpoint.
+
+    Primary route: the local Ollama app at 127.0.0.1:11434, which stays
+    signed in to the operator's ollama.com account and serves ``:cloud``
+    tags. The direct ``https://ollama.com/api`` path is used only when
+    ``~/.jaeger/secrets.env`` has ``OLLAMA_API_KEY``.
+    """
+    if ollama_cloud_uses_direct_api():
+        return OLLAMA_CLOUD_OPENAI if openai_compat else OLLAMA_CLOUD_API
+    return resolve_ollama_base_url(openai_compat=openai_compat)
+
+
 def normalize_ollama_provider(provider: str) -> str:
-    """Normalize user/profile aliases ('ollama-local', 'ollama-cloud') to 'ollama'."""
+    """Normalize local aliases to 'ollama'; keep ollama-cloud distinct."""
     name = (provider or "").strip().lower()
-    if name in {"ollama-local", "ollama-cloud", "ollama_cloud", "ollamacloud"}:
+    if name in {"ollama-cloud", "ollama_cloud", "ollamacloud"}:
+        return "ollama-cloud"
+    if name in {"ollama-local", "ollama_local", "ollamalocal"}:
         return "ollama"
     return name
 
@@ -376,13 +440,29 @@ def select_client(default: Any, config: Any, layout: Any, model: str | None = No
     _reject_cross_vendor_pair(owner, selected)
 
     if owner != ext.provider or not ext.enabled:
-        if owner == "ollama":
+        if owner == "ollama-cloud":
+            ext.base_url = resolve_ollama_cloud_base_url()
+            if ollama_cloud_uses_direct_api():
+                ext.api_key_credential = _CREDENTIALS.get(owner, "ollama_cloud_api_key")
+                ext.api_key_env = "OLLAMA_API_KEY"
+            else:
+                ext.api_key_credential = ""
+                ext.api_key_env = ""
+        elif owner == "ollama":
             ext.base_url = resolve_ollama_base_url()
             ext.api_key_credential = ""
             ext.api_key_env = ""
         else:
             ext.base_url = _BASE_URLS[owner]
             ext.api_key_credential = _CREDENTIALS.get(owner, "")
+            ext.api_key_env = ""
+    elif owner == "ollama-cloud":
+        ext.base_url = resolve_ollama_cloud_base_url()
+        if ollama_cloud_uses_direct_api():
+            ext.api_key_credential = ext.api_key_credential or _CREDENTIALS.get(owner, "ollama_cloud_api_key")
+            ext.api_key_env = ext.api_key_env or "OLLAMA_API_KEY"
+        else:
+            ext.api_key_credential = ""
             ext.api_key_env = ""
     elif owner == "ollama":
         current_base = str(getattr(ext, "base_url", "") or "").strip().lower()

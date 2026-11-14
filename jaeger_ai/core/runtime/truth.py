@@ -186,17 +186,76 @@ def provider_model_inventory(instance_root: Path | None = None) -> dict[str, Any
             })
         return out
 
-    ollama_models = _models(list(ollama.get("models") or []))
+    # Local Ollama only when the daemon is up. Cloud is a separate hosted API.
+    local_rows = [
+        row for row in list(ollama.get("models") or [])
+        if not (
+            str(row.get("name") or "").endswith(":cloud")
+            or str(row.get("name") or "").endswith("-cloud")
+            or row.get("remote_host")
+        )
+    ]
+    ollama_models = _models(local_rows) if ollama.get("online") else []
     providers.append({
         "id": "ollama",
-        "display_name": "Ollama",
-        "location": "local_or_cloud",
+        "display_name": "Local",
+        "location": "local",
         "supported": True,
         "configured": True,
-        "reachable": bool(ollama.get("online")),
+        "reachable": bool(ollama.get("online")) and bool(ollama_models),
         "reason": None if ollama.get("online") else str(ollama.get("detail") or "offline"),
         "models": ollama_models,
     })
+    from jaeger_ai.core.models.discovery import (
+        OLLAMA_CLOUD_CURATED, _merge_ollama_cloud_names, discover_ollama_cloud,
+        discover_subscription_clis,
+    )
+    from jaeger_ai.core.models.router import ollama_cloud_uses_direct_api
+    from jaeger_ai.core.secrets_env import ollama_api_key
+    daemon_cloud = [
+        row for row in list(ollama.get("models") or [])
+        if str(row.get("name") or "").endswith(":cloud")
+        or str(row.get("name") or "").endswith("-cloud")
+        or row.get("remote_host")
+    ]
+    names = [str(r.get("name") or "") for r in daemon_cloud]
+    if ollama_cloud_uses_direct_api():
+        api_cloud = discover_ollama_cloud(ollama_api_key())
+        names.extend(str(m.get("name") or "") for m in (api_cloud.get("models") or []))
+    merged = _merge_ollama_cloud_names(names, OLLAMA_CLOUD_CURATED)
+    by_name = {str(r.get("name") or ""): r for r in daemon_cloud}
+    cloud_rows = []
+    for name in merged:
+        if name in by_name:
+            cloud_rows.append(by_name[name])
+        else:
+            cloud_rows.append({"name": name, "id": name})
+    providers.append({
+        "id": "ollama-cloud",
+        "display_name": "Ollama Cloud",
+        "location": "cloud",
+        "supported": True,
+        "configured": True,
+        "reachable": True,
+        "reason": None if ollama.get("online") or ollama_cloud_uses_direct_api()
+        else "Ollama app will start when you use a cloud model",
+        "models": _models(cloud_rows),
+    })
+    for row in discover_subscription_clis():
+        providers.append({
+            "id": row["id"],
+            "display_name": row["display_name"],
+            "location": "local-cli",
+            "supported": True,
+            "configured": bool(row.get("configured")),
+            "reachable": bool(row.get("reachable")),
+            "reason": row.get("reason"),
+            "models": [
+                {"id": m["id"], "available": bool(m.get("available")), "usable_for_react": True,
+                 "certifications": {}, "capabilities": [], "remote_host": None, "context_length": None}
+                for m in row.get("models") or []
+            ],
+        })
     lm_models = _models(list(lmstudio.get("models") or []))
     providers.append({
         "id": "lmstudio",
