@@ -406,7 +406,8 @@ def discover_ollama_cloud(api_key: str = "") -> dict[str, Any]:
             continue
         name = str(item.get("name") or item.get("id") or item.get("model") or "").strip()
         if name:
-            models.append({"name": name})
+            from jaeger_ai.core.models.router import ollama_cloud_api_model
+            models.append({"name": ollama_cloud_api_model(name)})
     return {
         "online": True,
         "models": models,
@@ -438,13 +439,13 @@ def discover_all(ollama_cloud_key: str = "") -> dict[str, Any]:
 
 
 OLLAMA_CLOUD_CURATED: tuple[str, ...] = (
-    "glm-5.3:cloud",
-    "glm-5.3-flash:cloud",
-    "deepseek-v4-pro:cloud",
-    "deepseek-v4-flash:cloud",
-    "qwen3.5:397b-cloud",
-    "kimi-k2.7-code:cloud",
-    "mistral-large-4:cloud",
+    "glm-5.3",
+    "glm-5.3-flash",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "qwen3.5:397b",
+    "kimi-k2.7-code",
+    "mistral-large-4",
 )
 
 OPENAI_CURATED: tuple[str, ...] = (
@@ -603,7 +604,7 @@ def _cloud_family(name: str) -> str:
 
 
 def _merge_ollama_cloud_names(live_names: list[str], curated: tuple[str, ...] = OLLAMA_CLOUD_CURATED) -> list[str]:
-    """Prefer exact live :cloud tags; add curated families the daemon has not listed yet."""
+    """Prefer live ollama.com/api/tags names; add curated families still missing."""
     seen_families: set[str] = set()
     out: list[str] = []
     for name in live_names:
@@ -661,7 +662,7 @@ def canonical_runtime_inventory(
     except Exception:
         pass
     if not default_model_name:
-        default_model_name = configured_instance_model(instance_root) or "glm-5.3-flash:cloud"
+        default_model_name = configured_instance_model(instance_root) or "glm-5.3-flash"
 
     groups: list[dict[str, Any]] = []
 
@@ -755,18 +756,18 @@ def canonical_runtime_inventory(
         else:
             local_models.append(model_entry)
 
-    # Primary Ollama Cloud catalog: :cloud tags on the signed-in local
-    # daemon, plus the curated families. Direct ollama.com/api models are
-    # merged only when an API key is present in ~/.jaeger/secrets.env.
+    # Primary Ollama Cloud catalog: live https://ollama.com/api/tags names
+    # (suffixes already stripped), plus curated families still missing.
     from jaeger_ai.core.secrets_env import ollama_api_key
-    from jaeger_ai.core.models.router import ollama_cloud_uses_direct_api, resolve_ollama_base_url
+    from jaeger_ai.core.models.router import ollama_cloud_api_model, ollama_cloud_uses_direct_api, resolve_ollama_base_url
 
-    live_cloud_names = [str(m.get("name") or "") for m in (cloud_models or [])]
-    if ollama_cloud_uses_direct_api():
-        api_res = discover_ollama_cloud(ollama_api_key())
-        live_cloud_names.extend(str(m.get("name") or "") for m in (api_res.get("models") or []))
+    api_res = discover_ollama_cloud(ollama_api_key()) if ollama_cloud_uses_direct_api() else {"status": "needs_api_key"}
+    live_cloud_names = [
+        ollama_cloud_api_model(str(m.get("name") or ""))
+        for m in (api_res.get("models") or [])
+    ]
     merged_names = _merge_ollama_cloud_names(live_cloud_names)
-    by_live = {str(m.get("name") or ""): m for m in (cloud_models or [])}
+    by_live = {}
     cloud_models = []
     for name in merged_names:
         if not name or "embed" in name.lower():
@@ -801,23 +802,21 @@ def canonical_runtime_inventory(
     if not ollama_online:
         local_models = []
 
-    cloud_online = bool(ollama_online or ollama_cloud_uses_direct_api())
+    cloud_online = bool(api_res.get("online")) if ollama_cloud_uses_direct_api() else False
+    if ollama_cloud_uses_direct_api():
+        cloud_reason = None if cloud_online else str(api_res.get("detail") or "Ollama Cloud is unreachable")
+    else:
+        cloud_reason = "needs API key"
     groups.append({
         "provider": "Ollama Cloud",
         "provider_id": "ollama-cloud",
-        "status": "online" if cloud_online or cloud_models else "starting",
-        "credentials_available": True,
-        "endpoint": (
-            "https://ollama.com/api" if ollama_cloud_uses_direct_api()
-            else f"http://{LOOPBACK}:{OLLAMA_PORT}"
-        ),
+        "status": "online" if cloud_online else ("needs_api_key" if not ollama_cloud_uses_direct_api() else "unavailable"),
+        "credentials_available": ollama_cloud_uses_direct_api(),
+        "endpoint": "https://ollama.com/api",
         "models": cloud_models,
         "host": "cloud",
-        "base_url": (
-            "https://ollama.com/api" if ollama_cloud_uses_direct_api()
-            else resolve_ollama_base_url(openai_compat=False)
-        ),
-        "reason": None if cloud_online else "Ollama app will start when you use a cloud model",
+        "base_url": "https://ollama.com/api",
+        "reason": cloud_reason,
     })
 
     if local_models:

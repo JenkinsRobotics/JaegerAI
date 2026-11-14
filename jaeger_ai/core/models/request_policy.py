@@ -111,17 +111,16 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
         ext.api_key_env = ""
     if owner == "ollama-cloud":
         from jaeger_ai.core.models.router import (
-            ensure_local_ollama, ollama_cloud_uses_direct_api, resolve_ollama_cloud_base_url,
+            ollama_cloud_api_model, ollama_cloud_uses_direct_api, resolve_ollama_cloud_base_url,
         )
-        if not ollama_cloud_uses_direct_api() and not ensure_local_ollama():
-            raise ModelPolicyError("Starting Ollama… didn't finish. Open the Ollama app and try again.")
-        ext.base_url = resolve_ollama_cloud_base_url()
-        if ollama_cloud_uses_direct_api():
-            ext.api_key_credential = ext.api_key_credential or "ollama_cloud_api_key"
-            ext.api_key_env = ext.api_key_env or "OLLAMA_API_KEY"
-        else:
-            ext.api_key_credential = ""
-            ext.api_key_env = ""
+        if not ollama_cloud_uses_direct_api():
+            raise ModelPolicyError(
+                "Ollama Cloud needs an API key in ~/.jaeger/secrets.env."
+            )
+        ext.base_url = resolve_ollama_cloud_base_url(openai_compat=False)
+        ext.api_key_credential = ext.api_key_credential or "ollama_cloud_api_key"
+        ext.api_key_env = ext.api_key_env or "OLLAMA_API_KEY"
+        name = ollama_cloud_api_model(name)
     elif owner in {"ollama", "ollama-local"}:
         from jaeger_ai.core.models.router import ensure_local_ollama, resolve_ollama_base_url
         if not ensure_local_ollama():
