@@ -141,6 +141,8 @@ class TurnToolMcp:
         self.token: str | None = None
         self._server: Any = None
         self._thread: threading.Thread | None = None
+        self._mcp: Any = None
+        self._lock = threading.Lock()
 
     def start(self, tools: list[ToolDef], execute: ExecuteTool) -> str:
         """Serve ``tools`` on 127.0.0.1 and return the MCP URL."""
@@ -148,7 +150,7 @@ class TurnToolMcp:
         from mcp.server.transport_security import TransportSecuritySettings
 
         token = secrets.token_urlsafe(32)
-        lock = threading.Lock()
+        lock = self._lock
         mcp = FastMCP(
             "jaeger",
             host="127.0.0.1",
@@ -214,6 +216,7 @@ class TurnToolMcp:
             if getattr(server, "started", False):
                 self._server = server
                 self._thread = thread
+                self._mcp = mcp
                 self.token = token
                 self.url = f"http://127.0.0.1:{int(port)}/mcp"
                 return self.url
@@ -221,6 +224,34 @@ class TurnToolMcp:
         if failed:
             raise RuntimeError(f"turn MCP failed to start: {failed[0]!r}")
         raise RuntimeError("turn MCP did not become ready")
+
+    def sync_tools(self, tools: list[ToolDef], execute: ExecuteTool) -> None:
+        """Add or drop MCP tools so a reused server matches this turn's set."""
+        mcp = self._mcp
+        if mcp is None:
+            return
+        manager = getattr(mcp, "_tool_manager", None)
+        have = set(getattr(manager, "_tools", {}) or {})
+        want: set[str] = set()
+        for tool in tools:
+            name = mcp_safe_name(tool.name)
+            if not name or name in want:
+                continue
+            want.add(name)
+            if name in have:
+                continue
+            fn = _handler_for(tool, execute, self._lock)
+            mcp.add_tool(fn, name=name, description=fn.__doc__)
+            try:
+                registered = manager.get_tool(name)
+                registered.parameters = tool.to_anthropic_schema().get("input_schema") or registered.parameters
+            except Exception:  # noqa: BLE001 — inferred signature is enough
+                pass
+        for name in have - want:
+            try:
+                mcp.remove_tool(name)
+            except Exception:  # noqa: BLE001 — stale name must not fail the turn
+                pass
 
     def stop(self) -> None:
         server = self._server
@@ -231,6 +262,7 @@ class TurnToolMcp:
         if thread is not None and thread.is_alive():
             thread.join(timeout=2.0)
         self._thread = None
+        self._mcp = None
         self.url = None
         self.token = None
 
@@ -405,6 +437,9 @@ def acquire_cli_mcp(backend_id: str, tools: list[ToolDef], execute: ExecuteTool)
                 server._holder = holder  # type: ignore[attr-defined]
             holder.execute = execute
             holder.tools = {t.name: t for t in tools}
+            # Warmup used to start this server with zero tools; later turns
+            # only refreshed the holder, so Grok's tools/list stayed empty.
+            server.sync_tools(tools, holder)
         return server
 
 
