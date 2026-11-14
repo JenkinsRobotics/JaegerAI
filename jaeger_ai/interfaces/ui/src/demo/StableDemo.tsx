@@ -1,8 +1,8 @@
 import {ChatOrganizer} from "./ChatOrganizer";
 import type {Organization,OrganizationAction} from "../api/organization";
-import {CompanionMode} from "./CompanionMode";
 import { ConversationSection } from "./ConversationSection";
 import {JaegerAvatar} from "../avatar/JaegerAvatar";
+import { JaegerMark } from "../brand/JaegerMark";
 import {type ClipState} from "../avatar/avatar";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { JaegerSource } from "../api/source";
@@ -16,7 +16,7 @@ import { ApprovalTray } from "../unified/ApprovalTray";
 import { ToastProvider } from "../unified/ui";
 import "../unified/unified.css";
 import "../unified/design.css";
-import { applyAppearance, storedAppearance, type Appearance } from "../settings/SettingsDialog";
+import { groupChatsByDate } from "../agents/chats";
 import { ConversationSummary } from "./ConversationSummary";
 import { ConversationWorkPanel, type WorkView } from "./ConversationWorkPanel";
 import { sendJson } from "../unified/webui";
@@ -36,7 +36,6 @@ const COMPACT_SHELL_QUERY = "(max-width: 820px), (max-height: 520px) and (max-wi
 function storedSession() { try { return localStorage.getItem(DEMO_SESSION_KEY) || ""; } catch { return ""; } }
 function storedPins() { try { return new Set<string>(JSON.parse(localStorage.getItem(PINNED_SESSION_KEY) || "[]")); } catch { return new Set<string>(); } }
 function storedSidebarWidth() { try { return clampWidth(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY) || SIDEBAR.defaultWidth)); } catch { return SIDEBAR.defaultWidth; } }
-function projectLabel(workspace: string) { return workspace.split(/[\\/]/).filter(Boolean).pop() || workspace; }
 function sessionActivity(row: SessionRow) { return row.last_activity_at ?? row.updated_at ?? row.created_at ?? 0; }
 
 const GENERIC_TITLES = new Set(["", "Jaeger stable chat", "New conversation", "New chat", "Chat with Jaeger", "Untitled conversation", "Untitled"]);
@@ -59,18 +58,62 @@ function titleFromMessage(text: string) {
 function SummaryGlyph() { return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6" cy="7" r="2"/><path d="M11 7h8"/><circle cx="6" cy="17" r="2"/><path d="M11 17h8"/></svg>; }
 type HeaderPopup = "menu" | "summary" | null;
 type MenuPage = "main" | "copy" | "open" | "fork";
-function ConversationRow({ row, active, pinned, selecting, selected, onOpen, onSelect, onPin, onDelete, onManage }: { row: SessionRow; active: boolean; pinned: boolean; selecting: boolean; selected: boolean; onOpen(): void; onSelect(): void; onPin(): void; onDelete(): void; onManage?(): void }) {
+type RowMenuMode = "main" | "rename" | "move";
+
+function ConversationRow({ row, active, pinned, selecting, selected, projects, onOpen, onSelect, onPin, onRename, onArchive, onDelete, onMove, onCreateProject }: {
+  row: SessionRow; active: boolean; pinned: boolean; selecting: boolean; selected: boolean;
+  projects: { id: string; name: string }[];
+  onOpen(): void; onSelect(): void; onPin(): void;
+  onRename(title: string): void; onArchive(): void; onDelete(): void;
+  onMove(projectId: string | null): void; onCreateProject(name: string): void;
+}) {
   const title = row.title || "Untitled conversation";
   const generic = !row.title || ["Jaeger stable chat", "New conversation"].includes(row.title);
-  return <div className="jg-stable-demo__session-row" data-selected={selected || undefined}>
+  const [menu, setMenu] = useState<RowMenuMode | null>(null);
+  const [draft, setDraft] = useState(title);
+  const [projectName, setProjectName] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMenu(null); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", onKey); };
+  }, [menu]);
+  return <div className="jg-stable-demo__session-row" data-selected={selected || undefined} data-menu={menu || undefined}>
     {selecting && <label className="jg-stable-demo__session-check"><input type="checkbox" aria-label={`Select ${title}`} checked={selected} onChange={onSelect} /></label>}
     <button className="jg-stable-demo__session-title" type="button" title={title} aria-current={active ? "true" : undefined} onClick={onOpen}>{row.unread && <span className="jg-stable-demo__unread" aria-label="Unread" />}{title}{generic && <small className="jg-stable-demo__session-id">{row.session_id.slice(-8)}</small>}</button>
     {!selecting && <span className="jg-stable-demo__session-actions">
       <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`} title={pinned ? "Unpin" : "Pin"} onClick={onPin}><Pin size={14} /></button>
-      {onManage ? <button type="button" aria-label={`Manage ${title}`} title="Manage conversation" onClick={onManage}><MoreHorizontal size={14} /></button> : <button type="button" aria-label={`Delete ${title}`} title="Delete permanently" onClick={onDelete}><Trash2 size={14} /></button>}
+      <button type="button" aria-label={`Conversation actions for ${title}`} title="Conversation actions" aria-haspopup="menu" aria-expanded={menu !== null} onClick={() => { setDraft(title); setProjectName(""); setMenu(menu ? null : "main"); }}><MoreHorizontal size={14} /></button>
+      {menu && <div ref={menuRef} className="jg-stable-demo__row-menu" role="menu" aria-label={`Actions for ${title}`}>
+        {menu === "rename" ? <form className="jg-stable-demo__rename" onSubmit={event => { event.preventDefault(); const next = draft.trim(); if (next) { onRename(next); setMenu(null); } }}>
+          <label htmlFor={`jaeger-row-rename-${row.session_id}`}>Conversation name</label>
+          <input id={`jaeger-row-rename-${row.session_id}`} autoFocus value={draft} onChange={event => setDraft(event.target.value)} />
+          <div><button type="button" onClick={() => setMenu("main")}>Cancel</button><button type="submit" disabled={!draft.trim()}>Save</button></div>
+        </form> : menu === "move" ? <>
+          <button className="jg-stable-demo__popover-back" type="button" onClick={() => setMenu("main")}><ChevronLeft size={16} />Move to project</button>
+          <button role="menuitem" type="button" onClick={() => { onMove(null); setMenu(null); }}>No project</button>
+          {projects.map(project => <button role="menuitem" type="button" key={project.id} onClick={() => { onMove(project.id); setMenu(null); }}>{project.name}</button>)}
+          <form className="jg-stable-demo__rename" onSubmit={event => { event.preventDefault(); const name = projectName.trim(); if (name) { onCreateProject(name); setMenu(null); } }}>
+            <label htmlFor={`jaeger-row-project-${row.session_id}`}>New project</label>
+            <input id={`jaeger-row-project-${row.session_id}`} value={projectName} onChange={event => setProjectName(event.target.value)} placeholder="Name" />
+            <div><button type="submit" disabled={!projectName.trim()}>Create and move</button></div>
+          </form>
+        </> : <>
+          <button role="menuitem" type="button" onClick={() => setMenu("rename")}><Pencil size={15} />Rename</button>
+          <button role="menuitem" type="button" onClick={() => setMenu("move")}><FolderOpen size={15} />Move to project</button>
+          <button role="menuitem" type="button" onClick={() => { onArchive(); setMenu(null); }}><FolderOpen size={15} />Archive</button>
+          <button role="menuitem" type="button" className="jg-stable-demo__danger" onClick={() => { onDelete(); setMenu(null); }}><Trash2 size={15} />Delete</button>
+        </>}
+      </div>}
     </span>}
   </div>;
 }
+
 /** Recovery surface: existing chat renderer and Gateway-owned task runner, no parallel backend. */
 export function StableDemo({ source }: { source: JaegerSource }) {
   const setSettingsOpen = (open: boolean) => navigate(open ? "/settings/appearance" : "/chat");
@@ -148,7 +191,6 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [deleteConfirm, setDeleteConfirm] = useState<string[] | null>(null);
   const [deleting, setDeleting] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
-  const [appearance, setAppearance] = useState(storedAppearance);
   const route = useRoute();
   const linkedSession = route.page === 'chat' ? route.params.get('session') : null;
   const invalidLinkedSession = linkedSession !== null && !validConversationId(linkedSession);
@@ -158,6 +200,9 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [forkBusy, setForkBusy] = useState(false);
   const [recent, setRecent] = useState<SessionRow[]>([]);
   const [historyError, setHistoryError] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
+  const [searchRows, setSearchRows] = useState<SessionRow[] | null>(null);
+  const [searchError, setSearchError] = useState("");
   const [historyReady, setHistoryReady] = useState(false);
   const [organization,setOrganization]=useState<Organization|null>(null);
   const [managerSelection,setManagerSelection]=useState<string[]|null>(null);
@@ -380,6 +425,19 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     }, controller.signal).catch(() => { /* The chat transport owns connection notices. */ });
     return () => controller.abort();
   }, [source, session]);
+  useEffect(() => {
+    const term = historySearch.trim();
+    if (!term) { setSearchRows(null); setSearchError(""); return; }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      source.sessions({ agent_id: "native:jaeger", q: term }).then(rows => {
+        if (!live) return;
+        setSearchRows(rows.filter(row => !row.archived && !isBackgroundSession(row)));
+        setSearchError("");
+      }, e => { if (live) setSearchError((e as Error).message || "Search could not be completed."); });
+    }, 250);
+    return () => { live = false; window.clearTimeout(timer); };
+  }, [historySearch, source]);
   const openWork = (view: WorkView) => { setWorkView(view); setPanelOpen(true); setHeaderPopup(null); };
   const forkSession = async (side: boolean) => {
     if (!session || forkBusy) return;
@@ -404,20 +462,47 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     });
   };
   const togglePinned = () => togglePinnedSession(session);
-  const renameSession = async () => {
-    const title = renameDraft.trim();
-    if (!session || !title) return;
-    try { if(source.organization) await organize([{type:"rename",session_ids:[session],title}]); else await source.updateSession(session, { title }); setRecent(rows => rows.map(row => row.session_id === session ? { ...row, title } : row)); setRenameOpen(false); }
+  const renameConversation = async (id: string, title: string) => {
+    const next = title.trim();
+    if (!id || !next) return;
+    try {
+      if (source.organization) await organize([{ type: "rename", session_ids: [id], title: next }]);
+      else await source.updateSession(id, { title: next });
+      setRecent(rows => rows.map(row => row.session_id === id ? { ...row, title: next } : row));
+      if (id === session) setRenameOpen(false);
+    } catch (e) { setHistoryError(String((e as Error).message)); }
+  };
+  const renameSession = async () => { await renameConversation(session, renameDraft); };
+  const closeIfCurrent = (id: string) => {
+    if (id !== session) return;
+    setSession(""); setReady(true); setHeaderPopup(null);
+    try { localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* session simply remains unpersisted */ }
+    navigate("/");
+  };
+  const archiveConversation = async (id: string) => {
+    if (!id) return;
+    try {
+      if (source.organization) await organize([{ type: "archive", session_ids: [id], value: true }]);
+      else await source.updateSession(id, { archived: true });
+      setRecent(rows => rows.filter(row => row.session_id !== id));
+      closeIfCurrent(id);
+    } catch (e) { setHistoryError(String((e as Error).message)); }
+  };
+  const archiveSession = async () => { await archiveConversation(session); };
+  const moveConversation = async (id: string, projectId: string | null) => {
+    if (!id || !source.organization) return;
+    try { await organize([{ type: "move", session_ids: [id], field: "project_id", group_id: projectId }]); }
     catch (e) { setHistoryError(String((e as Error).message)); }
   };
-  const archiveSession = async () => {
-    if (!session) return;
+  const createProjectAndMove = async (id: string, name: string) => {
+    const title = name.trim();
+    if (!id || !title || !source.organization) return;
+    const projectId = crypto.randomUUID();
     try {
-      if(source.organization) await organize([{type:"archive",session_ids:[session],value:true}]); else await source.updateSession(session, { archived: true });
-      setRecent(rows => rows.filter(row => row.session_id !== session));
-      setSession(""); setHeaderPopup(null);
-      try { localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* session simply remains unpersisted */ }
-      navigate("/");
+      await organize([
+        { type: "create_group", id: projectId, kind: "project", name: title },
+        { type: "move", session_ids: [id], field: "project_id", group_id: projectId },
+      ]);
     } catch (e) { setHistoryError(String((e as Error).message)); }
   };
   const toggleSelected = (id: string) => setSelectedSessions(previous => {
@@ -485,20 +570,17 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   };
   const agent = agents.find(a => a.id === (currentRow?.agent_id || "native:jaeger"));
   const organized=new Map(organization?.sessions.map(row=>[row.session_id,row]));
-  const visibleRows=recent.filter(row=>!organized.get(row.session_id)?.archived).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title})).sort((a,b)=>(organized.get(a.session_id)?.position??Number.MAX_SAFE_INTEGER)-(organized.get(b.session_id)?.position??Number.MAX_SAFE_INTEGER));
+  const visibleRows=recent.filter(row=>!organized.get(row.session_id)?.archived).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title})).sort((a,b)=>sessionActivity(b)-sessionActivity(a));
   const pinnedRows = visibleRows.filter(row => pinnedSessions.has(row.session_id));
   const unpinnedRows = visibleRows.filter(row => !pinnedSessions.has(row.session_id));
-  const customSections=(organization?.groups||[]).filter(g=>g.kind==="section").map(group=>({group,rows:unpinnedRows.filter(row=>organized.get(row.session_id)?.section_id===group.id)}));
-  const sectionless=unpinnedRows.filter(row=>!organized.get(row.session_id)?.section_id);
-  const projectGroups: [string,SessionRow[]][] = (organization?.groups||[]).filter(g=>g.kind==="project").map(group=>[group.id,sectionless.filter(row=>organized.get(row.session_id)?.project_id===group.id)]);
-  for(const row of sectionless){
-    const org=organized.get(row.session_id);
-    if(!row.workspace||org?.project_id||org?.project_id===null)continue;
-    const label=row.workspace;
-    const group=projectGroups.find(([name])=>name===label);
-    if(group)group[1].push(row);else projectGroups.push([label,[row]]);
-  }
-  const recentRows = sectionless.filter(row=>{const org=organized.get(row.session_id);return !org?.project_id&&(!row.workspace||org?.project_id===null);});
+  const projectDefs=(organization?.groups||[]).filter(g=>g.kind==="project");
+  const projectGroups=projectDefs.map(group=>({group, rows: unpinnedRows.filter(row=>organized.get(row.session_id)?.project_id===group.id)})).filter(entry=>entry.rows.length);
+  const inProject=new Set(projectGroups.flatMap(entry=>entry.rows.map(row=>row.session_id)));
+  const recentRows = unpinnedRows.filter(row=>!inProject.has(row.session_id));
+  const searching=Boolean(historySearch.trim());
+  const resultRows=(searching ? (searchRows ?? []) : recentRows).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title})).sort((a,b)=>sessionActivity(b)-sessionActivity(a));
+  const resultGroups=groupChatsByDate(resultRows);
+  const conversationRow = (row: SessionRow, pinned: boolean) => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned={pinned} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} projects={projectDefs.map(group => ({ id: group.id, name: group.name }))} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onRename={title => void renameConversation(row.session_id, title)} onArchive={() => void archiveConversation(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} onMove={projectId => void moveConversation(row.session_id, projectId)} onCreateProject={name => void createProjectAndMove(row.session_id, name)} />;
   const workspacePage = route.page !== "chat";
   const routeTitle: Record<PageId, string> = { library: "Library", automations: "Automations", feed: "Feed", home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Imagine", models: "Models", machine: "Machine", settings: "Settings" };
   const activeSection = route.page === "work" && route.sub === "tasks" ? "tasks" : route.page === "models" ? "studio" : route.page === "home" ? "chat" : route.page;
@@ -557,7 +639,10 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         <button className="jg-stable-demo__rail-settings" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /><span>Settings</span></button>
       </div>
       <section id="jaeger-navigation-context" hidden={!sidebarOpen} className="jg-stable-demo__context" aria-label={`${routeTitle[route.page]} sidebar`}>
-        <div className="jg-stable-demo__brand"><CompanionMode team={route.page === "agents"} onChange={team => navigate(pathOf(team ? "agents" : "chat"))} />{activeSection === "chat" && <button type="button" className="jg-stable-demo__manage" aria-pressed={selectionMode} onClick={() => source.organization ? setManagerSelection([]) : selectionMode ? leaveSelectionMode() : setSelectionMode(true)}>{selectionMode ? "Done" : "Manage"}</button>}</div>
+        <div className="jg-stable-demo__brand">
+          <span className="jg-stable-demo__wordmark" aria-label="Jaeger"><JaegerMark /><span>Jaeger</span></span>
+          {activeSection === "chat" && <button type="button" className="jg-stable-demo__manage" aria-pressed={selectionMode} onClick={() => source.organization ? setManagerSelection([]) : selectionMode ? leaveSelectionMode() : setSelectionMode(true)}>{selectionMode ? "Done" : "Manage"}</button>}
+        </div>
         {activeSection === "chat" && <>
           <button className="jg-stable-demo__new" type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "New conversation"}</button>
           {selectionMode && <div className="jg-stable-demo__selection-tools">
@@ -566,24 +651,24 @@ export function StableDemo({ source }: { source: JaegerSource }) {
             <button className="jg-stable-demo__danger" type="button" disabled={!selectedSessions.size} onClick={() => setDeleteConfirm([...selectedSessions])}>Delete selected</button>
             <button className="jg-stable-demo__danger" type="button" disabled={!recent.length} onClick={() => setDeleteConfirm(recent.map(row => row.session_id))}>Delete all</button>
           </div>}
+          <label className="jg-stable-demo__search">
+            <Search size={16} aria-hidden="true" />
+            <input type="search" value={historySearch} placeholder="Search conversations" aria-label="Search conversations" onChange={event => setHistorySearch(event.target.value)} />
+          </label>
           <div className="jg-stable-demo__recents">
-            {historyError && <p role="alert">{historyError}</p>}
-            <ConversationSection id="pinned" title="Pinned">
-              {!pinnedRows.length && <p>Pin conversations you want to keep close.</p>}
-              {pinnedRows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} onManage={source.organization?()=>setManagerSelection([row.session_id]):undefined} />)}
-            </ConversationSection>
-            {customSections.map(({group,rows})=><ConversationSection key={group.id} id={group.id} title={group.name}>{!rows.length&&<p>No conversations yet.</p>}{rows.map(row=><ConversationRow key={row.session_id} row={row} active={session===row.session_id} pinned={false} selecting={false} selected={false} onOpen={()=>selectSession(row.session_id)} onSelect={()=>{}} onPin={()=>togglePinnedSession(row.session_id)} onDelete={()=>setDeleteConfirm([row.session_id])} onManage={()=>setManagerSelection([row.session_id])}/>)}</ConversationSection>)}
-            <ConversationSection id="projects" title="Projects">
-              {!projectGroups.length && <p>Conversations with a workspace appear here.</p>}
-              {projectGroups.map(([workspace, rows]) => <div className="jg-stable-demo__project" key={workspace}><h3 title={workspace}><FolderOpen size={15} />{organization?.groups.find(g=>g.id===workspace)?.name||projectLabel(workspace)}</h3>{rows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned={false} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} onManage={source.organization?()=>setManagerSelection([row.session_id]):undefined} />)}</div>)}
-            </ConversationSection>
-            <ConversationSection id="recents" title="Recents">
-              {!recentRows.length && !historyError && <p>{recent.length ? "All conversations are pinned or in projects." : "Your conversations will appear here."}</p>}
-              {recentRows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned={false} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} onManage={source.organization?()=>setManagerSelection([row.session_id]):undefined} />)}
-            </ConversationSection>
+            {(historyError || searchError) && <p role="alert">{historyError || searchError}</p>}
+            {searching ? <>
+              {!resultGroups.length && !searchError && <p>{searchRows === null ? "Searching…" : `No conversations match “${historySearch.trim()}”.`}</p>}
+              {resultGroups.map(group => <div className="jg-stable-demo__date-group" key={group.label}><h2>{group.label}</h2>{group.rows.map(row => conversationRow(row, pinnedSessions.has(row.session_id)))}</div>)}
+            </> : <>
+              {pinnedRows.length > 0 && <ConversationSection id="pinned" title="Pinned">{pinnedRows.map(row => conversationRow(row, true))}</ConversationSection>}
+              {projectGroups.length > 0 && <ConversationSection id="projects" title="Projects">{projectGroups.map(({group, rows}) => <div className="jg-stable-demo__project" key={group.id}><h3 title={group.name}><FolderOpen size={15} />{group.name}</h3>{rows.map(row => conversationRow(row, false))}</div>)}</ConversationSection>}
+              {resultGroups.map(group => <div className="jg-stable-demo__date-group" key={group.label}><h2>{group.label}</h2>{group.rows.map(row => conversationRow(row, false))}</div>)}
+              {!resultGroups.length && !pinnedRows.length && !projectGroups.length && !historyError && <p>Your conversations will appear here.</p>}
+            </>}
           </div>
         </>}
-        {activeSection === "agents" && <div className="jg-stable-demo__context-list"><h2>Agent team</h2>{agents.map(row => <button key={row.id} type="button" onClick={() => navigate(pathOf("agents"))}><Bot size={17} />{row.display_name || row.name || row.id}</button>)}</div>}
+{activeSection === "agents" && <div className="jg-stable-demo__context-list"><h2>Agent team</h2>{agents.map(row => <button key={row.id} type="button" onClick={() => navigate(pathOf("agents"))}><Bot size={17} />{row.display_name || row.name || row.id}</button>)}</div>}
         {(route.page === "work" || route.page === "research") && <div className="jg-stable-demo__context-list"><h2>{route.page === "work" ? "Your work" : "Explore"}</h2>{SUBTABS[route.page]?.map(tab => <button type="button" key={tab.id} aria-current={route.sub === tab.id ? "page" : undefined} onClick={() => navigate(pathOf(route.page,tab.id))}>{tab.title}</button>)}</div>}
         {activeSection === "studio" && <div className="jg-stable-demo__context-list"><h2>Create with Jaeger</h2>{[["create","Generate images"],["library","Saved images"],["board","Idea board"]].map(([section,title]) => <button type="button" key={section} aria-current={(route.params.get("section") || "create") === section ? "page" : undefined} onClick={() => navigate(`/studio?section=${section}`)}>{title}</button>)}</div>}
         {activeSection === "library" && <div className="jg-stable-demo__context-list"><h2>Your library</h2>{[["media","Media"],["documents","Documents"],["outputs","Task outputs"]].map(([section,title]) => <button type="button" key={section} aria-current={(route.params.get("section") || "media") === section ? "page" : undefined} onClick={() => navigate(`/library?section=${section}`)}>{title}</button>)}</div>}
@@ -591,7 +676,6 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         {activeSection === "feed" && <div className="jg-stable-demo__context-list"><h2>From Jaeger</h2><button type="button" aria-current="page" onClick={() => navigate("/feed")}>Agent updates</button><p>Recent activity and updates from your agent.</p></div>}
         {activeSection === "machine" && <div className="jg-stable-demo__context-list"><h2>System</h2><button type="button" aria-current="page" onClick={() => navigate(pathOf("machine"))}><Cpu size={17} />Machine</button></div>}
         <div className="jg-stable-demo__context-footer">
-          <label className="jg-stable-demo__appearance">Appearance<select aria-label="Appearance" value={appearance} onChange={e => { const mode = e.target.value as Appearance; setAppearance(mode); applyAppearance(mode); }}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
           <div className="jg-stable-demo__connection" role="status"><span className="jg-stable-demo__dot" data-ready={ready && !error} />{error ? "Connection error" : ready ? source.kind === "mock" ? "Design preview · sample data" : executionHost ? `Gateway · ${executionHost}` : "Gateway connected" : "Connecting…"}</div>
         </div>
       </section>

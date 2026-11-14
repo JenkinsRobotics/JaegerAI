@@ -315,7 +315,7 @@ export interface JaegerSource {
   };
   agents(): Promise<Agent[]>;
   agentsSummary(): Promise<AgentSummary[]>;
-  sessions(query?: { agent_id?: string }): Promise<SessionRow[]>;
+  sessions(query?: { agent_id?: string; q?: string }): Promise<SessionRow[]>;
   session(id: string): Promise<SessionDetail>;
   createSession(body: { agent_id?: string; title?: string }): Promise<SessionRow>;
   /** PATCH /v1/sessions/{id}: rename or archive a chat. */
