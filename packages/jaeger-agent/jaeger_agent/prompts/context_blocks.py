@@ -110,10 +110,8 @@ def build_toolset_catalog() -> str:
         return ""
     builtin = [(k, rows[k]) for k in TOOLSET_SUMMARY if k in rows]
     skills = [(k, v) for k, v in rows.items() if k not in TOOLSET_SUMMARY]
-    lines = ["TOOL CATALOG — categories you can describe_tool / load_tools:"]
-    for name, summary in builtin + skills:
-        lines.append(f"  • {name:<14} — {summary}")
-    return "\n".join(lines)
+    names = [name for name, _summary in builtin + skills]
+    return "TOOL CATALOG (load_tools / describe_tool / tool_search): " + ", ".join(names) + "."
 
 
 # ── kanban board digest ─────────────────────────────────────────────
