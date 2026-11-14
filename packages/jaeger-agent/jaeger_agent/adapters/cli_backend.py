@@ -40,11 +40,15 @@ logger = logging.getLogger(__name__)
 # only Jaeger MCP tools remain. Do not list names that collide with
 # Jaeger MCP tools (read_file, web_search): --disallowed-tools matches
 # the short name and would hide Jaeger's own tool.
+# Grok does not call MCP tools by their MCP name. It looks them up
+# with ``search_tool`` and runs them with ``use_tool`` under the
+# ``server__tool`` name (e.g. jaeger__list_skill_dir). Those two must
+# stay allowed or Jaeger MCP tools are unreachable.
 _GROK_BUILTIN_TOOLS = (
     "run_terminal_command", "read_file", "search_replace", "list_dir", "grep",
     "kill_command_or_subagent", "todo_write", "get_command_or_subagent_output",
     "scheduler_create", "scheduler_delete", "scheduler_list", "monitor",
-    "search_tool", "use_tool", "workflow", "enter_plan_mode", "exit_plan_mode",
+    "workflow", "enter_plan_mode", "exit_plan_mode",
     "ask_user_question", "send_feedback", "image_gen", "image_edit",
     "image_to_video", "reference_to_video", "write",
     # Vendor backend tools (--disable-web-search does not cover these).
@@ -190,37 +194,130 @@ def _strip_pipe_tool_calls(text: str) -> str:
     return out
 
 
-def parse_cli_text(stdout: str, stderr: str = "") -> str:
-    """Extract assistant text from CLI stdout. JSON if present, else raw."""
+def parse_cli_stream(stdout: str, stderr: str = "") -> dict[str, Any]:
+    """Walk every NDJSON line and keep text plus tool_use / tool_result blocks.
+
+    Grok's streaming-messages-json emits many records. The last text line is
+    often an intermediate "I'll look that up" message, not the final answer.
+    Prefer the terminal ``type=result`` record. Tool calls that Grok already
+    executed (``use_tool`` / MCP) are recorded but marked executed so the
+    Jaeger loop does not run them a second time.
+    """
     clean = (stdout or "").strip()
     if not clean:
         err = (stderr or "").strip()
-        return err[-100_000:] if err else ""
-    extracted = _extract_json_text(clean)
-    if extracted:
-        return extracted.strip()
-    return clean[-100_000:]
+        return {
+            "text": (err[-100_000:] if err else ""),
+            "tool_uses": [],
+            "tool_results": [],
+            "already_executed": False,
+        }
+
+    records: list[Any] = []
+    for line in clean.splitlines():
+        line = line.strip()
+        if not line or line[0] not in "{[":
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        records.append(value)
+
+    tool_uses: list[dict[str, Any]] = []
+    tool_results: list[dict[str, Any]] = []
+    result_text = ""
+    assistant_texts: list[str] = []
+
+    def _collect_blocks(value: Any) -> None:
+        if isinstance(value, dict):
+            typ = value.get("type")
+            if typ == "tool_use" and value.get("name"):
+                tool_uses.append(value)
+            elif typ == "tool_result":
+                tool_results.append(value)
+            else:
+                for child in value.values():
+                    _collect_blocks(child)
+        elif isinstance(value, list):
+            for child in value:
+                _collect_blocks(child)
+
+    def _assistant_text(value: Any) -> str:
+        if not isinstance(value, dict):
+            return ""
+        message = value.get("message") if isinstance(value.get("message"), dict) else value
+        content = message.get("content")
+        parts: list[str] = []
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text)
+        elif isinstance(content, str) and content.strip():
+            parts.append(content)
+        return "\n".join(parts).strip()
+
+    for value in records:
+        if not isinstance(value, dict):
+            continue
+        _collect_blocks(value)
+        if value.get("type") == "result":
+            raw_result = value.get("result")
+            if isinstance(raw_result, str) and raw_result.strip():
+                result_text = raw_result
+            elif raw_result is not None:
+                found = _find_text(raw_result)
+                if found:
+                    result_text = found
+        if value.get("type") == "assistant":
+            found = _assistant_text(value)
+            if found:
+                assistant_texts.append(found)
+
+    if result_text:
+        text = result_text
+    elif assistant_texts:
+        text = assistant_texts[-1]
+    else:
+        extracted = ""
+        if len(records) == 1:
+            extracted = _find_text(records[0])
+        else:
+            for value in reversed(records):
+                extracted = _find_text(value)
+                if extracted:
+                    break
+        text = extracted or clean[-100_000:]
+
+    already = False
+    for block in tool_uses:
+        name = str(block.get("name") or "")
+        raw_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+        tool_name = str(raw_input.get("tool_name") or "")
+        if name == "use_tool" or tool_name.startswith("jaeger__") or name.startswith("jaeger__"):
+            already = True
+            break
+    if not already and tool_results:
+        already = True
+
+    return {
+        "text": (text or "").strip(),
+        "tool_uses": tool_uses,
+        "tool_results": tool_results,
+        "already_executed": already,
+    }
+
+
+def parse_cli_text(stdout: str, stderr: str = "") -> str:
+    """Extract assistant text from CLI stdout. JSON if present, else raw."""
+    return str(parse_cli_stream(stdout, stderr).get("text") or "")
 
 
 def _extract_json_text(text: str) -> str:
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        value = None
-        # Codex --json is NDJSON; prefer the last object that carries text.
-        for line in reversed(text.splitlines()):
-            line = line.strip()
-            if not line or line[0] not in "{[":
-                continue
-            try:
-                value = json.loads(line)
-                found = _find_text(value)
-                if found:
-                    return found
-            except json.JSONDecodeError:
-                continue
-        return ""
-    return _find_text(value)
+    """Kept for callers; prefer ``parse_cli_stream`` for NDJSON."""
+    return parse_cli_text(text)
 
 
 def _find_text(value: Any) -> str:
@@ -476,9 +573,13 @@ class CliBackendAdapter(ProviderAdapter):
                 )
                 override = (
                     "You are Jaeger's language model. Follow the System "
-                    "section and the current request. Use only these Jaeger "
-                    "MCP tools: " + (tool_names or "list_skill_dir, read_file, terminal")
-                    + ". To list the current workspace, call list_skill_dir "
+                    "section and the current request. Jaeger MCP tools are "
+                    "named jaeger__<tool> (for example jaeger__list_skill_dir, "
+                    "jaeger__read_file, jaeger__terminal). Available short "
+                    "names: " + (tool_names or "list_skill_dir, read_file, terminal")
+                    + ". Look a tool up with search_tool if needed, then call "
+                    "it with use_tool using the jaeger__ name. To list the "
+                    "current workspace, use_tool tool_name=jaeger__list_skill_dir "
                     "with path '.'. Do not use built-in file, editor, X search, "
                     "or web tools. The CLI cache directory is not the workspace."
                 )
@@ -679,6 +780,15 @@ class CliBackendAdapter(ProviderAdapter):
                 str(payload.get("stdout") or ""),
                 str(payload.get("stderr") or ""),
             )
+        # Prefer a full NDJSON walk so tool_use / tool_result blocks are
+        # not dropped in favour of the last text fragment.
+        stream = parse_cli_stream(raw if isinstance(raw, str) else str((raw or {}).get("stdout") or ""),
+                                  "" if isinstance(raw, str) else str((raw or {}).get("stderr") or ""))
+        text = str(stream.get("text") or text or "")
+        if stream.get("already_executed"):
+            # Grok already ran Jaeger MCP via use_tool; the loopback
+            # executor emitted the tool row. Do not enqueue a second call.
+            return Message(role="assistant", content=_strip_pipe_tool_calls(text).strip() or text, finish_reason="stop")
         from jaeger_agent.dialects import extract_tool_calls
         tool_calls = list(extract_tool_calls(text) or [])
         if not tool_calls:
