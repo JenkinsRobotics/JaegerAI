@@ -1,6 +1,21 @@
 #!/bin/zsh
 set -eu
 
+# Owner-only secrets for the launch environment (OLLAMA_API_KEY, etc.).
+# Never echo the file. Refuse to source if group/world readable.
+_secrets_env="${JAEGER_STATE_DIR:-${JAEGER_STATE_HOME:-$HOME/.jaeger}}/secrets.env"
+if [[ -f "$_secrets_env" ]]; then
+  _mode="$(stat -f %Lp "$_secrets_env" 2>/dev/null || stat -c %a "$_secrets_env" 2>/dev/null || echo 000)"
+  if [[ "$_mode" == "600" || "$_mode" == "400" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$_secrets_env"
+    set +a
+  fi
+fi
+unset _secrets_env _mode
+
+
 script_dir=${0:A:h}
 repo_root=${script_dir:h}
 webui_root="$repo_root/jaeger_ai/features/webui"

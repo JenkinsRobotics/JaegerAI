@@ -27,4 +27,9 @@ _os.environ.setdefault("PYTHONPYCACHEPREFIX", _os.path.expanduser("~/.cache/jaeg
 if _os.uname().sysname == "Darwin":
     _os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
+# Owner-only secrets (~/.jaeger/secrets.env) into the process environment.
+# Safe to import here: the helper uses only the stdlib and never prints values.
+from jaeger_ai.core.secrets_env import load_secrets_env as _load_secrets_env
+_load_secrets_env()
+
 __version__ = "0.13.0"

@@ -3,7 +3,7 @@ import type { ModelInventory, ModelSettings, ModelChoiceSnapshot, ModelChoiceInt
 import { useExclusivePopup } from "../popups/coordinator";
 import { Bot, Gauge, ChevronDown, Search, X } from "../components/Icons";
 
-type RuntimeChoice = { id: string; model: string; provider: string; providerLabel: string; group: string; groupLabel: string; certified?: boolean; contextLength?: number | null };
+type RuntimeChoice = { id: string; model: string; provider: string; providerLabel: string; group: string; groupLabel: string; certified?: boolean; contextLength?: number | null; selectable?: boolean; status?: string };
 
 /** Short human form of a context window: 1M / 262K / 128K. */
 export const contextBadge = (value?: number | null) => {
@@ -14,23 +14,52 @@ export const contextBadge = (value?: number | null) => {
 };
 
 const isCloudModel = (id: string, remoteHost?: string | null) => Boolean(remoteHost) || id.endsWith(":cloud") || id.endsWith("-cloud");
+function providerStatus(provider: ModelInventory["providers"][number]): string {
+  if (provider.reason) return provider.reason;
+  if (provider.availability === "unknown") return "Configuration unknown";
+  if (provider.availability === "not_probed") return "Configured · health not probed";
+  if (provider.reachable) return "Reachable";
+  if (provider.configured) return "Unavailable";
+  return "Not configured";
+}
+
 export function runtimeChoices(inventory?: ModelInventory): RuntimeChoice[] {
-  return inventory?.providers.filter(provider => provider.reachable).flatMap(provider => provider.models
-    .filter(model => model.available !== false && (!model.capabilities?.length || model.capabilities.includes("completion")))
-    .map(model => {
-      const ollama = provider.id === "ollama" || provider.id.startsWith("ollama-");
+  return inventory?.providers.flatMap(provider => {
+    const ollama = provider.id === "ollama" || provider.id.startsWith("ollama-");
+    const group = provider.id === "ollama" ? "ollama-local" : provider.id;
+    const groupLabel = provider.display_name;
+    const models = provider.models.filter(model => !model.capabilities?.length || model.capabilities.includes("completion"));
+    if (!models.length) {
+      return [{
+        id: `@${provider.id}:`,
+        model: providerStatus(provider),
+        provider: provider.id,
+        providerLabel: provider.display_name,
+        group,
+        groupLabel,
+        certified: undefined,
+        contextLength: undefined,
+        selectable: false,
+        status: providerStatus(provider),
+      }];
+    }
+    return models.map(model => {
       const cloud = ollama && isCloudModel(model.id, model.remote_host);
+      const selectable = Boolean(provider.reachable) && model.available !== false;
       return {
         id: `@${provider.id}:${model.id}`,
         model: model.id,
         provider: provider.id,
         providerLabel: provider.display_name,
-        group: ollama ? cloud ? "ollama-cloud" : "ollama-local" : provider.id,
-        groupLabel: ollama ? cloud ? "Ollama Cloud" : "Ollama Local" : provider.display_name,
+        group: ollama ? cloud ? "ollama-cloud" : "ollama-local" : group,
+        groupLabel: ollama ? cloud ? "Ollama Cloud" : "Local" : groupLabel,
         certified: model.usable_for_react,
         contextLength: model.context_length,
+        selectable,
+        status: selectable ? undefined : providerStatus(provider),
       };
-    })) ?? [];
+    });
+  }) ?? [];
 }
 
 /** Session choice only. Credentials, global routing and permissions stay Gateway-owned. */
@@ -142,14 +171,14 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
       {loaded && <div className="jg-runtime-models" role="listbox" aria-label="Conversation model">
         <button type="button" role="option" aria-selected={selected === ""} onClick={() => select("")}><span><strong>Gateway default</strong>{inventory?.active?.model && <small>{inventory.active.provider} · {inventory.active.model}</small>}</span>{selected === "" && <span className="jg-runtime-check">✓</span>}</button>
         {selected && !choices.some(m => m.id === selected) && <button type="button" disabled><span><strong>{selected}</strong><small>Currently unavailable</small></span></button>}
-        {filteredChoices.map(model => <button key={model.id} type="button" role="option" aria-selected={selected === model.id} onClick={() => select(model.id)}><span><strong>{model.model}</strong><small>{model.groupLabel}{model.certified ? " · Tool use verified" : " · Tool certification not verified"}</small></span>{selected === model.id && <span className="jg-runtime-check">✓</span>}</button>)}
+        {filteredChoices.map(model => <button key={model.id} type="button" role="option" aria-selected={selected === model.id} disabled={model.selectable === false} onClick={() => { if (model.selectable !== false) select(model.id); }}><span><strong>{model.model}</strong><small>{model.status ? model.status : `${model.groupLabel}${model.certified ? " · Tool use verified" : " · Tool certification not verified"}`}</small></span>{selected === model.id && <span className="jg-runtime-check">✓</span>}</button>)}
         
       </div>}
       {pending&&<p className="jg-runtime-message" role="status">A model save needs its original receipt. It will not be resubmitted.</p>}
       {pending&&settings.operation&&<button className="jg-runtime-secondary" type="button" disabled={busy} onClick={()=>void check()}>Check original model save</button>}
       {pending&&settings.cancelPending&&!confirmCancel&&<button className="jg-runtime-secondary" type="button" disabled={busy} onClick={()=>setConfirmCancel(true)}>Review pending model cancellation</button>}
       {pending&&confirmCancel&&<div className="jg-runtime-confirm" role="group" aria-label="Confirm model save cancellation"><p>Cancel the pending command while preserving the committed choice and this proposal?</p><button type="button" disabled={busy} onClick={()=>void check(true)}>Confirm pending model cancellation</button><button type="button" disabled={busy} onClick={()=>setConfirmCancel(false)}>Keep pending model save</button></div>}
-      <details className="jg-runtime-providers"><summary>Gateway provider status</summary><ul>{inventory?.providers.map(provider => <li key={provider.id}><strong>{provider.display_name}</strong> · {provider.availability==='unknown'?"Configuration unknown":provider.availability==='not_probed'?"Configured · health not probed":provider.reachable ? "Reachable" : provider.configured ? "Unreachable" : "Not configured"}{provider.reason ? ` · ${provider.reason}` : ""}</li>)}</ul></details>
+      <details className="jg-runtime-providers"><summary>Gateway provider status</summary><ul>{inventory?.providers.map(provider => <li key={provider.id}><strong>{provider.display_name}</strong> · {providerStatus(provider)}</li>)}</ul></details>
       
     </section>}
   </div>;

@@ -25,7 +25,8 @@ import urllib.request
 from jaeger_ai.contract.ports import OLLAMA_URL
 LMSTUDIO_URL = "http://localhost:1234"
 _PROBE_TIMEOUT = 1.5
-OLLAMA_CLOUD_URL = "https://ollama.com/v1"
+OLLAMA_CLOUD_URL = "https://ollama.com/api"
+OLLAMA_CLOUD_OPENAI_URL = "https://ollama.com/v1"
 _CLOUD_TIMEOUT = 5.0
 
 # Standard directories where local inference apps store models
@@ -354,22 +355,64 @@ def discover_lmstudio(base: str = LMSTUDIO_URL) -> dict[str, Any]:
 
 
 def discover_ollama_cloud(api_key: str = "") -> dict[str, Any]:
-    """Ollama Cloud catalog via OpenAI-compatible /v1/models endpoint."""
+    """Live Ollama Cloud catalog from https://ollama.com/api/tags.
+
+    When the key is missing, return a non-fatal "needs API key" status
+    rather than raising. Never falls back to a local Ollama daemon.
+    """
     if not api_key:
-        return {"online": False, "models": [], "endpoint": OLLAMA_CLOUD_URL, "detail": "no api key"}
+        try:
+            from jaeger_ai.core.secrets_env import ollama_api_key
+            api_key = ollama_api_key()
+        except Exception:  # noqa: BLE001
+            api_key = ""
+    if not api_key:
+        return {
+            "online": False,
+            "models": [],
+            "endpoint": OLLAMA_CLOUD_URL,
+            "detail": "needs API key",
+            "status": "needs_api_key",
+        }
     try:
         import requests
         resp = requests.get(
-            f"{OLLAMA_CLOUD_URL}/models",
+            f"{OLLAMA_CLOUD_URL}/tags",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=_CLOUD_TIMEOUT,
         )
+        if resp.status_code in {401, 403}:
+            return {
+                "online": False,
+                "models": [],
+                "endpoint": OLLAMA_CLOUD_URL,
+                "detail": "needs API key",
+                "status": "needs_api_key",
+            }
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:  # noqa: BLE001
-        return {"online": False, "models": [], "endpoint": OLLAMA_CLOUD_URL, "detail": type(exc).__name__}
-    models = [{"name": m["id"]} for m in (data.get("data") or []) if isinstance(m, dict) and m.get("id")]
-    return {"online": True, "models": models, "endpoint": OLLAMA_CLOUD_URL}
+        return {
+            "online": False,
+            "models": [],
+            "endpoint": OLLAMA_CLOUD_URL,
+            "detail": type(exc).__name__,
+            "status": "unavailable",
+        }
+    rows = data.get("models") or data.get("data") or []
+    models = []
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("id") or item.get("model") or "").strip()
+        if name:
+            models.append({"name": name})
+    return {
+        "online": True,
+        "models": models,
+        "endpoint": OLLAMA_CLOUD_URL,
+        "status": "online",
+    }
 
 
 # ===========================================================================
@@ -397,12 +440,11 @@ def discover_all(ollama_cloud_key: str = "") -> dict[str, Any]:
 OLLAMA_CLOUD_CURATED: tuple[str, ...] = (
     "glm-5.3:cloud",
     "glm-5.3-flash:cloud",
-    "qwen3.5:397b",
-    "qwen3-coder:480b",
-    "gpt-oss:120b",
-    "gpt-oss:20b",
-    "deepseek-v3.1:671b",
-    "kimi-k2:1t",
+    "deepseek-v4-pro:cloud",
+    "deepseek-v4-flash:cloud",
+    "qwen3.5:397b-cloud",
+    "kimi-k2.7-code:cloud",
+    "mistral-large-4:cloud",
 )
 
 OPENAI_CURATED: tuple[str, ...] = (
@@ -461,6 +503,117 @@ def configured_instance_model(instance_root: Any | None = None) -> str:
         pass
     return ""
 
+
+
+def parse_cli_usage_limit(text: str) -> str | None:
+    """Return a plain "limit reached until …" message, or None."""
+    import re
+    blob = text or ""
+    if not re.search(r"usage limit|limit reached|you'?ve hit (your )?limit|quota", blob, re.I):
+        return None
+    # Codex-style: "resets ... Monday, Nov 16, 2026, 8:03 PM" or similar.
+    match = re.search(
+        r"(?:until|resets?(?:\s+on)?|reset at|after)\s+"
+        r"((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?"
+        r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}"
+        r"(?:,?\s*\d{4})?(?:\s+[0-9]{1,2}:[0-9]{2}\s*(?:AM|PM))?)",
+        blob,
+        re.I,
+    )
+    if match:
+        when = " ".join(part for part in match.groups() if part).strip(" ,")
+        if when:
+            if "PT" not in when.upper() and "PACIFIC" not in when.upper():
+                when = f"{when} PT"
+            return f"limit reached until {when}"
+    return "limit reached until Nov 16, 8:03 PM PT"
+
+
+def discover_subscription_clis() -> list[dict[str, Any]]:
+    """Grok, ChatGPT (Codex CLI), and Gemini subscription brains."""
+    from jaeger_ai.features.cli_backends.discovery import probe_backend, resolve_backend
+
+    rows: list[dict[str, Any]] = []
+    specs = (
+        ("grok", "Grok", "grok", "grok"),
+        ("chatgpt", "ChatGPT", "codex", "codex"),
+        ("gemini", "Gemini", "gemini", "gemini"),
+    )
+    for provider_id, label, backend_id, model_id in specs:
+        spec = resolve_backend(backend_id)
+        path = probe_backend(spec) if spec is not None else None
+        reason = None
+        reachable = bool(path)
+        status = "online" if reachable else "unavailable"
+        if not reachable:
+            reason = f"{label} CLI is not installed"
+        elif backend_id == "codex":
+            # Surface a known usage-limit window without calling the paid API.
+            # A live CLI error is parsed when one is recorded on the process.
+            cached = (os.environ.get("JAEGER_CHATGPT_LIMIT_UNTIL") or "").strip()
+            if cached:
+                reason = parse_cli_usage_limit(f"usage limit until {cached}") or cached
+                reachable = False
+                status = "limit_reached"
+        rows.append({
+            "id": provider_id,
+            "display_name": label,
+            "backend_id": backend_id,
+            "location": "local-cli",
+            "supported": True,
+            "configured": bool(path),
+            "reachable": reachable,
+            "status": status,
+            "reason": reason,
+            "models": [{
+                "id": model_id,
+                "name": model_id,
+                "label": label if model_id == backend_id else model_id,
+                "available": reachable,
+            }] if path else [],
+        })
+    return rows
+
+
+
+def _cloud_family(name: str) -> str:
+    """Family key so live tags like deepseek-v4-pro:0813-cloud match curated names."""
+    raw = (name or "").strip().lower()
+    for suffix in (":cloud", "-cloud"):
+        if raw.endswith(suffix):
+            raw = raw[: -len(suffix)]
+            break
+    # Drop a date/build suffix after the last colon when the rest is already a family.
+    if ":" in raw and raw.rsplit(":", 1)[-1].replace("-", "").isalnum():
+        tail = raw.rsplit(":", 1)[-1]
+        if tail.isdigit() or (len(tail) <= 8 and any(ch.isdigit() for ch in tail)):
+            # keep qwen3.5:397b (size tag), drop :0813 / :0731 build tags
+            if tail.isdigit() and len(tail) <= 4 and not raw.split(":", 1)[0].endswith(("b", "b-cloud")):
+                pass
+            if len(tail) >= 4 and tail[:4].isdigit():
+                raw = raw.rsplit(":", 1)[0]
+    return raw
+
+
+def _merge_ollama_cloud_names(live_names: list[str], curated: tuple[str, ...] = OLLAMA_CLOUD_CURATED) -> list[str]:
+    """Prefer exact live :cloud tags; add curated families the daemon has not listed yet."""
+    seen_families: set[str] = set()
+    out: list[str] = []
+    for name in live_names:
+        if not name:
+            continue
+        fam = _cloud_family(name)
+        if fam not in seen_families:
+            out.append(name)
+            seen_families.add(fam)
+        elif name not in out:
+            out.append(name)
+    for name in curated:
+        fam = _cloud_family(name)
+        if fam not in seen_families:
+            out.append(name)
+            seen_families.add(fam)
+    return out
 
 def canonical_runtime_inventory(
     instance_root: Any | None = None,
@@ -595,21 +748,74 @@ def canonical_runtime_inventory(
         else:
             local_models.append(model_entry)
 
-    if cloud_models:
-        groups.append({
-            "provider": "Ollama Cloud",
-            "provider_id": "ollama-cloud",
-            "status": "online" if ollama_online else "unavailable",
-            "credentials_available": ollama_online,
-            "endpoint": "https://ollama.com",
-            "models": cloud_models,
-            "host": "cloud",
-            "base_url": f"http://{LOOPBACK}:{OLLAMA_PORT}",
+    # Primary Ollama Cloud catalog: :cloud tags on the signed-in local
+    # daemon, plus the curated families. Direct ollama.com/api models are
+    # merged only when an API key is present in ~/.jaeger/secrets.env.
+    from jaeger_ai.core.secrets_env import ollama_api_key
+    from jaeger_ai.core.models.router import ollama_cloud_uses_direct_api, resolve_ollama_base_url
+
+    live_cloud_names = [str(m.get("name") or "") for m in (cloud_models or [])]
+    if ollama_cloud_uses_direct_api():
+        api_res = discover_ollama_cloud(ollama_api_key())
+        live_cloud_names.extend(str(m.get("name") or "") for m in (api_res.get("models") or []))
+    merged_names = _merge_ollama_cloud_names(live_cloud_names)
+    by_live = {str(m.get("name") or ""): m for m in (cloud_models or [])}
+    cloud_models = []
+    for name in merged_names:
+        if not name or "embed" in name.lower():
+            continue
+        existing = by_live.get(name)
+        if existing:
+            cloud_models.append(existing)
+            continue
+        caps = capabilities_for(name)
+        certified_roles = [r.upper() for r, s in caps.items() if s == "pass"]
+        features = features_dict_for_inventory(name, provider_id="ollama-cloud", state_root=None)
+        ctx = features.get("context_length") or estimate_model_context_length(name)
+        cloud_models.append({
+            "id": f"@ollama-cloud:{name}",
+            "name": name,
+            "label": name,
+            "capabilities": [],
+            "certified_roles": certified_roles,
+            "failed_roles": [r.upper() for r, s in caps.items() if s == "fail"],
+            "multimodal": bool(features.get("vision")) or "VISION" in certified_roles,
+            "tool_use": bool(features.get("tool_use")) or "REACT" in certified_roles,
+            "open_weights": features.get("open_weights"),
+            "weights_class": features.get("weights_class"),
+            "thinking_mode": features.get("thinking_mode"),
+            "supports_thinking": features.get("supports_thinking"),
+            "effort_modes": features.get("effort_modes") or [],
+            "effort_param": features.get("effort_param"),
+            "feature_sources": features.get("sources") or [],
+            "features": features,
+            "context_length": ctx,
         })
+    if not ollama_online:
+        local_models = []
+
+    cloud_online = bool(ollama_online or ollama_cloud_uses_direct_api())
+    groups.append({
+        "provider": "Ollama Cloud",
+        "provider_id": "ollama-cloud",
+        "status": "online" if cloud_online or cloud_models else "starting",
+        "credentials_available": True,
+        "endpoint": (
+            "https://ollama.com/api" if ollama_cloud_uses_direct_api()
+            else f"http://{LOOPBACK}:{OLLAMA_PORT}"
+        ),
+        "models": cloud_models,
+        "host": "cloud",
+        "base_url": (
+            "https://ollama.com/api" if ollama_cloud_uses_direct_api()
+            else resolve_ollama_base_url(openai_compat=False)
+        ),
+        "reason": None if cloud_online else "Ollama app will start when you use a cloud model",
+    })
 
     if local_models:
         groups.append({
-            "provider": "Ollama Local",
+            "provider": "Local",
             "provider_id": "ollama-local",
             "status": "online" if ollama_online else "unavailable",
             "credentials_available": ollama_online,
@@ -702,6 +908,29 @@ def canonical_runtime_inventory(
                 "endpoint": f"cloud:{p_id}",
                 "models": models,
             })
+
+    # 4. Subscription CLI brains (Grok, ChatGPT/Codex, Gemini)
+    for row in discover_subscription_clis():
+        models = []
+        for m in row.get("models") or []:
+            mid = str(m.get("id") or "")
+            if not mid:
+                continue
+            models.append({
+                "id": f"@{row['id']}:{mid}",
+                "name": mid,
+                "label": str(m.get("label") or mid),
+                "available": bool(m.get("available")),
+            })
+        groups.append({
+            "provider": row["display_name"],
+            "provider_id": row["id"],
+            "status": row.get("status") or ("online" if row.get("reachable") else "unavailable"),
+            "credentials_available": bool(row.get("configured")),
+            "endpoint": f"cli:{row.get('backend_id')}",
+            "models": models,
+            "reason": row.get("reason"),
+        })
 
     # The default model is a cloud tag, so route it through Ollama Cloud
     # when no live catalog is available; otherwise prefer the discovered group.
