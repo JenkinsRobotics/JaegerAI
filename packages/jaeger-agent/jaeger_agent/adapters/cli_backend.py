@@ -398,6 +398,10 @@ class CliBackendAdapter(ProviderAdapter):
                     os.chmod(prompt_file, 0o600)
                     handle.write(live_prompt)
             if self.backend_id == "grok":
+                # --tools "" hid Jaeger MCP tools from the model request.
+                while "--tools" in child_argv:
+                    index = child_argv.index("--tools")
+                    del child_argv[index:index + 2]
                 import uuid
                 # Jaeger already sends the conversation. A reused Grok
                 # session in the stable cwd stacked prior turns into a
