@@ -51,9 +51,9 @@ IDENTITY_FRAGMENT = "identity_name"
 # the old line said that was TRUE (local, one tool, the capability list
 # is not a tool list) and drops the part that named a second self.
 SELF_MODEL_HEADER = (
-    "You are running locally on this machine. Capability areas below are "
-    "NOT tool names — you reach ALL of them through your one tool, "
-    "perform_task:"
+    "You are running on this machine. Capability areas below are "
+    "NOT tool names — you reach ALL of them through your tools. "
+    "Configured language-model providers are listed in the runtime truth block:"
 )
 
 

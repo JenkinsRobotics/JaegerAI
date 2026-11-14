@@ -27,13 +27,38 @@ function splitPackedRows(line: string): string[] {
 export function repairPipeTables(text: string): string {
   const source = text.split("\n").flatMap(splitPackedRows);
   const out: string[] = [];
+  let inTable = false;
+  let seenSeparator = false;
   for (let i = 0; i < source.length; i++) {
     const line = source[i]!;
-    const next = source[i + 1];
-    out.push(line);
-    if (PIPE_ROW.test(line) && !SEP_ROW.test(line) && next && PIPE_ROW.test(next) && !SEP_ROW.test(next)) {
-      out.push(separator(Math.max(columns(line), columns(next))));
+    const isSep = SEP_ROW.test(line);
+    const isPipe = isSep || PIPE_ROW.test(line);
+    if (!isPipe) {
+      inTable = false;
+      seenSeparator = false;
+      out.push(line);
+      continue;
     }
+    if (!inTable) {
+      inTable = true;
+      seenSeparator = isSep;
+      out.push(line);
+      const next = source[i + 1];
+      const nextIsSep = Boolean(next && SEP_ROW.test(next));
+      const nextIsPipe = Boolean(next && (PIPE_ROW.test(next) || nextIsSep));
+      if (!isSep && nextIsPipe && !nextIsSep) {
+        out.push(separator(Math.max(columns(line), columns(next!))));
+        seenSeparator = true;
+      }
+      continue;
+    }
+    if (isSep) {
+      if (seenSeparator) continue;
+      out.push(line);
+      seenSeparator = true;
+      continue;
+    }
+    out.push(line);
   }
   return out.join("\n");
 }

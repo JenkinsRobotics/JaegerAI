@@ -309,6 +309,10 @@ class GatewaySessionStore:
         self.event_listener: Callable[[dict[str, Any]], Any] | None = None
         self._pending_events = threading.local()
         self._init_db()
+        try:
+            self.backfill_generic_titles()
+        except Exception:
+            pass
 
     def _queue_event(self, record: dict[str, Any]) -> None:
         pending = getattr(self._pending_events, "items", None)
@@ -757,6 +761,33 @@ class GatewaySessionStore:
                     row["search_match"] = True
                 out.append(row)
             return out
+
+    def backfill_generic_titles(self) -> int:
+        """Give existing generic-titled conversations a title from the first user message.
+
+        Does not mark titles as manual, so later edits still follow auto-title rules.
+        Empty conversations are left unchanged.
+        """
+        changed = 0
+        with self._immediate() as conn:
+            rows = conn.execute("SELECT session_id, title, metadata_json FROM sessions").fetchall()
+            for row in rows:
+                if not is_generic_session_title(row["title"], _row_meta(row["metadata_json"])):
+                    continue
+                first = conn.execute(
+                    "SELECT content FROM messages WHERE session_id = ? AND role = 'user' "
+                    "AND (kind IS NULL OR kind IN ('', 'message')) AND trim(content) != '' "
+                    "ORDER BY timestamp ASC, id ASC LIMIT 1",
+                    (row["session_id"],),
+                ).fetchone()
+                if first is None:
+                    continue
+                auto_title = title_from_user_text(first["content"])
+                if auto_title:
+                    conn.execute("UPDATE sessions SET title = ? WHERE session_id = ?",
+                                 (auto_title, row["session_id"]))
+                    changed += 1
+        return changed
 
     def recover_interrupted_sessions(self) -> int:
         """A new gateway cannot attest completion of work its predecessor sent."""

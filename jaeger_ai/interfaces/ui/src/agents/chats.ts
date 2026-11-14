@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import type { JaegerSource } from "../api/source";
 import type { SessionRow } from "../api/types";
 
-const GENERIC_TITLES = new Set(["", "new chat", "new conversation", "untitled"]);
+const GENERIC_TITLES = new Set(["", "new chat", "new conversation", "jaeger stable chat", "chat with jaeger", "untitled conversation", "untitled"]);
 const TITLE_CHARS = 48;
 
 const activityAt = (row: SessionRow) => row.last_activity_at ?? row.updated_at ?? row.created_at ?? 0;

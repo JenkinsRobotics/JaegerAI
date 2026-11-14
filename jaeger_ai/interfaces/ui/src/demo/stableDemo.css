@@ -37,8 +37,15 @@
 .jg-stable-demo__session-check { display: grid; place-items: center; flex: 0 0 30px; margin-left: 4px; }
 .jg-stable-demo__session-check input { width: 16px; height: 16px; accent-color: var(--jg-color-accent); }
 .jg-stable-demo__session-actions { position: absolute; right: 5px; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: color-mix(in srgb,var(--jg-color-elevated) 94%,transparent); opacity: 0; pointer-events: none; box-shadow: -7px 0 12px color-mix(in srgb,var(--jg-color-elevated) 90%,transparent); }
-.jg-stable-demo__session-row:hover .jg-stable-demo__session-actions, .jg-stable-demo__session-row:focus-within .jg-stable-demo__session-actions, .jg-stable-demo__session-row[data-menu] .jg-stable-demo__session-actions { opacity: 1; pointer-events: auto; }
-@media (hover: none) { .jg-stable-demo__session-actions { opacity: 1; pointer-events: auto; } }
+.jg-stable-demo__session-row:hover .jg-stable-demo__session-actions,
+.jg-stable-demo__session-row:focus-within .jg-stable-demo__session-actions,
+.jg-stable-demo__session-row[data-menu] .jg-stable-demo__session-actions { opacity: 1; pointer-events: auto; }
+@media (hover: none), (pointer: coarse) {
+  .jg-stable-demo__session-actions { opacity: 0; pointer-events: none; }
+  .jg-stable-demo__session-row[data-active] .jg-stable-demo__session-actions,
+  .jg-stable-demo__session-row[data-menu] .jg-stable-demo__session-actions { opacity: 1; pointer-events: auto; }
+  .jg-stable-demo__session-actions [data-action="pin"] { display: none; }
+}
 .jg-stable-demo__row-menu { position: absolute; top: calc(100% - 4px); right: 4px; z-index: 20; display: flex; flex-direction: column; min-width: 198px; max-width: min(260px, 70vw); padding: 6px; border: 1px solid var(--jg-color-border); border-radius: 12px; background: color-mix(in srgb,var(--jg-color-elevated) 96%,transparent); box-shadow: 0 16px 40px var(--jg-menu-shadow); -webkit-backdrop-filter: blur(20px) saturate(1.2); backdrop-filter: blur(20px) saturate(1.2); }
 .jg-stable-demo__row-menu button { width: 100%; justify-content: flex-start; min-height: 36px; padding: 7px 8px; border-radius: 8px; }
 .jg-stable-demo__date-group + .jg-stable-demo__date-group { margin-top: 16px; }
