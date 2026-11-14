@@ -38,13 +38,17 @@ from jaeger_agent.core.workspace import (
 # File ops (all sandboxed to <instance>/skills/)
 from .files import (
     append_file,
+    apply_patch,
     copy_file,
     delete_file,
     edit_file,
     file_read,
     file_write,
+    glob_files,
     list_skill_dir,
     move_file,
+    notebook_edit,
+    read_many_files,
     reset_read_tracker,
     search_files,
 )
@@ -64,6 +68,7 @@ from .scheduling import cancel_schedule, list_schedules, schedule_prompt
 
 # Web
 from .web import get_weather, web_fetch, web_search
+from . import x_search  # noqa: F401  (registers x_search)
 
 # Code execution
 from .code import run_python, run_shell
@@ -86,7 +91,7 @@ from .speak import (
 # Avatar (0.5 — AnimationNode driving)
 
 # Vision
-from .vision import generate_image, look_at
+from .vision import generate_image, look_at, view_image
 
 # Cloud AI generation (fal.ai) — the paid, higher-quality counterpart
 # to the local vision tools. Plugin-provided (jaeger_os/plugins/ai_gen).

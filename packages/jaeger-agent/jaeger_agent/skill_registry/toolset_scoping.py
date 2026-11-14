@@ -61,7 +61,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "code": (r"\b(code|python|swift|javascript|typescript|shell|terminal|command|test suite|debug|package|disk|system|process|cpu|memory usage|df|ls|cat|ps|kill|curl|git|ping|port)\b",),
     "containers": (r"\b(container|containers|containerized)\b",),
     "media": (r"\b(image|video|audio|speech|voice|camera|microphone|listen)\b",),
-    "web": (r"\b(weather|forecast)\b",),
+    "web": (r"\b(weather|forecast|twitter|tweets?|x\.com|x search)\b",),
     "sessions": (r"\b(conversation|session|chat history)\b",),
     "board": (r"\b(board|kanban|card)\b",),
     "agent_notes": (r"\b(notes?|remember|preferences?|keep track)\b",),
@@ -167,6 +167,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # patch / search_files are CORE; the rest loads on intent.
         "append_file", "delete_file",
         "move_file", "copy_file",
+        "glob", "read_many_files", "apply_patch", "notebook_edit",
     }),
     "code": frozenset({
         # ``execute_code`` is in CORE; heavy/risky code surfaces load
@@ -179,7 +180,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     }),
     "containers": frozenset({"container"}),
     "media": frozenset({
-        "text_to_speech", "listen", "vision_analyze", "image_generate",
+        "text_to_speech", "listen", "vision_analyze", "view_image", "image_generate",
         # fal.ai cloud generation (plugins/ai_gen) — the paid counterpart
         # to the local image_generate.
         "generate_image_fal", "generate_video_fal",
@@ -192,9 +193,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "set_avatar_state", "play_timeline",
     }),
     "web": frozenset({
-        # ``web_search`` and ``web_extract`` are in CORE; weather is
-        # loadable so it doesn't bloat routing for chat-heavy users.
-        "get_weather",
+        # ``web_search`` and ``web_extract`` are in CORE; weather and
+        # X search load on intent so they don't bloat everyday routing.
+        "get_weather", "x_search",
     }),
     "memory_granular": frozenset({
         # The pre-umbrella granular memory tools — kept registered so
@@ -318,11 +319,11 @@ TOOLSETS: dict[str, frozenset[str]] = {
 
 # One-line description per built-in class — for the load_tools catalog.
 TOOLSET_SUMMARY: dict[str, str] = {
-    "files": "append, delete, patch, search files; list the workspace",
+    "files": "append, delete, patch, glob, batch-read, apply_patch, notebook_edit; list the workspace",
     "code": "shell/terminal, ssh, install packages, venv exec",
-    "media": "text-to-speech, mic capture, vision, image/video generation (local + fal.ai cloud)",
+    "media": "text-to-speech, mic capture, image view, vision, image/video generation (local + fal.ai cloud)",
     "avatar": "avatar face + animation timelines (BETA — dev mode only)",
-    "web": "weather lookups (web_search / web_extract are always-on)",
+    "web": "weather and X (Twitter) search (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
     "planning": "show and update a step plan (update_plan); wait for a bounded time",
     "agent_notes": "a specialist agent's own persistent notes (read / append / replace)",
