@@ -473,6 +473,42 @@ def _resolve_write(path: str) -> Path:
     return target
 
 
+
+def _redirect_cli_cache_path(path: str) -> str:
+    """The Grok CLI workdir is only for MCP config and prompt.txt.
+
+    If the model lists or reads that cache folder (its --cwd), send the
+    call to the bound project or the effective workspace instead.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return path
+    try:
+        candidate = Path(raw).expanduser()
+        resolved = candidate.resolve() if candidate.is_absolute() else candidate
+        cache = (Path.home() / ".cache" / "jaeger" / "cli-workdir").resolve()
+        if resolved != cache and cache not in resolved.parents:
+            return path
+        project = get_project_root()
+        if project is None:
+            try:
+                project = get_effective_workspace_dir()
+            except Exception:
+                project = None
+        if project is None:
+            return path
+        try:
+            rel = resolved.relative_to(cache)
+        except ValueError:
+            return str(project)
+        # .../cli-workdir/<backend> or a file under it → project root
+        # (or a leftover relative suffix after the backend name).
+        parts = rel.parts[1:] if rel.parts else ()
+        return str(project.joinpath(*parts) if parts else project)
+    except Exception:
+        return path
+
+
 def _resolve_read(path: str) -> Path:
     """Resolve a path for a READ operation.
 
@@ -487,7 +523,7 @@ def _resolve_read(path: str) -> Path:
     reads the repo naturally), then falls back to the **instance root**
     (so a workspace-relative path like ``skills/foo.py`` still resolves
     even when cwd isn't the instance)."""
-    path = _guard_path(path)
+    path = _guard_path(_redirect_cli_cache_path(path))
     if not path:
         raise SandboxError("path must be non-empty")
     p = Path(path).expanduser()

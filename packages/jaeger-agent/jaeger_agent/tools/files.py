@@ -519,7 +519,17 @@ def list_skill_dir(path: str = ".") -> dict[str, Any]:
     _vN suffix)."""
     layout = _require_layout()
     try:
-        target = layout.skills_dir if path == "." else _resolve_read(path)
+        from jaeger_agent.core.workspace import _redirect_cli_cache_path, get_project_root, get_effective_workspace_dir
+        redirected = _redirect_cli_cache_path(path)
+        if redirected != path:
+            target = Path(redirected)
+            if not target.is_dir():
+                target = get_project_root() or get_effective_workspace_dir()
+        elif path == ".":
+            # "List the workspace" should show the bound project, not skills/.
+            target = get_project_root() or get_effective_workspace_dir() or layout.skills_dir
+        else:
+            target = _resolve_read(path)
     except SandboxError as exc:
         return {"listed": False, "error": str(exc)}
     if not target.exists():

@@ -35,6 +35,18 @@ from .cli_stream import collect_stream, VisibleTextStream
 
 logger = logging.getLogger(__name__)
 
+# --tools "" does not actually disable Grok built-ins (they still appear
+# in tool_definitions.json and add ~12k tokens). Deny them by name so
+# only Jaeger MCP tools remain.
+_GROK_BUILTIN_TOOLS = (
+    "run_terminal_command", "read_file", "search_replace", "list_dir", "grep",
+    "kill_command_or_subagent", "todo_write", "get_command_or_subagent_output",
+    "scheduler_create", "scheduler_delete", "scheduler_list", "monitor",
+    "search_tool", "use_tool", "workflow", "enter_plan_mode", "exit_plan_mode",
+    "ask_user_question", "send_feedback", "image_gen", "image_edit",
+    "image_to_video", "reference_to_video", "write",
+)
+
 _SAFE_ENV = frozenset({
     "COLORTERM",
     "HOME",
@@ -387,8 +399,10 @@ class CliBackendAdapter(ProviderAdapter):
                     "You are Jaeger's language model. Follow the System "
                     "section and the current request. Use only Jaeger MCP "
                     "tools for file, shell, web, and other work. Do not "
-                    "use built-in file or editor tools.",
+                    "use built-in file or editor tools. The CLI cache "
+                    "directory is not the workspace.",
                 ])
+                child_argv.extend(["--disallowed-tools", ",".join(_GROK_BUILTIN_TOOLS)])
             # Keep the process-global MCP server running between turns.
             return self._spawn(
                 child_argv, spawn_stdin, spec,

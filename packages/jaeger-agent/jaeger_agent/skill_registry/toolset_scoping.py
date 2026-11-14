@@ -245,7 +245,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # Self-modifying tools — should never fire by accident on a
         # routine chat turn. Loadable explicitly when the user asks
         # the agent to update its name / soul.
-        "set_name", "update_soul",
+        "set_name", "update_soul", "adjust_trait",
     }),
     "skills": frozenset({
         # Skill authoring + the Deep Think queue. ``list_skills`` stays
@@ -309,6 +309,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "goals": frozenset({
         "goal_create", "goal_list", "goal_status", "goal_update",
         "project_status", "task_spawn",
+        "complete_task", "work_ledger",
     }),
     "knowledge_library": frozenset({
         "library_add", "library_index", "library_search", "library_read",
