@@ -77,7 +77,7 @@ KNOWN_BACKENDS: tuple[BackendSpec, ...] = (
         args=(
             "--single", "{prompt}", "--output-format", "json", "--verbatim",
             "--tools", "",
-            "--disable-web-search", "--no-subagents",
+            "--disable-web-search", "--no-subagents", "--no-plan",
         ),
         prompt_mode="placeholder",
         credential_env=("XAI_API_KEY",),

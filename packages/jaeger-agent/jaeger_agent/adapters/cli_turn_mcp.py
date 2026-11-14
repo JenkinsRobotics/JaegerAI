@@ -61,7 +61,7 @@ def permission_argv(backend_id: str, autonomy: str) -> list[str]:
     mode = (autonomy or "scoped").strip().lower()
     argv: list[str] = []
     if backend_id == "grok":
-        argv.extend(["--allow", "MCPTool(jaeger__*)"])
+        argv.extend(["--allow", "MCPTool(jaeger__*)", "--allow", "mcp:jaeger"])
         if mode == "auto":
             argv.extend(["--permission-mode", "bypassPermissions"])
         else:
@@ -480,6 +480,13 @@ def attach_cli_mcp(
         # owner's trusted_folders.toml or ~/.grok/config.toml.
         extra_env["GROK_FOLDER_TRUST"] = "0"
         extra_env["GROK_LEADER_SOCKET"] = str(GROK_LEADER_SOCKET)
+        # X search / code interpreter are backend tools. --disable-web-search
+        # does not turn them off; a list-files turn spun on x_keyword_search.
+        extra_env["GROK_BACKEND_SEARCH"] = "0"
+        # Do not import ~/.claude.json MCP (jaeger-local on :8792 failed auth
+        # and is not this turn's loopback server).
+        extra_env["GROK_CLAUDE_MCPS_ENABLED"] = "0"
+        extra_env["GROK_CURSOR_MCPS_ENABLED"] = "0"
         for flag in grok_leader_argv():
             if flag not in child:
                 child.append(flag)

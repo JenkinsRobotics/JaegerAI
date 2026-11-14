@@ -460,13 +460,14 @@ def capability_prompt_block(instance_root: Path | None = None) -> str:
         f" reason={vision.get('reason') or 'certified'}\n"
         "- Do not present unsupported or unconfigured providers as currently available."
     )
-    tools = _tool_capability_summary()
-    if tools:
-        block += (
-            "\n\n# Tool capabilities (authoritative; this instance actually has these tools "
-            "even on a turn where you cannot call one — do not claim a narrower toolset):\n"
-            f"{tools}"
-        )
+    # Do not dump the full inventory into every prompt. That text told the
+    # model it had tools it could not call this turn, and a Grok turn
+    # then hunted for them with vendor X-search instead of Jaeger MCP.
+    block += (
+        "\n- Use the Jaeger tools offered this turn. If you need another, "
+        "call tool_search or load_tools. Do not use the CLI's built-in "
+        "or vendor X/web search tools for local files."
+    )
     return block
 
 
