@@ -72,9 +72,12 @@ def budget_visible_tools(tools, selection, guard, system_prompt: str, query: str
     """
     import json
     import re
-    discovery = {'list_tools', 'describe_tool', 'load_tools'}
-    from .toolset_scoping import resolve_groups
-    required = discovery | selection.names | resolve_groups(selection.groups)
+    discovery = {'list_tools', 'describe_tool', 'load_tools', 'tool_search'}
+    from .toolset_scoping import CORE, resolve_groups
+    # CORE must stay visible. A large system prompt used to shrink the
+    # schema budget so read_file / search_files / terminal were dropped
+    # and Grok fell back to a leftover directory tool.
+    required = discovery | set(CORE) | selection.names | resolve_groups(selection.groups)
     limit = max(0, min(2048, guard.budget.prompt_budget
                        - guard.estimate_text_tokens(system_prompt) - 1536))
     costs = {t.name: guard.estimate_text_tokens(json.dumps(t.to_openai_schema())) + 2
