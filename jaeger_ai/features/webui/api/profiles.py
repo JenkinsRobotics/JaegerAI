@@ -323,16 +323,25 @@ def _resolve_base_hermes_home() -> Path:
     well.  Normalize both env vars through the same helper so active-profile
     and per-request resolution share one base-root contract (#749).
     """
-    # Explicit override for tests or unusual setups
-    base_override = os.getenv('HERMES_BASE_HOME', '').strip()
-    if base_override:
-        return _unwrap_profile_home_to_base(Path(base_override).expanduser())
+    def _is_retired_hermes_tree(path: Path) -> bool:
+        try:
+            return path.expanduser().resolve() == (Path.home() / ".hermes").resolve()
+        except OSError:
+            return False
 
-    hermes_home = os.getenv('HERMES_HOME', '').strip()
-    if hermes_home:
-        p = Path(hermes_home).expanduser()
-        # If HERMES_HOME points to a profiles/ subdir, walk up two levels to the base
-        return _unwrap_profile_home_to_base(p)
+    # Legacy HERMES_* names are ignored when they point at the retired
+    # ~/.hermes tree. JAEGER_* launch env is the source of truth.
+    base_override = os.getenv('JAEGER_WEBUI_BASE_HOME', '').strip() or os.getenv('HERMES_BASE_HOME', '').strip()
+    if base_override:
+        base_path = Path(base_override).expanduser()
+        if not _is_retired_hermes_tree(base_path):
+            return _unwrap_profile_home_to_base(base_path)
+
+    jaeger_home = os.getenv('JAEGER_WEBUI_AGENT_STATE', '').strip() or os.getenv('HERMES_HOME', '').strip()
+    if jaeger_home:
+        p = Path(jaeger_home).expanduser()
+        if not _is_retired_hermes_tree(p):
+            return _unwrap_profile_home_to_base(p)
 
     # Platform default. On Windows this includes the #2905 migration-safety
     # fallback (prefer the populated legacy %USERPROFILE%\.hermes over an

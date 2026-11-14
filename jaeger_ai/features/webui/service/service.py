@@ -459,16 +459,8 @@ class WebUIService:
             env["JAEGER_GATEWAY_URL"] = env["JAEGER_GATEWAY_URL"].rstrip("/")
         env["JAEGER_WEBUI_PORT"] = str(self.webui_port)
         env["JAEGER_WEBUI_HOST"] = webui_bind_host(env)
-        hermes_agent_src = Path(
-            os.environ.get("JAEGER_HERMES_AGENT_SRC")
-            or (Path.home() / "GitHub" / "hermes-agent")
-        ).expanduser()
-        if hermes_agent_src.is_dir():
-            env["HERMES_WEBUI_AGENT_DIR"] = str(hermes_agent_src)
-            # Ensure hermes_cli imports resolve for profile listing/switch.
-            env["PYTHONPATH"] = str(hermes_agent_src) + (
-                (os.pathsep + env["PYTHONPATH"]) if env.get("PYTHONPATH") else ""
-            )
+        # hermes-agent is not part of the Jaeger stack. Do not inject
+        # HERMES_WEBUI_AGENT_DIR even if a leftover checkout exists.
         env["JAEGER_WEBUI_AGENT_STATE"] = str(agent_home)
         # Popen retains the descriptor after this method returns; explicit
         # lifecycle management is clearer than a context manager here.

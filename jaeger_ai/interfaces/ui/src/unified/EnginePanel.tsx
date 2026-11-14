@@ -1,10 +1,9 @@
-// Hermes / OpenClaw's own UIs, embedded through Jaeger's loopback-only embed proxy (J-083 C).
+// OpenClaw's own UI, embedded through Jaeger's loopback-only embed proxy (J-083 C).
 import { useEffect, useState } from 'react'
 
-export type EngineId = 'hermes' | 'openclaw'
+export type EngineId = 'openclaw'
 
 export const ENGINE_EMBEDS: Record<EngineId, { title: string; port: number; start: string; blurb: string }> = {
-  hermes: { title: 'Hermes', port: 8798, start: '/', blurb: 'Hermes dashboard: its sessions, skills, memory and config.' },
   openclaw: { title: 'OpenClaw', port: 8797, start: '/__jaeger/start', blurb: 'OpenClaw Control UI: its agents, tools, channels and sessions.' },
 }
 
