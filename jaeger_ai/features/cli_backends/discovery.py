@@ -104,17 +104,6 @@ KNOWN_BACKENDS: tuple[BackendSpec, ...] = (
         display_name="Antigravity (Google subscription)",
     ),
     BackendSpec(
-        id="hermes",
-        executables=("hermes", "hermes-agent"),
-        args=("chat", "-q", "{prompt}"),
-        prompt_mode="placeholder",
-        credential_env=(
-            "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY",
-            "GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY", "NOUS_API_KEY",
-        ),
-        display_name="Hermes Agent",
-    ),
-    BackendSpec(
         id="ollama",
         executables=("ollama",),
         args=("run", "{prompt}"),

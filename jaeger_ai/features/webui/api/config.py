@@ -76,7 +76,9 @@ TLS_ENABLED = TLS_CERT is not None and TLS_KEY is not None
 
 # ── State directory (env-overridable, never inside repo) ──────────────────────
 _DEFAULT_HERMES_HOME = _platform_default_hermes_home()
-_DEFAULT_STATE_HOME = Path(os.getenv("HERMES_HOME") or _DEFAULT_HERMES_HOME).expanduser()
+_DEFAULT_STATE_HOME = Path(os.getenv("JAEGER_WEBUI_AGENT_STATE") or os.getenv("HERMES_HOME") or _DEFAULT_HERMES_HOME).expanduser()
+if Path(str(_DEFAULT_STATE_HOME)).expanduser().resolve() == (Path.home() / ".hermes").resolve():
+    _DEFAULT_STATE_HOME = _DEFAULT_HERMES_HOME
 
 STATE_DIR = (
     Path(os.getenv("HERMES_WEBUI_STATE_DIR", str(_DEFAULT_STATE_HOME / "webui")))
@@ -131,9 +133,17 @@ def _env_mb_bytes(name: str, default_mb: int) -> int:
 
 
 # ── Hermes agent directory discovery ─────────────────────────────────────────
-def _discover_agent_dir() -> Path:
+def _discover_agent_dir() -> Path | None:
+    """Jaeger WebUI talks to the Jaeger Gateway; it does not load hermes-agent.
+
+    Legacy HERMES_WEBUI_AGENT_DIR / ~/.hermes / sibling hermes-agent paths
+    are ignored so a removed Hermes install cannot break the live UI.
     """
-    Locate the hermes-agent checkout using a multi-strategy search.
+    return None
+
+
+def _discover_agent_dir_retired() -> Path:
+    """Retired hermes-agent search (kept only as a reference, never called).
 
     Priority:
       1. HERMES_WEBUI_AGENT_DIR env var  -- explicit override always wins
@@ -953,38 +963,13 @@ def print_startup_config() -> None:
     except Exception:
         pass
 
-    if not _HERMES_FOUND:
-        print(
-            f"{err}  Could not find the Hermes agent directory.\n"
-            "      The server will start but agent features will not work.\n"
-            "\n"
-            "      To fix, set one of:\n"
-            "        export HERMES_WEBUI_AGENT_DIR=/path/to/hermes-agent\n"
-            "        export HERMES_HOME=/path/to/.hermes\n"
-            "\n"
-            "      Or clone hermes-agent as a sibling of this repo:\n"
-            "        git clone <hermes-agent-repo> ../hermes-agent\n",
-            flush=True,
-        )
+    # hermes-agent is not part of Jaeger. The WebUI serves chat through
+    # the Jaeger Gateway; a missing agent checkout is not an error.
 
 
 def verify_hermes_imports() -> tuple:
-    """
-    Attempt to import the key Hermes modules.
-    Returns (ok: bool, missing: list[str], errors: dict[str, str]).
-    """
-    required = ["run_agent"]
-    missing = []
-    errors = {}
-    for mod in required:
-        try:
-            __import__(mod)
-        except Exception as e:
-            missing.append(mod)
-            # Capture the full error message so startup logs show WHY
-            # (e.g. pydantic_core .so mismatch) instead of just the name.
-            errors[mod] = f"{type(e).__name__}: {e}"
-    return (len(missing) == 0), missing, errors
+    """Compatibility shim. Hermes agent imports are no longer required."""
+    return True, [], {}
 
 
 # ── Limits ───────────────────────────────────────────────────────────────────

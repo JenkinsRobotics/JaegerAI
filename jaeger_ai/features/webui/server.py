@@ -22,6 +22,7 @@ _JAEGER_ENV_ALIASES = {
     "JAEGER_WEBUI_BOT_NAME": "HERMES_WEBUI_BOT_NAME",
     "JAEGER_WEBUI_WORKSPACE": "HERMES_WEBUI_DEFAULT_WORKSPACE",
     "JAEGER_WEBUI_EXTENSION_DIR": "HERMES_WEBUI_EXTENSION_DIR",
+    "JAEGER_WEBUI_PASSWORD": "HERMES_WEBUI_PASSWORD",
 }
 
 
@@ -662,13 +663,13 @@ def main() -> None:
     if HOST not in ('127.0.0.1', '::1', 'localhost') and not is_auth_enabled():
         print(f'[!!] WARNING: Binding to {HOST} with NO PASSWORD SET.', flush=True)
         print(f'     Anyone on the network can access your filesystem and agent.', flush=True)
-        print(f'     Set a password via Settings or HERMES_WEBUI_PASSWORD env var.', flush=True)
+        print(f'     Set a password via Settings or JAEGER_WEBUI_PASSWORD env var.', flush=True)
         print(f'     To suppress: bind to 127.0.0.1 or set a password.', flush=True)
         if within_container:
             print(f'     Note: You are running within a container, must bind to 0.0.0.0 (IPv4) or :: (IPv6) to publish the port.', flush=True)
     elif not is_auth_enabled():
         print(f'  [tip] No password set. Any process on this machine can read sessions', flush=True)
-        print(f'        and memory via the local API. Set HERMES_WEBUI_PASSWORD to', flush=True)
+        print(f'        and memory via the local API. Set JAEGER_WEBUI_PASSWORD to', flush=True)
         print(f'        enable authentication.', flush=True)
 
     oidc_startup_warning = get_oidc_startup_warning()
@@ -754,7 +755,7 @@ def main() -> None:
             print(f'[!!] WARNING: TLS setup failed ({e}), falling back to HTTP', flush=True)
             scheme = 'http'
 
-    print(f'  Hermes Web UI listening on {scheme}://{HOST}:{PORT}', flush=True)
+    print(f'  Jaeger Web UI listening on {scheme}://{HOST}:{PORT}', flush=True)
     if HOST in ('127.0.0.1', '::1') or within_container:
         print(f'  Remote access: ssh -N -L {PORT}:127.0.0.1:{PORT} <user>@<your-server>', flush=True)
     print(f'  Then open:     {scheme}://localhost:{PORT}', flush=True)

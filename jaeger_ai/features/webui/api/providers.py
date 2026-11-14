@@ -873,12 +873,29 @@ def _entry_pool_exhausted_reason(entry):
 
 
 def _get_hermes_home() -> Path:
-    """Return the active Hermes home directory."""
+    """Return the active Jaeger WebUI agent home (legacy name)."""
     try:
         from api.profiles import get_active_hermes_home
-        return get_active_hermes_home()
+        home = get_active_hermes_home()
+        try:
+            if home.expanduser().resolve() == (Path.home() / ".hermes").resolve():
+                return Path.home() / ".jaeger" / "hermes"
+        except OSError:
+            pass
+        return home
     except ImportError:
         return Path.home() / ".jaeger" / "hermes"
+
+
+def _provider_env_path(env_var: str = "") -> Path:
+    """Where provider keys are stored. Ollama Cloud uses ~/.jaeger/secrets.env only."""
+    if env_var in {"OLLAMA_API_KEY", "OLLAMA_CLOUD_API_KEY", "OLLAMA_KEY"}:
+        try:
+            from jaeger_ai.core.secrets_env import secrets_env_path
+            return secrets_env_path()
+        except Exception:
+            return Path.home() / ".jaeger" / "secrets.env"
+    return _get_hermes_home() / ".env"
 
 
 def _providers_file_mtime_ns(path: Path) -> int:
@@ -1020,7 +1037,7 @@ def _provider_has_shadowed_codex_oauth_value(provider_id: str) -> bool:
     values: list[object] = []
     env_var = _provider_env_var_for(provider_id)
     if env_var:
-        env_path = _get_hermes_home() / ".env"
+        env_path = _provider_env_path(env_var)
         env_values = _load_env_file(env_path)
         values.append(env_values.get(env_var))
         values.append(_thread_local_env_value(env_var))
@@ -1161,7 +1178,7 @@ def _provider_has_key(provider_id: str) -> bool:
     """
     env_var = _provider_env_var_for(provider_id)
     if env_var:
-        env_path = _get_hermes_home() / ".env"
+        env_path = _provider_env_path(env_var)
         env_values = _load_env_file(env_path)
         env_file_value = env_values.get(env_var)
         if _provider_value_counts_as_api_key(provider_id, env_file_value):
@@ -1224,7 +1241,7 @@ def _get_provider_api_key(provider_id: str) -> str | None:
     provider_id = (provider_id or "").strip().lower()
     env_var = _provider_env_var_for(provider_id)
     if env_var:
-        env_path = _get_hermes_home() / ".env"
+        env_path = _provider_env_path(env_var)
         env_values = _load_env_file(env_path)
         env_file_value = env_values.get(env_var)
         if _provider_value_counts_as_api_key(provider_id, env_file_value):
@@ -1846,7 +1863,7 @@ def get_providers() -> dict[str, Any]:
         elif has_key:
             env_var = _provider_env_var_for(pid)
             if env_var:
-                env_path = _get_hermes_home() / ".env"
+                env_path = _provider_env_path(env_var)
                 env_values = _load_env_file(env_path)
                 if _provider_value_counts_as_api_key(pid, env_values.get(env_var)):
                     key_source = "env_file"
@@ -2157,7 +2174,7 @@ def set_provider_key(provider_id: str, api_key: str | None) -> dict[str, Any]:
         if len(api_key) < 8:
             return {"ok": False, "error": "API key appears too short."}
 
-    env_path = _get_hermes_home() / ".env"
+    env_path = _provider_env_path(env_var)
     try:
         _write_env_file(env_path, {env_var: api_key})
     except ValueError as exc:

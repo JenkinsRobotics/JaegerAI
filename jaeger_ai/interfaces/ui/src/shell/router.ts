@@ -61,7 +61,7 @@ export function canonicalPath(pathname: string, search = ""): string | null {
   const moved: Record<string, string> = {
     "/home/widgets": "/settings/widgets", "/home/overview": "/work", "/home": "/work",
     "/models/library": "/settings/models/library", "/models/compare": "/settings/models/compare", "/models/usage": "/settings/models/usage", "/models": "/settings/models/library",
-    "/agents/team": "/agents/roster", "/agents/hermes": "/settings/integrations/hermes", "/agents/openclaw": "/settings/integrations/openclaw",
+    "/agents/team": "/agents/roster", "/agents/hermes": "/settings", "/settings/integrations/hermes": "/settings", "/agents/openclaw": "/settings/integrations/openclaw",
     "/work/workspace": "/research/workspace", "/work/checkpoints": "/settings/checkpoints",
     "/research/youtube": "/work/youtube", "/research/knowledge": "/agents/knowledge", "/research/sharepoint": "/settings/integrations/sharepoint",
   };

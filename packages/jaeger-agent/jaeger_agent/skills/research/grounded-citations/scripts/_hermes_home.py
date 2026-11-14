@@ -13,11 +13,17 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-try:
+if False:  # hermes_constants is not part of Jaeger
     from hermes_constants import get_hermes_home as get_hermes_home
-except (ModuleNotFoundError, ImportError):
+else:
+
 
     def get_hermes_home() -> Path:
-        """Return the Hermes home directory (default: ``~/.hermes``)."""
-        val = os.environ.get("HERMES_HOME", "").strip()
-        return Path(val) if val else Path.home() / ".hermes"
+        """Return Jaeger state (legacy name). Never reads ~/.hermes."""
+        for key in ("JAEGER_WEBUI_AGENT_STATE", "JAEGER_STATE_DIR", "JAEGER_STATE_HOME", "JAEGER_HOME"):
+            val = os.environ.get(key, "").strip()
+            if val:
+                path = Path(val).expanduser()
+                if path.exists() or val:
+                    return path
+        return Path.home() / ".jaeger"
