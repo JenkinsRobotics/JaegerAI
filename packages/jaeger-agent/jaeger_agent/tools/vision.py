@@ -266,3 +266,79 @@ def _t_image_generate(
         num_inference_steps=num_inference_steps,
         guidance_scale=guidance_scale, seed=seed,
     )
+
+
+def view_image(path: str, max_edge: int = 1024) -> dict[str, Any]:
+    """Read an image file and return format, size, and a small preview.
+
+    Model-agnostic: this does not call a vision model. The path is
+    resolved the same way as ``read_file``. Credential paths are refused.
+    A compact JPEG preview (base64) is included when the file can be
+    decoded, capped so it does not flood the context.
+    """
+    import base64
+    import hashlib
+    import io
+    from jaeger_agent.core.workspace import SandboxError, _display_path, _require_layout, _resolve_read
+    from jaeger_os.core.safety.file_safety import is_sensitive_path
+
+    raw = (path or "").strip()
+    if not raw:
+        return {"ok": False, "error": "empty path"}
+    try:
+        target = _resolve_read(raw)
+    except SandboxError as exc:
+        return {"ok": False, "error": str(exc), "path": raw}
+    if is_sensitive_path(target):
+        return {"ok": False, "error": "refused — credential or secret path", "path": raw}
+    if not target.exists() or not target.is_file():
+        return {"ok": False, "error": "not found", "path": raw}
+    try:
+        data = target.read_bytes()
+    except OSError as exc:
+        return {"ok": False, "error": str(exc), "path": raw}
+    result: dict[str, Any] = {
+        "ok": True,
+        "path": _display_path(target, _require_layout()),
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "suffix": target.suffix.lower(),
+    }
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as image:
+            result["format"] = (image.format or target.suffix.lstrip(".")).lower()
+            result["mime"] = Image.MIME.get(image.format or "", f"image/{result['format']}")
+            result["width"], result["height"] = image.size
+            result["mode"] = image.mode
+            preview = image.convert("RGB") if image.mode != "RGB" else image.copy()
+            edge = max(32, min(int(max_edge or 1024), 2048))
+            preview.thumbnail((edge, edge))
+            buf = io.BytesIO()
+            preview.save(buf, format="JPEG", quality=70, optimize=True)
+            encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+            # Keep the preview modest so a tool row stays usable.
+            if len(encoded) <= 64_000:
+                result["preview_mime"] = "image/jpeg"
+                result["preview_base64"] = encoded
+                result["preview_width"], result["preview_height"] = preview.size
+            else:
+                result["preview"] = "omitted — preview exceeded size cap"
+    except Exception as exc:  # noqa: BLE001 — still return metadata
+        result["decode_error"] = type(exc).__name__
+        result["ok"] = result.get("bytes", 0) > 0
+        if "format" not in result:
+            result["error"] = "not a decodable image"
+            result["ok"] = False
+    return result
+
+
+@register_tool_from_function(name="view_image", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="vision", operation="view_image",
+               summary="read an image file's format, size, and a small preview")
+def _t_view_image(path: str) -> dict:
+    """Read an image (png, jpeg, gif, webp, …) and return its dimensions,
+    format, and a small preview. This is a model-agnostic image read —
+    it does not require a vision model. Use vision_analyze when you need
+    a description of what the picture shows."""
+    return view_image(path=path)

@@ -12,21 +12,18 @@ the user) can tell whether they're seeing top-quality results or a
 last-ditch fallback.
 
 Backend order (most preferred first):
-  1. ``ddgs``                — the modern DuckDuckGo client library
-  2. ``duckduckgo_search``   — legacy DuckDuckGo client library
-  3. ``ddg_html``            — direct scrape of html.duckduckgo.com
-                                using only ``requests`` (a hard dep)
-                                plus stdlib HTML parser. No extra deps.
-  4. ``wikipedia_api``       — last-resort factual fallback against
-                                en.wikipedia.org's public API. Only
-                                useful for knowledge queries, not
-                                news / time-sensitive lookups, but
-                                dependent on network and service availability.
+  1. ``ollama``              — ollama.com ``/api/web_search`` when
+                                ``OLLAMA_API_KEY`` is in Jaeger's
+                                secrets file (never logged).
+  2. ``searxng``             — optional local/configured SearXNG
+  3. ``ddgs``                — the modern DuckDuckGo client library
+  4. ``duckduckgo_search``   — legacy DuckDuckGo client library
+  5. ``ddg_html``            — direct scrape of html.duckduckgo.com
+  6. ``wikipedia_api``       — last-resort factual fallback
 
-Future backends (Brave Search API, SearXNG, Bing) can plug in by
-appending to ``_BACKENDS`` — they need the same
-``(query, max_results) -> list[result_dict]`` shape, raising on any
-failure so the chain advances.
+Future backends can plug in by appending to ``_BACKENDS`` — they need
+the same ``(query, max_results) -> list[result_dict]`` shape, raising
+on any failure so the chain advances.
 """
 
 from __future__ import annotations
@@ -310,7 +307,96 @@ def _backend_searxng(query: str, max_results: int) -> list[_Result]:
     raise RuntimeError(f"searxng unreachable: {last_exc}")
 
 
+
+def _ollama_api_key() -> str:
+    """Return the Ollama Cloud key without logging it."""
+    try:
+        from jaeger_ai.core.secrets_env import ollama_api_key
+        return ollama_api_key() or ""
+    except Exception:
+        return ""
+
+
+def _backend_ollama(query: str, max_results: int) -> list[_Result]:
+    """Hosted ollama.com web_search. Requires OLLAMA_API_KEY."""
+    key = _ollama_api_key()
+    if not key:
+        raise RuntimeError("no OLLAMA_API_KEY")
+    import requests
+    try:
+        import certifi
+        verify: Any = certifi.where()
+    except ImportError:
+        verify = True
+    capped = max(1, min(int(max_results or 5), 10))
+    response = requests.post(
+        "https://ollama.com/api/web_search",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        json={"query": query, "max_results": capped},
+        timeout=20,
+        verify=verify,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"HTTP {response.status_code}")
+    payload = response.json() if response.content else {}
+    raw = payload.get("results") if isinstance(payload, dict) else None
+    if not raw:
+        raise NoSearchResults("ollama web_search returned zero results")
+    return [
+        _normalize(item.get("title"), item.get("url"), item.get("content") or item.get("snippet"))
+        for item in raw
+        if isinstance(item, dict)
+    ]
+
+
+def _ollama_web_fetch(url: str, cap: int) -> dict[str, Any] | None:
+    """Hosted ollama.com web_fetch, or None to fall through."""
+    key = _ollama_api_key()
+    if not key:
+        return None
+    import requests
+    try:
+        import certifi
+        verify: Any = certifi.where()
+    except ImportError:
+        verify = True
+    response = requests.post(
+        "https://ollama.com/api/web_fetch",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        json={"url": url},
+        timeout=25,
+        verify=verify,
+    )
+    if response.status_code >= 400:
+        return None
+    payload = response.json() if response.content else {}
+    if not isinstance(payload, dict):
+        return None
+    content = str(payload.get("content") or payload.get("text") or "").strip()
+    if not content:
+        return None
+    truncated = len(content) > cap
+    return {
+        "ok": True,
+        "url": url,
+        "title": str(payload.get("title") or "").strip() or None,
+        "content_type": "text/markdown",
+        "text": content[:cap],
+        "truncated": truncated,
+        "links": (payload.get("links") or [])[:40] if isinstance(payload.get("links"), list) else [],
+        "bytes": len(content.encode("utf-8")),
+        "backend": "ollama",
+    }
+
+
 _BACKENDS: list[tuple[str, Callable[[str, int], list[_Result]]]] = [
+    ("ollama", _backend_ollama),
     ("searxng", _backend_searxng),
     ("ddgs", _backend_ddgs),
     ("duckduckgo_search", _backend_duckduckgo_legacy),
@@ -443,6 +529,10 @@ def web_fetch(url: str, max_chars: int = 8000) -> dict[str, Any]:
         target = "https://" + target
     cap = max(500, min(int(max_chars or 8000), 40000))
 
+    hosted = _ollama_web_fetch(target, cap)
+    if hosted:
+        return hosted
+
     try:
         import requests
     except ImportError as exc:
@@ -560,8 +650,8 @@ def get_weather(location: str) -> dict[str, Any]:
 
 @register_tool_from_function(name="web_search", side_effect="read")
 def _t_web_search(query: str, max_results: int = 5) -> dict:
-    """Web search (multi-backend, no API key). Returns titles + URLs
-    + snippets. Use this to FIND relevant pages, then web_extract to
+    """Web search (Ollama Cloud first when a key is present, then
+    other backends). Returns titles + URLs + snippets. Use this to FIND relevant pages, then web_extract to
     actually READ one."""
     return web_search(query=query, max_results=max_results)
 

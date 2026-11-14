@@ -665,6 +665,352 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
     }
 
 
+
+def _default_search_root():
+    """Bound project when one is selected, else the skills sandbox."""
+    from jaeger_agent.core.workspace import get_project_root
+    project = get_project_root()
+    if project is not None:
+        return project
+    return _require_layout().skills_dir
+
+
+def _refuse_broad_root(root: Path) -> str | None:
+    resolved = root.resolve()
+    if resolved == Path.home().resolve() or resolved.parent == resolved:
+        return (
+            f"refused — that search root is too broad ({resolved}); "
+            "narrow it to a project directory"
+        )
+    return None
+
+
+def glob_files(pattern: str, path: str = ".", max_results: int = 200) -> dict[str, Any]:
+    """Find files whose names match a glob pattern under a directory.
+
+    ``path`` defaults to the bound project (or the skills sandbox).
+    Does not walk the home directory or filesystem root. Skips VCS,
+    venv, and cache dirs. This is the filename-pattern tool; use
+    ``search_files`` to grep file contents.
+    """
+    import fnmatch
+    needle = (pattern or "").strip()
+    if not needle:
+        return {"ok": False, "error": "empty pattern"}
+    try:
+        root = _default_search_root() if path == "." else _resolve_read(path)
+    except SandboxError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not root.exists():
+        return {"ok": True, "pattern": needle, "matches": [], "count": 0}
+    reason = _refuse_broad_root(root)
+    if reason:
+        return {"ok": False, "error": reason}
+    cap = max(1, min(int(max_results or 200), 1000))
+    matches: list[str] = []
+    scanned = 0
+    layout = _require_layout()
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in _SEARCH_SKIP]
+        for filename in filenames:
+            scanned += 1
+            if scanned > 50_000:
+                break
+            rel = Path(dirpath, filename)
+            try:
+                from jaeger_os.core.safety.file_safety import is_sensitive_path
+                if is_sensitive_path(rel):
+                    continue
+            except Exception:
+                pass
+            relative = str(rel.relative_to(root)) if rel.is_relative_to(root) else rel.name
+            if fnmatch.fnmatch(filename, needle) or fnmatch.fnmatch(relative, needle):
+                matches.append(_display_path(rel, layout))
+                if len(matches) >= cap:
+                    break
+        if scanned > 50_000 or len(matches) >= cap:
+            break
+    return {
+        "ok": True,
+        "pattern": needle,
+        "path": str(root),
+        "matches": matches,
+        "count": len(matches),
+        "truncated": len(matches) >= cap or scanned > 50_000,
+    }
+
+
+def read_many_files(paths: list[str], max_chars: int = 24_000) -> dict[str, Any]:
+    """Read several text files in one call and concatenate their contents.
+
+    Each path is resolved the same way as ``read_file``. Binary and
+    credential files are skipped, not dumped. Total output is capped.
+    """
+    if not paths:
+        return {"ok": False, "error": "no paths"}
+    cap = max(1000, min(int(max_chars or 24_000), 80_000))
+    remaining = cap
+    files: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    for raw in list(paths)[:40]:
+        path = str(raw or "").strip()
+        if not path:
+            continue
+        if remaining <= 0:
+            skipped.append({"path": path, "reason": "total character cap"})
+            continue
+        try:
+            result = file_read(path, offset=0, limit=200)
+        except Exception as exc:  # noqa: BLE001
+            skipped.append({"path": path, "reason": type(exc).__name__})
+            continue
+        if not result.get("read"):
+            skipped.append({"path": path, "reason": str(result.get("error") or "unreadable")})
+            continue
+        content = str(result.get("content") or "")
+        clipped = content[:remaining]
+        remaining -= len(clipped)
+        files.append({
+            "path": result.get("path") or path,
+            "content": clipped,
+            "truncated": bool(result.get("truncated")) or len(clipped) < len(content),
+            "total_lines": result.get("total_lines"),
+        })
+    return {
+        "ok": True,
+        "files": files,
+        "count": len(files),
+        "skipped": skipped,
+        "truncated": remaining <= 0 or any(item.get("truncated") for item in files),
+    }
+
+
+def apply_patch(patch: str) -> dict[str, Any]:
+    """Apply a Codex-style apply_patch document to workspace files.
+
+    Accepts a patch wrapped in ``*** Begin Patch`` / ``*** End Patch``
+    with ``*** Add File:``, ``*** Delete File:``, or ``*** Update File:``
+    sections. Writes stay inside the existing write sandbox.
+    """
+    raw = (patch or "").replace("\r\n", "\n")
+    if not raw.strip():
+        return {"ok": False, "error": "empty patch"}
+    lines = raw.splitlines()
+    # Drop the begin/end wrappers if present.
+    if lines and lines[0].strip() == "*** Begin Patch":
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "*** End Patch":
+        lines = lines[:-1]
+
+    sections: list[tuple[str, str, list[str]]] = []
+    action = ""
+    path = ""
+    body: list[str] = []
+
+    def flush() -> None:
+        nonlocal action, path, body
+        if action and path:
+            sections.append((action, path, body))
+        action, path, body = "", "", []
+
+    for line in lines:
+        if line.startswith("*** Add File:"):
+            flush()
+            action, path = "add", line.split(":", 1)[1].strip()
+        elif line.startswith("*** Delete File:"):
+            flush()
+            action, path = "delete", line.split(":", 1)[1].strip()
+        elif line.startswith("*** Update File:"):
+            flush()
+            action, path = "update", line.split(":", 1)[1].strip()
+        else:
+            body.append(line)
+    flush()
+    if not sections:
+        return {"ok": False, "error": "no Add/Update/Delete sections found"}
+
+    changed: list[dict[str, Any]] = []
+    for action, path, body in sections:
+        if action == "add":
+            content = "\n".join(line[1:] if line.startswith("+") else line for line in body)
+            if body and not content.endswith("\n"):
+                content += "\n"
+            result = file_write(path, content)
+            if result.get("error") or result.get("written") is False:
+                return {"ok": False, "error": result.get("error") or "write failed", "path": path, "changed": changed}
+            changed.append({"action": "add", "path": result.get("path") or path})
+        elif action == "delete":
+            result = delete_file(path)
+            if result.get("error") or result.get("deleted") is False:
+                return {"ok": False, "error": result.get("error") or "delete failed", "path": path, "changed": changed}
+            changed.append({"action": "delete", "path": result.get("path") or path})
+        else:
+            try:
+                target = _resolve_write(path)
+            except SandboxError as exc:
+                return {"ok": False, "error": str(exc), "path": path, "changed": changed}
+            if not target.exists():
+                return {"ok": False, "error": "not found", "path": path, "changed": changed}
+            try:
+                original = target.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                return {"ok": False, "error": f"unreadable: {exc}", "path": path, "changed": changed}
+            updated, err = _apply_update_hunks(original, body)
+            if err:
+                return {"ok": False, "error": err, "path": path, "changed": changed}
+            result = file_write(path, updated)
+            if result.get("error") or result.get("written") is False:
+                return {"ok": False, "error": result.get("error") or "write failed", "path": path, "changed": changed}
+            changed.append({"action": "update", "path": result.get("path") or path})
+    return {"ok": True, "changed": changed, "count": len(changed)}
+
+
+def _apply_update_hunks(original: str, body: list[str]) -> tuple[str, str]:
+    """Apply + / - / context lines to ``original``. ``@@`` starts a hunk."""
+    hunks: list[list[str]] = []
+    current: list[str] = []
+    for line in body:
+        if line.startswith("@@"):
+            if current:
+                hunks.append(current)
+            current = []
+            continue
+        current.append(line)
+    if current:
+        hunks.append(current)
+    if not hunks:
+        # Treat the whole body as one hunk if the model omitted @@ markers.
+        hunks = [body]
+    text = original
+    for hunk in hunks:
+        old_lines: list[str] = []
+        new_lines: list[str] = []
+        for line in hunk:
+            if line.startswith("+"):
+                new_lines.append(line[1:])
+            elif line.startswith("-"):
+                old_lines.append(line[1:])
+            elif line.startswith(" "):
+                old_lines.append(line[1:])
+                new_lines.append(line[1:])
+            elif line.startswith("\\"):
+                continue
+            else:
+                # Bare context (no prefix) is treated as unchanged.
+                old_lines.append(line)
+                new_lines.append(line)
+        old = "\n".join(old_lines)
+        new = "\n".join(new_lines)
+        if old and old in text:
+            text = text.replace(old, new, 1)
+            continue
+        # Fallback to the existing tolerant patcher when context whitespace differs.
+        if old:
+            found = _tolerant_hits(text, old)
+            if len(found) == 1:
+                result = _patch_text(text, old, new)
+                if result is None:
+                    return original, "hunk did not match the file"
+                text = result
+                continue
+            if len(found) > 1:
+                return original, "hunk matched more than once; make the context unique"
+            return original, "hunk did not match the file"
+        if new:
+            text = text + (("\n" if text and not text.endswith("\n") else "") + new)
+    return text, ""
+
+
+def _patch_text(original: str, old: str, new: str) -> str | None:
+    if old in original:
+        return original.replace(old, new, 1)
+    hits = _tolerant_hits(original, old)
+    if len(hits) != 1:
+        return None
+    # Reuse edit_file's windowing against a stand-in is messy; do a line splice.
+    orig_lines = original.splitlines(keepends=True)
+    old_lines, _new_keep = _line_windows(original, old)
+    if not old_lines:
+        return None
+    # Find the first matching window start
+    start = hits[0]
+    end = start + len(old.splitlines() or [old])
+    prefix = "".join(orig_lines[:start])
+    suffix = "".join(orig_lines[end:])
+    addition = new if new.endswith("\n") or not suffix else new + "\n"
+    return prefix + addition + suffix
+
+
+def notebook_edit(
+    path: str,
+    new_source: str = "",
+    cell_number: int = 0,
+    edit_mode: str = "replace",
+    cell_type: str = "code",
+) -> dict[str, Any]:
+    """Edit a cell in a Jupyter ``.ipynb`` notebook.
+
+    ``edit_mode`` is ``replace`` (default), ``insert``, or ``delete``.
+    ``cell_number`` is a 0-based index. Writes stay in the write sandbox.
+    """
+    import json as json_lib
+    try:
+        # Writes only — never edit a notebook outside the write sandbox.
+        target = _resolve_write(path)
+    except SandboxError as exc:
+        return {"ok": False, "error": str(exc), "path": path}
+    if not str(target).endswith(".ipynb") and target.suffix != ".ipynb":
+        return {"ok": False, "error": "not a .ipynb notebook", "path": path}
+    if edit_mode not in {"replace", "insert", "delete"}:
+        return {"ok": False, "error": f"unknown edit_mode {edit_mode!r}"}
+    if edit_mode != "insert" and not target.exists():
+        return {"ok": False, "error": "not found", "path": path}
+    if not target.exists():
+        notebook = {"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": []}
+    else:
+        try:
+            notebook = json_lib.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "error": f"unreadable notebook: {exc}", "path": path}
+    cells = notebook.setdefault("cells", [])
+    if not isinstance(cells, list):
+        return {"ok": False, "error": "notebook has no cell list", "path": path}
+    index = int(cell_number or 0)
+    if edit_mode == "delete":
+        if index < 0 or index >= len(cells):
+            return {"ok": False, "error": "cell_number out of range", "path": path, "cell_count": len(cells)}
+        cells.pop(index)
+    else:
+        source = new_source if new_source.endswith("\n") or not new_source else new_source + "\n"
+        cell = {
+            "cell_type": cell_type if cell_type in {"code", "markdown", "raw"} else "code",
+            "metadata": {},
+            "source": source.splitlines(keepends=True),
+        }
+        if cell["cell_type"] == "code":
+            cell["outputs"] = []
+            cell["execution_count"] = None
+        if edit_mode == "insert":
+            index = max(0, min(index, len(cells)))
+            cells.insert(index, cell)
+        else:
+            if index < 0 or index >= len(cells):
+                return {"ok": False, "error": "cell_number out of range", "path": path, "cell_count": len(cells)}
+            existing = cells[index] if isinstance(cells[index], dict) else {}
+            existing["source"] = cell["source"]
+            if cell_type in {"code", "markdown", "raw"}:
+                existing["cell_type"] = cell_type
+            cells[index] = existing
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json_lib.dumps(notebook, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "error": str(exc), "path": path}
+    git_autocommit(target, f"notebook_edit {path}")
+    return {"ok": True, "path": _display_path(target, _require_layout()), "edit_mode": edit_mode, "cell_number": index, "cell_count": len(cells)}
+
+
+
 # ---------------------------------------------------------------------------
 # Agent-facing tool wrappers (migrated from main.py::_register_builtins).
 # Private ``_t_*`` names + explicit ``name=`` override so the gated tool never
@@ -779,3 +1125,56 @@ def _t_search_files(query: str, path: str = ".", max_results: int = 50) -> dict:
     something is defined or used instead of reading files one by
     one. Returns {file, line, text} matches."""
     return search_files(query=query, path=path, max_results=max_results)
+
+
+@register_tool_from_function(name="glob", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="glob",
+               summary="find workspace files by name pattern")
+def _t_glob(pattern: str, path: str = ".", max_results: int = 200) -> dict:
+    """Find files by glob pattern (for example `*.py` or `src/**/*.md`).
+    Defaults to the bound project. This lists names; use search_files
+    to grep contents."""
+    return glob_files(pattern=pattern, path=path, max_results=max_results)
+
+
+@register_tool_from_function(name="read_many_files", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="read_many_files",
+               summary="read several workspace files in one call")
+def _t_read_many_files(paths: list[str], max_chars: int = 24000) -> dict:
+    """Read multiple text files at once and return their contents.
+    Each path follows the same rules as read_file. Binary and
+    credential files are skipped. Output is capped."""
+    return read_many_files(paths=paths, max_chars=max_chars)
+
+
+@register_tool_from_function(name="apply_patch", side_effect="external")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files", operation="apply_patch",
+               summary="apply a multi-file patch in the operator's project")
+def _t_apply_patch(patch: str) -> dict:
+    """Apply a Codex-style patch (Begin Patch / Add File / Update File
+    / Delete File / End Patch) to files in the write sandbox. Prefer
+    this for a multi-hunk or multi-file change; use patch for a single
+    old/new replacement."""
+    return apply_patch(patch=patch)
+
+
+@register_tool_from_function(name="notebook_edit", side_effect="external")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="files", operation="notebook_edit",
+               summary="edit a cell in a Jupyter notebook")
+def _t_notebook_edit(
+    path: str,
+    new_source: str = "",
+    cell_number: int = 0,
+    edit_mode: str = "replace",
+    cell_type: str = "code",
+) -> dict:
+    """Edit a Jupyter notebook cell. edit_mode is replace, insert, or
+    delete. cell_number is 0-based. The notebook must be inside the
+    write sandbox."""
+    return notebook_edit(
+        path=path,
+        new_source=new_source,
+        cell_number=cell_number,
+        edit_mode=edit_mode,
+        cell_type=cell_type,
+    )
