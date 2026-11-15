@@ -113,8 +113,8 @@ def infer_toolsets(text: str) -> set[str]:
 # local model routes over distinct named tools better than one tool's
 # action parameter (measured: the kanban umbrella hurt board filing).
 CORE: frozenset[str] = frozenset({
-    # Files: read / write / edit / search / list.
-    "read_file", "write_file", "patch", "search_files", "list_skill_dir",
+    # Files: read / write / edit / search / list / name lookup.
+    "read_file", "write_file", "patch", "search_files", "list_skill_dir", "glob",
     # Shell and code.
     "terminal", "execute_code",
     # Web and X (Twitter) search.
@@ -136,7 +136,7 @@ CORE: frozenset[str] = frozenset({
 # five). JAEGER_FULL_TOOLS=1 exposes the whole surface (debug/power use).
 LEAN_CORE: frozenset[str] = frozenset({
     "execute_code", "terminal",
-    "read_file", "write_file", "patch", "search_files", "list_skill_dir",
+    "read_file", "write_file", "patch", "search_files", "list_skill_dir", "glob",
     "web_search", "web_extract",
     "memory",
     "todo", "clarify", "delegate_task", "board_add", "board_view", "list_skills",
@@ -167,7 +167,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # patch / search_files are CORE; the rest loads on intent.
         "append_file", "delete_file",
         "move_file", "copy_file",
-        "glob", "read_many_files", "apply_patch", "notebook_edit",
+        "read_many_files", "apply_patch", "notebook_edit",
     }),
     "code": frozenset({
         # ``execute_code`` is in CORE; heavy/risky code surfaces load

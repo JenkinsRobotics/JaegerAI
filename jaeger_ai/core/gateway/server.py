@@ -6052,7 +6052,11 @@ class JaegerGatewayApp:
             }
 
         from jaeger_ai.core.runtime.work_ledger import ledger_scope, last_completion
+        from jaeger_ai.contract.modes import normalize_interaction_tier
+        from jaeger_agent.loop.runtime_bridge import is_simple_or_chat_turn, turn_effort_hint
         _options = ((execution or {}).get("options") or {})
+        _tier = normalize_interaction_tier((execution or {}).get("interaction_tier"))
+        _effort_hint = "low" if is_simple_or_chat_turn(objective or prompt, _tier) else None
         # A turn-owned card runs in the chat's own session, so it must start from a
         # fresh ledger: resuming would hand it an earlier request's completion.
         turn_owned = bool(_options.get("turn_owned"))
@@ -6064,7 +6068,7 @@ class JaegerGatewayApp:
             # neither is a stall to push the model through.
             return turn_owned and (request_id in self._owner_declined or request_id in self._owner_unanswered)
 
-        with ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned):
+        with ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned), turn_effort_hint(_effort_hint):
             try:
                 result = run_continued_turn(
                     step, prompt, objective=objective or prompt,

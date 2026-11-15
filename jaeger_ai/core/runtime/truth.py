@@ -517,9 +517,12 @@ def capability_prompt_block(instance_root: Path | None = None) -> str:
     # model it had tools it could not call this turn, and a Grok turn
     # then hunted for them with vendor X-search instead of Jaeger MCP.
     block += (
-        "\n- Use the Jaeger tools offered this turn. If you need another, "
-        "call tool_search or load_tools. Do not use the CLI's built-in "
-        "or vendor X/web search tools for local files."
+        "\n- Use the Jaeger tools offered this turn. list_skill_dir, "
+        "read_file, glob, search_files, and terminal are already available; "
+        "do not call tool_search or load_tools for them. Make the fewest "
+        "tool calls that answer the request, and stop as soon as you know "
+        "the answer. Do not use the CLI's built-in or vendor X/web search "
+        "tools for local files."
     )
     return block
 

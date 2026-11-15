@@ -27,8 +27,11 @@ side effects.
 from __future__ import annotations
 
 import os
+import re
 import time
-from typing import Any
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Iterator
 
 from jaeger_agent import AgentCallbacks, JaegerAgent
 from jaeger_agent.adapters.anthropic import AnthropicAdapter
@@ -233,11 +236,43 @@ def _adapter_for_client(
 
 _LOCAL_REASONING_PROVIDERS = frozenset({"ollama", "lmstudio"})
 
+_TURN_EFFORT_HINT: ContextVar[str | None] = ContextVar("jaeger_turn_effort_hint", default=None)
+_HARD_TURN = re.compile(
+    r"\b(implement|refactor|debug|root cause|architect|migrate|multi-step|"
+    r"write a (?:pr|patch|plan)|investigate thoroughly)\b",
+    re.I,
+)
+
+
+def is_simple_or_chat_turn(text: str, tier: str | None) -> bool:
+    """True for Chat mode or a short, non-implementation Agent request."""
+    if str(tier or "").strip().lower() == "chat":
+        return True
+    cleaned = (text or "").strip()
+    return bool(cleaned) and len(cleaned) <= 280 and not _HARD_TURN.search(cleaned)
+
+
+@contextmanager
+def turn_effort_hint(effort: str | None) -> Iterator[None]:
+    """Apply a per-turn reasoning-effort hint (for example ``low``)."""
+    token = _TURN_EFFORT_HINT.set((effort or "").strip().lower() or None)
+    try:
+        yield
+    finally:
+        _TURN_EFFORT_HINT.reset(token)
+
 
 def reasoning_effort_for(provider: str, model: str, configured: Any) -> str | None:
-    """Preserve explicit effort; automatic selection uses the model default."""
+    """Preserve explicit effort; automatic selection uses the model default.
+
+    Chat mode and simple turns may lower the default when the operator
+    left effort on auto, which is what Grok used for a 47s README check.
+    """
     value = str(configured or "auto").strip().lower()
     if value in {"auto", "provider"}:
+        hint = _TURN_EFFORT_HINT.get()
+        if hint in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}:
+            return hint
         return None
     if value not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}:
         raise ValueError(f"Unsupported reasoning effort: {configured}")

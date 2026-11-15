@@ -436,7 +436,8 @@ def file_read(path: str, offset: int = 0, limit: int | None = None, column: int 
     """
     layout = _require_layout()
     try:
-        target = _resolve_read(path)
+        from jaeger_agent.core.workspace import resolve_existing_read
+        target = resolve_existing_read(path)
     except SandboxError as exc:
         _audit("file_read_denied", {"path": path, "reason": str(exc)})
         return {"read": False, "error": str(exc)}
@@ -1105,18 +1106,18 @@ def _t_read_file(path: str, offset: int = 0, limit: int | None = None, column: i
 
 @register_tool_from_function(name="list_skill_dir", side_effect="read")
 @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="list_skill_dir",
-               summary="list contents of the skills directory")
+               summary="list the current workspace or any directory")
 def _t_list_skill_dir(path: str = ".") -> dict:
-    """List a directory's contents. With no path, lists your instance
-    workspace; pass an ABSOLUTE path (or `~`) to browse ANY directory
-    — your repository, the wider system. Listing is not sandboxed.
-    Use for "list files", "show files", "what's in <dir>"."""
+    """List a directory's contents. With no path, lists the current
+    workspace (the bound project, or the instance workspace). Pass an
+    ABSOLUTE path (or `~`) to browse any directory. Listing is not
+    sandboxed. Use for "list files", "show files", "what's in <dir>"."""
     return list_skill_dir(path=path)
 
 
 @register_tool_from_function(name="search_files", side_effect="read")
 @requires_tier(PermissionTier.READ_ONLY, skill="files", operation="search_files",
-               summary="search file contents under the skills directory")
+               summary="search file contents in the current workspace")
 def _t_search_files(query: str, path: str = ".", max_results: int = 50) -> dict:
     """Recursively grep file CONTENTS — case-insensitive substring
     match. With no path, searches the working directory; pass an

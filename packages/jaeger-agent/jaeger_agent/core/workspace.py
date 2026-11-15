@@ -509,6 +509,36 @@ def _redirect_cli_cache_path(path: str) -> str:
         return path
 
 
+def resolve_existing_read(path: str) -> Path:
+    """Resolve a readable path, with a case-insensitive fallback.
+
+    If the exact path is missing, look in the same directory for a
+    case-insensitive name match. A name without a suffix also matches a
+    file with the same stem (``README`` → ``README.md``), which stops
+    retry loops on case or extension variants.
+    """
+    target = _resolve_read(path)
+    if target.exists():
+        return target
+    parent, name = target.parent, target.name
+    if not parent.is_dir() or not name:
+        return target
+    lowered, stem = name.lower(), Path(name).stem.lower()
+    stemmed = Path(name).suffix == ""
+    matches: list[Path] = []
+    try:
+        for child in parent.iterdir():
+            if child.name.lower() == lowered:
+                return child
+            if stemmed and child.is_file() and child.stem.lower() == stem:
+                matches.append(child)
+    except OSError:
+        return target
+    if len(matches) == 1:
+        return matches[0]
+    return target
+
+
 def _resolve_read(path: str) -> Path:
     """Resolve a path for a READ operation.
 
@@ -539,6 +569,16 @@ def _resolve_read(path: str) -> Path:
         project_root = get_project_root()
         if project_root is not None:
             full = (project_root / p).resolve()
+        if full is None:
+            # Same default root as list_skill_dir("."): the bound project, then
+            # the instance workspace. Falling through to Path.cwd() used to
+            # open the JaegerAI repo while a workspace listing showed no README.
+            try:
+                workspace = get_effective_workspace_dir()
+            except Exception:
+                workspace = None
+            if workspace is not None:
+                full = (workspace / p).resolve()
         if full is None:
             full = (Path.cwd() / p).resolve()
         if project_root is None and not full.exists() and _layout is not None:
