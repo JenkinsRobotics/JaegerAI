@@ -1259,6 +1259,11 @@ class JaegerAgent:
                 )
             except Exception:  # noqa: BLE001
                 pass
+            try:
+                from jaeger_ai.core.runtime.maintenance_text import sanitize_injected_text
+                content = sanitize_injected_text(content)
+            except Exception:  # noqa: BLE001 — hygiene must not block routing
+                pass
             cap = 24_000
             if len(content) > cap:
                 content = content[:cap] + "\n\n[recipe truncated by automatic router]"

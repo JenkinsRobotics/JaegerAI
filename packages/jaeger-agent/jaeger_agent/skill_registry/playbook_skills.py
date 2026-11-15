@@ -480,6 +480,11 @@ _ROUTE_WORD = re.compile(r"[a-z0-9]+")
 _ROUTE_STOP = frozenset({
     "a", "an", "and", "are", "for", "from", "in", "into", "is", "it",
     "my", "of", "on", "or", "the", "this", "to", "use", "with", "you",
+    # Generic fillers that otherwise pair with a skill-name tail
+    # ("anything" + "without" was enough to auto-route
+    # reverse-engineer-anything onto a morning heartbeat).
+    "anything", "something", "everything", "nothing", "anyone",
+    "someone", "everyone", "without",
 })
 
 
