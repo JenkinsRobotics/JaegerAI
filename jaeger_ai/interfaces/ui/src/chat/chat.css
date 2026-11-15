@@ -422,18 +422,18 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
   .jg-composer__bar .jg-runtime-trigger { width: 40px; max-width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; box-shadow: none; background: transparent; }
   .jg-composer__bar .jg-runtime-trigger > span, .jg-composer__bar .jg-runtime-trigger > .jg-runtime-context, .jg-composer__bar .jg-runtime-trigger > svg:last-child { display: none; }
   /* One-line follow-up at rest; focus or a preserved draft exposes the toolbar. */
-  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])) {
+  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])):not(:has(> :is([role=status],[role=alert],.jg-chip,.jg-followup-actions,.jg-attachments))) {
     display: grid; grid-template-columns: 40px minmax(0,1fr) auto auto; align-items: center;
     min-height: 56px; gap: 4px; padding: 6px 8px; border-radius: 30px;
   }
-  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])) .jg-composer__input {
+  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])):not(:has(> :is([role=status],[role=alert],.jg-chip,.jg-followup-actions,.jg-attachments))) .jg-composer__input {
     grid-column: 2; grid-row: 1; min-height: 28px; height: 28px; padding: 4px; box-sizing: border-box;
   }
-  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])) .jg-composer__bar { display: contents; }
-  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])) .jg-composer__bar > [aria-label="Attach file"] { grid-column: 1; grid-row: 1; }
-  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])) .jg-composer__bar > :not([aria-label="Attach file"]):not(.jg-send):not(.jg-voice) { display: none; }
-  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])) .jg-voice { grid-column: 3; grid-row: 1; }
-  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])) .jg-send { grid-column: 4; grid-row: 1; }
+  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])):not(:has(> :is([role=status],[role=alert],.jg-chip,.jg-followup-actions,.jg-attachments))) .jg-composer__bar { display: contents; }
+  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])):not(:has(> :is([role=status],[role=alert],.jg-chip,.jg-followup-actions,.jg-attachments))) .jg-composer__bar > [aria-label="Attach file"] { grid-column: 1; grid-row: 1; }
+  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])):not(:has(> :is([role=status],[role=alert],.jg-chip,.jg-followup-actions,.jg-attachments))) .jg-composer__bar > :not([aria-label="Attach file"]):not(.jg-send):not(.jg-voice) { display: none; }
+  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])):not(:has(> :is([role=status],[role=alert],.jg-chip,.jg-followup-actions,.jg-attachments))) .jg-voice { grid-column: 3; grid-row: 1; }
+  .jg-composer[data-expanded=false]:not(:focus-within):not(:has([aria-expanded=true])):not(:has(> :is([role=status],[role=alert],.jg-chip,.jg-followup-actions,.jg-attachments))) .jg-send { grid-column: 4; grid-row: 1; }
   .jg-composer__bar :is(.jg-send,.jg-composer__icon) { min-width: 40px; width: 40px; height: 40px; }
   .jg-chat-home { margin-top: 10vh; }
 }
@@ -607,3 +607,13 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-generated-image__lightbox { max-width: min(92vw, 1024px); max-height: 92vh; border: 0; padding: 16px; background: var(--jg-color-pane, var(--aether-color-bg, #111)); color: var(--aether-color-text, inherit); }
 .jg-generated-image__lightbox::backdrop { background: color-mix(in srgb, black 55%, transparent); }
 .jg-generated-image__lightbox form { display: flex; gap: 8px; margin-top: 12px; }
+/* Mobile: notices (plan hint, errors) keep the composer in its column layout so they span the full width;
+   the plan hint collapses to a one-line chip with a short Execute action. */
+.jg-plan-banner__short { display: none; }
+@media (max-width: 600px) {
+  .jg-composer .jg-plan-banner { flex-wrap: nowrap; gap: 6px; margin: 0 0 6px; padding: 4px 4px 4px 12px; border-radius: 999px; }
+  .jg-composer .jg-plan-banner__long { display: none; }
+  .jg-composer .jg-plan-banner__short { display: inline; }
+  .jg-composer .jg-plan-banner > .jg-plan-banner__short { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .jg-composer .jg-plan-execute { flex: none; height: 28px; padding: 0 10px; }
+}
