@@ -537,6 +537,10 @@ def route(handler, parsed, method: str) -> bool:
     if path.startswith('/v1/runtime/diagnostics/capture/') and method=='POST' and path.rsplit('/',1)[1] in {'start','stop','report'}:return _proxy(handler,method,path,_body_bytes(handler))
 
     if path=='/v1/runtime/skills/managed' and method=='GET':return _proxy(handler,method,path)
+    if path in {'/v1/memory/profile','/v1/memory/upkeep'} and method=='GET':return _proxy(handler,method,path)
+    if path=='/v1/memory/profile' and method=='PUT':return _proxy(handler,method,path,_body_bytes(handler))
+    if path=='/v1/memory/profile/revert' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
+    if path=='/v1/memory/upkeep' and method=='PATCH':return _proxy(handler,method,path,_body_bytes(handler))
     if path in {'/v1/runtime/skills/revisions','/v1/runtime/skills/history','/v1/runtime/skills/history/version'} and method=='GET':return _proxy(handler,method,path+query)
     if path=='/v1/runtime/skills/history/rollback' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
     if path in {'/v1/runtime/skills/managed/change','/v1/runtime/skills/managed/review'} and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))

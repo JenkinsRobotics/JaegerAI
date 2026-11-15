@@ -204,7 +204,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # historical callers and the bench corpus's expected_tools
         # entries still work, but hidden from default routing in
         # favour of the umbrella ``memory(action=…)`` (in CORE).
-        "remember", "recall", "forget", "list_facts", "search_memory",
+        "remember", "recall", "forget", "list_facts", "search_memory", "user_profile",
         "record_insight", "recall_insight",
     }),
     # Planning primitives (Codex ``update_plan`` / ``wait``): stateless display

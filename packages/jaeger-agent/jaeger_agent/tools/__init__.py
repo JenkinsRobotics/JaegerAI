@@ -128,6 +128,9 @@ from .skill_market import benchmark_skill, package_skill
 # Self-authored skills — create/edit/patch with versioned history + rollback
 from .skill_manage import skill_manage
 
+# Owner profile (memory/USER.md) — durable preferences and facts
+from .user_profile_tool import user_profile
+
 # Background processes — long-running work that outlives the turn
 from .background import (
     check_background,
@@ -197,7 +200,7 @@ from .ocr import ocr_file
 
 
 __all__ = [
-    "skill_manage",
+    "skill_manage", "user_profile",
     # framework wiring
     "bind", "get_layout",
     "SandboxError", "_audit", "_require_layout", "_resolve_under", "git_autocommit",

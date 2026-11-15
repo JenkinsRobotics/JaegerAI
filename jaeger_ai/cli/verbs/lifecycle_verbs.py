@@ -597,8 +597,6 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
     ollama_port = ollama_endpoint.port or OLLAMA_PORT
     ollama_ok = _is_port_open(ollama_port, ollama_name, timeout=0.5)
     ollama_host = f"{ollama_name}:{ollama_port}"
-    rack_enabled = os.environ.get("JAEGER_RACK_SERVICES", "").strip().lower() in {"1", "true", "yes"}
-    honcho_ok = _is_port_open(8088, "10.15.0.239", timeout=1.0) if rack_enabled else False
 
     # Collect Web UI status
     try:
@@ -628,7 +626,6 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
             "containers": containers_report,
             "substrates": {
                 "ollama": {"host": ollama_host, "reachable": ollama_ok},
-                "honcho": {"host": "10.15.0.239:8088", "reachable": honcho_ok, "enabled": rack_enabled},
             },
             "runtime": runtime_doc,
         }
@@ -691,9 +688,7 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
     # Substrates
     print(f"  {_bold('Network Substrates:')}")
     ollama_badge = _green("● Reachable") if ollama_ok else _red("○ Offline")
-    honcho_badge = (_green("● Reachable") if honcho_ok else _red("○ Offline")) if rack_enabled else _dim("○ Paused")
     print(f"    Ollama ({ollama_host}) -> {ollama_badge}")
-    print(f"    Honcho (10.15.0.239:8088)   -> {honcho_badge}")
     print()
 
     return 0

@@ -1395,6 +1395,12 @@ class JaegerGatewayApp:
                     salience=salience, allowed_tools=allowed_tools,
                 )
 
+            def ensure_session(self, session_id: str, title: str) -> str:
+                return app.store.ensure_session(session_id, title=title, profile="jaeger")["session_id"]
+
+            def recent_owner_messages(self, since_s: float, limit: int = 400) -> list[dict[str, Any]]:
+                return app._recent_owner_messages(since_s, limit=limit)
+
             def propose_webhook(self, event):
                 loop = app._loop
                 if loop is None or not loop.is_running():
@@ -1909,6 +1915,8 @@ class JaegerGatewayApp:
         register_skill_controls(self)
         from .skill_history_routes import register as register_skill_history
         register_skill_history(self)
+        from .profile_routes import register as register_profile_routes
+        register_profile_routes(self)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)
@@ -6224,10 +6232,75 @@ class JaegerGatewayApp:
                         list(self._request_tools.get(request_id, [])), _options, _tier)
                 except Exception:  # noqa: BLE001 — the nudge never affects the turn
                     logger.debug("skill review nudge skipped", exc_info=True)
+                try:
+                    self._maybe_queue_memory_review(session_key, request_id, result, _options, _tier)
+                except Exception:  # noqa: BLE001 — the nudge never affects the turn
+                    logger.debug("memory review nudge skipped", exc_info=True)
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
                 self._request_tools.pop(request_id, None)
+
+    _BACKGROUND_SESSIONS = ("skill-reviews", "memory-upkeep")
+    _memory_turns: dict[str, int] = {}
+
+    def _recent_owner_messages(self, since_s: float, *, session_id: str | None = None,
+                               limit: int = 400) -> list[dict[str, Any]]:
+        """The owner's own chat messages (oldest first), excluding background sessions."""
+        sql = ("SELECT session_id, content, timestamp FROM messages WHERE role='user' AND timestamp>? "
+               "AND session_id NOT LIKE 'cron:%' AND session_id NOT IN (?,?)")
+        params: list[Any] = [time.time() - float(since_s), *self._BACKGROUND_SESSIONS]
+        if session_id:
+            sql += " AND session_id=?"
+            params.append(session_id)
+        sql += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(int(limit))
+        with self.store._get_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        out = []
+        for r in rows[::-1]:
+            content = r["content"]
+            if isinstance(content, str) and content.startswith("["):
+                try:  # structured content blocks → plain text
+                    blocks = json.loads(content)
+                    content = " ".join(str(((b.get("content") or {}).get("text")) or b.get("text") or "")
+                                       for b in blocks if isinstance(b, dict))
+                except ValueError:
+                    pass
+            out.append({"session_id": r["session_id"], "content": content, "timestamp": r["timestamp"]})
+        return out
+
+    def _maybe_queue_memory_review(self, session_key: str, request_id: str,
+                                   result: dict[str, Any], options: dict[str, Any], tier: str) -> None:
+        """Memory nudge: every N owner turns in a chat, a background pass updates USER.md."""
+        from jaeger_ai.core.runtime import memory_upkeep as mu
+        if tier != "agent" or options.get("background") or result.get("error"):
+            return
+        if session_key in self._BACKGROUND_SESSIONS or str(session_key).startswith("cron:"):
+            return
+        count = self._memory_turns.get(session_key, 0) + 1
+        self._memory_turns[session_key] = count
+        every = int(os.environ.get("JAEGER_MEMORY_REVIEW_EVERY") or mu.REVIEW_EVERY)
+        if every <= 0 or count % every:
+            return
+        msgs = self._recent_owner_messages(7 * 86400, session_id=session_key, limit=every * 2)
+        if not msgs:
+            return
+        from jaeger_ai.core.instance.instance import InstanceLayout
+        layout = InstanceLayout(root=self._instance_root())
+        rid = f"memory-review-{request_id}"[:120]
+
+        def run() -> None:
+            time.sleep(float(os.environ.get("JAEGER_SKILL_NUDGE_DELAY_S") or 20))
+            try:
+                sid = self.store.ensure_session(mu.UPKEEP_SESSION, title="Memory upkeep", profile="jaeger")["session_id"]
+                out = self.submit_background_turn(mu.review_prompt(msgs), session_id=sid, request_id=rid,
+                                                  source="memory_upkeep", allowed_tools=list(mu.TOOLS))
+                mu.log_run(layout, "review", out, messages=len(msgs))
+            except Exception:  # noqa: BLE001
+                logger.warning("memory review failed", exc_info=True)
+
+        threading.Thread(target=run, name="memory-review", daemon=True).start()
 
     # Hermes-style procedural memory: after a complex, successful owner turn,
     # a short background pass decides whether to save or update a skill.

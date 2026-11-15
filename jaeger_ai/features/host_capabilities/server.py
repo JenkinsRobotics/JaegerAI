@@ -30,12 +30,6 @@ from .mac_tools import (
     shortcuts_list,
     shortcuts_run,
 )
-from .memory_tools import (
-    memory_add,
-    memory_context,
-    memory_query,
-    memory_status,
-)
 from .system_tools import (
     capabilities_inspect,
     host_environment,
@@ -91,10 +85,6 @@ mcp.tool()(camera_listen)
 mcp.tool()(camera_ptz)
 
 # 5. Shared Memory Tools
-mcp.tool()(memory_status)
-mcp.tool()(memory_query)
-mcp.tool()(memory_context)
-mcp.tool()(memory_add)
 
 
 def main() -> None:
