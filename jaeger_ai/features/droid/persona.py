@@ -81,3 +81,81 @@ def speakable(text: str) -> str:
     for pattern, repl in _MD:
         text = pattern.sub(repl, text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+# Sight: answered from the local camera + local vision model, never the cloud.
+_AROUND = re.compile(r"\b(?:look around|have a look around|scan the room|look about|who(?:'s| is) (?:here|around|in the room))\b", re.I)
+_SEE = re.compile(
+    r"\b(?:what do you see|what can you see|what are you seeing|can you see (?:me|this|that|anything)|"
+    r"do you see|describe (?:the room|what you see|what's in front of you|me)|how do i look|"
+    r"what am i (?:holding|wearing|doing)|what(?:'s| is) (?:this|in front of you|on my desk|behind me)|"
+    r"look at (?:me|this|that)|is anyone (?:here|there|in the room)|how many people)\b", re.I)
+
+
+def visual(said: str) -> str | None:
+    """``around`` / ``look`` for questions about the room, else ``None``."""
+    if _AROUND.search(said):
+        return "around"
+    if _SEE.search(said):
+        return "look"
+    return None
+
+
+_MOVE = re.compile(r"^(?:(?:hey |ok |okay )?jaeger[, ]+)?(?:(?:can you|could you|please) )*(?:look|turn|tilt|pan)"
+                   r"(?: your head| your camera)?(?: a (?:bit|little)(?: more)?)?(?: (?:to|towards?)(?: (?:your|the|my))?)?"
+                   r" (left|right|up|down|ahead|straight(?: ahead)?|forward|at me|center|centre|back)"
+                   r"(?: a (?:bit|little)(?: more)?)?(?:,? please)?\W*$", re.I)
+
+
+def head_move(said: str):
+    """``(pan_deg, tilt_deg, absolute)`` for spoken head moves, else ``None``."""
+    m = _MOVE.match(said.strip())
+    if not m:
+        return None
+    word = m.group(1).lower()
+    small = re.search(r"\b(?:bit|little)\b", said, re.I)
+    step = 15 if small else 35
+    return {"left": (-step, 0, False), "right": (step, 0, False), "up": (0, step / 2, False),
+            "down": (0, -step / 2, False)}.get(word, (0, 0, True))
+
+
+def move_phrase(pan: float, tilt: float, absolute: bool) -> str:
+    if absolute:
+        return "Facing forward."
+    if pan:
+        return "Looking left." if pan < 0 else "Looking right."
+    return "Looking up." if tilt > 0 else "Looking down."
+
+
+def narrate(tool: str, args) -> str | None:
+    """A short spoken line for a tool the droid is using (computer use first)."""
+    name = tool.lower().rsplit("__", 1)[-1]
+    args = args if isinstance(args, dict) else {}
+    app = str(args.get("app") or args.get("app_name") or args.get("name") or "").strip()
+    action = str(args.get("action") or "").lower()
+    if name in {"computer_open_app", "launch_app", "open_app", "open_on_host"} or action in {"open_app", "launch"}:
+        return f"Opening {app}." if app and len(app) < 40 else "Opening that for you."
+    if any(k in name for k in ("screenshot", "screen", "computer_look", "desktop_state", "window_state", "zoom",
+                               "vision_analyze", "view_image", "look_at")):
+        return "Let me look at the screen."
+    if name in {"computer_use", "computer_do"} or name.startswith("computer_"):
+        if "type" in name or action in {"type", "type_text"}:
+            return "Typing that in."
+        if "click" in name or "click" in action:
+            return "Clicking."
+        if "key" in name or "hotkey" in action:
+            return None
+        return "Working on the screen now."
+    if "type_text" in name:
+        return "Typing that in."
+    if "web_search" in name or name in {"search", "x_search"}:
+        return "Searching the web."
+    if "web_fetch" in name or name.startswith("browser"):
+        return "Reading the page."
+    if name in {"run_shell", "shell", "terminal", "bash"}:
+        return "Running a command."
+    if name in {"read_file", "read_many_files", "glob", "grep", "list_dir"}:
+        return "Checking your files."
+    if name in {"send_message", "send_email"}:
+        return "Preparing that message."
+    return None

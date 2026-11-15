@@ -35,7 +35,9 @@ from pathlib import Path
 import numpy as np
 from aiohttp import ClientSession, ClientTimeout, web
 
-from . import coreaudio, persona
+from collections import deque
+
+from . import coreaudio, persona, vision
 from .audio import BLOCK, RATE, DuplexAudio
 
 log = logging.getLogger("jaeger.droid")
@@ -43,8 +45,11 @@ STATE = Path(os.environ.get("JAEGER_STATE_DIR") or Path.home() / ".jaeger")
 RUN = STATE / "run" / "droid"
 CONFIG = STATE / "droid.json"
 VOICE_URL = os.environ.get("JAEGER_VOICE_URL", "http://127.0.0.1:8794")
-DEFAULTS = {"speaker": "Mac Studio Speakers", "microphone": "Insta360 Link 2", "engine": "local",
-            "session_id": "agent-native:jaeger", "name": "Matthew", "max_spoken_chars": 700}
+DEFAULTS = {"speaker": "Mac Studio Speakers", "microphone": "Insta360 Link 2", "camera": "Insta360 Link 2",
+            "engine": "local", "session_id": "agent-native:jaeger", "name": "Matthew", "max_spoken_chars": 700,
+            "presence_greet_after_s": 600, "narrate_tools": True}
+BIN = STATE / "droid" / "bin"
+CUA = Path.home() / ".local/bin/cua-driver"
 _SENTENCE = re.compile(r"[.!?](?:[\"')\]]*)(?:\s|$)|\n")
 
 
@@ -101,10 +106,15 @@ class Droid:
         self.pending_approval: dict | None = None
         self.bot_speaking = False
         self.heard_at = 0.0
+        self.eyes: vision.Eyes | None = None
+        self.transcript: deque = deque(maxlen=60)
+        self.narrated = {"at": 0.0, "count": 0}
+        self.screen_cache = (0.0, b"")
         self.status = {"state": "off", "awake": False, "muted": False, "engine": self.cfg["engine"],
                        "heard": "", "said": "", "latency_ms": None, "error": None,
                        "speaker": self.cfg["speaker"], "microphone": self.cfg["microphone"],
-                       "voice_processing": None, "pending_approval": None, "since": time.time()}
+                       "voice_processing": None, "pending_approval": None, "since": time.time(),
+                       "camera": "off", "faces": 0, "present": False, "action": None}
         self.write()
 
     # status ------------------------------------------------------------
@@ -149,6 +159,8 @@ class Droid:
                 await asyncio.wait_for(self.ready.wait(), 30)
                 self.say(persona.greeting(self.cfg["name"]))
                 self.set(state="listening")
+                self._open_eyes()
+                asyncio.create_task(asyncio.to_thread(_ensure_cua_driver))
             except Exception as exc:
                 log.exception("wake failed")
                 await self._teardown()
@@ -177,7 +189,41 @@ class Droid:
     async def toggle(self):
         await (self.sleep() if self.status["awake"] else self.wake())
 
+    def _open_eyes(self):
+        if permission("camera") != "authorized":
+            self.set(camera="needs permission")
+            return
+        loop = asyncio.get_running_loop()
+        self.eyes = vision.Eyes(
+            self.cfg["camera"],
+            on_presence=lambda away, faces: loop.call_soon_threadsafe(self._presence, away, faces),
+            report=lambda **f: loop.call_soon_threadsafe(lambda: self.set(**f)))
+        self.eyes.start()
+
+        def ready_head():
+            vision.warm()
+            time.sleep(1.5)  # the gimbal leaves its privacy pose once streaming starts
+            self.eyes and self.eyes.head.point(0, 0)
+
+        asyncio.create_task(asyncio.to_thread(ready_head))
+
+    def _presence(self, away: float, faces: int):
+        """Someone came into view: welcome them back after a real absence."""
+        if (not self.status["awake"] or self.bot_speaking or self.request_id or self.pending_approval
+                or away < float(self.cfg.get("presence_greet_after_s") or 600)):
+            return
+        self.say(f"Ah, welcome back, {self.cfg['name']}." if faces == 1 else "Hello there, everyone.")
+
     async def _teardown(self):
+        if self.eyes:
+            eyes, self.eyes = self.eyes, None
+
+            def close():
+                eyes.head.point(0, -85)  # privacy pose: the camera looks down while asleep
+                time.sleep(1.0)
+                eyes.stop()
+
+            await asyncio.to_thread(close)
         for task in self.tasks:
             task.cancel()
         self.tasks = []
@@ -354,11 +400,22 @@ class Droid:
         if self.dc is not None and self.dc.readyState == "open":
             self.dc.send(json.dumps({"type": "jaeger", **message}))
 
+    def note(self, role: str, text: str):
+        """Recent conversation for the live Droid view (assistant chunks join)."""
+        now = time.time()
+        if role == "assistant" and self.transcript and self.transcript[-1]["role"] == "assistant" \
+                and now - self.transcript[-1]["at"] < 12:
+            self.transcript[-1]["text"] = (self.transcript[-1]["text"] + " " + text)[-1200:]
+            self.transcript[-1]["at"] = now
+        else:
+            self.transcript.append({"role": role, "text": text[-1200:], "at": now})
+
     def say(self, text: str):
         text = persona.speakable(text)
         if text:
             self._send({"t": "speak", "text": text[:2000]})
             self.set(said=text[-400:])
+            self.note("assistant", text)
 
     def stop_talking(self):
         self._barge_in()
@@ -366,6 +423,7 @@ class Droid:
 
     # turns -------------------------------------------------------------
     async def on_heard(self, text: str):
+        self.note("user", text)
         if self.pending_approval:
             choice = persona.decision(text)
             if choice is None:
@@ -390,6 +448,14 @@ class Droid:
         if action == "stop":
             self.stop_talking()
             return
+        move = persona.head_move(text)
+        if move:
+            await self.move_head(*move)
+            return
+        sight = persona.visual(text)
+        if sight:
+            asyncio.create_task(self.see(text, around=sight == "around"))
+            return
         rid = self.request_id
         if rid:
             try:
@@ -399,9 +465,58 @@ class Droid:
                 pass
         asyncio.create_task(self.turn(text))
 
+    async def move_head(self, pan: float, tilt: float, absolute: bool = False):
+        if not self.eyes:
+            self.say("My camera is off, so I can't turn my head just now.")
+            return
+        label = persona.move_phrase(pan, tilt, absolute)
+        self.say(label)
+        head = self.eyes.head
+        ok = await asyncio.to_thread(head.point if absolute else head.nudge, pan, tilt)
+        if not ok:
+            self.say("I'm afraid my neck isn't responding.")
+
+    async def see(self, question: str, around: bool = False):
+        """Answer a question about the room from the local camera and vision model only."""
+        if not self.eyes:
+            self.say("My eyes are closed: I need camera permission for Jaeger Droid, or the camera is busy.")
+            return
+        self.set(state="thinking", action="looking around" if around else "looking")
+        if around:
+            self.say("Let me have a look around.")
+        elif not await asyncio.to_thread(vision.is_warm):
+            self.say("One moment, my eyes are still focusing.")
+        started = time.time()
+        try:
+            answer = await asyncio.to_thread(self.eyes.look_around if around else self.eyes.look, question)
+        except Exception as exc:
+            log.warning("vision failed: %s", exc)
+            answer = "I'm afraid my vision system isn't answering right now."
+        self.set(action=None, vision_ms=round((time.time() - started) * 1000))
+        self.say(answer)
+        if self.status["state"] == "thinking":
+            self.set(state="listening")
+
+        def save():
+            for role, text in (("user", question), ("assistant", answer)):
+                self._save_transcript({"role": role, "text": text, "engine": "droid-vision"})
+
+        await asyncio.to_thread(save)
+
+    def _narrate(self, data: dict):
+        if not self.cfg.get("narrate_tools", True):
+            return
+        line = persona.narrate(str(data.get("tool") or data.get("name") or ""), data.get("args") or data.get("input") or {})
+        now = time.time()
+        if line and now - self.narrated["at"] > 6 and self.narrated["count"] < 5:
+            self.narrated.update(at=now, count=self.narrated["count"] + 1)
+            self.set(action=line)
+            self.say(line)
+
     async def turn(self, text: str, *, full: bool = False) -> str:
         rid = uuid.uuid4().hex
         self.request_id, self.skip_rid = rid, None
+        self.narrated = {"at": 0.0, "count": 0}
         self.set(state="thinking", error=None)
         spoken = {"pending": "", "chars": 0, "any": False, "capped": False}
         loop = asyncio.get_running_loop()
@@ -432,6 +547,8 @@ class Droid:
                     cut = cut if cut > 0 else 300
                     speak(spoken["pending"][:cut])
                     spoken["pending"] = spoken["pending"][cut:]
+            elif name == "tool.started" and not full and self.skip_rid != rid:
+                self._narrate(data)
             elif name == "approval.request" and data.get("approval_id"):
                 self.pending_approval = data
                 prompt = str(data.get("title") or data.get("prompt") or "take an action")
@@ -461,6 +578,7 @@ class Droid:
         finally:
             if self.request_id == rid:
                 self.request_id = None
+                self.set(action=None)
                 if self.status["state"] == "thinking":
                     self.set(state="listening")
 
@@ -472,10 +590,59 @@ class Droid:
         try:
             from urllib.parse import quote
             self.gateway._call("POST", f"/v1/sessions/{quote(self.cfg['session_id'], safe='')}/voice-transcript",
-                               {"role": m.get("role"), "text": m.get("text"), "engine": "gemini",
+                               {"role": m.get("role"), "text": m.get("text"), "engine": m.get("engine") or "gemini",
                                 "interrupted": bool(m.get("interrupted"))})
         except Exception as exc:
             log.warning("transcript not saved: %s", exc)
+
+
+def _ensure_cua_driver():
+    """Computer use and the live screen view go through CuaDriver (its own permissions)."""
+    import subprocess
+    if not CUA.exists():
+        return
+    status = subprocess.run([str(CUA), "status"], capture_output=True, text=True, timeout=10)
+    if "not running" in (status.stdout + status.stderr):
+        subprocess.run(["/usr/bin/open", "-n", "-g", "-a", "CuaDriver", "--args", "serve"], capture_output=True)
+
+
+def screen_jpeg(width: int = 1280) -> bytes | None:
+    """The main display, via CuaDriver's screenshot (works on a virtual display too)."""
+    import subprocess
+
+    import cv2
+    out = RUN / "screen.png"
+    try:
+        _ensure_cua_driver()
+        subprocess.run([str(CUA), "call", "get_desktop_state", json.dumps({"screenshot_out_file": str(out)})],
+                       capture_output=True, timeout=10)
+        img = cv2.imread(str(out))
+        out.unlink(missing_ok=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    if w > width:
+        img = cv2.resize(img, (width, int(h * width / w)), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    return buf.tobytes() if ok else None
+
+
+def display_info() -> dict:
+    """Online displays and whether each is a real monitor or a virtual one."""
+    try:
+        import Quartz
+        err, ids, count = Quartz.CGGetOnlineDisplayList(16, None, None)
+        rows = []
+        for d in ids[:count]:
+            vendor = Quartz.CGDisplayVendorNumber(d)
+            rows.append({"id": int(d), "width": int(Quartz.CGDisplayPixelsWide(d)),
+                         "height": int(Quartz.CGDisplayPixelsHigh(d)), "main": bool(Quartz.CGDisplayIsMain(d)),
+                         "virtual": vendor in (0x756E6B6E, 0) or Quartz.CGDisplayModelNumber(d) == 0x76697274})
+        return {"displays": rows, "headless": bool(rows) and all(r["virtual"] for r in rows)}
+    except Exception as exc:
+        return {"displays": [], "error": str(exc)}
 
 
 def _system_say(text: str, device: str = ""):
@@ -542,6 +709,33 @@ def app(droid: Droid) -> web.Application:
             droid.audio.muted = not droid.audio.muted
             droid.set(muted=droid.audio.muted)
 
+    @routes.get("/transcript")
+    async def transcript(_r):
+        return web.json_response({"lines": list(droid.transcript), "status": droid.status})
+
+    @routes.get("/camera.jpg")
+    async def camera(_r):
+        img = droid.eyes.jpeg(width=960, max_age=5) if droid.eyes else None
+        if not img:
+            return web.json_response({"error": "camera off"}, status=404)
+        return web.Response(body=img, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @routes.get("/screen.jpg")
+    async def screen(_r):
+        at, img = droid.screen_cache
+        if time.time() - at > 0.8 or not img:
+            img = await asyncio.to_thread(screen_jpeg) or b""
+            droid.screen_cache = (time.time(), img)
+        if not img:
+            return web.json_response({"error": "screen unavailable"}, status=404)
+        return web.Response(body=img, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @routes.get("/display")
+    async def display(_r):
+        return web.json_response(await asyncio.to_thread(display_info))
+
+    routes.post("/look")(action(lambda b: droid.see(str(b.get("question") or "What do you see?"),
+                                                    around=bool(b.get("around"))) if droid.status["awake"] else None))
     routes.post("/wake")(action(lambda b: droid.wake(ears=b.get("ears") is not False)))
     routes.post("/sleep")(action(lambda b: droid.sleep()))
     routes.post("/toggle")(action(lambda b: droid.toggle()))
@@ -566,6 +760,10 @@ async def main():
     await web.UnixSite(runner, str(sock)).start()
     sock.chmod(0o600)
     log.info("droid standing by on %s", sock)
+    keeper = None
+    if (BIN / "droid-display").exists():
+        import subprocess
+        keeper = subprocess.Popen([str(BIN / "droid-display")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     stop = asyncio.Event()
     import signal
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -576,6 +774,8 @@ async def main():
     await droid.sleep(farewell=False)
     await runner.cleanup()
     sock.unlink(missing_ok=True)
+    if keeper:
+        keeper.terminate()
     droid.set(state="off", awake=False)
 
 

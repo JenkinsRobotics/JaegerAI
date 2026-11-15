@@ -27,6 +27,7 @@ import './windows.css'
 import '../unified/unified.css'
 import '../unified/design.css'
 import { ToastProvider, SkeletonRows, TabbedPage } from '../unified/ui'
+const DroidView = lazy(() => import('../droid/DroidView').then(m => ({ default: m.DroidView })))
 
 // Route-level code splitting: every page but Home loads on first open.
 const App = lazy(() => import('../App').then((m) => ({ default: m.App })))
@@ -149,7 +150,7 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
       case 'library':
       case 'automations':
       case 'feed': return <CompanionPage page={id} source={source} agents={store.agents} onNavigate={go} />
-      case 'machine': return <MachineControlPanel source={source} />
+      case 'machine': return active === 'machine' && route.params.get('section') === 'droid' ? <Suspense fallback={null}><DroidView /></Suspense> : <MachineControlPanel source={source} />
       case 'studio': return <div className="jg-tabbed">{banner('studio', 'studio')}<div className="jg-tabbed__body"><StudioPage source={source} agents={store.agents} onNavigate={go} /></div></div>
       default: return null
     }
