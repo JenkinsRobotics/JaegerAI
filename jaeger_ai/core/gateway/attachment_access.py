@@ -5,9 +5,15 @@ import hashlib
 from pathlib import Path
 
 
+def _in_staged_store(provenance: str) -> bool:
+    # Generated images are copied into the session staged-upload dir, same as
+    # user uploads. Workspace-only roots would 409 the inline preview.
+    return provenance in {"upload_staged", "image_generate"}
+
+
 def resolve(row: dict, *, staged_root: Path, workspace: str) -> Path:
     path = Path(row.get('safe_path') or '').resolve()
-    root = staged_root if row.get('provenance') == 'upload_staged' else Path(workspace) if workspace else None
+    root = staged_root if _in_staged_store(str(row.get('provenance') or '')) else Path(workspace) if workspace else None
     if root is None or not path.is_relative_to(root.resolve()):
         raise ValueError('Attachment is outside its current originating workspace')
     if row.get('provenance') == 'verified_task_artifact':
@@ -28,7 +34,7 @@ def read(row: dict, *, staged_root: Path, workspace: str, limit: int) -> dict:
     # No arbitrary path supplied by the caller is accepted.
     import os
     flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
-    root = (staged_root if row.get('provenance') == 'upload_staged' else Path(workspace)).resolve()
+    root = (staged_root if _in_staged_store(str(row.get('provenance') or '')) else Path(workspace)).resolve()
     relative = path.relative_to(root)
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     directory = os.open(root, directory_flags)
