@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { speakablePrefix, speechSentences } from './webSpeech';
 import { RealtimeVoice, realtimeStatus, type ServiceMessage, type VoiceEngine } from './realtimeVoice';
 import { useAudioPreferences } from '../settings/audioPreferences';
@@ -168,7 +169,7 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
 
  const status=error&&phase==='paused'?'Voice paused':phase==='connecting'?'Connecting…':phase==='paused'?'Microphone off':phase==='hearing'?'Listening…':phase==='thinking'?(toolCall.current?'Jaeger is working…':'Thinking…'):phase==='speaking'?'Tap or speak to interrupt':'Listening';
  return <><button type="button" className={primary?'jg-send jg-send--speak jg-voice-mode__trigger':'jg-composer__icon jg-voice-mode__trigger'} aria-label="Start voice mode" title="Voice mode" aria-expanded={open} disabled={disabled} onClick={()=>{if(!open)start();}}><WaveIcon/></button>
-  {open&&<section className="jg-vmode" role="dialog" aria-modal="true" aria-label="Voice mode" data-phase={phase}>
+  {open&&createPortal(<section className="jg-vmode" role="dialog" aria-modal="true" aria-label="Voice mode" data-phase={phase}>
    <header className="jg-vmode__top">
     <div className="jg-vmode__engines" role="radiogroup" aria-label="Voice engine">
      <button type="button" role="radio" aria-checked={engine==='local'} onClick={()=>switchEngine('local')}>Jaeger</button>
@@ -187,6 +188,6 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
     <button type="button" className="jg-vmode__control" aria-pressed={muted} aria-label={muted?'Unmute microphone':'Mute microphone'} data-active={muted} onClick={toggleMute}><MicIcon/></button>
     <button type="button" className="jg-vmode__control jg-vmode__end" aria-label="End voice mode" onClick={close}><CloseIcon/></button>
    </footer>
-  </section>}
+  </section>,document.body)}
  </>;
 }
