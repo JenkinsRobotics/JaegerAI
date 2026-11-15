@@ -28,7 +28,7 @@ from pathlib import Path
 POLL_S = 60
 TERMINAL = ("done", "done_with_errors", "error", "cancelled")
 _GET = re.compile(r"^/v1/(approvals/counts|approvals/[A-Za-z0-9_.:-]+/events|notifications|push/[a-z-]+)$")
-_PUSH_WRITE = re.compile(r"^/v1/push/(subscriptions|test|job-events)$")
+_PUSH_WRITE = re.compile(r"^/v1/push/(subscriptions|test|job-events|presence)$")
 _PUSH_DELETE = re.compile(r"^/v1/push/subscriptions/[A-Za-z0-9_-]+$")
 
 

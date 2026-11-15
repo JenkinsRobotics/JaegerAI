@@ -152,7 +152,7 @@ def list_subscriptions() -> list[dict]:
 
 def public_view(s: dict) -> dict:
     return {k: s.get(k) for k in ("id", "device_label", "platform", "standalone", "created_at", "last_sent_at",
-                                  "last_status")} | {"push_service": urlparse(s.get("endpoint", "")).hostname}
+                                  "last_status", "origin")} | {"push_service": urlparse(s.get("endpoint", "")).hostname}
 
 
 def add_subscription(body: dict) -> tuple[dict, bool]:
@@ -169,6 +169,9 @@ def add_subscription(body: dict) -> tuple[dict, bool]:
     rec = {"id": sid, "endpoint": endpoint, "keys": {"p256dh": keys["p256dh"], "auth": keys["auth"]},
            "device_label": str(body.get("device_label") or "")[:80], "platform": str(body.get("platform") or "")[:40],
            "standalone": bool(body.get("standalone")), "created_at": time.time()}
+    origin = urlparse(str(body.get("origin") or ""))
+    if origin.scheme in ("https", "http") and origin.hostname:
+        rec["origin"] = f"{origin.scheme}://{origin.netloc}"[:200]  # VAPID subject (Apple rejects localhost)
     with _lock:
         subs = list_subscriptions()
         existing = next((s for s in subs if s.get("id") == sid), None)

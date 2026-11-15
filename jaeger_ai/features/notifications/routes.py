@@ -21,6 +21,8 @@ CATEGORY_DEFAULTS={
     'task_failed':{'label':'Task failed/blocked','in_app':True,'push':True,'sound':False},
     'bot_finished':{'label':'Bot finished','in_app':True,'push':False,'sound':False,'digest':True},
     'design_reviews':{'label':'Design reviews','in_app':True,'push':True,'sound':False},
+    'scheduled':{'label':'Scheduled job results','in_app':True,'push':True,'sound':False},
+    'replies_away':{'label':'Replies while you\'re away','in_app':True,'push':True,'sound':False},
 }
 QUIET_DEFAULT={'enabled':True,'start':'22:00','end':'07:30','tz':'America/Los_Angeles','allow':['critical','expiring']}
 PREVIEWS=('full','title_only','hidden')
