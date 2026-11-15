@@ -16,7 +16,7 @@ export function ConversationSection({ id, title, children }: { id: SectionId; ti
     try { localStorage.setItem(storageKey, String(expanded)); }
     catch { /* Navigation still works when browser storage is unavailable. */ }
   }, [expanded, storageKey]);
-  return <section className="jg-stable-demo__session-section jg-sidebar-section" data-expanded={expanded}>
+  return <section id={id} className="jg-stable-demo__session-section jg-sidebar-section" data-expanded={expanded}>
     <h2><button type="button" className="jg-sidebar-section__toggle" aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(value => !value)}>
       <span>{title}</span><ChevronRight size={15} className="jg-sidebar-section__chevron" />
     </button></h2>
