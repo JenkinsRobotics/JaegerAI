@@ -1551,6 +1551,10 @@ class JaegerGatewayApp:
         if allowed_tools is not None:
             # [] = a compose-only turn: the agent is built with no tools.
             requested["allowed_tools"] = list(allowed_tools)
+        from jaeger_ai.core.runtime.cron_turns import apply_cron_turn
+        prompt, requested = apply_cron_turn(
+            prompt, session_id=session_id, requested=requested, source=source,
+        )
         try:
             admitted = self.store.admit_request(
                 session_id, prompt, request_id=request_id, requested=requested,
@@ -4628,6 +4632,11 @@ class JaegerGatewayApp:
             request_id = str(request_id).strip() or None
 
         requested = self._requested_from_body(body)
+        from jaeger_ai.core.runtime.cron_turns import apply_cron_turn
+        text, requested = apply_cron_turn(
+            text, session_id=session_id, requested=requested,
+            source=str(((requested.get("options") or {}).get("source") or body.get("source") or "")),
+        )
         try:
             model_revision=await self._turn_model_revision(session_id,requested,request_id)
             timing_admitted_at = time.monotonic()
@@ -6102,6 +6111,12 @@ class JaegerGatewayApp:
                             "pass": passes,
                             "reason": "owner continuation: the turn's objective was not closed by the last inner loop",
                         })
+                _tool_cap = None
+                try:
+                    if options.get("max_tool_calls") is not None:
+                        _tool_cap = max(1, int(options["max_tool_calls"]))
+                except (TypeError, ValueError):
+                    _tool_cap = None
                 outcome = runtime.run_subordinate_react(
                     prompt,
                     session_key=session_key,
@@ -6115,6 +6130,7 @@ class JaegerGatewayApp:
                     provider=str(selection.get("provider") or lane or "") or None,
                     local_only=bool(options.get("local_only")),
                     attachments=self._turn_attachments(session_key, execution),
+                    **({} if _tool_cap is None else {"max_tool_calls": _tool_cap}),
                     on_model=on_model,
                     on_agent=lambda agent: self._active_agents.__setitem__(request_id, agent),
                     cancellation=self._cancellations.get(request_id),
@@ -6190,13 +6206,20 @@ class JaegerGatewayApp:
             # neither is a stall to push the model through.
             return turn_owned and (request_id in self._owner_declined or request_id in self._owner_unanswered)
 
-        with ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned), turn_effort_hint(_effort_hint):
+        from jaeger_ai.core.runtime.cron_turns import cron_turn_scope
+        try:
+            _cron_steps = int(_options["max_steps"]) if _options.get("max_steps") is not None else None
+        except (TypeError, ValueError):
+            _cron_steps = None
+        if _cron_steps is None:
+            _cron_steps = (4 if turn_owned else 8) if _options.get("task_id") else None
+        with cron_turn_scope(_options, session_id=session_key), ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned), turn_effort_hint(_effort_hint):
             try:
                 result = run_continued_turn(
                     step, prompt, objective=objective or prompt,
                     durable=bool(_options.get("task_id")),
                     interactive=turn_owned,
-                    max_steps=(4 if turn_owned else 8) if _options.get("task_id") else None,
+                    max_steps=_cron_steps,
                     is_cancelled=stop_requested,
                     on_checkpoint=lambda checkpoint: self.event_bus.publish(
                         session_key, "turn.checkpoint", {**checkpoint, "request_id": request_id}),
@@ -6402,8 +6425,10 @@ class JaegerGatewayApp:
             logger.debug("guardrail refresh skipped", exc_info=True)
         actor = (execution or {}).get("caller")
         try:
+            from jaeger_ai.core.runtime.cron_turns import cron_turn_scope
             with caller_identity(actor if isinstance(actor, str) and actor.strip() else None), \
-                    goal_scope(self, session_id, request_id, execution), channel_reply_scope(self, session_id, request_id):
+                    goal_scope(self, session_id, request_id, execution), channel_reply_scope(self, session_id, request_id), \
+                    cron_turn_scope((execution or {}).get("options") or {}, session_id=session_id):
                 await self._execute_turn_inner(
                     session_id, turn_id, text, request_id=request_id, execution=execution,
                 )

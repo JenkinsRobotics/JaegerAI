@@ -1238,6 +1238,12 @@ class JaegerAgent:
         if os.environ.get("JAEGER_AUTO_SKILLS", "1").strip() == "0":
             return user_message
         try:
+            from jaeger_ai.core.runtime.cron_turns import cron_auto_route_allowed
+            if not cron_auto_route_allowed(query):
+                return user_message
+        except Exception:  # noqa: BLE001 — cron gating must not break a turn
+            pass
+        try:
             from jaeger_agent.skill_registry.toolset_scoping import is_untrusted_content
             if is_untrusted_content():
                 return user_message
