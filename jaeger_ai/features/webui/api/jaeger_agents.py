@@ -220,6 +220,44 @@ def _serve_rtc(handler, method: str, action: str) -> bool:
     return True
 
 
+_DROID_ACTIONS = {("GET", "status"), ("POST", "wake"), ("POST", "sleep"), ("POST", "toggle"),
+                  ("POST", "mute"), ("POST", "stop"), ("POST", "say")}
+
+
+def _serve_droid(handler, method: str, action: str) -> bool:
+    """Droid mode controls, forwarded to the droid service's owner-only unix socket."""
+    import http.client
+    import socket
+    from api.helpers import j, read_body
+
+    if (method, action) not in _DROID_ACTIONS:
+        j(handler, {"error": "Not found"}, status=404)
+        return True
+    sock_path = os.path.join(os.environ.get("JAEGER_STATE_DIR") or os.path.expanduser("~/.jaeger"),
+                             "run", "droid", "control.sock")
+
+    class _Unix(http.client.HTTPConnection):
+        def connect(self):
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(10)
+            self.sock.connect(sock_path)
+
+    body = json.dumps(read_body(handler) or {}).encode() if method == "POST" else None
+    try:
+        conn = _Unix("droid", timeout=10)
+        conn.request(method, "/" + action, body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+        payload, status = json.loads(resp.read() or b"{}"), resp.status
+        conn.close()
+    except (OSError, ValueError):
+        j(handler, {"state": "unavailable", "awake": False,
+                    "error": "Droid service is not running (Jaeger Droid menu-bar app)"},
+          status=200 if action == "status" else 503)
+        return True
+    j(handler, payload, status=status)
+    return True
+
+
 def _serve_local_vision(handler) -> bool:
     """Describe one camera/screen frame with the local VISION-certified model.
 
@@ -450,6 +488,9 @@ def route(handler, parsed, method: str) -> bool:
     # Realtime voice (WebRTC signalling) for the voice service on 127.0.0.1:8794.
     if path.startswith("/api/jaeger/rtc/"):
         return _serve_rtc(handler, method, path[len("/api/jaeger/rtc/"):])
+    # Droid mode (the Mac Studio as Jaeger's body) controls.
+    if path.startswith("/api/jaeger/droid/"):
+        return _serve_droid(handler, method, path[len("/api/jaeger/droid/"):])
     if method == "POST" and path == "/api/jaeger/vision/describe":
         return _serve_local_vision(handler)
     if method == "POST" and path == "/api/jaeger/voice/warm":

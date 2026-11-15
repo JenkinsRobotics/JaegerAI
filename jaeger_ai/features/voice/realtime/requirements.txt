@@ -3,3 +3,4 @@ pipecat-ai[webrtc,silero,local-smart-turn,google]==1.16.0
 parakeet-mlx
 aiohttp
 fastapi
+pyobjc-framework-AVFoundation  # Droid mode: AVAudioEngine voice processing
