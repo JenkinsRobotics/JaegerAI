@@ -606,6 +606,7 @@ class GatewaySessionStore:
             """)
             current = 16
         self._ensure_title_source(conn)
+        self._ensure_session_topics(conn)
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -640,6 +641,24 @@ class GatewaySessionStore:
                     "UPDATE sessions SET title_source=?, metadata_json=? WHERE session_id=?",
                     (source, json.dumps(meta), row["session_id"]),
                 )
+
+    def _ensure_session_topics(self, conn: sqlite3.Connection) -> None:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS session_topics (
+                topic_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                title_source TEXT NOT NULL DEFAULT 'auto',
+                start_message_id INTEGER NOT NULL,
+                end_message_id INTEGER,
+                summary TEXT NOT NULL DEFAULT '',
+                archived INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_topics_session ON session_topics(session_id, start_message_id);
+        """)
 
     def _title_source_of(self, row: sqlite3.Row, meta: dict[str, Any] | None = None) -> str:
         meta = meta if meta is not None else _row_meta(row["metadata_json"] if "metadata_json" in row.keys() else "{}")
@@ -1227,18 +1246,25 @@ class GatewaySessionStore:
         return msg_id
 
     def list_messages(self, session_id: str, *, before: int | None = None,
-                      limit: int = 50) -> dict[str, Any]:
+                      limit: int = 50, after: int | None = None,
+                      until: int | None = None) -> dict[str, Any]:
         """Newest first. ``next_before`` pages to older rows; null at the start."""
         limit = max(1, min(int(limit or 50), MESSAGES_PAGE_MAX))
+        clauses = ["session_id=?"]
+        params: list[Any] = [session_id]
+        if before is not None:
+            clauses.append("id<?")
+            params.append(int(before))
+        if after is not None:
+            clauses.append("id>=?")
+            params.append(int(after))
+        if until is not None:
+            clauses.append("id<=?")
+            params.append(int(until))
+        sql = "SELECT * FROM messages WHERE " + " AND ".join(clauses) + " ORDER BY id DESC LIMIT ?"
+        params.append(limit + 1)
         with self._get_conn() as conn:
-            if before is not None:
-                rows = conn.execute(
-                    "SELECT * FROM messages WHERE session_id=? AND id<? ORDER BY id DESC LIMIT ?",
-                    (session_id, int(before), limit + 1)).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
-                    (session_id, limit + 1)).fetchall()
+            rows = conn.execute(sql, params).fetchall()
         more = len(rows) > limit
         rows = rows[:limit]
         return {"messages": [message_dict(r, session_id) for r in rows],
@@ -3236,3 +3262,169 @@ class GatewaySessionStore:
         with self._immediate() as conn:
             conn.execute("UPDATE control_operations SET status='settled', receipt_json=? WHERE operation_id=?",
                          (json.dumps(receipt), operation_id))
+
+
+    def list_topics(self, session_id: str | None = None, *, include_archived: bool = False) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            self._ensure_session_topics(conn)
+            sql = "SELECT * FROM session_topics"
+            params: list[Any] = []
+            clauses = []
+            if session_id:
+                clauses.append("session_id=?")
+                params.append(session_id)
+            if not include_archived:
+                clauses.append("archived=0")
+            if clauses:
+                sql += " WHERE " + " AND ".join(clauses)
+            sql += " ORDER BY created_at ASC, start_message_id ASC"
+            rows = conn.execute(sql, params).fetchall()
+            return [self._topic_dict(row, self._topic_message_count(conn, row)) for row in rows]
+
+    def get_topic(self, topic_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            self._ensure_session_topics(conn)
+            row = conn.execute("SELECT * FROM session_topics WHERE topic_id=?", (topic_id,)).fetchone()
+            return self._topic_dict(row, self._topic_message_count(conn, row)) if row else None
+
+    def topic_for_message(self, session_id: str, message_id: int) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            self._ensure_session_topics(conn)
+            row = conn.execute(
+                "SELECT * FROM session_topics WHERE session_id=? AND archived=0 "
+                "AND start_message_id<=? AND (end_message_id IS NULL OR end_message_id>=?) "
+                "ORDER BY start_message_id DESC LIMIT 1",
+                (session_id, message_id, message_id),
+            ).fetchone()
+        return self._topic_dict(row) if row else None
+
+    def current_topic(self, session_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            self._ensure_session_topics(conn)
+            row = conn.execute(
+                "SELECT * FROM session_topics WHERE session_id=? AND archived=0 AND end_message_id IS NULL "
+                "ORDER BY start_message_id DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        return self._topic_dict(row) if row else None
+
+    def create_topic(
+        self,
+        session_id: str,
+        *,
+        title: str = "New conversation",
+        title_source: str = "auto",
+        start_message_id: int,
+        end_message_id: int | None = None,
+        summary: str = "",
+        metadata: dict[str, Any] | None = None,
+        close_open: bool = True,
+    ) -> dict[str, Any]:
+        topic_id = "topic_" + uuid.uuid4().hex
+        now = time.time()
+        source = "user" if title_source == "user" else "auto"
+        title = (title or "New conversation").strip()[:200] or "New conversation"
+        with self._get_conn() as conn:
+            self._ensure_session_topics(conn)
+            if close_open:
+                last = conn.execute(
+                    "SELECT MAX(id) FROM messages WHERE session_id=?",
+                    (session_id,),
+                ).fetchone()[0]
+                close_at = int(start_message_id) - 1
+                if last is not None:
+                    close_at = min(close_at, int(last))
+                if close_at > 0:
+                    conn.execute(
+                        "UPDATE session_topics SET end_message_id=?, updated_at=? "
+                        "WHERE session_id=? AND archived=0 AND end_message_id IS NULL AND start_message_id<=?",
+                        (close_at, now, session_id, close_at),
+                    )
+            conn.execute(
+                "INSERT INTO session_topics (topic_id, session_id, title, title_source, start_message_id, "
+                "end_message_id, summary, archived, created_at, updated_at, metadata_json) "
+                "VALUES (?,?,?,?,?,?,?,0,?,?,?)",
+                (topic_id, session_id, title, source, int(start_message_id), end_message_id,
+                 summary or "", now, now, json.dumps(metadata or {})),
+            )
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='chat_organization'").fetchone():
+                conn.execute("UPDATE chat_organization SET revision=revision+1 WHERE id=1")
+        topic = self.get_topic(topic_id)
+        if topic is None:
+            raise RuntimeError("topic was not stored")
+        return topic
+
+    def update_topic(
+        self,
+        topic_id: str,
+        *,
+        title: str | None = None,
+        title_source: str | None = None,
+        end_message_id: int | None | object = ...,
+        summary: str | None = None,
+        archived: bool | None = None,
+        metadata: dict[str, Any] | None = None,
+        merge_metadata: bool = True,
+    ) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            self._ensure_session_topics(conn)
+            row = conn.execute("SELECT * FROM session_topics WHERE topic_id=?", (topic_id,)).fetchone()
+            if row is None:
+                return None
+            meta = _row_meta(row["metadata_json"])
+            if metadata is not None:
+                meta = {**meta, **metadata} if merge_metadata else dict(metadata)
+            source = title_source if title_source in {"auto", "user"} else row["title_source"]
+            next_title = (title.strip()[:200] if isinstance(title, str) and title.strip() else row["title"])
+            end = row["end_message_id"] if end_message_id is ... else end_message_id
+            nxt_summary = row["summary"] if summary is None else summary
+            nxt_archived = row["archived"] if archived is None else int(bool(archived))
+            conn.execute(
+                "UPDATE session_topics SET title=?, title_source=?, end_message_id=?, summary=?, archived=?, "
+                "updated_at=?, metadata_json=? WHERE topic_id=?",
+                (next_title, source, end, nxt_summary, nxt_archived, time.time(), json.dumps(meta), topic_id),
+            )
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='chat_organization'").fetchone():
+                conn.execute("UPDATE chat_organization SET revision=revision+1 WHERE id=1")
+        return self.get_topic(topic_id)
+
+    def delete_topic(self, topic_id: str) -> bool:
+        with self._get_conn() as conn:
+            self._ensure_session_topics(conn)
+            result = conn.execute("DELETE FROM session_topics WHERE topic_id=?", (topic_id,))
+            if result.rowcount and conn.execute("SELECT 1 FROM sqlite_master WHERE name='chat_organization'").fetchone():
+                conn.execute("UPDATE chat_organization SET revision=revision+1 WHERE id=1")
+            return result.rowcount > 0
+
+    def next_message_id(self, session_id: str) -> int:
+        with self._get_conn() as conn:
+            last = conn.execute("SELECT MAX(id) FROM messages WHERE session_id=?", (session_id,)).fetchone()[0]
+        return int(last or 0) + 1
+
+    def _topic_message_count(self, conn: sqlite3.Connection, row: sqlite3.Row) -> int:
+        return int(conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE session_id=? AND id>=? AND (? IS NULL OR id<=?)",
+            (row["session_id"], row["start_message_id"], row["end_message_id"], row["end_message_id"]),
+        ).fetchone()[0])
+
+    def _topic_dict(self, row: sqlite3.Row, message_count: int | None = None) -> dict[str, Any]:
+        meta = _row_meta(row['metadata_json'])
+        return {
+            'topic_id': row['topic_id'],
+            'session_id': row['session_id'],
+            'title': row['title'],
+            'title_source': row['title_source'],
+            'start_message_id': row['start_message_id'],
+            'end_message_id': row['end_message_id'],
+            'summary': row['summary'] or '',
+            'archived': bool(row['archived']),
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at'],
+            'pinned': bool(meta.get('pinned')),
+            'project_id': meta.get('project_id'),
+            'section_id': meta.get('section_id'),
+            'position': meta.get('position'),
+            'metadata': meta,
+            'kind': 'topic',
+            'message_count': 0 if message_count is None else int(message_count),
+        }

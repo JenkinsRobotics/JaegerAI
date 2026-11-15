@@ -54,8 +54,12 @@ export const PAGE_LIMIT = 50;
 export const PAGE_LIMIT_MAX = 200;
 export const HOME_ROUTES = {
   home: (agentId: string) => `/v1/agents/${encodeURIComponent(agentId)}/home`,
-  page: (sessionId: string, limit: number, before?: string) =>
-    `/v1/sessions/${encodeURIComponent(sessionId)}/messages?${before ? `before=${encodeURIComponent(before)}&` : ""}limit=${Math.min(Math.max(1, limit), PAGE_LIMIT_MAX)}`,
+  page: (sessionId: string, limit: number, before?: string, topic?: string | null) => {
+    const params = new URLSearchParams({ limit: String(Math.min(Math.max(1, limit), PAGE_LIMIT_MAX)) });
+    if (before) params.set("before", String(before));
+    if (topic) params.set("topic", topic);
+    return `/v1/sessions/${encodeURIComponent(sessionId)}/messages?${params}`;
+  },
   /** Older chats: the existing session list (last_message_preview, last_activity_at, last_event_id). */
   sessions: (agentId: string) => `/v1/sessions?agent_id=${encodeURIComponent(agentId)}`,
 };
@@ -173,6 +177,8 @@ export interface HomeOptions {
   pageSize?: number;
   /** The SSE cursor for a session the chat just loaded (WebHost.noteCursor). */
   onCursor?: (sessionId: string, eventId: number) => void;
+  /** When set, message pages are filtered to this home-chat topic. */
+  topicId?: () => string | null | undefined;
 }
 
 /** Session stream subscription (JaegerSource.stream). */
@@ -194,7 +200,7 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: 
       const detail = await getJson(`/v1/sessions/${encodeURIComponent(sessionId)}`) as SessionRow;
       if (detail.agent_id) agentOf.set(sessionId, detail.agent_id);
     }
-    const wire = await getJson(HOME_ROUTES.page(sessionId, limit, before)) as WirePage;
+    const wire = await getJson(HOME_ROUTES.page(sessionId, limit, before, opts.topicId?.() ?? undefined)) as WirePage;
     if (!Array.isArray(wire.messages) || wire.messages.some(message => message.session_id !== sessionId)) throw new Error("History response belongs to a different conversation; nothing was merged");
     const next = wire.next_before == null ? undefined : String(wire.next_before);
     if (before && next && (next === before || (/^\d+$/.test(before) && /^\d+$/.test(next) && Number(next) >= Number(before)))) throw new Error("History cursor did not advance; current messages are preserved");

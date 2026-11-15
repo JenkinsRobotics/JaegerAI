@@ -35,6 +35,31 @@ class ChatOrganization:
                 extra['title_source'] = 'user' if extra.get('manual_title') else 'auto'
             sessions.append({'session_id': s['session_id'], 'title': s['title'], 'workspace': s['workspace'],
                 'archived': bool(meta.get('archived')), **extra})
+        if 'session_topics' in {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+            for topic in conn.execute("SELECT * FROM session_topics"):
+                meta = json.loads(topic['metadata_json'] or '{}')
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM messages WHERE session_id=? AND id>=? AND (? IS NULL OR id<=?)",
+                    (topic['session_id'], topic['start_message_id'], topic['end_message_id'], topic['end_message_id']),
+                ).fetchone()[0]
+                sessions.append({
+                    'session_id': 'topic:' + topic['topic_id'],
+                    'title': topic['title'],
+                    'workspace': '',
+                    'archived': bool(topic['archived']),
+                    'pinned': bool(meta.get('pinned')),
+                    'manual_title': topic['title_source']=='user',
+                    'title_source': topic['title_source'],
+                    'project_id': meta.get('project_id'),
+                    'section_id': meta.get('section_id'),
+                    'position': meta.get('position'),
+                    'kind': 'topic',
+                    'home_session_id': topic['session_id'],
+                    'start_message_id': topic['start_message_id'],
+                    'end_message_id': topic['end_message_id'],
+                    'message_count': int(count),
+                    'updated_at': topic['updated_at'],
+                })
         return {'revision': row['revision'], 'groups': json.loads(row['groups_json']), 'sessions': sessions}
 
     def snapshot(self):
@@ -120,11 +145,24 @@ class ChatOrganization:
         original={s['session_id']:s for s in before['sessions']}
         for s in after['sessions']:
             if original.get(s['session_id'])==s: continue
+            if str(s['session_id']).startswith('topic:'):
+                topic_id=s['session_id'][6:]
+                row=conn.execute('SELECT metadata_json,title_source FROM session_topics WHERE topic_id=?',(topic_id,)).fetchone()
+                if not row: raise OrganizationConflict('Conversation was deleted; refresh and try again')
+                meta=json.loads(row[0] or '{}')
+                for key in ('pinned','project_id','section_id','position'):
+                    if key in s: meta[key]=s.get(key)
+                source=s.get('title_source')
+                if source not in ('auto','user'):
+                    source='user' if s.get('manual_title') else (row['title_source'] or 'auto')
+                conn.execute('UPDATE session_topics SET title=?, title_source=?, archived=?, metadata_json=?, updated_at=? WHERE topic_id=?',
+                             (s['title'], source, int(bool(s.get('archived'))), json.dumps(meta), time.time(), topic_id))
+                continue
             row=conn.execute('SELECT metadata_json FROM sessions WHERE session_id=?',(s['session_id'],)).fetchone()
             if not row: raise OrganizationConflict('Conversation was deleted; refresh and try again')
             meta=json.loads(row[0] or '{}')
             meta['archived']=s['archived']
-            meta['chat_organization']={k:v for k,v in s.items() if k not in ('session_id','title','workspace','archived')}
+            meta['chat_organization']={k:v for k,v in s.items() if k not in ('session_id','title','workspace','archived','kind','home_session_id','start_message_id','end_message_id')}
             source = s.get('title_source')
             if source not in ('auto','user'):
                 source = 'user' if s.get('manual_title') else 'auto'

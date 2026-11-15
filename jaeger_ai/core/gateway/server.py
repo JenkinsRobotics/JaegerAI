@@ -1031,6 +1031,11 @@ class JaegerGatewayApp:
             _install_session_titles(self)
         except Exception:  # noqa: BLE001 — title generation never blocks startup
             logger.warning("session title generation unavailable", exc_info=True)
+        try:
+            from jaeger_ai.core.gateway.session_topics import install as _install_session_topics
+            _install_session_topics(self)
+        except Exception:  # noqa: BLE001 — topic segmentation never blocks startup
+            logger.warning("session topic segmentation unavailable", exc_info=True)
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
         self._install_otel_export()
@@ -1805,6 +1810,11 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/transfer", self.handle_session_transfer)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
         self.app.router.add_get("/v1/sessions/{id}/messages", self.handle_list_messages)
+        self.app.router.add_get("/v1/sessions/{id}/topics", self.handle_list_topics)
+        self.app.router.add_post("/v1/sessions/{id}/topics", self.handle_create_topic)
+        self.app.router.add_patch("/v1/topics/{topic_id}", self.handle_patch_topic)
+        self.app.router.add_delete("/v1/topics/{topic_id}", self.handle_delete_topic)
+        self.app.router.add_post("/v1/agents/{id}/home/topics", self.handle_home_new_topic)
         self.app.router.add_get("/v1/events/stream", self.handle_global_stream)
         self.app.router.add_get("/v1/connect-apps", self.handle_connect_apps)
         self.app.router.add_get("/v1/connect-apps/{id}/state", self.handle_connect_app_state)
@@ -3313,6 +3323,73 @@ class JaegerGatewayApp:
         sid, created = self._ensure_agent_home(canonical, getattr(record, "display_name", None))
         return web.json_response({"session_id": sid, "agent_id": canonical, "created": created})
 
+    async def handle_list_topics(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        include = request.query.get("include_archived") in {"1", "true", "yes"}
+        return web.json_response({"session_id": session_id, "topics": self.store.list_topics(session_id, include_archived=include)})
+
+    async def handle_create_topic(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        from jaeger_ai.core.gateway.session_topics import start_new_topic
+        topic = await asyncio.to_thread(start_new_topic, self.store, session_id, event_bus=self.event_bus)
+        return web.json_response({"session_id": session_id, "topic": topic}, status=201)
+
+    async def handle_home_new_topic(self, request: web.Request) -> web.Response:
+        agent_id = request.match_info["id"]
+        record = self._registry().get_agent(agent_id)
+        if record is None:
+            return web.json_response({"error": "Agent not found"}, status=404)
+        canonical = str(getattr(record, "id", None) or agent_id)
+        sid, created = self._ensure_agent_home(canonical, getattr(record, "display_name", None) or "Jaeger")
+        from jaeger_ai.core.gateway.session_topics import start_new_topic
+        topic = await asyncio.to_thread(start_new_topic, self.store, sid, event_bus=self.event_bus)
+        return web.json_response({"session_id": sid, "agent_id": canonical, "created": created, "topic": topic}, status=201)
+
+    async def handle_patch_topic(self, request: web.Request) -> web.Response:
+        topic_id = request.match_info["topic_id"]
+        if topic_id.startswith("topic:"):
+            topic_id = topic_id[6:]
+        topic = self.store.get_topic(topic_id)
+        if topic is None:
+            return web.json_response({"error": "Topic not found"}, status=404)
+        body = await request.json()
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON object required"}, status=400)
+        kwargs = {}
+        meta = {}
+        if "title" in body:
+            title = str(body.get("title") or "").strip()
+            if not title:
+                return web.json_response({"error": "Title required"}, status=400)
+            kwargs["title"] = title[:200]
+            kwargs["title_source"] = "user"
+        if "archived" in body:
+            kwargs["archived"] = bool(body["archived"])
+        if "pinned" in body:
+            meta["pinned"] = bool(body["pinned"])
+        if "project_id" in body:
+            meta["project_id"] = body["project_id"]
+        if meta:
+            kwargs["metadata"] = meta
+        updated = self.store.update_topic(topic_id, **kwargs) if kwargs else topic
+        self.event_bus.publish(topic["session_id"], "session.updated", {"session_id": topic["session_id"], "topic": updated})
+        return web.json_response({"topic": updated})
+
+    async def handle_delete_topic(self, request: web.Request) -> web.Response:
+        topic_id = request.match_info["topic_id"]
+        if topic_id.startswith("topic:"):
+            topic_id = topic_id[6:]
+        topic = self.store.get_topic(topic_id)
+        if topic is None:
+            return web.json_response({"error": "Topic not found"}, status=404)
+        self.store.delete_topic(topic_id)
+        self.event_bus.publish(topic["session_id"], "session.updated", {"session_id": topic["session_id"], "topic_id": topic_id, "deleted": True})
+        return web.json_response({"deleted": True, "topic_id": topic_id})
+
     async def handle_list_messages(self, request: web.Request) -> web.Response:
         """GET /v1/sessions/{id}/messages?before=<message_id>&limit=50 — newest first."""
         session_id = request.match_info["id"]
@@ -3325,7 +3402,16 @@ class JaegerGatewayApp:
             return web.json_response({"error": "limit must be between 1 and 200"}, status=400)
         if self.store.get_session(session_id) is None:
             return web.json_response({"error": "Session not found"}, status=404)
-        return web.json_response(self.store.list_messages(session_id, before=before, limit=limit))
+        after = until = None
+        topic_id = request.query.get("topic")
+        if topic_id:
+            ident = topic_id[6:] if topic_id.startswith("topic:") else topic_id
+            topic = self.store.get_topic(ident)
+            if topic is None or topic["session_id"] != session_id:
+                return web.json_response({"error": "Topic not found"}, status=404)
+            after = int(topic["start_message_id"])
+            until = int(topic["end_message_id"]) if topic.get("end_message_id") is not None else None
+        return web.json_response(self.store.list_messages(session_id, before=before, limit=limit, after=after, until=until))
 
     def _post_handoff_request(self, record: dict[str, Any]) -> None:
         """The task, as a message in the specialist's home chat."""

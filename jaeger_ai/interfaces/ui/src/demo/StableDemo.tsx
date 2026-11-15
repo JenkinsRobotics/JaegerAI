@@ -40,6 +40,15 @@ function sessionActivity(row: SessionRow) { return row.last_activity_at ?? row.u
 
 const GENERIC_TITLES = new Set(["", "Jaeger stable chat", "New conversation", "New chat", "Chat with Jaeger", "Untitled conversation", "Untitled"]);
 function isGenericTitle(title?: string) { return !title || GENERIC_TITLES.has(title); }
+const JAEGER_HOME_ID = "agent-native:jaeger";
+const JAEGER_HOME_AGENT = "native:jaeger";
+function isTopicId(id?: string | null) { return Boolean(id && (id.startsWith("topic:") || id.startsWith("topic_"))); }
+function topicIdent(id: string) { return id.startsWith("topic:") ? id.slice(6) : id; }
+function topicKey(id: string) { return id.startsWith("topic:") ? id : `topic:${id}`; }
+function isJaegerHome(id?: string | null) { return id === JAEGER_HOME_ID; }
+function topicAsRow(row: {session_id:string; title?:string; archived?:boolean; message_count?:number; updated_at?:number; home_session_id?:string}): SessionRow {
+  return { session_id: row.session_id, title: row.title || "New conversation", archived: row.archived, message_count: row.message_count, updated_at: row.updated_at, last_activity_at: row.updated_at, agent_id: JAEGER_HOME_AGENT };
+}
 function isBackgroundSession(row: SessionRow) {
   const title = (row.title || "").trim();
   const lowered = title.toLowerCase();
@@ -217,6 +226,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const toolsRef = useRef<HTMLDivElement>(null);
   const route = useRoute();
   const linkedSession = route.page === 'chat' ? route.params.get('session') : null;
+  const linkedTopic = route.page === 'chat' ? route.params.get('topic') : null;
   const invalidLinkedSession = linkedSession !== null && !validConversationId(linkedSession);
   const [panelOpen, setPanelOpen] = useState(false);
   const [workView, setWorkView] = useState<WorkView | null>(null);
@@ -232,6 +242,9 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [managerSelection,setManagerSelection]=useState<string[]|null>(null);
   const refreshOrganization=useCallback(async()=>{
     if(!source.organization)return;
+    if(source.kind==="live"){
+      try{await httpGetJson()(`/v1/agents/${encodeURIComponent(JAEGER_HOME_AGENT)}/home`);}catch{/* Home is created on first successful visit. */}
+    }
     let org=await source.organization.get();
     const legacy=storedPins();
     const migrate=org.sessions.filter(row=>legacy.has(row.session_id)&&row.pinned===undefined).map(row=>row.session_id);
@@ -282,6 +295,8 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [session, setSession] = useState(() => {
     return linkedSession !== null ? validConversationId(linkedSession) ? linkedSession : '' : storedSession();
   });
+  const [topic, setTopic] = useState<string | null>(linkedTopic);
+  const topicRef = useRef<string | null>(linkedTopic);
   const [selectedRow, setSelectedRow] = useState<SessionRow | null>(null);
   const [executionHost, setExecutionHost] = useState('');
   const [shareOrigin, setShareOrigin] = useState(location.origin);
@@ -302,10 +317,11 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     try { if (localStorage.getItem(DEMO_SESSION_KEY) === missingSession) localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* the in-memory recovery still works */ }
   }, [linkedSession]);
   useEffect(() => {
+    if (linkedTopic !== topic) { topicRef.current = linkedTopic; setTopic(linkedTopic); }
     if (linkedSession !== null && !invalidLinkedSession && linkedSession !== session) {
       setReady(false); setSelectedRow(null); setSession(linkedSession);
     }
-  }, [linkedSession, invalidLinkedSession, session]);
+  }, [linkedSession, linkedTopic, invalidLinkedSession, session, topic]);
   useEffect(() => {
     if (!source.connectionInfo) return;
     let live = true;
@@ -331,7 +347,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   }, [sidebarOpen]);
   const host = useMemo(() => {
     const h = new WebHost(source);
-    h.home = contractHome(httpGetJson(), { agentName: id => id === "native:jaeger" ? "Jaeger" : id, onCursor: (sid, cursor) => h.noteCursor(sid, cursor) }, source.stream.bind(source));
+    h.home = contractHome(httpGetJson(), { agentName: id => id === "native:jaeger" ? "Jaeger" : id, onCursor: (sid, cursor) => h.noteCursor(sid, cursor), topicId: () => topicRef.current }, source.stream.bind(source));
     h.openDetails = () => navigate(pathOf("agents"));
     return h;
   }, [source]);
@@ -403,24 +419,28 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     }, e => { if (live) setHistoryError(String((e as Error).message)); });
     return () => { live = false; };
   }, [source, session, linkedSession]);
-  const selectSession = (id: string) => {
+  const selectSession = (id: string, nextTopic?: string | null) => {
+    if (isTopicId(id) && !nextTopic) { nextTopic = id; id = JAEGER_HOME_ID; }
+    const topicId = nextTopic ? topicIdent(nextTopic) : null;
     if (id !== session) { setReady(false); setSession(id); }
-    navigate(conversationPath(id, location.search));
+    topicRef.current = topicId;
+    setTopic(topicId);
+    navigate(conversationPath(id, location.search, topicId));
     try { localStorage.setItem(DEMO_SESSION_KEY, id); } catch { setHistoryError("This browser could not remember the selected conversation."); }
   };
   const start = async () => {
     if (busy) return;
     setBusy(true); setError("");
     try {
-      // Independent lead conversation: never reuse or replay the stuck Builder request.
-      const row = await source.createSession({ agent_id: "native:jaeger", title: "New chat" });
-      selectSession(row.session_id);
+      const result = await sendJson<{session_id:string; topic:{topic_id:string}}>("POST", `/v1/agents/${encodeURIComponent(JAEGER_HOME_AGENT)}/home/topics`, {});
+      selectSession(result.session_id, result.topic.topic_id);
     } catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(false); }
   };
+  const currentTopic = topic ? organization?.sessions.find(row => row.session_id === topicKey(topic)) : undefined;
   const currentRow = recent.find(row => row.session_id === session) ?? (selectedRow?.session_id === session ? selectedRow : undefined);
-  const currentTitle = organization?.sessions.find(row=>row.session_id===session)?.title || currentRow?.title || "New chat";
-  const headerTitle = currentRow ? chatTitle({ ...currentRow, title: currentTitle }) : (isGenericTitle(currentTitle) ? "New chat" : currentTitle);
+  const currentTitle = currentTopic?.title || organization?.sessions.find(row=>row.session_id===session)?.title || currentRow?.title || (isJaegerHome(session) ? "Jaeger" : "New chat");
+  const headerTitle = currentTopic ? currentTopic.title : isJaegerHome(session) && !topic ? "Jaeger" : currentRow ? chatTitle({ ...currentRow, title: currentTitle }) : (isGenericTitle(currentTitle) ? "New chat" : currentTitle);
   const togglePopup = (popup: Exclude<HeaderPopup, null>) => {
     setHeaderPopup(value => value === popup ? null : popup);
     setMenuPage("main"); setRenameOpen(false);
@@ -472,7 +492,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       return next;
     });
   };
-  const togglePinned = () => togglePinnedSession(session);
+  const togglePinned = () => togglePinnedSession(topic ? topicKey(topic) : session);
   const renameConversation = async (id: string, title: string) => {
     const next = title.trim();
     if (!id || !next) return;
@@ -526,7 +546,9 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     if (!deleteConfirm?.length || deleting) return;
     if (!source.deleteSession) { setHistoryError("This Gateway does not support permanent session deletion."); setDeleteConfirm(null); return; }
     setDeleting(true); setHistoryError("");
-    const results = await Promise.allSettled(deleteConfirm.map(id => source.deleteSession!(id)));
+    const results = await Promise.allSettled(deleteConfirm.map(id => isTopicId(id)
+      ? sendJson("DELETE", `/v1/topics/${encodeURIComponent(topicIdent(id))}`).then(() => ({deleted:true}))
+      : source.deleteSession!(id)));
     const deleted = deleteConfirm.filter((_, index) => results[index].status === "fulfilled" && (results[index] as PromiseFulfilledResult<{deleted:boolean}>).value.deleted);
     const failed = deleteConfirm.length - deleted.length;
     if (deleted.length) {
@@ -581,17 +603,31 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   };
   const agent = agents.find(a => a.id === (currentRow?.agent_id || "native:jaeger"));
   const organized=new Map(organization?.sessions.map(row=>[row.session_id,row]));
-  const visibleRows=visibleChats(recent.filter(row=>!organized.get(row.session_id)?.archived).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title})), session);
-  const pinnedRows = visibleRows.filter(row => pinnedSessions.has(row.session_id));
-  const unpinnedRows = visibleRows.filter(row => !pinnedSessions.has(row.session_id));
+  const visibleRows=visibleChats(recent.filter(row=>!organized.get(row.session_id)?.archived && !isJaegerHome(row.session_id)).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title})), session);
+  const topicRows=(organization?.sessions||[]).filter(row=>row.session_id.startsWith("topic:") && !row.archived && ((row.message_count||0)>0 || (session=== (row.home_session_id||JAEGER_HOME_ID) && topic===topicIdent(row.session_id)))).map(row=>topicAsRow(row));
+  const homeRow=recent.find(row=>isJaegerHome(row.session_id)) || {session_id:JAEGER_HOME_ID, title:"Jaeger", agent_id:JAEGER_HOME_AGENT, message_count:0};
+  const allRows=[...topicRows, ...visibleRows];
+  const pinnedRows = allRows.filter(row => pinnedSessions.has(row.session_id));
+  const unpinnedRows = allRows.filter(row => !pinnedSessions.has(row.session_id));
+  const topicIdSet=new Set(topicRows.map(row=>row.session_id));
   const projectDefs=(organization?.groups||[]).filter(g=>g.kind==="project");
   const projectGroups=projectDefs.map(group=>({group, rows: unpinnedRows.filter(row=>organized.get(row.session_id)?.project_id===group.id)})).filter(entry=>entry.rows.length);
   const inProject=new Set(projectGroups.flatMap(entry=>entry.rows.map(row=>row.session_id)));
-  const recentRows = unpinnedRows.filter(row=>!inProject.has(row.session_id));
+  const recentRows = unpinnedRows.filter(row=>!inProject.has(row.session_id) && !topicIdSet.has(row.session_id));
+  const topicList = unpinnedRows.filter(row=>topicIdSet.has(row.session_id) && !inProject.has(row.session_id)).sort((a,b)=>sessionActivity(b)-sessionActivity(a));
   const searching=Boolean(historySearch.trim());
-  const resultRows=(searching ? (searchRows ?? []) : recentRows).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title})).sort((a,b)=>sessionActivity(b)-sessionActivity(a));
+  const searchNeedle=historySearch.trim().toLowerCase();
+  const resultRows=(searching
+    ? [
+        ...(searchRows ?? []).filter(row => !isJaegerHome(row.session_id) && !row.session_id.startsWith("topic:")),
+        ...topicRows.filter(row => (row.title || "").toLowerCase().includes(searchNeedle)),
+        ...((!searchNeedle || "jaeger".includes(searchNeedle) || (homeRow.title||"").toLowerCase().includes(searchNeedle)) ? [homeRow] : []),
+      ]
+    : recentRows
+  ).map(row=>({...row,title:organized.get(row.session_id)?.title||row.title||row.title})).sort((a,b)=>sessionActivity(b)-sessionActivity(a));
   const resultGroups=groupChatsByDate(resultRows);
-  const conversationRow = (row: SessionRow, pinned: boolean) => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned={pinned} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} projects={projectDefs.map(group => ({ id: group.id, name: group.name }))} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onRename={title => void renameConversation(row.session_id, title)} onArchive={() => void archiveConversation(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} onMove={projectId => void moveConversation(row.session_id, projectId)} onCreateProject={name => void createProjectAndMove(row.session_id, name)} />;
+  const rowIsActive = (row: SessionRow) => isTopicId(row.session_id) ? (session === (organized.get(row.session_id)?.home_session_id || JAEGER_HOME_ID) && topic === topicIdent(row.session_id)) : (session === row.session_id && !topic);
+  const conversationRow = (row: SessionRow, pinned: boolean) => <ConversationRow key={row.session_id} row={row} active={rowIsActive(row)} pinned={pinned} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} projects={projectDefs.map(group => ({ id: group.id, name: group.name }))} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onRename={title => void renameConversation(row.session_id, title)} onArchive={() => void archiveConversation(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} onMove={projectId => void moveConversation(row.session_id, projectId)} onCreateProject={name => void createProjectAndMove(row.session_id, name)} />;
   const workspacePage = route.page !== "chat";
   const routeTitle: Record<PageId, string> = { library: "Library", automations: "Automations", feed: "Feed", home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Imagine", models: "Models", machine: "Machine", settings: "Settings" };
   const activeSection = route.page === "work" && route.sub === "tasks" ? "tasks" : route.page === "models" ? "studio" : route.page === "home" ? "chat" : route.page;
@@ -613,7 +649,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
             {menuPage !== "main" && <button className="jg-stable-demo__popover-back" type="button" onClick={() => setMenuPage("main")}><ChevronLeft size={16} />{menuPage === "copy" ? "Copy" : menuPage === "fork" ? "Fork" : "Open in"}</button>}
             {menuPage === "main" && <>
               {renameOpen ? <form className="jg-stable-demo__rename" onSubmit={e => { e.preventDefault(); void renameSession(); }}><label htmlFor="jaeger-rename">Conversation name</label><input id="jaeger-rename" autoFocus value={renameDraft} onChange={e => setRenameDraft(e.target.value)} /><div><button type="button" onClick={() => setRenameOpen(false)}>Cancel</button><button type="submit" disabled={!renameDraft.trim()}>Save</button></div></form> : <button role="menuitem" type="button" disabled={!session} onClick={() => { setRenameDraft(currentTitle); setRenameOpen(true); }}><Pencil size={17} />Rename</button>}
-              <button role="menuitem" type="button" disabled={!session} onClick={togglePinned}><Pin size={17} />{pinnedSessions.has(session) ? "Unpin" : "Pin"}</button>
+              <button role="menuitem" type="button" disabled={!session} onClick={togglePinned}><Pin size={17} />{pinnedSessions.has(topic ? topicKey(topic) : session) ? "Unpin" : "Pin"}</button>
               <div className="jg-stable-demo__menu-separator" />
               <button role="menuitem" type="button" onClick={() => openWork("sidechat")}><MessageSquare size={19} />New side chat</button>
               <button role="menuitem" type="button" disabled={!session || source.kind !== "live" || forkBusy} onClick={() => setMenuPage("fork")}><Workflow size={19} />Fork<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
@@ -672,10 +708,14 @@ export function StableDemo({ source }: { source: JaegerSource }) {
               {!resultGroups.length && !searchError && <p>{searchRows === null ? "Searching…" : `No conversations match “${historySearch.trim()}”.`}</p>}
               {resultGroups.map(group => <div className="jg-stable-demo__date-group" key={group.label}><h2>{group.label}</h2>{group.rows.map(row => conversationRow(row, pinnedSessions.has(row.session_id)))}</div>)}
             </> : <>
+              <div className="jg-stable-demo__home-chat">
+                <button className="jg-stable-demo__session-title" type="button" data-home="true" title="Jaeger" aria-current={isJaegerHome(session) && !topic ? "true" : undefined} onClick={() => selectSession(JAEGER_HOME_ID)}>{homeRow.title || "Jaeger"}</button>
+              </div>
+              {topicList.length > 0 && <ConversationSection id="topics" title="Topics">{topicList.map(row => conversationRow(row, false))}</ConversationSection>}
               {pinnedRows.length > 0 && <ConversationSection id="pinned" title="Pinned">{pinnedRows.map(row => conversationRow(row, true))}</ConversationSection>}
               {projectGroups.length > 0 && <ConversationSection id="projects" title="Projects">{projectGroups.map(({group, rows}) => <div className="jg-stable-demo__project" key={group.id}><h3 title={group.name}><FolderOpen size={15} />{group.name}</h3>{rows.map(row => conversationRow(row, false))}</div>)}</ConversationSection>}
               {resultGroups.map(group => <div className="jg-stable-demo__date-group" key={group.label}><h2>{group.label}</h2>{group.rows.map(row => conversationRow(row, false))}</div>)}
-              {!resultGroups.length && !pinnedRows.length && !projectGroups.length && !historyError && <p>Your conversations will appear here.</p>}
+              {!resultGroups.length && !pinnedRows.length && !projectGroups.length && !topicList.length && !historyError && <p>Your conversations will appear here.</p>}
             </>}
           </div>
         </>}
@@ -697,7 +737,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
 
       {error && <p className="jg-stable-demo__connection-alert" role="alert"><span>{error}</span><button type="button" onClick={() => location.reload()}>Reconnect</button></p>}
       <section className="jg-stable-demo__body" hidden={workspacePage} aria-label="Chat">
-        {session && ready && !invalidLinkedSession && (linkedSession === null || linkedSession === session) ? <ChatPane onAvatarState={setAvatarState} host={host} sessionId={session} agents={agent ? [agent] : agents} onSessionMissing={recoverMissingSession} /> : !ready || !historyReady || historyError || session ?
+        {session && ready && !invalidLinkedSession && (linkedSession === null || linkedSession === session) ? <ChatPane onAvatarState={setAvatarState} host={host} sessionId={session} topicId={isJaegerHome(session) ? topic : null} agents={agent ? [agent] : agents} onSessionMissing={recoverMissingSession} /> : !ready || !historyReady || historyError || session ?
           <div className="jg-stable-demo__empty" role="status"><h1>{error || historyError ? "Waiting to reconnect" : "Restoring your conversation"}</h1><p>{error || historyError ? "Jaeger is temporarily unavailable. Your saved conversation will return when the connection is restored." : "Loading your saved conversation from Jaeger."}</p></div> :
           <div className="jg-stable-demo__empty"><span className="jg-stable-demo__eyebrow">YOUR AI COMPANION</span><h1>What would you like to work on?</h1><p>Talk with Jaeger, follow a task, or explore your files.<br />Your conversation stays here when you return.</p>
           <button type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "Start conversation"}</button></div>}
