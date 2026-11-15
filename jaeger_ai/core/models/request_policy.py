@@ -48,14 +48,19 @@ def route_for(client: Any, *, reason: str = "selected") -> ModelRoute:
 
 
 def payload_text(payload: Any) -> str:
-    """Extract text without copying image bytes into policy logs/classification."""
+    """Extract text without copying image bytes into policy logs/classification.
+
+    Skip developer-owned ``system`` (and tool schemas): those routinely mention
+    ``~/.ssh``, private keys, or "do not share" as safety instructions, which
+    must not classify a public user turn as private.
+    """
     if isinstance(payload, str):
         return "" if payload.startswith("data:image/") else payload
     if isinstance(payload, list):
         return "\n".join(payload_text(item) for item in payload)
     if isinstance(payload, dict):
         return "\n".join(payload_text(v) for k, v in payload.items()
-                         if k not in {"images", "image_url", "data", "tools", "tool_choice"})
+                         if k not in {"images", "image_url", "data", "tools", "tool_choice", "system"})
     return ""
 
 

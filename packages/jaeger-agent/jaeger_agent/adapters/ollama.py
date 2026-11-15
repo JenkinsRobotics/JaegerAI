@@ -99,6 +99,12 @@ class OllamaAdapter(OpenAIAdapter):
             body["think"] = False
         elif effort in values:
             body["think"] = effort
+        elif values and set(values) <= {True, False}:
+            # Chat speed hints use "low"/"high"; many local models only accept think on/off.
+            want = False if effort in {"none", "low"} else True
+            if want not in values:
+                want = True if True in values else False
+            body["think"] = want
         elif values:
             raise ValueError(f"{self.model} does not support reasoning effort {effort!r}; supported thinking values: {values}")
         self.effective_thinking = body.get("think", (metadata.get("thinking") or {}).get("default"))
