@@ -1,4 +1,5 @@
 import { OwnerProfilePanel } from "./settings/OwnerProfilePanel";
+import { pushTarget, syncPush } from "./platform/webPush";
 import type {ClipState} from "./avatar/avatar";
 import {FinancePanel} from "./settings/FinancePanel";
 import {useDevicePreferences} from "./settings/devicePreferences";
@@ -248,6 +249,17 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
       setSettingsOpen(false);setDetailsAgentId(null);setHistoryAgentId(null);setSelection(selected);setPhoneView('chat');
     }catch(e){if(generation===notificationGeneration.current)setSessionError("Couldn't open notification conversation: "+message(e));}
   },[source,store.agents]);
+  // Web Push deep links: /?session=<id>&src=push (cold start) or a click while a window is open.
+  const pushReady=initialReady&&!store.loading&&!store.error;
+  useEffect(()=>{
+    if(!pushReady)return;
+    const open=(url:string)=>{const target=pushTarget(url);if(!target)return;if(target.session_id)void openNotificationConversation(target.session_id);
+      const here=new URL(location.href);if(here.searchParams.get('src')==='push'){here.searchParams.delete('src');here.searchParams.delete('session');history.replaceState(history.state,'',here.pathname+here.search+here.hash);}};
+    open(location.href);
+    const onMessage=(e:MessageEvent)=>{const d=e.data as {type?:string;url?:string}|null;if(d?.type==='jaeger:push-open'&&typeof d.url==='string')open(d.url);else if(d?.type==='jaeger:push-resubscribe')void syncPush();};
+    navigator.serviceWorker?.addEventListener('message',onMessage);
+    return()=>navigator.serviceWorker?.removeEventListener('message',onMessage);
+  },[pushReady,openNotificationConversation]);
   useNotificationNavigation(initialReady&&!store.loading&&!store.error,route=>{
     if(route.target==='conversation')void openNotificationConversation(route.session_id);
     else{setSettingsRequest(prior=>({tab:'notifications',sequence:(prior?.sequence??0)+1}));setSettingsOpen(true);}

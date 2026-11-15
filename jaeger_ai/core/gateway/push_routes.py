@@ -8,6 +8,7 @@ Routes (owner/admin auth from caller_auth):
   POST   /v1/push/test                  {subscription_id?}
   GET    /v1/push/queue                 held/batched counts (diagnostics, no payload text)
   POST   /v1/push/job-events            {task_id, state, title?}  (WebUI jobs runner → job.updated event)
+  POST   /v1/push/presence              {client_id, visible}  (an open app window the owner is looking at)
 
 Policy (an event-bus observer enqueues; a 60 s ticker sends, so publishing never blocks):
   * categories/quiet hours/preview/mute come from ``GET/PATCH /v1/notifications`` preferences.
@@ -17,15 +18,20 @@ Policy (an event-bus observer enqueues; a 60 s ticker sends, so publishing never
     which notify 30 min before expiry); a morning summary is sent when quiet hours end.
   * approval.resolved → silent replacement with the same tag, body "Resolved".
   * job/task failed or blocked → task_failed; handoff finished → bot_finished (in-app only by default).
+  * scheduled job finished (cron:* session) → ``scheduled`` with the result; "nothing to report" replies stay quiet.
+  * a long owner turn (>= LONG_TURN_S) that finishes while no app window is in use → ``replies_away``
+    (ChatGPT-style "your reply is ready"); background/maintenance turns never push.
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from aiohttp import web
@@ -39,6 +45,10 @@ EXPIRY_LEAD_S = 30 * 60
 TICK_S = 60
 STALE_S = 24 * 3600
 MAX_LANE = 50
+LONG_TURN_S = 20.0      # owner turns at least this long notify when the owner is away
+PRESENCE_S = 45.0       # an app window counts as "in use" this long after its last heartbeat
+_QUIET_REPLIES = ("HEARTBEAT_OK", "NO_REPLY", "NOTHING_TO_REPORT")
+_BACKGROUND_SOURCES = frozenset({"cron", "memory_upkeep", "skill_review", "initiative", "sensor", "heartbeat"})
 
 
 def _has_subscribers() -> bool:
@@ -46,7 +56,25 @@ def _has_subscribers() -> bool:
         return bool(webpush.list_subscriptions())
     except Exception:  # noqa: BLE001
         return False
-SUBJECT = "mailto:owner@localhost"
+def _subject() -> str:
+    """VAPID ``sub``: Apple rejects localhost addresses, so prefer the app's own https origin."""
+    env = os.environ.get("JAEGER_PUSH_SUBJECT", "").strip()
+    if env.startswith(("mailto:", "https://")):
+        return env
+    for s in webpush.list_subscriptions():
+        origin = str(s.get("origin") or "")
+        if origin.startswith("https://"):
+            return origin
+    return "mailto:jaeger-push@users.noreply.github.com"
+
+
+def _quiet_reply(text: str) -> bool:
+    head = text.strip().strip("`*_ .").upper()
+    return any(head == q or head.startswith(q + " ") or head.endswith(q) for q in _QUIET_REPLIES)
+
+
+def _session_url(session_id: str | None) -> str:
+    return f"/?session={quote(session_id, safe='')}&src=push" if session_id else "/?src=push"
 
 
 # ── preferences / quiet hours ────────────────────────────────────────
@@ -96,7 +124,7 @@ def classify(event: str, data: dict, store=None) -> dict | None:
                "approvals_urgent" if item["risk"] in ("high", "critical") else "approvals_routine")
         return {"kind": "approval", "category": cat, "id": item["approval_id"], "risk": item["risk"],
                 "type": item["type"], "title_text": item["title"], "agent_id": item["agent_id"],
-                "expires_at": item["expires_at"]}
+                "expires_at": item["expires_at"], "session_id": item.get("session_id")}
     if event == "approval.resolved" and data.get("approval_id"):
         return {"kind": "resolved", "category": None, "id": data["approval_id"]}
     if event in ("task.updated", "job.updated"):
@@ -127,13 +155,15 @@ def build_payload(c: dict, prefs: dict, badge: int) -> dict:
     preview = prefs.get("preview", "title_only")
     if c["kind"] == "approval":
         title = f"Approval needed · {c['risk'].capitalize()}"
-        url = f"/work/approvals/{c['id']}?src=push"
+        url = _session_url(c.get("session_id"))
     elif c["kind"] == "batch":
-        title, url = c["title"], "/work/approvals?src=push"
+        title, url = c["title"], "/?src=push"
     elif c["kind"] == "summary":
         title, url = "While quiet hours were on", "/?src=push"
     elif c["kind"] == "resolved":
-        title, url = "Resolved", f"/work/approvals/{c['id']}?src=push"
+        title, url = "Resolved", "/?src=push"
+    elif c["kind"] in ("scheduled", "reply"):
+        title, url = str(c.get("title_text") or "Jaeger"), _session_url(c.get("session_id"))
     else:
         title = "Task needs attention" if c["kind"] == "task" else "Work finished"
         url = "/work?src=push"
@@ -142,6 +172,10 @@ def build_payload(c: dict, prefs: dict, badge: int) -> dict:
         body = c.get("body") or (f"{c.get('agent_id')}: {c.get('title_text')}" if c.get("agent_id") else str(c.get("title_text") or ""))
     elif c["kind"] in ("batch", "summary", "resolved"):
         body = c.get("body") or ""
+    elif c["kind"] == "scheduled":
+        body = "Tap to see the result"
+    elif c["kind"] == "reply":
+        body = "Tap to read the reply"
     if preview == "hidden":
         title, body = "Jaeger", ""
     out = {"v": 1, "id": c.get("id"), "type": c["kind"], "kind": c.get("type"), "risk": c.get("risk"),
@@ -159,6 +193,100 @@ class PushDispatcher:
         self._seen: dict[int, float] = {}
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._wake = threading.Event()
+        self._turn_started: dict[str, float] = {}
+        self._presence: dict[str, float] = {}
+
+    # ── owner presence (an app window in use suppresses "reply ready" pushes) ──
+    def note_presence(self, client_id: str, visible: bool) -> None:
+        now = self.clock()
+        with self._lock:
+            if visible:
+                self._presence[client_id] = now
+            else:
+                self._presence.pop(client_id, None)
+            for k, t in list(self._presence.items()):
+                if now - t > PRESENCE_S * 4:
+                    self._presence.pop(k, None)
+
+    def owner_watching(self) -> bool:
+        now = self.clock()
+        return any(now - t <= PRESENCE_S for t in list(self._presence.values()))
+
+    def _request_meta(self, rid: str) -> dict:
+        try:
+            with self.gw.store._get_conn() as conn:
+                row = conn.execute("SELECT * FROM client_requests WHERE request_id=?", (rid,)).fetchone()
+        except Exception:  # noqa: BLE001
+            return {}
+        if row is None:
+            return {}
+        out = {"created_at": row["created_at"]}
+        for col in ("requested_json", "execution_json"):
+            try:
+                out[col] = json.loads(row[col] or "{}") if col in row.keys() else {}
+            except (TypeError, ValueError):
+                out[col] = {}
+        return out
+
+    @staticmethod
+    def _is_background(meta: dict) -> bool:
+        def walk(v) -> bool:
+            if isinstance(v, dict):
+                if v.get("background") is True or str(v.get("source") or "") in _BACKGROUND_SOURCES:
+                    return True
+                return any(walk(x) for x in v.values())
+            if isinstance(v, list):
+                return any(walk(x) for x in v)
+            return False
+        return walk(meta.get("requested_json")) or walk(meta.get("execution_json"))
+
+    def _turn_candidate(self, evt) -> dict | None:
+        sid = str(getattr(evt, "session_id", "") or "")
+        data = getattr(evt, "data", {}) or {}
+        name = getattr(evt, "event", "")
+        rid = str(data.get("request_id") or "")
+        started = self._turn_started.pop(rid, None)
+        text = str(data.get("output") or data.get("text") or "").strip()
+        if sid.startswith("cron:"):
+            job = sid.split(":", 1)[1] or "Scheduled job"
+            if name == "turn.failed":
+                return {"kind": "task", "category": "task_failed", "id": rid or job, "risk": "medium",
+                        "title_text": f"Scheduled job failed: {job}", "state": "failed", "session_id": sid}
+            if not text or _quiet_reply(text):
+                return None
+            return {"kind": "scheduled", "category": "scheduled", "id": rid or job, "risk": "low",
+                    "title_text": f"⏰ {job}", "body": text, "session_id": sid, "tag": f"schedule-{job}"[:60]}
+        if not rid or data.get("replayed"):
+            return None
+        meta = self._request_meta(rid)
+        if self._is_background(meta):
+            return None
+        finished = float(getattr(evt, "timestamp", 0) or self.clock())
+        timing = data.get("timing") if isinstance(data.get("timing"), dict) else {}
+        duration = None
+        if isinstance(timing.get("turn_finish_ms"), (int, float)) and timing["turn_finish_ms"] > 0:
+            duration = float(timing["turn_finish_ms"]) / 1000.0
+        elif started:
+            duration = finished - started
+        elif meta.get("created_at"):
+            duration = finished - float(meta["created_at"])
+        if duration is None or duration < LONG_TURN_S or self.owner_watching():
+            return None
+        title = "Jaeger"
+        try:
+            sess = self.gw.store.get_session(sid) or {}
+            title = str(sess.get("title") or "").strip() or title
+        except Exception:  # noqa: BLE001
+            pass
+        if name == "turn.failed":
+            return {"kind": "reply", "category": "replies_away", "id": rid, "risk": "low", "session_id": sid,
+                    "title_text": title, "body": "Jaeger couldn't finish that. Open the chat to see why.",
+                    "tag": f"reply-{sid}"[:60]}
+        if not text:
+            return None
+        return {"kind": "reply", "category": "replies_away", "id": rid, "risk": "low", "session_id": sid,
+                "title_text": title, "body": text, "tag": f"reply-{sid}"[:60]}
 
     # persistent queue in schema_meta (no secrets in it)
     def _load(self) -> dict:
@@ -194,7 +322,23 @@ class PushDispatcher:
             if len(self._seen) > 2000:
                 for k in sorted(self._seen)[:1000]:
                     self._seen.pop(k, None)
-        c = classify(getattr(evt, "event", ""), getattr(evt, "data", {}) or {}, self.gw.store)
+        name = getattr(evt, "event", "")
+        if name == "turn.start":
+            rid = str((getattr(evt, "data", {}) or {}).get("request_id") or "")
+            if rid:
+                self._turn_started[rid] = float(getattr(evt, "timestamp", 0) or self.clock())
+                if len(self._turn_started) > 500:
+                    for k in list(self._turn_started)[:250]:
+                        self._turn_started.pop(k, None)
+            return
+        if name in ("turn.finish", "turn.failed"):
+            try:
+                c = self._turn_candidate(evt)
+            except Exception:  # noqa: BLE001
+                logger.warning("push turn classification failed", exc_info=True)
+                c = None
+        else:
+            c = classify(name, getattr(evt, "data", {}) or {}, self.gw.store)
         if c:
             try:
                 self.enqueue(c)
@@ -219,7 +363,9 @@ class PushDispatcher:
             elif route.startswith("at:"):
                 q["scheduled"].append({**c, "send_at": float(route[3:])})
             self._save(q)
-            return route
+        if route == "now":
+            self._wake.set()  # deliver now, not on the next minute tick
+        return route
 
     def _route(self, c: dict, prefs: dict, q: dict, now: float) -> str:
         if c["kind"] == "approval" and (c["id"] in q["pushed_tags"] or any(
@@ -259,7 +405,7 @@ class PushDispatcher:
     def _send(self, c: dict, prefs: dict, q: dict) -> dict:
         payload = build_payload(c, prefs, self._badge())
         urgency = "high" if c.get("risk") in ("high", "critical") else "low" if c["kind"] == "resolved" else "normal"
-        out = webpush.send(payload, subject=SUBJECT, urgency=urgency, poster=self.poster)
+        out = webpush.send(payload, subject=_subject(), urgency=urgency, poster=self.poster)
         if c["kind"] == "approval":
             q["pushed_tags"].append(c["id"])
             try:
@@ -323,7 +469,11 @@ class PushDispatcher:
         if self._thread and self._thread.is_alive():
             return
         def loop():
-            while not self._stop.wait(TICK_S):
+            while not self._stop.is_set():
+                self._wake.wait(TICK_S)
+                self._wake.clear()
+                if self._stop.is_set():
+                    break
                 try:
                     if webpush.list_subscriptions():
                         self.tick()
@@ -336,6 +486,7 @@ class PushDispatcher:
 
     def stop(self) -> None:
         self._stop.set()
+        self._wake.set()
 
 
 # ── routes ───────────────────────────────────────────────────────────
@@ -387,8 +538,19 @@ def register(gateway) -> PushDispatcher:
         out = await asyncio.to_thread(webpush.send, {"v": 1, "type": "test", "title": "Jaeger test notification",
                                                      "body": "Push is working", "url": "/settings/notifications",
                                                      "tag": "push-test"},
-                                      subject=SUBJECT, only=sid, poster=dispatcher.poster)
+                                      subject=_subject(), only=sid, poster=dispatcher.poster)
         return web.json_response(out)
+
+    async def presence(request):
+        try:
+            body = await request.json()
+            cid = str(body.get("client_id") or "").strip()[:64]
+            if not cid:
+                raise ValueError
+        except (ValueError, TypeError, AttributeError):
+            return web.json_response({"error": "client_id is required"}, status=400)
+        dispatcher.note_presence(cid, bool(body.get("visible")))
+        return web.json_response({"ok": True, "watching": dispatcher.owner_watching()})
 
     async def job_event(request):
         """WebUI job runner → push: {task_id, state: done|done_with_errors|error|stuck|runner_down, title?}."""
@@ -412,6 +574,7 @@ def register(gateway) -> PushDispatcher:
     r.add_post("/v1/push/subscriptions", add_sub)
     r.add_delete("/v1/push/subscriptions/{id}", del_sub)
     r.add_post("/v1/push/test", test)
+    r.add_post("/v1/push/presence", presence)
     r.add_get("/v1/push/queue", queue)
     r.add_post("/v1/push/job-events", job_event)
     return dispatcher

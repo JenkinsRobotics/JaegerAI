@@ -24,6 +24,7 @@ import { applyAppearance, storedAppearance } from "./settings/SettingsDialog";
 import { applyDensity, applyFeel, applyIcon, storedDensity, storedFeel, storedIcon } from "./settings/appearance";
 import { applyPreset, storedPreset, syncPresetFromGateway } from "./shell/layoutPresets";
 import { syncLogoFromGateway } from "./brand/logo";
+import { registerServiceWorker, startPresence, syncPush } from "./platform/webPush";
 
 const redirect = legacyRedirect(location.pathname, location.search);
 if (redirect) history.replaceState(null, "", redirect + location.hash);
@@ -37,6 +38,10 @@ void syncPresetFromGateway();
 void syncLogoFromGateway();
 
 const source = await createSource();
+// Web Push: push-only service worker, keep this device's subscription fresh,
+// and tell the Gateway when a window is in use (long replies push only while away).
+void registerServiceWorker().then(() => syncPush()).catch(() => undefined);
+startPresence();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

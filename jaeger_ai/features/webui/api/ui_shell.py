@@ -92,6 +92,19 @@ def _send_index(handler, index: Path) -> bool:
     return True
 
 
+def _send_service_worker(handler, path: Path) -> bool:
+    body = path.read_bytes()
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/javascript; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", _NO_STORE)
+    handler.send_header("Service-Worker-Allowed", "/")
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.end_headers()
+    handler.wfile.write(body)
+    return True
+
+
 def _send_kill_switch(handler) -> bool:
     body = KILL_SWITCH_SW
     handler.send_response(200)
@@ -179,6 +192,10 @@ def serve(handler, parsed) -> bool:
     if path in ("/", "/index.html") or (path.startswith("/session/") and path.count("/") == 2) or is_page_route(path):
         return _send_index(handler, root / "index.html")
     if path in ("/sw.js", "/static/sw.js"):
+        # The shared UI ships its own push-only worker (no fetch caching); the
+        # legacy /static/sw.js path (old WebUI) still gets the kill switch.
+        if path == "/sw.js" and (root / "sw.js").is_file():
+            return _send_service_worker(handler, root / "sw.js")
         return _send_kill_switch(handler)
     if path == "/static/manifest.json" or (path.startswith("/static/") and path.endswith(".webmanifest")):
         return _serve_static_manifest(handler, path)
