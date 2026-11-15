@@ -532,61 +532,94 @@ def parse_cli_usage_limit(text: str) -> str | None:
     return "limit reached until Nov 16, 2026, 8:03 PM PT"
 
 
-_GEMINI_PROBE_CACHE: tuple[float, dict[str, Any]] | None = None
+_GEMINI_PROBE_CACHE: tuple[float, float, dict[str, Any]] | None = None
 _GEMINI_PROBE_TTL_S = 15 * 60
+
+
+def _classify_gemini_probe(returncode: int | None, blob: str) -> dict[str, Any] | None:
+    """Map Gemini CLI output to a picker status, or None if it is inconclusive."""
+    lowered = (blob or "").lower()
+    ineligible = (
+        "ineligibletiererror" in lowered
+        or "ineligibleorprojectiderror" in lowered
+        or "no longer supported" in lowered
+        or "unsupported_client" in lowered
+        or "antigravity" in lowered
+    )
+    if ineligible:
+        return {
+            "reachable": False,
+            "status": "unavailable",
+            "reason": (
+                "Gemini CLI is installed, but this client is no longer "
+                "supported for individual Gemini Code Assist. Use Google's "
+                "Antigravity suite, or pick another provider."
+            ),
+        }
+    if "not logged in" in lowered or "please login" in lowered or "unauthenticated" in lowered:
+        return {"reachable": False, "status": "unavailable", "reason": "Gemini CLI is installed but is not signed in."}
+    if returncode == 55 or "exit 55" in lowered or ("trusted" in lowered and "folder" in lowered):
+        return {"reachable": False, "status": "unavailable", "reason": "Gemini CLI rejected this workspace (trusted-folder check)."}
+    if returncode == 0 and "ready" in lowered:
+        return {"reachable": True, "status": "online", "reason": None}
+    if returncode == 0:
+        return {"reachable": True, "status": "online", "reason": None}
+    return None
+
+
+def _run_gemini_probe(executable: str) -> tuple[int | None, str]:
+    env = os.environ.copy()
+    env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
+    env.setdefault("TERM", "xterm-256color")
+    env.setdefault("NO_COLOR", "1")
+    completed = subprocess.run(  # noqa: S603
+        [executable, "-p", "Reply with the single word ready.", "--skip-trust", "--approval-mode", "plan"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env=env,
+        cwd="/tmp",
+    )
+    blob = "\n".join((completed.stdout or "", completed.stderr or ""))
+    return completed.returncode, blob
 
 
 def _gemini_cli_status(executable: str) -> dict[str, Any]:
     """A --version probe is not enough: Gemini can be installed and still rejected.
 
     Individual Gemini Code Assist clients now fail with IneligibleTierError.
-    Cache the result so inventory refreshes do not pay for a new CLI start
-    every time the picker opens.
+    Cache a conclusive result so inventory refreshes do not pay for a new
+    CLI start every time the picker opens. Inconclusive failures are only
+    held briefly so a startup race does not stick a generic 'not ready' row
+    in the picker for 15 minutes.
     """
     global _GEMINI_PROBE_CACHE
     now = time.time()
-    if _GEMINI_PROBE_CACHE and now - _GEMINI_PROBE_CACHE[0] < _GEMINI_PROBE_TTL_S:
-        return dict(_GEMINI_PROBE_CACHE[1])
+    if _GEMINI_PROBE_CACHE and now - _GEMINI_PROBE_CACHE[0] < _GEMINI_PROBE_CACHE[1]:
+        return dict(_GEMINI_PROBE_CACHE[2])
     result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI could not be verified"}
+    ttl = 60.0
     try:
-        env = os.environ.copy()
-        env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
-        completed = subprocess.run(  # noqa: S603
-            [executable, "-p", "Reply with the single word ready.", "--skip-trust", "--approval-mode", "plan"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=env,
-            cwd="/tmp",
-        )
-        blob = "\n".join((completed.stdout or "", completed.stderr or ""))
-        lowered = blob.lower()
-        if "ineligibletiererror" in lowered or "no longer supported" in lowered or "unsupported_client" in lowered:
-            result = {
-                "reachable": False,
-                "status": "unavailable",
-                "reason": (
-                    "Gemini CLI is installed, but this client is no longer "
-                    "supported for individual Gemini Code Assist. Use Google's "
-                    "Antigravity suite, or pick another provider."
-                ),
-            }
-        elif completed.returncode == 0 and "ready" in lowered:
-            result = {"reachable": True, "status": "online", "reason": None}
-        elif "not logged in" in lowered or "please login" in lowered or "unauthenticated" in lowered:
-            result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI is installed but is not signed in."}
-        elif completed.returncode == 55 or "exit 55" in lowered or ("trusted" in lowered and "folder" in lowered):
-            result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI rejected this workspace (trusted-folder check)."}
-        elif completed.returncode == 0:
-            result = {"reachable": True, "status": "online", "reason": None}
+        returncode, blob = _run_gemini_probe(executable)
+        classified = _classify_gemini_probe(returncode, blob)
+        if classified is None and not (blob or "").strip():
+            time.sleep(0.4)
+            returncode, blob = _run_gemini_probe(executable)
+            classified = _classify_gemini_probe(returncode, blob)
+        if classified is not None:
+            result = classified
+            ttl = _GEMINI_PROBE_TTL_S if classified.get("reachable") or "Antigravity" in str(classified.get("reason") or "") else 5 * 60
         else:
             result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI is installed but is not ready to run a turn."}
+            ttl = 60.0
     except subprocess.TimeoutExpired:
         result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI did not respond in time."}
+        ttl = 60.0
     except Exception as exc:  # noqa: BLE001
         result = {"reachable": False, "status": "unavailable", "reason": f"Gemini CLI could not be verified ({type(exc).__name__})."}
-    _GEMINI_PROBE_CACHE = (now, dict(result))
+        ttl = 60.0
+    _GEMINI_PROBE_CACHE = (now, ttl, dict(result))
     return result
 
 
