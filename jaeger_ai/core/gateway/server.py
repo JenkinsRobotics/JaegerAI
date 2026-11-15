@@ -1018,6 +1018,10 @@ class JaegerGatewayApp:
         self._session_grants_boot_id = uuid.uuid4().hex
         from .file_changes import FileChanges
         self.file_changes = FileChanges(self.store.path.parent / "turn-file-changes")
+        from .agent_safety import AgentSafety
+        self.agent_safety = AgentSafety(
+            Path(os.environ.get("JAEGER_STATE_HOME") or Path.home() / ".jaeger").expanduser(),
+            self.store.path.parent / "agent-safety")
         from jaeger_ai.core.agent_registry.projects import ProjectStore
         self.projects = ProjectStore(self.store.path.parent / "projects.json")
         from .chat_organization import ChatOrganization
@@ -1824,6 +1828,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}", self.handle_get_request)
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}/changes", self.handle_file_changes)
         self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/changes/undo", self.handle_file_changes)
+        self.app.router.add_get("/v1/sessions/{id}/worktree", self.handle_agent_worktree)
+        self.app.router.add_post("/v1/sessions/{id}/worktree/{action}", self.handle_agent_worktree)
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_post("/v1/sessions/{id}/transfer", self.handle_session_transfer)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
@@ -1901,6 +1907,8 @@ class JaegerGatewayApp:
         register_handoff_controls(self)
         from .skill_controls import register as register_skill_controls
         register_skill_controls(self)
+        from .skill_history_routes import register as register_skill_history
+        register_skill_history(self)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)
@@ -6023,6 +6031,7 @@ class JaegerGatewayApp:
         callbacks, flush = self._turn_stream_callbacks(session_key, request_id,
                                                        model=selected_model or None, lane=lane or None)
         callbacks.context_references = context_references
+        agent_safety_turn = [False]
         from jaeger_agent.tool_executor import tool_allowlist
         from jaeger_agent.core.workspace import read_confinement
 
@@ -6030,6 +6039,19 @@ class JaegerGatewayApp:
         try:
             # The admitted tool grant scopes the agent built for this turn
             # ([] = no tools; absent = the owner's normal catalog).
+            # Agent mode works in a session worktree (git) and is checkpointed
+            # per turn, so its file changes can be applied, discarded or undone.
+            safe_selection = selection
+            from jaeger_ai.contract.modes import normalize_interaction_tier as _tier_of
+            if _tier_of(selection.get("interaction_tier") or self._current_tier()) == "agent":
+                try:
+                    safe = self.agent_safety.prepare(session_key, request_id, str(selection.get("workspace") or "") or None)
+                except Exception:  # noqa: BLE001 — safety setup never blocks the turn
+                    logger.warning("agent safety unavailable for %s", request_id, exc_info=True)
+                    safe = {}
+                if safe.get("root"):
+                    safe_selection = {**selection, "workspace": safe["root"]}
+                    agent_safety_turn[0] = True
             from jaeger_agent.task_port import task_scope
             request_row = self.store.get_request(request_id) or {}
             options = selection.get("options") or {}
@@ -6048,7 +6070,7 @@ class JaegerGatewayApp:
                             execution=selection, user_text=request_row.get("input_text", prompt), source=source), \
                     interaction_request_sink(self._clarify_sink(session_key, request_id)), \
                     tool_allowlist(list(grant) if grant is not None else None), \
-                    read_confinement(self._read_roots(runtime, selection, self._staged_upload_dir(session_key))):
+                    read_confinement(self._read_roots(runtime, safe_selection, self._staged_upload_dir(session_key))):
                 _live.emit("route.selected", {
                     "model": selected_model or None, "lane": lane or None,
                     "provider": str(selection.get("provider") or lane or "") or None,
@@ -6070,7 +6092,7 @@ class JaegerGatewayApp:
                     request_id=request_id,
                     callbacks=callbacks,
                     continuation_state=continuation_state,
-                    project_root=str(selection.get("workspace") or "") or None,
+                    project_root=str(safe_selection.get("workspace") or "") or None,
                     confirmation_provider=_GatewayToolConfirmationProvider(self, session_key, request_id),
                     native_run_id=native,
                     model=selected_model or None,
@@ -6095,6 +6117,14 @@ class JaegerGatewayApp:
                 return outcome
         finally:
             flush()
+            if agent_safety_turn[0]:
+                try:
+                    turn = self.agent_safety.settle(session_key, request_id)
+                    if turn.get("files"):
+                        self.event_bus.publish(session_key, "files.changed", {
+                            "request_id": request_id, **self.agent_safety.describe(session_key, request_id)})
+                except Exception:  # noqa: BLE001
+                    logger.warning("agent safety settle failed for %s", request_id, exc_info=True)
 
     def _continued_owner_react(
         self, prompt: str, *, session_key: str, request_id: str,
@@ -6188,10 +6218,74 @@ class JaegerGatewayApp:
                         f"Jaeger stopped before completing this request ({halt}). "
                         "Completed tool actions remain recorded; review activity before retrying."
                     )}
+                try:
+                    self._maybe_queue_skill_review(
+                        session_key, request_id, objective or prompt, result,
+                        list(self._request_tools.get(request_id, [])), _options, _tier)
+                except Exception:  # noqa: BLE001 — the nudge never affects the turn
+                    logger.debug("skill review nudge skipped", exc_info=True)
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
                 self._request_tools.pop(request_id, None)
+
+    # Hermes-style procedural memory: after a complex, successful owner turn,
+    # a short background pass decides whether to save or update a skill.
+    _SKILL_REVIEW_SESSION = "skill-reviews"
+    _SKILL_REVIEW_TOOLS = ["skill_manage", "list_skills", "use_skill", "skill_note"]
+    _last_skill_review_at = 0.0
+
+    def _maybe_queue_skill_review(self, session_key: str, request_id: str, prompt: str,
+                                  result: dict[str, Any], tools: list[str],
+                                  options: dict[str, Any], tier: str) -> None:
+        min_tools = int(os.environ.get("JAEGER_SKILL_NUDGE_MIN_TOOLS") or 5)
+        if min_tools <= 0 or tier != "agent" or options.get("background"):
+            return
+        if result.get("error") or str(result.get("status") or "completed") != "completed":
+            return
+        used = [t for t in tools if t]
+        if len(used) < min_tools or "skill_manage" in used:
+            return
+        try:
+            from jaeger_agent.background import skill_review
+            if not skill_review.enabled():
+                return
+        except Exception:  # noqa: BLE001
+            return
+        now = time.time()
+        if now - type(self)._last_skill_review_at < float(os.environ.get("JAEGER_SKILL_NUDGE_COOLDOWN_S") or 600):
+            return
+        type(self)._last_skill_review_at = now
+        seq = ", ".join(used[:40]) + (" …" if len(used) > 40 else "")
+        answer = str(result.get("text") or "")[:1500]
+        review = (
+            "Skill review (background, no one is waiting for a reply).\n"
+            f"A task just finished using {len(used)} tool calls.\n\n"
+            f"Owner request:\n{prompt[:2000]}\n\nTools used, in order: {seq}\n\n"
+            f"Final answer (truncated):\n{answer}\n\n"
+            "Decide whether this produced a reusable procedure worth keeping as a skill "
+            "(a non-obvious workflow, a fix that took trial and error, or something the owner "
+            "will likely ask again). First check existing skills with list_skills(action='search', "
+            "query=...). If a matching skill of yours exists and this run taught something new, "
+            "update it with skill_manage(action='patch' or 'edit'). If nothing fits and it is worth "
+            "keeping, skill_manage(action='create') with frontmatter name/description and concise "
+            "steps, pitfalls and how to verify. Never store secrets, tokens or personal data. "
+            "If nothing is worth saving, reply exactly NO_REPLY. Otherwise reply with one line "
+            "naming the skill and what changed."
+        )
+        rid = f"skill-review-{request_id}"[:120]
+
+        def run() -> None:
+            time.sleep(float(os.environ.get("JAEGER_SKILL_NUDGE_DELAY_S") or 20))
+            try:
+                sid = self.store.ensure_session(self._SKILL_REVIEW_SESSION, title="Skill reviews", profile="jaeger")["session_id"]
+                out = self.submit_background_turn(review, session_id=sid, request_id=rid,
+                                                  source="skill_review", allowed_tools=list(self._SKILL_REVIEW_TOOLS))
+                logger.info("skill review %s: %s", rid, (out.get("text") or out.get("error") or "")[:200])
+            except Exception:  # noqa: BLE001
+                logger.warning("skill review failed", exc_info=True)
+
+        threading.Thread(target=run, name="skill-review", daemon=True).start()
 
     async def _execute_turn(
         self,
@@ -7043,6 +7137,15 @@ class JaegerGatewayApp:
         if request.method == "POST" and any(not task.done() for task in self._running_tasks.values()):
             return web.json_response({"error": "Wait for active Gateway turns to finish before undoing"}, status=409)
         try:
+            if self.agent_safety.has_turn(sid, rid):
+                # Agent-mode turn with a checkpoint: covers every file the turn
+                # touched (tools and shell), not only file-tool edits.
+                if request.method == "POST":
+                    data = await asyncio.to_thread(self.agent_safety.undo, sid, rid)
+                    self.event_bus.publish(sid, "files.changed", {"request_id": rid, **data})
+                else:
+                    data = await asyncio.to_thread(self.agent_safety.describe, sid, rid)
+                return web.json_response(data)
             if request.method == "POST":
                 data = await asyncio.to_thread(self.file_changes.undo, sid, rid)
                 self.event_bus.publish(sid, "files.changed", {"request_id": rid, **data})
@@ -7051,6 +7154,26 @@ class JaegerGatewayApp:
                                                contents=request.query.get("contents") == "1")
             return web.json_response(data)
         except (ValueError, OSError) as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+
+    async def handle_agent_worktree(self, request: web.Request) -> web.Response:
+        """GET/POST /v1/sessions/{id}/worktree[/apply|/discard] — the chat's agent worktree."""
+        sid = request.match_info["id"]
+        if self.store.get_session(sid) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        action = request.match_info.get("action")
+        try:
+            if request.method == "GET":
+                data = await asyncio.to_thread(self.agent_safety.worktree_status, sid)
+            elif action in {"apply", "discard"}:
+                if any(not task.done() for task in self._running_tasks.values()):
+                    return web.json_response({"error": "Wait for active turns to finish first"}, status=409)
+                data = await asyncio.to_thread(getattr(self.agent_safety, action), sid)
+                self.event_bus.publish(sid, "files.changed", {"worktree": data})
+            else:
+                return web.json_response({"error": "Unknown action"}, status=404)
+            return web.json_response(data)
+        except (ValueError, OSError, RuntimeError) as exc:
             return web.json_response({"error": str(exc)}, status=409)
 
     async def handle_get_request(self, request: web.Request) -> web.Response:

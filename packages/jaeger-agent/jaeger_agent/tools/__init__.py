@@ -125,6 +125,9 @@ from .models import download_model, list_models, model_location
 # Skill marketplace — package a skill into a shareable bundle
 from .skill_market import benchmark_skill, package_skill
 
+# Self-authored skills — create/edit/patch with versioned history + rollback
+from .skill_manage import skill_manage
+
 # Background processes — long-running work that outlives the turn
 from .background import (
     check_background,
@@ -194,6 +197,7 @@ from .ocr import ocr_file
 
 
 __all__ = [
+    "skill_manage",
     # framework wiring
     "bind", "get_layout",
     "SandboxError", "_audit", "_require_layout", "_resolve_under", "git_autocommit",

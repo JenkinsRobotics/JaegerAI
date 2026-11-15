@@ -89,26 +89,17 @@ def run_status(args: Any) -> int:
 
     # Skill tree summary
     print()
-    print(c.bold("  Skill tree"))
+    print(c.bold("  Skills"))
     try:
-        from jaeger_ai.features.skill_tree import (
-            SkillTreeRegistry, seed_default_tree,
-        )
-        reg = SkillTreeRegistry.for_instance(layout)
-        seed_default_tree(reg)
-        skills = list(reg.all())
-        by_status: dict[str, int] = {}
-        for s in skills:
-            by_status[s.status] = by_status.get(s.status, 0) + 1
-        total = len(skills)
-        mastered = by_status.get("mastered", 0)
-        print(c.kv("Total",        str(total)))
-        print(c.kv("Mastered",     f"{mastered}  {c.bar(mastered / max(1, total))}"))
-        print(c.kv("Active",       str(by_status.get("active", 0))))
-        print(c.kv("Available",    str(by_status.get("available", 0))))
-        print(c.kv("Locked",       str(by_status.get("locked", 0))))
+        from jaeger_ai.core.skills import service
+        rows = service.list_skills(layout)["skills"]
+        mine = sum(1 for r in rows if r.get("zone") == "instance")
+        by_jaeger = sum(1 for r in rows if r.get("origin") == "agent")
+        print(c.kv("Total", str(len(rows))))
+        print(c.kv("Instance", f"{mine}  {c.dim(f'({by_jaeger} written by Jaeger)')}"))
+        print(c.kv("Disabled", str(sum(1 for r in rows if r.get("disabled")))))
     except Exception as exc:  # noqa: BLE001
-        print(c.kv("Skill tree", c.red(f"unreadable: {exc}")))
+        print(c.kv("Skills", c.red(f"unreadable: {exc}")))
 
     # Personality presence
     print()

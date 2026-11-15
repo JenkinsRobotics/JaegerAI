@@ -744,22 +744,9 @@ def _construct_animation_components(
         except Exception:  # noqa: BLE001
             bridge_instance = None
 
-    # Build the registry once so XP grants land on the same
-    # tree the CLI + Swift app read. 0.9 step 4 split: skill_tree/ and
-    # core.instance.instance moved to the Mind's own package (jaeger_ai
-    # today) — resolved via resolve_mind_module.
+    # The XP skill tree was retired (2026-11-15); the animation node runs
+    # without a registry.
     skill_registry: Any | None = None
-    try:
-        skill_tree_mod = _resolve_application_module("skill_tree")
-        instance_mod = _resolve_application_module("core.instance.instance")
-        layout = instance_mod.InstanceLayout(
-            root=instance_mod.resolve_instance_dir(
-                instance_mod.default_instance_name()),
-        )
-        skill_registry = skill_tree_mod.SkillTreeRegistry.for_instance(layout)
-        skill_tree_mod.seed_default_tree(skill_registry)
-    except Exception:  # noqa: BLE001
-        skill_registry = None
 
     frame_callback = (
         bridge_instance.publish_frame if bridge_instance else None

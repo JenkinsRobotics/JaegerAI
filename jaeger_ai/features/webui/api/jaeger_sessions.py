@@ -537,6 +537,8 @@ def route(handler, parsed, method: str) -> bool:
     if path.startswith('/v1/runtime/diagnostics/capture/') and method=='POST' and path.rsplit('/',1)[1] in {'start','stop','report'}:return _proxy(handler,method,path,_body_bytes(handler))
 
     if path=='/v1/runtime/skills/managed' and method=='GET':return _proxy(handler,method,path)
+    if path in {'/v1/runtime/skills/revisions','/v1/runtime/skills/history','/v1/runtime/skills/history/version'} and method=='GET':return _proxy(handler,method,path+query)
+    if path=='/v1/runtime/skills/history/rollback' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
     if path in {'/v1/runtime/skills/managed/change','/v1/runtime/skills/managed/review'} and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
     if path in {'/v1/runtime/skills/managed/content','/v1/runtime/skills/managed/export'} and method=='GET':return _proxy(handler,method,path+query)
     if path.startswith('/v1/runtime/skills/managed/operations/') and len(path.split('/'))==7 and method=='GET':return _proxy(handler,method,path)
@@ -650,6 +652,16 @@ def route(handler, parsed, method: str) -> bool:
     if len(parts) == 4 and parts[1] == 'requests' and parts[3] == 'steer' and method in {'GET', 'POST'}:
         return _proxy(handler, method, f'/v1/sessions/{session_id}/requests/{parts[2]}/steer{query}',
                       _body_bytes(handler) if method == 'POST' else None)
+
+    # Agent-mode safety: a turn's file changes + Undo, and the chat's worktree.
+    if len(parts) == 4 and parts[1] == "requests" and parts[3] == "changes" and method == "GET":
+        return _proxy(handler, "GET", f"/v1/sessions/{session_id}/requests/{parts[2]}/changes{query}")
+    if len(parts) == 5 and parts[1] == "requests" and parts[3:] == ["changes", "undo"] and method == "POST":
+        return _proxy(handler, "POST", f"/v1/sessions/{session_id}/requests/{parts[2]}/changes/undo", _body_bytes(handler))
+    if len(parts) == 2 and parts[1] == "worktree" and method == "GET":
+        return _proxy(handler, "GET", f"/v1/sessions/{session_id}/worktree")
+    if len(parts) == 3 and parts[1] == "worktree" and parts[2] in {"apply", "discard"} and method == "POST":
+        return _proxy(handler, "POST", f"/v1/sessions/{session_id}/worktree/{parts[2]}", _body_bytes(handler))
 
     # /v1/sessions/{id}/requests/{request_id}/otel — OTLP/JSON trace of one run
     if len(parts) == 4 and parts[1] == "requests" and parts[3] == "otel" and method == "GET":
