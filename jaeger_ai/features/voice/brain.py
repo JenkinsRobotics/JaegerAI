@@ -54,6 +54,24 @@ def voice_brain() -> dict:
     }
 
 
+def voice_history(rows) -> list:
+    """Recent history for a spoken turn, shaped so Ollama can reuse its KV cache.
+
+    The window start moves in steps of six messages (not one per turn), and each
+    message is clipped deterministically, so consecutive voice turns share the
+    same prompt prefix and only the new utterance is prefilled.
+    """
+    rows = list(rows or ())
+    step = 6
+    start = 0 if len(rows) <= VOICE_HISTORY else ((len(rows) - VOICE_HISTORY) // step + 1) * step
+    out = []
+    for row in rows[start:]:
+        if isinstance(row, dict) and isinstance(row.get("content"), str) and len(row["content"]) > 600:
+            row = {**row, "content": row["content"][:600] + " …"}
+        out.append(row)
+    return out
+
+
 def warm(timeout: float = 30.0) -> None:
     """Load the local voice brain into memory (no output). Best effort, background."""
     provider, model = selection()
