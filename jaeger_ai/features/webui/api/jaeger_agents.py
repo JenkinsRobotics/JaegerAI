@@ -220,16 +220,18 @@ def _serve_rtc(handler, method: str, action: str) -> bool:
     return True
 
 
-_DROID_ACTIONS = {("GET", "status"), ("POST", "wake"), ("POST", "sleep"), ("POST", "toggle"),
-                  ("POST", "mute"), ("POST", "stop"), ("POST", "say")}
+_DROID_ACTIONS = {("GET", "status"), ("GET", "transcript"), ("GET", "display"), ("GET", "camera.jpg"),
+                  ("GET", "screen.jpg"), ("POST", "wake"), ("POST", "sleep"), ("POST", "toggle"),
+                  ("POST", "mute"), ("POST", "stop"), ("POST", "say"), ("POST", "look")}
 
 
 def _serve_droid(handler, method: str, action: str) -> bool:
-    """Droid mode controls, forwarded to the droid service's owner-only unix socket."""
+    """Droid mode controls and live view, forwarded to the droid service's owner-only unix socket."""
     import http.client
     import socket
     from api.helpers import j, read_body
 
+    action = action.split("?", 1)[0]
     if (method, action) not in _DROID_ACTIONS:
         j(handler, {"error": "Not found"}, status=404)
         return True
@@ -239,22 +241,28 @@ def _serve_droid(handler, method: str, action: str) -> bool:
     class _Unix(http.client.HTTPConnection):
         def connect(self):
             self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self.sock.settimeout(10)
+            self.sock.settimeout(15)
             self.sock.connect(sock_path)
 
     body = json.dumps(read_body(handler) or {}).encode() if method == "POST" else None
     try:
-        conn = _Unix("droid", timeout=10)
+        conn = _Unix("droid", timeout=15)
         conn.request(method, "/" + action, body=body, headers={"Content-Type": "application/json"})
         resp = conn.getresponse()
-        payload, status = json.loads(resp.read() or b"{}"), resp.status
+        payload, status = resp.read(), resp.status
+        ctype = resp.getheader("Content-Type") or "application/json"
         conn.close()
     except (OSError, ValueError):
         j(handler, {"state": "unavailable", "awake": False,
                     "error": "Droid service is not running (Jaeger Droid menu-bar app)"},
-          status=200 if action == "status" else 503)
+          status=200 if action in ("status", "transcript") else 503)
         return True
-    j(handler, payload, status=status)
+    handler.send_response(status)
+    handler.send_header("Content-Type", ctype)
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
     return True
 
 
