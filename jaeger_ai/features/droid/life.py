@@ -276,6 +276,15 @@ class Gate:
                 return "quiet", "social drive is low"
         return "speak", "present, facing and within budget"
 
+    def small_talk_ready(self, drives: Drives, now: float | None = None) -> bool:
+        """Cheap pre-check so idle small talk is only offered (and logged) when it could pass."""
+        now = now or time.time()
+        day = datetime.now().strftime("%Y-%m-%d")
+        count = self.small_talk_day[1] if self.small_talk_day[0] == day else 0
+        return (count < 2 and self.ignored < 2 and drives.values["social"] >= 0.6
+                and now - self.last_small_talk >= 3 * 3600 * (2 ** self.ignored)
+                and not any(now - t < 15 * 60 for t, _ in self.spoken))
+
     def heard_reply(self, now: float | None = None):
         if (now or time.time()) <= self.awaiting_reply_until:
             self.ignored = 0
@@ -504,6 +513,13 @@ class Life:
                                  engaged=room["mode"] == "conversation", novel=False)
                 self.gate.check_ignored(now)
                 last_tick = now
+                if (room["owner_present"] and room["owner_facing"] and room["mode"] == "present"
+                        and not room["guests"] and not room["quiet"] and not room["speech"]
+                        and self.gate.small_talk_ready(self.drives, now) and random.random() < 0.1):
+                    loop = self.droid.loop
+                    line = self.small_talk_line()
+                    if loop is not None:
+                        loop.call_soon_threadsafe(lambda: self.offer(line, kind="small_talk", private=False))
             self._idle_motion()
             time.sleep(max(0.02, period - (time.time() - started)))
 
@@ -572,6 +588,20 @@ class Life:
         loop = self.droid.loop
         if loop is not None:
             loop.call_soon_threadsafe(lambda: self.offer(text, kind="greeting", private=False))
+
+    def small_talk_line(self) -> str:
+        hour = datetime.now().hour
+        mood = self.drives.mood()
+        lines = ["It is rather nice to have some company. Do tell me if I can be of help.",
+                 "All systems quiet on my end. Is there anything you'd like me to look into?",
+                 "I've been keeping an eye on things. Everything seems in order, sir."]
+        if hour < 12:
+            lines.append("A fine morning for getting things done, if I may say so.")
+        elif hour >= 18:
+            lines.append("Another day nearly done. Shall I note anything for tomorrow?")
+        if mood == "curious":
+            lines.append("I confess I'm curious what you're working on.")
+        return random.choice(lines)
 
     def trigger(self, event: str, **fields):
         """Hand a salient event to Jaeger's reflection (Tier 2) through the trigger queue."""

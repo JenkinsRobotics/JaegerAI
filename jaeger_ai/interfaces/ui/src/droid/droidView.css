@@ -42,3 +42,32 @@
 .jg-droid__lines p[data-role="user"] { align-self: flex-end; text-align: right; max-width: 90%; }
 .jg-droid__lines p[data-partial] { opacity: .6; }
 .jg-droid__hint { color: var(--secondary-label, rgba(60, 60, 67, 0.7)); /* literal-ok */ font-size: 13px; }
+/* Droid Life (presence, recognise you, what I noticed) */
+.jg-dlife { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 1100px) { .jg-dlife { grid-template-columns: 1fr; } }
+.jg-dlife section { gap: 8px; }
+.jg-dlife button { border: 0; border-radius: 8px; padding: 6px 11px; font: inherit; font-size: 12.5px; font-weight: 550; cursor: pointer;
+  background: var(--tertiary-fill, rgba(118, 118, 128, 0.12)); /* literal-ok */ color: inherit; }
+.jg-dlife button:disabled { opacity: .45; cursor: default; }
+.jg-dlife .jg-dlife__danger { color: var(--system-red, #d70015); /* literal-ok */ }
+.jg-dlife__row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.jg-dlife__ind { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; font-weight: 550; }
+.jg-dlife__ind span { display: inline-flex; align-items: center; gap: 6px; }
+.jg-dlife__ind i { width: 9px; height: 9px; border-radius: 50%; background: rgba(125, 133, 144, 0.5); /* literal-ok */ }
+.jg-dlife__ind span[data-on] i { background: #30d158; /* literal-ok */ box-shadow: 0 0 0 3px rgba(48, 209, 88, 0.2); /* literal-ok */ }
+.jg-dlife__ind span[data-rec] i { background: #ff9f0a; /* literal-ok */ box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.22); /* literal-ok */ }
+.jg-dlife__line { margin: 0; font-size: 13px; }
+.jg-dlife__drives p { margin: 0 0 4px; font-size: 12px; color: var(--secondary-label, rgba(60, 60, 67, 0.7)); /* literal-ok */ }
+.jg-dlife__drive { display: grid; grid-template-columns: 86px 1fr; align-items: center; gap: 8px; font-size: 12px; }
+.jg-dlife__drive meter { width: 100%; height: 8px; }
+.jg-dlife__enrol { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; flex-wrap: wrap; }
+.jg-dlife__enrol b { font-size: 13px; }
+.jg-dlife__enrol p { margin: 2px 0 0; font-size: 12px; color: var(--secondary-label, rgba(60, 60, 67, 0.7)); /* literal-ok */ }
+.jg-dlife__list { max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.jg-dlife__list p { margin: 0; display: grid; grid-template-columns: 92px 1fr auto; gap: 8px; align-items: baseline; }
+.jg-dlife__list time { color: var(--tertiary-label, rgba(60, 60, 67, 0.5)); /* literal-ok */ font-size: 11.5px; }
+.jg-dlife__list button { padding: 0 6px; background: transparent; font-size: 14px; line-height: 1; }
+.jg-dlife__why p { grid-template-columns: 92px 1fr; }
+.jg-dlife__why b[data-action="speak"] { color: var(--system-green, #248a3d); /* literal-ok */ }
+.jg-dlife__why b[data-action="push"] { color: var(--accent, #0a84ff); /* literal-ok */ }
+.jg-droid__orb[data-state="present"] { background: radial-gradient(circle at 35% 30%, #d7f5e3, #34c77b 70%); /* literal-ok */ box-shadow: 0 0 0 4px rgba(52, 199, 123, 0.14); /* literal-ok */ }

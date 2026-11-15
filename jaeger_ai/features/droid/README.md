@@ -111,3 +111,25 @@ Config lives in `~/.jaeger/droid.json` (`speaker`, `microphone`, `engine`
 * The gimbal moves only while the camera is streaming (i.e. while awake).
 * The screen in the live view comes from CuaDriver, which already holds
   Screen Recording, so Jaeger Droid itself needs only Microphone and Camera.
+
+## Living heartbeat (Droid Life)
+
+Modes: **off** (night, or "go to sleep" / "power down": camera and mic closed until the next 9 AM or an
+explicit wake), **present** (active hours, `droid.json` `active_hours`, default 9-23: Apple Vision person/face/
+head-pose detection at 2-5 fps plus a Silero VAD on the mic; nothing is recorded or transcribed, the voice
+service receives silence) and **conversation** (the existing voice loop). "That's all" or 2 minutes without
+speech returns to present; Stream Deck toggle goes present -> conversation -> off.
+
+* `life.py`: blackboard, reflexes (graded head turns toward people and sound, glances, look-around when
+  alone), drives (social, curiosity, energy, confidence; `~/.jaeger/droid/drives.json`), the speak-or-quiet
+  `Gate` (active hours, quiet mode, present and facing, guests -> no private content, not mid-conversation,
+  max 1 unprompted line per 15 min and 4 per hour, small talk max 2/day with backoff when ignored).
+* Halts: Stream Deck STOP (2 min), "quiet" (1 h, "you can talk again" ends it), Matthew starting to speak.
+* Logs (derived text only, 7 days, deletable in the Droid view): `~/.jaeger/droid/noticed.jsonl` and
+  `decisions.jsonl`.
+* Identity: face (YuNet + SFace) and voice (WeSpeaker ResNet34) embeddings in `~/.jaeger/droid/identity/`
+  (0600), learned and deleted from the Droid view. Models in `~/.jaeger/droid/models/`.
+* Gateway: `deliver_proactive` offers each unprompted line to `POST /proactive`; `speak` plays it in the
+  room (the apps don't repeat it), `push` sends a Web Push (`proactive_away`).
+* Reflection is event-driven (`core/runtime/reflection_triggers.py`): arrival, return after 30+ min, job
+  finished, approval waiting. `JAEGER_HEARTBEAT_TIMER=1` restores the 30-minute timer.
