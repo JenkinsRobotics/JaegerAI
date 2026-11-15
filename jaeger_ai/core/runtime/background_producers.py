@@ -242,6 +242,7 @@ class BackgroundProducers:
         self.stop_event: threading.Event | None = None
         self._lock_file: Any = None
         self._idle_thread: threading.Thread | None = None
+        self._upkeep_stop: threading.Event | None = None
         self.sensor_bus: Any = None
         self._accepting = False
         self.held = False
@@ -286,6 +287,7 @@ class BackgroundProducers:
         cfg = _load_config(self.layout)
         try:
             self._start_cron()
+            self._start_upkeep()
             self._start_idle(cfg)
             self._start_webhooks(cfg)
             self._publish_status()
@@ -309,6 +311,9 @@ class BackgroundProducers:
             except Exception:  # noqa: BLE001
                 pass
             self.cron = None
+        if self._upkeep_stop is not None:
+            self._upkeep_stop.set()
+            self._upkeep_stop = None
         if self.sensor_bus is not None:
             try:
                 self.sensor_bus.stop()
@@ -354,6 +359,41 @@ class BackgroundProducers:
         poll_s = _float_env("JAEGER_CRON_POLL_S", 30.0)
         self.cron = CronRunner(self._cron_cb, llm_lock=None, poll_s=poll_s)
         self.cron.start()
+
+    def _start_upkeep(self) -> None:
+        """Nightly memory upkeep: once a day after the configured hour, update USER.md."""
+        stop = threading.Event()
+        self._upkeep_stop = stop
+        poll = _float_env("JAEGER_UPKEEP_POLL_S", 300.0)
+
+        def _loop() -> None:
+            while not stop.wait(poll):
+                try:
+                    self._upkeep_once()
+                except Exception as exc:  # noqa: BLE001 — never kill the producer
+                    print(f"[background] memory upkeep failed: {exc}", flush=True)
+
+        threading.Thread(target=_loop, name="memory-upkeep", daemon=True).start()
+
+    def _upkeep_once(self) -> None:
+        from datetime import datetime
+
+        from jaeger_ai.core.runtime import memory_upkeep as mu
+        if not self._accepting or not mu.due(self.layout):
+            return
+        if self.sink.current_tier() != "agent" or self.sink.is_busy():
+            return
+        msgs = self.sink.recent_owner_messages(86400)  # type: ignore[attr-defined]
+        today = datetime.now().strftime("%Y-%m-%d")
+        if not msgs:
+            mu.log_run(self.layout, "nightly", {"status": "skipped", "text": "no owner messages in 24h"}, messages=0)
+            return
+        session = self.sink.ensure_session(mu.UPKEEP_SESSION, "Memory upkeep")  # type: ignore[attr-defined]
+        result = self.sink.submit_turn(  # type: ignore[call-arg]
+            mu.nightly_prompt(msgs), session=session, request_id=f"memory-upkeep-{today}",
+            source="memory_upkeep", allowed_tools=list(mu.TOOLS),
+        )
+        mu.log_run(self.layout, "nightly", result, messages=len(msgs))
 
     def _cron_cb(self, prompt: str, session_key: str | None = None) -> None:
         from jaeger_ai.core.runtime.background_delivery import record_result

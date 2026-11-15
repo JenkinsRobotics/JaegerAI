@@ -224,6 +224,27 @@ def _cross_agent_memory_block(ctx: Any) -> str:
     return load_cross_agent_memory()
 
 
+OWNER_PROFILE_FRAGMENT = "owner_profile"
+
+
+def _owner_profile_block(ctx: Any) -> str:
+    """The owner's profile (memory/USER.md) plus the standing memory nudge."""
+    try:
+        from jaeger_agent.memory import user_profile as up
+        body = up.load(ctx.layout).strip()
+    except Exception:  # noqa: BLE001 — a profile must never break a prompt
+        return ""
+    lines = [l for l in body.splitlines() if l.strip()]
+    text = "\n".join(lines).strip()
+    has_entries = any(l.lstrip().startswith("- ") for l in lines)
+    guide = ("When you learn something durable about the owner (a preference, standing fact, "
+             "working-style rule or active project), record it with user_profile(action='add'); "
+             "correct stale entries with action='replace'. Never store secrets.")
+    if not has_entries:
+        return "[OWNER PROFILE]\n(empty so far)\n" + guide
+    return "[OWNER PROFILE — memory/USER.md, editable by the owner in Settings › Memory]\n" + text + "\n" + guide
+
+
 def register_context_documents() -> bool:
     """Contribute the two document fragments to jaeger-agent's prompt
     registry. Idempotent; returns True when the registry now carries
@@ -290,6 +311,19 @@ def register_context_documents() -> bool:
                 break
     else:
         _insert_after(fragments, SOUL_FRAGMENT, cross_mem)
+
+    profile_frag = assemble.PromptFragment(
+        OWNER_PROFILE_FRAGMENT, "instance", "instance/memory/USER.md",
+        _owner_profile_block, _user_facing,
+        "the owner's profile (native user model) + memory nudge — user-facing modes only",
+    )
+    if OWNER_PROFILE_FRAGMENT in present:
+        for index, existing in enumerate(fragments):
+            if existing.name == OWNER_PROFILE_FRAGMENT:
+                fragments[index] = profile_frag
+                break
+    else:
+        _insert_after(fragments, SOUL_FRAGMENT, profile_frag)
 
     facts_frag = assemble.PromptFragment(
         INSTANCE_FACTS_FRAGMENT, "instance", "instance/memory/state.db",

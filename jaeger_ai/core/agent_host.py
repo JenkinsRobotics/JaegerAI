@@ -20,7 +20,6 @@ def bind_agent_host() -> None:
         "skill_guard": "jaeger_ai.core.safety.skills_guard",
         "pipeline": "jaeger_ai.main",
         "containers": "jaeger_ai.core.runtime.container_service",
-        "shared_memory": "jaeger_ai.features.shared_memory.honcho_client",
     }
     bind_services({name: lambda module=module: import_module(module)
                    for name, module in modules.items()})

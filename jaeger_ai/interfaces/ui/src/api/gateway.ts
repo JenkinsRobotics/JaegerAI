@@ -204,6 +204,13 @@ export class GatewayClient implements JaegerSource {
     list: sessionId => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files`),
     read: (sessionId, id) => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}`),
   };
+  ownerProfile = {
+    get: () => this.json<import('./source').OwnerProfile>('/v1/memory/profile'),
+    save: (profile: string) => this.json<{ ok: boolean; changed?: boolean; error?: string }>('/v1/memory/profile', { profile }, 'PUT'),
+    revert: (previous: string) => this.json<{ ok: boolean; error?: string }>('/v1/memory/profile/revert', { previous }),
+    upkeep: () => this.json<import('./source').MemoryUpkeep>('/v1/memory/upkeep'),
+    setUpkeep: (body: { enabled?: boolean; hour?: number }) => this.json<import('./source').MemoryUpkeep & { ok: boolean }>('/v1/memory/upkeep', body, 'PATCH'),
+  };
   skillRevisions = {
     recent: () => this.json<{ revisions: import('./source').SkillRevision[]; counts: Record<string, number> }>('/v1/runtime/skills/revisions?limit=50'),
     history: (name: string) => this.json<{ skill: string; mutable: boolean; versions: { version: string; bytes: number; ts: string; origin: string; summary: string }[] }>(`/v1/runtime/skills/history?name=${encodeURIComponent(name)}`),

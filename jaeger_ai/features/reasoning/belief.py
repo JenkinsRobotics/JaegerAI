@@ -2,7 +2,7 @@
 
 Maintains a rolling state across sessions and turns. Research archives belong
 in the native persistent memory; this cache does not prove unbroken memory.
-Honcho shared memory is optional — never crash a tick if Honcho is down.
+Belief state is kept locally (Honcho shared memory was retired 2026-11-15).
 Belief state persists under ``~/.jaeger/ares/`` (or JAEGER_STATE_DIR/ares/).
 """
 
@@ -77,18 +77,7 @@ class EpistemicContext:
         self.cache_dir = Path(cache_dir or Path(default_base) / "ares").resolve()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._state_file = self.cache_dir / "belief_state.json"
-        self._honcho = self._maybe_honcho()
         self._state = self._load_local_state()
-
-    def _maybe_honcho(self) -> Any | None:
-        """Honcho is optional — import/connectivity failures never raise."""
-        try:
-            from jaeger_ai.features._stubs.shared_memory import HonchoClient  # Deprecated: use stub
-
-            return HonchoClient()
-        except Exception as exc:  # noqa: BLE001
-            logger.info("Honcho unavailable for reasoning belief context: %s", type(exc).__name__)
-            return None
 
     @property
     def current(self) -> BeliefState:
@@ -144,15 +133,7 @@ class EpistemicContext:
             logger.warning("Failed to persist reasoning belief state: %s", type(exc).__name__)
 
     async def orient(self, snapshot: Any) -> BeliefState:
-        """Update belief state; Honcho down must never crash the tick."""
-        if self._honcho is not None:
-            try:
-                # Connectivity only. This is not a memory synchronization
-                # receipt, and the client has health(), not status().
-                await asyncio.to_thread(self._honcho.health)
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Honcho status probe failed (ignored): %s", type(exc).__name__)
-
+        """Update belief state from the latest snapshot."""
         narrative_parts = [
             f"Active on {snapshot.repo.branch or 'workspace'} with "
             f"{snapshot.repo.dirty_files_count} modified files."

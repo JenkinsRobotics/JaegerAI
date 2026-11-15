@@ -1,12 +1,10 @@
 """Attributed research records in the existing instance memory, with receipts.
 
-Saving a claim does not verify it. Public research may explicitly be copied to
-Honcho; that receipt is separate from local durability and never inferred from
-the presence of a client or from generated prose.
+Saving a claim does not verify it. Records live only in the local instance
+memory (the Honcho mirror was retired 2026-11-15).
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -24,74 +22,15 @@ def _identity(topic: str, insight_id: str) -> tuple[str, str]:
     return "research:" + topic, "insight:" + insight_id
 
 
-def _remote_session(topic: str) -> str:
-    return "research-" + hashlib.sha256(topic.encode()).hexdigest()[:32]
-
-
-def _honcho():
-    from jaeger_agent.core.host import service
-    HonchoClient = service("shared_memory").HonchoClient
-    return HonchoClient()
-
-
-def _messages(payload: Any):
-    """Inspect message bodies only; summaries and model answers are not receipts."""
-    if isinstance(payload, list):
-        for item in payload:
-            yield from _messages(item)
-    elif isinstance(payload, dict):
-        if isinstance(payload.get("content"), str):
-            yield payload
-        for key in ("items", "messages", "data"):
-            if key in payload:
-                yield from _messages(payload[key])
-
-
-def _share(record: dict[str, Any]) -> dict[str, Any]:
-    client = _honcho()
-    session = _remote_session(record["topic"])
-    if not client.health():
-        return {"status": "unavailable", "verified": False, "session_id": session}
-    # Check before creating; never blindly retry a possibly accepted write.
-    peer = client.get_peer("jaeger-research")
-    if peer.get("error"):
-        if "HTTP 404" not in str(peer["error"]):
-            return {"status": "unconfirmed", "verified": False, "error": peer["error"]}
-        peer = client.create_peer("jaeger-research", {"kind": "research_archive"})
-    if peer.get("error"):
-        return {"status": "unconfirmed", "verified": False, "error": peer["error"]}
-    existing = client.get_session(session)
-    if existing.get("error"):
-        if "HTTP 404" not in str(existing["error"]):
-            return {"status": "unconfirmed", "verified": False, "error": existing["error"]}
-        existing = client.create_session(session, {"jaeger-research": {}})
-    if existing.get("error"):
-        return {"status": "unconfirmed", "verified": False, "error": existing["error"]}
-    body = json.dumps(record, sort_keys=True, ensure_ascii=False)
-    before = client.list_messages(session)
-    if before.get("error"):
-        return {"status": "unconfirmed", "verified": False, "error": before["error"]}
-    found = next((m for m in _messages(before) if m["content"] == body), None)
-    if found is None:
-        write = client.add_message(session, "jaeger-research", body)
-        if write.get("error"):
-            return {"status": "unconfirmed", "verified": False, "session_id": session, "error": write["error"]}
-        found = next((m for m in _messages(client.list_messages(session)) if m["content"] == body), None)
-    return {"status": "verified" if found else "unconfirmed", "verified": found is not None,
-            "session_id": session, "message_id": found.get("id") if found else None}
-
-
 @register_tool_from_function(name="record_insight")
 def record_insight(topic: str, insight_id: str, claim: str,
-                   epistemic_status: str, sources: list[str],
-                   share_publicly_with_honcho: bool = False) -> dict[str, Any]:
+                   epistemic_status: str, sources: list[str]) -> dict[str, Any]:
     """Persist an attributed research claim or open_question; read it back.
 
     Use a topic about the project/phenomenon, not the owner's identity.
     Status: supported, hypothesis, disputed, or open_question. Cite URLs.
     This records the author's assessment, not independently verified truth.
-    Set share_publicly_with_honcho only for public material the user asked
-    to archive there. Local success never implies remote success. IDs are
+    IDs are
     immutable: use a new insight_id for a revision, citing the old one.
     """
     try:
@@ -116,45 +55,25 @@ def record_insight(topic: str, insight_id: str, claim: str,
             return {"ok": False, "error": "insight_id already holds different content; use a revision ID"}
         # Exact lookup: ordinary recall() also permits fuzzy key matches.
         verified = json.loads(mem.list_facts(subject=subject).get(key, "null")) == record
-        remote: dict[str, Any] = {"status": "not_requested", "verified": False}
-        if verified and share_publicly_with_honcho:
-            try:
-                remote = _share(record)
-            except Exception as exc:
-                remote = {"status": "unconfirmed", "verified": False, "error": str(exc)}
         return {"ok": verified, "local_verified": verified, "subject": subject,
-                "key": key, "record": record, "honcho": remote}
+                "key": key, "record": record}
     except (ValueError, TypeError) as exc:
         return {"ok": False, "error": str(exc)}
 
 
 @register_tool_from_function(name="recall_insight", side_effect="read")
 def recall_insight(topic: str, insight_id: str, backend: str = "local") -> dict[str, Any]:
-    """Retrieve an exact research record from local memory or Honcho.
+    """Retrieve an exact research record from local memory.
 
-    Honcho reads never fall back to the local cache. A missing/failed read
-    is explicit. The stored epistemic status is an attributed assessment.
+    The stored epistemic status is an attributed assessment.
     """
     try:
         subject, key = _identity(topic, insight_id)
         if backend == "local":
             raw = mem.list_facts(subject=subject).get(key)
             record = json.loads(raw) if raw else None
-        elif backend == "honcho":
-            response = _honcho().list_messages(_remote_session(topic))
-            if response.get("error"):
-                return {"ok": False, "found": False, "backend": backend, "error": response["error"]}
-            records = []
-            for message in _messages(response):
-                try:
-                    candidate = json.loads(message["content"])
-                    if isinstance(candidate, dict) and candidate.get("topic") == topic and candidate.get("insight_id") == insight_id:
-                        records.append(candidate)
-                except ValueError:
-                    continue
-            record = records[-1] if records else None
         else:
-            raise ValueError("backend must be local or honcho")
+            raise ValueError("backend must be local")
         return {"ok": True, "found": record is not None, "backend": backend, "record": record}
     except (ValueError, TypeError) as exc:
         return {"ok": False, "found": False, "error": str(exc)}

@@ -284,6 +284,13 @@ export interface JaegerSource {
   taskArtifacts?:TaskArtifacts;
   managedSkills?:ManagedSkills;
   skillDetail?(name: string, category: string): Promise<SkillDetail>;
+  ownerProfile?: {
+    get(): Promise<OwnerProfile>;
+    save(profile: string): Promise<{ ok: boolean; changed?: boolean; error?: string }>;
+    revert(previous: string): Promise<{ ok: boolean; error?: string }>;
+    upkeep(): Promise<MemoryUpkeep>;
+    setUpkeep(body: { enabled?: boolean; hour?: number }): Promise<MemoryUpkeep & { ok: boolean }>;
+  };
   skillRevisions?: {
     recent(): Promise<{ revisions: SkillRevision[]; counts: Record<string, number> }>;
     history(name: string): Promise<{ skill: string; mutable: boolean; versions: { version: string; bytes: number; ts: string; origin: string; summary: string }[] }>;
@@ -431,3 +438,5 @@ export type TemplateCatalogReceipt={operation_id:string;outcome:'saved'|'rejecte
 export interface TemplateCatalogControls {read(id:string):Promise<TemplateCatalogState>;change(id:string,body:TemplateCatalogIntent):Promise<TemplateCatalogReceipt>;operation(id:string):Promise<TemplateCatalogReceipt>}
 
 export type SkillRevision = { skill: string; version: string; origin: string; summary: string; delta: string; ts: string };
+export type OwnerProfile = { profile: string; chars: number; limit: number; sections: string[]; changes: { ts: number; origin: string; summary: string; chars: number; previous: string | null }[] };
+export type MemoryUpkeep = { enabled: boolean; hour: number; next_run: string | null; review_every_turns: number; runs: { kind: string; at: number; messages: number; status: string; halt_reason?: string | null; error?: string | null; reply?: string }[] };
