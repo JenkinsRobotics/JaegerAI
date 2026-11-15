@@ -6533,7 +6533,7 @@ class JaegerGatewayApp:
                 # The worker must know how the owner will check its result.
                 from jaeger_ai.core.tasks.owner import TURN_CARD_GUIDANCE
                 prompt = f"{TURN_CARD_GUIDANCE}\n\n" + prompt
-            if fast_lane and self._voice_direct_lane(runtime, prepared, fast_lane=fast_lane):
+            if fast_lane and self._voice_direct_lane(runtime, prepared, fast_lane=fast_lane, request_text=request_text):
                 model_only = True
                 from jaeger_ai.features.voice.brain import voice_brain as _voice_brain, voice_history, voice_prompt
                 voice_brain = _voice_brain()
@@ -6705,13 +6705,19 @@ class JaegerGatewayApp:
             self._turn_timings.pop(rid, None)
 
     @staticmethod
-    def _voice_direct_lane(runtime: Any, prepared: Any, *, fast_lane: bool) -> bool:
+    def _voice_direct_lane(runtime: Any, prepared: Any, *, fast_lane: bool, request_text: str = "") -> bool:
         """Honor the executive's conversational voice decision at execution.
 
         Reuse the existing model-only lane; work requests retain the full owner
         loop and tool authority. An unavailable decision never changes lanes.
+        Requests needing live facts or the user's data always take the full loop,
+        so the small voice model never guesses them.
         """
         if not fast_lane or prepared is None:
+            return False
+        from jaeger_ai.features.voice.brain import needs_live_facts
+
+        if needs_live_facts(request_text):
             return False
         from jaeger_ai.core.entity.executive import CognitiveStrategy
 

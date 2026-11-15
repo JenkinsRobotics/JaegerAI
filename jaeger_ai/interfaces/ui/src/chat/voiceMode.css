@@ -1,12 +1,12 @@
 /* ChatGPT-style voice mode: full-screen orb, captions, mute and end. */
 .jg-vmode { position:fixed; inset:0; z-index:200; display:flex; flex-direction:column; align-items:center; justify-content:space-between; box-sizing:border-box; padding:max(16px,env(safe-area-inset-top)) 20px max(24px,env(safe-area-inset-bottom)); background:var(--jg-color-pane); color:var(--jg-color-text); }
-.jg-vmode__top { width:100%; max-width:640px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.jg-vmode__engines { display:inline-flex; padding:3px; border-radius:999px; background:var(--jg-color-inset); border:1px solid var(--jg-color-border); }
+.jg-vmode__top { width:100%; max-width:640px; display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:12px; }
+.jg-vmode__engines { grid-column:2; display:inline-flex; padding:3px; border-radius:999px; background:var(--jg-color-inset); border:1px solid var(--jg-color-border); }
 .jg-vmode__engines button { min-height:36px; padding:6px 14px; border:0; border-radius:999px; background:transparent; color:var(--jg-color-text-secondary); font:inherit; font-size:14px; cursor:pointer; }
 .jg-vmode__engines button[aria-checked="true"] { background:var(--jg-color-elevated); color:var(--jg-color-text); box-shadow:var(--jg-shadow-control); }
 .jg-vmode__engines button[aria-disabled="true"] { opacity:0.6; }
 .jg-vmode__engines small { font-size:12px; color:var(--jg-color-text-tertiary); }
-.jg-vmode__latency { font-size:13px; color:var(--jg-color-text-tertiary); font-variant-numeric:tabular-nums; }
+.jg-vmode__latency { grid-column:3; justify-self:end; font-size:13px; color:var(--jg-color-text-tertiary); font-variant-numeric:tabular-nums; }
 .jg-vmode__orb { --jg-voice-level:0; position:relative; width:min(56vw,240px); aspect-ratio:1; margin-top:auto; border:0; padding:0; border-radius:50%; background:transparent; cursor:pointer; -webkit-tap-highlight-color:transparent; }
 .jg-vmode__orb > span { position:absolute; inset:0; border-radius:50%; background:radial-gradient(circle at 35% 30%, var(--jg-color-on-accent) 0%, var(--jg-color-accent) 45%, var(--jg-color-accent-text) 100%); box-shadow:0 0 calc(24px + 60px * var(--jg-voice-level)) var(--jg-color-accent); transform:scale(calc(0.86 + 0.32 * var(--jg-voice-level))); transition:transform 70ms linear, box-shadow 70ms linear, opacity 200ms; }
 .jg-vmode__orb[data-phase="connecting"] > span, .jg-vmode__orb[data-phase="thinking"] > span { animation:jg-voice-breathe 1.6s ease-in-out infinite; }
