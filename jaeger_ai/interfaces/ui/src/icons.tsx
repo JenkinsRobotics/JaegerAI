@@ -17,6 +17,9 @@ export const AppsIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><r
 export const ArrowDownIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /></svg>;
 export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="m6 4 4 4-4 4" /></svg>;
 export const CloseIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" /></svg>;
+export const CameraIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><rect x="1.8" y="4.2" width="9" height="7.6" rx="1.6" /><path d="m10.8 7 3.4-2v6l-3.4-2" /></svg>;
+export const ScreenIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><rect x="1.8" y="2.6" width="12.4" height="8.6" rx="1.4" /><path d="M5.5 13.6h5M8 11.2v2.4" /></svg>;
+export const UndoIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M4.5 3 2 5.5 4.5 8" /><path d="M2.2 5.5h7.3a4 4 0 0 1 0 8H6" /></svg>;
 export const WaveIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M3 6.5v3M5.5 4.5v7M8 3v10M10.5 5v6M13 6.5v3" /></svg>;
 /** Neutral app glyphs for the Connect apps pill (D11: no vendor logos yet). */
 export const GlyphCode = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="m6 4.5-3.5 3.5L6 11.5M10 4.5l3.5 3.5-3.5 3.5" /></svg>;

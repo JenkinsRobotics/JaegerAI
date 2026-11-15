@@ -499,6 +499,22 @@ def warm_vision() -> dict[str, Any]:
     return {"warmed": True, "backend": "llama.cpp", "handler": type(handler).__name__}
 
 
+
+def _local_vision(data: bytes, question: str) -> dict[str, Any] | None:
+    """Ask Jaeger's VISION-certified local model (Ollama, on this Mac).
+
+    Returns None when no local model passed the VISION probe, so callers can
+    fall back. Images never leave the machine on this path.
+    """
+    try:
+        from jaeger_ai.core.models import local_vision
+    except Exception:  # noqa: BLE001
+        return None
+    model = local_vision.certified_model()
+    if not model:
+        return None
+    return local_vision.describe(data, question, model=model)
+
 def look_at(image_path: str, question: str = "Describe this image in one short sentence.") -> dict[str, Any]:
     """Look at an image file under <instance>/skills/ and answer a question.
 
@@ -527,6 +543,10 @@ def look_at(image_path: str, question: str = "Describe this image in one short s
                 "error": "look_at interrupted by user"}
 
     q = (question or "Describe this image in one short sentence.").strip()
+    local = _local_vision(target.read_bytes(), q)
+    if local and local.get("ok"):
+        return {"saw": True, "answer": local["answer"], "backend": f"ollama:{local['model']} (local)",
+                "elapsed_s": local.get("elapsed_s"), "path": clean_path}
     try:
         import base64
         import mimetypes
@@ -566,8 +586,8 @@ def look_at(image_path: str, question: str = "Describe this image in one short s
 @register_tool_from_function(name="vision_analyze")
 def _t_vision_analyze(image_path: str, question: str = "Describe this image in one short sentence.") -> dict:
     """Look at a workspace image and answer a question about it.
-    Uses Jaeger's active local llama.cpp model plus its configured vision
-    projector. image_path is sandbox-resolved under <instance>/skills/."""
+    Uses Jaeger's VISION-certified local model (falls back to the llama.cpp
+    projector). Runs on this Mac; the image is not uploaded."""
     return look_at(image_path=image_path, question=question)
 
 
@@ -612,10 +632,13 @@ def _t_image_edit(
     return edit_image(prompt=prompt, source_path=source_path, out_path=out_path)
 
 
-def view_image(path: str, max_edge: int = 1024) -> dict[str, Any]:
-    """Read an image file and return format, size, and a small preview.
+def view_image(path: str, max_edge: int = 1024, question: str = "", describe: bool = True) -> dict[str, Any]:
+    """Read an image file and return format, size, a small preview and,
+    when a local model is VISION-certified, a description of what it shows.
 
-    Model-agnostic: this does not call a vision model. The path is
+    The description comes from Jaeger's local vision model on this Mac
+    (``jaeger_ai.core.models.local_vision``); the image is not sent to a
+    cloud service. The path is
     resolved the same way as ``read_file``. Credential paths are refused.
     A compact JPEG preview (base64) is included when the file can be
     decoded, capped so it does not flood the context.
@@ -674,15 +697,26 @@ def view_image(path: str, max_edge: int = 1024) -> dict[str, Any]:
         if "format" not in result:
             result["error"] = "not a decodable image"
             result["ok"] = False
+    if describe and result.get("ok") and "format" in result:
+        seen = _local_vision(data, question)
+        if seen is None:
+            result["description_unavailable"] = "no VISION-certified local model"
+        elif seen.get("ok"):
+            result["description"] = seen["answer"]
+            result["vision_model"] = seen["model"]
+            result["vision_local"] = True
+            result["vision_elapsed_s"] = seen.get("elapsed_s")
+        else:
+            result["description_error"] = seen.get("error")
     return result
 
 
 @register_tool_from_function(name="view_image", side_effect="read")
 @requires_tier(PermissionTier.READ_ONLY, skill="vision", operation="view_image",
-               summary="read an image file's format, size, and a small preview")
-def _t_view_image(path: str) -> dict:
-    """Read an image (png, jpeg, gif, webp, …) and return its dimensions,
-    format, and a small preview. This is a model-agnostic image read —
-    it does not require a vision model. Use vision_analyze when you need
-    a description of what the picture shows."""
-    return view_image(path=path)
+               summary="look at an image file with the local vision model")
+def _t_view_image(path: str, question: str = "") -> dict:
+    """Look at an image (png, jpeg, gif, webp, …): returns its dimensions,
+    format, a small preview, and a description from Jaeger's local vision
+    model (runs on this Mac). Pass question to ask something specific about
+    the picture, e.g. "what does the error dialog say?"."""
+    return view_image(path=path, question=question)

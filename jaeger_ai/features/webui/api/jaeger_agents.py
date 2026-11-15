@@ -220,6 +220,37 @@ def _serve_rtc(handler, method: str, action: str) -> bool:
     return True
 
 
+def _serve_local_vision(handler) -> bool:
+    """Describe one camera/screen frame with the local VISION-certified model.
+
+    The frame goes to Ollama on this Mac only; nothing is sent to a cloud
+    vision service. Body: ``{image_base64, question?}`` (a JPEG/PNG frame)."""
+    import base64
+    import binascii
+    from api.helpers import j, read_body
+
+    if int(handler.headers.get("Content-Length", "0") or 0) > 8 * 1024 * 1024:
+        j(handler, {"error": "Frame too large"}, status=413)
+        return True
+    raw = getattr(handler, "_json_body_bytes", None)
+    try:
+        body = json.loads(raw) if raw is not None else (read_body(handler) or {})
+        encoded = str(body.get("image_base64") or "")
+        if "," in encoded[:64]:
+            encoded = encoded.split(",", 1)[1]
+        frame = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error, AttributeError):
+        j(handler, {"error": "image_base64 is required"}, status=400)
+        return True
+    if not frame:
+        j(handler, {"error": "image_base64 is required"}, status=400)
+        return True
+    from jaeger_ai.core.models import local_vision
+    result = local_vision.describe(frame, str(body.get("question") or ""), max_edge=768, timeout=60)
+    j(handler, result, status=200 if result.get("ok") else 503)
+    return True
+
+
 def _serve_kokoro(handler) -> bool:
     from api.helpers import read_body
 
@@ -419,6 +450,8 @@ def route(handler, parsed, method: str) -> bool:
     # Realtime voice (WebRTC signalling) for the voice service on 127.0.0.1:8794.
     if path.startswith("/api/jaeger/rtc/"):
         return _serve_rtc(handler, method, path[len("/api/jaeger/rtc/"):])
+    if method == "POST" and path == "/api/jaeger/vision/describe":
+        return _serve_local_vision(handler)
     if method == "POST" and path == "/api/jaeger/voice/warm":
         from jaeger_ai.features.voice.web_speech import warm
         from api.helpers import j

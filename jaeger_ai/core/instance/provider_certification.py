@@ -246,6 +246,10 @@ def certify_role(
 
 def _live_probe(provider: str, model: str, role: str) -> tuple[bool, str]:
     """Cheap reachability + seed overlay. Does not invent a pass for a known fail."""
+    if role.upper() == "VISION" and provider in {"ollama", "ollama-local"}:
+        # A real image probe, not reachability: read a known number and colours.
+        from jaeger_ai.core.models.local_vision import probe
+        return probe(model)
     cap_role = _ROLE_TO_CAP.get(role.upper(), role.lower())
     if is_certified(model, cap_role) is False and capabilities_for(model).get(cap_role) == FAIL:
         return False, "existing evidence: FAIL"
