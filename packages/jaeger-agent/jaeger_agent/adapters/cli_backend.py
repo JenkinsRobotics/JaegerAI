@@ -78,6 +78,49 @@ _SAFE_ENV = frozenset({
 })
 
 
+
+def _grok_system_prompt_override(tools: list[ToolDef]) -> str:
+    """Build the Grok override from the tools actually on this turn's MCP."""
+    names = [
+        str(getattr(tool, "name", "") or "")
+        for tool in tools
+        if getattr(tool, "name", "")
+    ]
+    present = set(names)
+    # Keep argv compact: highlight the tools the prompt talks about when
+    # they are really registered, then mention the rest by count.
+    from .cli_turn_mcp import REQUIRED_CLI_MCP_TOOLS
+    highlighted = [n for n in sorted(REQUIRED_CLI_MCP_TOOLS) if n in present]
+    mcp_names = [f"jaeger__{n}" for n in highlighted]
+    short = ", ".join(highlighted) if highlighted else ", ".join(names[:24])
+    prefixed = ", ".join(mcp_names) if mcp_names else short
+    extra = len(present) - len(highlighted)
+    rest = (
+        f" This session also has {extra} more Jaeger MCP tools; find them "
+        "with search_tool or list_tools, then call them as jaeger__<name> "
+        "via use_tool."
+        if extra > 0 else ""
+    )
+    list_hint = (
+        " To list the current workspace, call jaeger__list_skill_dir with path '.'."
+        if "list_skill_dir" in present else ""
+    )
+    return (
+        "You are Jaeger's language model. Follow the System section and the "
+        "current request. Answer with the fewest Jaeger MCP tool calls and "
+        "stop as soon as you know the answer. Do not search for or load a "
+        "tool that is already available. Call Jaeger tools only through "
+        "use_tool with the jaeger__ prefix (never the bare short name — "
+        "bare names are rejected). Tools on this turn include "
+        + (prefixed or "the Jaeger MCP tools in this session")
+        + " (short names: " + (short or "see the MCP catalog") + ")."
+        + list_hint
+        + rest
+        + " Do not use built-in file, editor, X search, or web tools. "
+        "The CLI cache directory is not the workspace."
+    )
+
+
 def flatten_messages(
     messages: list[Message],
     tools: list[ToolDef],
@@ -226,9 +269,18 @@ def _is_id_like_text(text: str) -> bool:
     return False
 
 
+_DEAD_END_TEXT = re.compile(
+    r"user cancelled the execution for tool|tool not found:|failed via `use_tool`|"
+    r"tool execution cancelled due to earlier user cancellation",
+    re.IGNORECASE,
+)
+
+
 def _usable_cli_text(text: str) -> str:
     value = (text or "").strip()
-    return value if value and not _is_id_like_text(value) else ""
+    if not value or _is_id_like_text(value) or _DEAD_END_TEXT.search(value):
+        return ""
+    return value
 
 
 def parse_cli_stream(stdout: str, stderr: str = "") -> dict[str, Any]:
@@ -662,6 +714,17 @@ class CliBackendAdapter(ProviderAdapter):
             mcp_hint=mcp_capable and bool(tools),
         )}
 
+    def attach_mcp_catalog(self, tools: list[ToolDef] | None) -> None:
+        """Put the full dispatchable catalog on the loopback MCP for this call.
+
+        The model-facing prompt may be a scoped CORE set, but ``use_tool``
+        and ``search_tool`` must be able to invoke any tool the prompt
+        names (or ``load_tools`` would reveal) without waiting for a
+        later Jaeger loop iteration.
+        """
+        if tools:
+            self._pending_tools = list(tools)
+
     def call(
         self,
         formatted: Any,
@@ -715,7 +778,8 @@ class CliBackendAdapter(ProviderAdapter):
         def _run() -> dict[str, Any]:
             from .cli_turn_mcp import MCP_BACKENDS, attach_cli_mcp
 
-            tools = list(getattr(self, "_pending_tools", []) or [])
+            from .cli_turn_mcp import merge_cli_mcp_tools
+            tools = merge_cli_mcp_tools(list(getattr(self, "_pending_tools", []) or []))
             execute = kwargs.get("execute_tool")
             use_workdir = (
                 (self.spec_id == "grok" and "--single" in argv)
@@ -763,25 +827,7 @@ class CliBackendAdapter(ProviderAdapter):
                 # session in the stable cwd stacked prior turns into a
                 # 20k–80k prompt. Start a fresh session every turn.
                 child_argv.extend(["--session-id", str(uuid.uuid4())])
-                tool_names = ", ".join(
-                    str(getattr(tool, "name", "") or "")
-                    for tool in tools
-                    if getattr(tool, "name", "")
-                )
-                override = (
-                    "You are Jaeger's language model. Follow the System "
-                    "section and the current request. Answer with the fewest "
-                    "Jaeger MCP tool calls and stop as soon as you know the "
-                    "answer. Do not search for or load a tool that is already "
-                    "available. File tools already on this turn include "
-                    "jaeger__list_skill_dir, jaeger__read_file, jaeger__glob, "
-                    "jaeger__search_files, and jaeger__terminal. Short names: "
-                    + (tool_names or "list_skill_dir, read_file, glob, terminal")
-                    + ". To list the current workspace, call "
-                    "jaeger__list_skill_dir with path '.'. Do not use built-in "
-                    "file, editor, X search, or web tools. The CLI cache "
-                    "directory is not the workspace."
-                )
+                override = _grok_system_prompt_override(tools)
                 child_argv.extend(["--system-prompt-override", override])
                 child_argv.extend(["--disallowed-tools", ",".join(_GROK_BUILTIN_TOOLS)])
                 if "--no-plan" not in child_argv:
