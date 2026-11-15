@@ -17,7 +17,6 @@ import json
 import logging
 import re
 import secrets
-import socket
 import threading
 import time
 from collections.abc import Callable
@@ -321,34 +320,6 @@ class TurnToolMcp:
         self.url = None
         self.token = None
 
-    def write_grok_plugin(self, folder: str) -> str:
-        """Trusted --plugin-dir payload so MCP attaches without a project .grok/."""
-        from pathlib import Path
-
-        if not self.url or not self.token:
-            raise RuntimeError("turn MCP is not running")
-        plugin = Path(folder) / "jaeger-plugin"
-        plugin.mkdir(parents=True, exist_ok=True)
-        os.chmod(plugin, 0o700)
-        (plugin / "plugin.json").write_text(json.dumps({
-            "name": "jaeger-turn-mcp",
-            "description": "Jaeger loopback MCP for this CLI turn",
-            "version": "0.0.0",
-        }, indent=2), encoding="utf-8")
-        payload = {
-            "mcpServers": {
-                "jaeger": {
-                    "type": "http",
-                    "url": self.url,
-                    "headers": {"Authorization": f"Bearer {self.token}"},
-                }
-            }
-        }
-        path = plugin / ".mcp.json"
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        path.chmod(0o600)
-        return str(plugin)
-
     def write_grok_config(self, folder: str) -> None:
         """Project-scoped Grok MCP config (loaded when cwd is this folder)."""
         from pathlib import Path
@@ -536,19 +507,133 @@ def cli_session_cwd() -> str | None:
     return path if os.path.isdir(path) else None
 
 
-def _grok_leader_live() -> bool:
-    """True when the Jaeger-specific Grok leader socket accepts a connection."""
-    path = GROK_LEADER_SOCKET
-    if not path.exists():
-        return False
+_GROK_EXCLUDE = "/.grok"
+_GROK_OVERLAY_MARK_START = "# begin-jaeger-turn-mcp"
+_GROK_OVERLAY_MARK_END = "# end-jaeger-turn-mcp"
+
+
+def _git_info_exclude(work_cwd: str) -> _Path | None:
+    """``info/exclude`` for this working tree, or None if it is not a git repo."""
+    import subprocess
     try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(0.2)
-        sock.connect(str(path))
-        sock.close()
-        return True
-    except OSError:
+        raw = subprocess.check_output(
+            ["git", "rev-parse", "--git-path", "info/exclude"],
+            cwd=work_cwd, text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    path = _Path(raw)
+    if not path.is_absolute():
+        path = _Path(work_cwd) / path
+    return path
+
+
+def _add_git_exclude(work_cwd: str, line: str) -> bool:
+    """Append ``line`` to info/exclude. Returns True if this call wrote it."""
+    path = _git_info_exclude(work_cwd)
+    if path is None:
         return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if line in existing.splitlines():
+        return False
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    path.write_text(existing + prefix + line + "\n", encoding="utf-8")
+    return True
+
+
+def _remove_git_exclude_line(work_cwd: str, line: str) -> None:
+    path = _git_info_exclude(work_cwd)
+    if path is None or not path.is_file():
+        return
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [row for row in lines if row != line]
+    if kept != lines:
+        body = "\n".join(kept)
+        path.write_text(body + ("\n" if body else ""), encoding="utf-8")
+
+
+def _strip_overlay(body: str) -> str:
+    start, end = _GROK_OVERLAY_MARK_START, _GROK_OVERLAY_MARK_END
+    if start not in body or end not in body:
+        return body
+    pre, rest = body.split(start, 1)
+    _, post = rest.split(end, 1)
+    if post.strip():
+        return pre.rstrip() + "\n" + post.lstrip("\n")
+    return pre.rstrip() + ("\n" if pre.strip() else "")
+
+
+def stage_session_cli_config(backend_id: str, work_cwd: str | None, folder: str | None):
+    """Make a session worktree see the stable Grok MCP config, then undo it.
+
+    Headless ``grok`` reads project MCP from ``--cwd/.grok/config.toml``, not
+    from the process cwd, and has no --mcp-config flag. A symlink (or a
+    marked overlay in an existing project config) plus a git exclude keeps
+    the token out of ``git add`` / Undo / Apply. The returned callable
+    always removes what this function added.
+    """
+    if backend_id != "grok" or not work_cwd or not folder:
+        return lambda: None
+    if os.path.realpath(work_cwd) == os.path.realpath(folder):
+        return lambda: None
+    src = _Path(folder) / ".grok"
+    dest = _Path(work_cwd) / ".grok"
+    if not src.is_dir():
+        return lambda: None
+
+    added_exclude = _add_git_exclude(work_cwd, _GROK_EXCLUDE)
+    cleanups: list = []
+
+    def cleanup() -> None:
+        for fn in reversed(cleanups):
+            try:
+                fn()
+            except OSError:
+                pass
+        if added_exclude:
+            try:
+                _remove_git_exclude_line(work_cwd, _GROK_EXCLUDE)
+            except OSError:
+                pass
+
+    if dest.is_symlink() or not dest.exists():
+        if dest.is_symlink() or dest.exists():
+            dest.unlink()
+        dest.symlink_to(src)
+        cleanups.append(lambda: dest.unlink(missing_ok=True) if dest.is_symlink() else None)
+        return cleanup
+
+    # Owner already has a project .grok/. Temporarily overlay our MCP block.
+    cfg = dest / "config.toml"
+    original = cfg.read_text(encoding="utf-8") if cfg.is_file() else ""
+    source_cfg = src / "config.toml"
+    incoming = source_cfg.read_text(encoding="utf-8") if source_cfg.is_file() else ""
+    stripped = _strip_overlay(original)
+    overlay = (
+        (stripped + ("\n" if stripped and not stripped.endswith("\n") else ""))
+        + _GROK_OVERLAY_MARK_START + "\n"
+        + incoming.rstrip() + "\n"
+        + _GROK_OVERLAY_MARK_END + "\n"
+    )
+    if not cfg.exists():
+        def _remove_cfg() -> None:
+            try:
+                cfg.unlink()
+            except OSError:
+                pass
+        cleanups.append(_remove_cfg)
+    else:
+        def _restore() -> None:
+            try:
+                cfg.write_text(original, encoding="utf-8")
+                cfg.chmod(0o600)
+            except OSError:
+                pass
+        cleanups.append(_restore)
+    cfg.write_text(overlay, encoding="utf-8")
+    cfg.chmod(0o600)
+    return cleanup
 
 
 def acquire_cli_mcp(backend_id: str, tools: list[ToolDef], execute: ExecuteTool) -> TurnToolMcp:
@@ -619,24 +704,10 @@ def attach_cli_mcp(
     if backend_id == "grok":
         if folder:
             server.write_grok_config(folder)
-        # When the process runs in the session worktree, Grok will not load
-        # the stable folder's .grok/config.toml. Inject the same MCP via a
-        # trusted --plugin-dir so we never write .grok/ (or the token) into
-        # the owner's project.
-        distinct_work = bool(
-            work_cwd and folder
-            and os.path.realpath(work_cwd) != os.path.realpath(folder)
-        )
-        if distinct_work:
-            plugin = server.write_grok_plugin(folder)
-            if "--plugin-dir" not in child:
-                child.extend(["--plugin-dir", plugin])
-            # Project [cli] use_leader is not in the worktree; attach to the
-            # Jaeger leader when it is already up.
-            if _grok_leader_live() and "--leader" not in child and "--no-leader" not in child:
-                child.append("--leader")
-        # Load the project MCP config in the stable cwd without writing the
-        # owner's trusted_folders.toml or ~/.grok/config.toml.
+        # Load the project MCP config without writing the owner's
+        # trusted_folders.toml or ~/.grok/config.toml. Headless `grok` has
+        # no --plugin-dir / --mcp-config, so a worktree turn stages a
+        # temporary .grok link (see stage_session_cli_config).
         extra_env["GROK_FOLDER_TRUST"] = "0"
         extra_env["GROK_LEADER_SOCKET"] = str(GROK_LEADER_SOCKET)
         # X search / code interpreter are backend tools. --disable-web-search
