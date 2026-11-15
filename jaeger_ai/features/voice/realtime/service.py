@@ -248,7 +248,10 @@ def _gemini_pipeline(transport, request_data: dict, pending: dict, send):
     from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
     from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiVADParams
 
-    @tool_options(cancel_on_interruption=False)
+    # Synchronous (BLOCKING on Gemini 3.8 Live): Gemini waits for Jaeger and then speaks
+    # the answer. As NON_BLOCKING it voiced only its filler and dropped the result.
+    # Interrupting cancels the wait; the Jaeger turn still finishes in the chat.
+    @tool_options(cancel_on_interruption=True)
     async def ask_jaeger(params):
         call_id = uuid.uuid4().hex[:12]
         fut = asyncio.get_running_loop().create_future()
