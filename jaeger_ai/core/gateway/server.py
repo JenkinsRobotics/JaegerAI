@@ -6404,10 +6404,6 @@ class JaegerGatewayApp:
                 )
         finally:
             self._schedule_summary(session_id)
-            try:
-                self._continue_after_transfer(request_id)
-            except Exception:  # noqa: BLE001
-                logger.warning("handoff continuation failed", exc_info=True)
 
     async def _execute_turn_inner(
         self,
@@ -9196,6 +9192,29 @@ def _is_launchd_stack_gateway() -> bool:
     )
 
 
+def _leave_install_root() -> None:
+    """Never run from the JaegerAI checkout: anything that resolves a relative
+    path or spawns a child without an explicit cwd (CLI brains, code runners,
+    shell side effects) would otherwise write into the repo root. Turns get
+    their real directory from the session workspace / agent worktree; the
+    process itself sits in the instance workspace."""
+    try:
+        here = Path.cwd().resolve()
+        install = Path(os.environ.get("JAEGER_INSTALL_ROOT") or Path(__file__).resolve().parents[3]).resolve()
+        if here != install and install not in here.parents:
+            return
+        try:
+            from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+            target = Path(InstanceLayout(root=resolve_instance_dir()).root) / "workspace"
+        except Exception:  # noqa: BLE001
+            target = Path(os.environ.get("JAEGER_STATE_HOME") or Path.home() / ".jaeger").expanduser()
+        target.mkdir(parents=True, exist_ok=True)
+        os.chdir(target)
+        logger.info("gateway working directory: %s (not the install root)", target)
+    except Exception:  # noqa: BLE001
+        logger.warning("could not leave the install root", exc_info=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     """``jaeger gateway daemon`` — run the Jaeger Gateway on :data:`GATEWAY_PORT`.
 
@@ -9224,6 +9243,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_GATEWAY_PORT,
                         help=f"bind port (default {DEFAULT_GATEWAY_PORT})")
     args = parser.parse_args(argv)
+    _leave_install_root()
 
     try:
         asyncio.run(run_gateway_forever(args.host, args.port))
