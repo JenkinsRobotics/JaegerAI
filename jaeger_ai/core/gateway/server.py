@@ -1464,6 +1464,8 @@ class JaegerGatewayApp:
                 payload["spoken_by"] = "droid"
             elif decision.get("action") == "push":
                 payload["push"] = True
+        elif payload["kind"] == "approval_check_in":
+            payload["push"] = True  # droid not running: an approval still reaches the phone
 
         def _write() -> None:
             self.store.ensure_session(session_id)

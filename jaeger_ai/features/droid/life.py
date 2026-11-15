@@ -236,10 +236,22 @@ class Gate:
         self.log.append("decision", action=action, reason=reason, about=kind, value=value, private=private,
                         preview=(text[:60] + ("…" if len(text) > 60 else "")) if text and not private else None,
                         room={k: room.get(k) for k in ("owner_present", "owner_facing", "guests", "speech",
-                                                        "mode", "active_hours", "quiet", "halted")})
+                                                        "mode", "active_hours", "quiet", "halted", "stopped")})
         return {"action": action, "reason": reason}
 
     def _decide(self, kind, value, private, room, drives, now):
+        if kind == "approval":
+            # Urgent: always reaches Matthew, by voice if he's here, else his phone. Only
+            # STOP and sleep/night keep it off the speaker; guests never hear private details.
+            if not room.get("active_hours") or not room.get("presence_on"):
+                return "push", "approval: droid asleep, sent to phone"
+            if room.get("stopped"):
+                return "push", "approval: STOP pressed, sent to phone"
+            if not room.get("owner_present"):
+                return "push", "approval: Matthew is away, sent to phone"
+            if room.get("guests") and private:
+                return "push", "approval: someone else is present, details sent to phone"
+            return "speak", "approval: urgent, Matthew is here"
         away_action = "push" if value >= 2 else "quiet"
         if not room.get("active_hours"):
             return away_action, "outside active hours (phone instead)" if value >= 2 else "outside active hours"
@@ -373,7 +385,9 @@ class Life:
                 "owner_present": owner_present, "owner_facing": bb["facing"] and now - bb["person_seen_at"] < 20,
                 "guests": bb["guests"], "speech": now - bb["speech_at"] < 8,
                 "mode": self.droid.status.get("mode"), "busy": bool(self.droid.request_id or self.droid.pending_approval),
-                "quiet": now < bb["quiet_until"], "halted": now < bb["halted_until"], "enrolled": enrolled}
+                "quiet": now < bb["quiet_until"], "halted": now < bb["halted_until"],
+                "stopped": now < bb["halted_until"] and bb.get("halt_why") in ("STOP pressed", "asked to stop"),
+                "enrolled": enrolled}
 
     def snapshot(self) -> dict:
         from . import senses
@@ -392,7 +406,10 @@ class Life:
         return bool(self.ears is not None and self.ears.speaking)
 
     def halt(self, seconds: float, why: str):
-        self.bb["halted_until"] = max(self.bb["halted_until"], time.time() + seconds)
+        until = time.time() + seconds
+        if until >= self.bb["halted_until"]:
+            self.bb["halt_why"] = why
+        self.bb["halted_until"] = max(self.bb["halted_until"], until)
         loop = self.droid.loop
         if self.droid.unprompted_speaking and loop is not None:
             loop.call_soon_threadsafe(self.droid.stop_talking)   # audio thread -> event loop

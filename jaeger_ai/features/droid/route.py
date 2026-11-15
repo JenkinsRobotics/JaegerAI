@@ -30,7 +30,7 @@ class _UnixConnection(http.client.HTTPConnection):
 def droid_kind(kind: str, source: str = "", level: str = "") -> str:
     """Map an initiative kind onto the gate's value classes."""
     k = f"{kind} {source}".lower()
-    if "approval" in k:
+    if "approval" in k:  # includes the heartbeat's approval_check_in
         return "approval"
     if "follow" in k or "commit" in k or "remind" in k:
         return "follow_up"
