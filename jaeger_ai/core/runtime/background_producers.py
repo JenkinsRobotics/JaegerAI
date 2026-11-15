@@ -470,6 +470,7 @@ class BackgroundProducers:
         from jaeger_agent.prompts import AUTO_BOARD_PROMPT
 
         from jaeger_ai.core.runtime import heartbeat as hb
+        from jaeger_ai.core.runtime import reflection_triggers
         from jaeger_ai.core.runtime.completions import pending_batch, pending_count, completion_prompt, batch_id, acknowledge
         from jaeger_ai.core.runtime.idle_supervisor import Action, decide, window_elapsed
         from jaeger_ai.core.runtime.task_liveness import reclaim_stale
@@ -507,7 +508,10 @@ class BackgroundProducers:
             idle_ready=idle_ready,
             has_deep_think=False,
             has_board=has_actionable_work(layout),
-            heartbeat_due=hb.is_due(layout, interval_minutes=interval, enabled=enabled),
+            # Event-driven (arrival, return, job finished, approval waiting); the
+            # old fixed timer only when JAEGER_HEARTBEAT_TIMER=1.
+            heartbeat_due=(hb.is_due(layout, interval_minutes=interval, enabled=enabled)
+                           if _env_flag("JAEGER_HEARTBEAT_TIMER") else enabled and reflection_triggers.due()),
         )
         if action is Action.SKIP or action is Action.IDLE:
             return
@@ -538,6 +542,7 @@ class BackgroundProducers:
 
             _ = (hb_prompt, hb_session)
             policy = self.initiative_policy()
+            triggers = reflection_triggers.consume()
             if policy.in_quiet_hours():
                 # Deterministic pre-check: nothing to say at night, zero tokens.
                 hb.mark_beat(layout, silent=True)
@@ -546,6 +551,10 @@ class BackgroundProducers:
             # code, never a checklist it cannot execute. Facts carry no
             # timestamp: unchanged facts dedupe to zero model calls.
             facts = heartbeat_facts(layout)
+            if triggers:
+                # What just happened; the talker may tie a greeting to something
+                # useful, or stay silent (NO_REPLY) when nothing is worth saying.
+                facts["events"] = reflection_triggers.summary(triggers)
             outcome = self.offer_initiative(Initiative(
                 source="heartbeat", kind="check_in", level=SalienceLevel.DIGEST,
                 summary=f"{facts['slot']} check-in", details=facts,
