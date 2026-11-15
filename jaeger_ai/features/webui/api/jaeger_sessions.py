@@ -621,7 +621,7 @@ def route(handler, parsed, method: str) -> bool:
         return _proxy(handler, "POST", f"/v1/sessions/{session_id}/ide/{parts[2]}", _body_bytes(handler))
 
     # /v1/sessions/{id}/{turns|cancel|reconcile}
-    if len(parts) == 2 and method == "POST" and parts[1] in {"turns", "cancel", "reconcile", "feedback"}:
+    if len(parts) == 2 and method == "POST" and parts[1] in {"turns", "cancel", "reconcile", "feedback", "voice-transcript"}:
         return _proxy(
             handler, "POST", f"/v1/sessions/{session_id}/{parts[1]}", _body_bytes(handler),
         )
