@@ -6111,12 +6111,21 @@ class JaegerGatewayApp:
                             "pass": passes,
                             "reason": "owner continuation: the turn's objective was not closed by the last inner loop",
                         })
-                _tool_cap = None
+                _react_kw: dict[str, Any] = {}
                 try:
                     if options.get("max_tool_calls") is not None:
-                        _tool_cap = max(1, int(options["max_tool_calls"]))
+                        _react_kw["max_tool_calls"] = max(1, int(options["max_tool_calls"]))
                 except (TypeError, ValueError):
-                    _tool_cap = None
+                    pass
+                try:
+                    if options.get("max_iterations") is not None:
+                        _react_kw["max_iterations"] = max(1, int(options["max_iterations"]))
+                except (TypeError, ValueError):
+                    pass
+                if options.get("finalize_after_first_tools"):
+                    _react_kw["finalize_after_first_tools"] = True
+                    from jaeger_ai.core.runtime.cron_turns import HEARTBEAT_FINALIZE_PROMPT
+                    _react_kw["finalize_prompt"] = HEARTBEAT_FINALIZE_PROMPT
                 outcome = runtime.run_subordinate_react(
                     prompt,
                     session_key=session_key,
@@ -6130,7 +6139,7 @@ class JaegerGatewayApp:
                     provider=str(selection.get("provider") or lane or "") or None,
                     local_only=bool(options.get("local_only")),
                     attachments=self._turn_attachments(session_key, execution),
-                    **({} if _tool_cap is None else {"max_tool_calls": _tool_cap}),
+                    **_react_kw,
                     on_model=on_model,
                     on_agent=lambda agent: self._active_agents.__setitem__(request_id, agent),
                     cancellation=self._cancellations.get(request_id),
