@@ -260,7 +260,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # Skill self-improvement: usage journal + the review trigger/toggle +
         # the revision log (feeds + records the Deep Think review loop).
         "skill_note", "skill_notes", "request_skill_review", "set_skill_review",
-        "record_skill_revision",
+        "record_skill_revision", "skill_manage",
         # Task-level after-action reflection (the REFLECT loop step).
         "reflect",
     }),

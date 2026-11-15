@@ -1,5 +1,6 @@
 import { WidgetCard } from "../widgets/primitives/WidgetCard";
 import {SkillLifecycle} from "./SkillLifecycle";
+import { SkillRevisions } from "./SkillRevisions";
 import { useEffect, useRef, useState } from "react";
 import type { JaegerSource, SkillDetail } from "../api/source";
 export function SkillsPanel({ source }: { source: JaegerSource }) {
@@ -22,8 +23,8 @@ export function SkillsPanel({ source }: { source: JaegerSource }) {
     return () => { live = false; clearTimeout(timer); };
   }, [source, query, attempt]);
   if (!source.skills) return <p>Skills catalog is unavailable from this host.</p>;
-  return <section aria-label="Skills catalog"><SkillLifecycle source={source}/><label>Find skill <input aria-label="Find skill" value={query} onChange={e => setQuery(e.target.value)} /></label>
-    <p>Discovered Gateway playbooks. Lifecycle is reported by the registry; this view does not install, publish or grant tools.</p>
+  return <section aria-label="Skills catalog"><SkillRevisions source={source}/><SkillLifecycle source={source}/><label>Find skill <input aria-label="Find skill" value={query} onChange={e => setQuery(e.target.value)} /></label>
+    <p>All skills Jaeger can use: builtin playbooks and tools, plus the ones it wrote itself.</p>
     {error && <p role="alert">Couldn't load skills: {error} <button type="button" onClick={() => setAttempt(n => n + 1)}>Retry skills</button></p>}
     {!rows && <WidgetCard title="Skills" state={error ? "error" : "loading"} message={error ? `Couldn't load skills: ${error}` : "Loading skills…"} />}
     {rows?.skills.length === 0 && <WidgetCard title="Skills" state="empty" message="No matching skills" />}

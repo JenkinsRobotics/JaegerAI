@@ -1,9 +1,14 @@
-"""``jaeger skills`` — view the skill tree.
+"""``jaeger skills`` — the real skill catalog, history and rollback.
 
 Subcommands:
-  jaeger skills              — overview by category
-  jaeger skills view <id>    — detail on one skill
-  jaeger skills tree         — full text-rendered tree
+  jaeger skills                      — catalog grouped by category
+  jaeger skills search <text>        — filter by name/description
+  jaeger skills view <name>          — one skill's SKILL.md and metadata
+  jaeger skills history <name>       — saved versions of a skill Jaeger wrote
+  jaeger skills rollback <name> <v>  — restore an earlier version
+  jaeger skills revisions [name]     — self-improvement log
+  jaeger skills notes [name]         — usage journal
+  jaeger skills score [name]         — win-rates + retire candidates
 """
 
 from __future__ import annotations
@@ -16,35 +21,33 @@ from . import _common as c
 def register(subparsers: Any) -> None:
     parser = subparsers.add_parser(
         "skills",
-        help="view + inspect the agent's skill tree",
-        description=(
-            "Inspect the XP-driven skill tree for the active instance. "
-            "The tree is the same data the eventual GUI radial view "
-            "reads — terminal first by design."
-        ),
+        help="list, inspect, and roll back the agent's skills",
+        description="The skills Jaeger can use (builtin playbooks, tool skills, and the ones it wrote itself).",
     )
     parser.set_defaults(_handler=run_overview)
     sub = parser.add_subparsers(dest="skills_subcommand")
     sub.required = False
 
-    overview = sub.add_parser(
-        "overview",
-        help="one-line-per-skill grouped by category (default)",
-    )
+    overview = sub.add_parser("list", help="catalog grouped by category (default)")
+    overview.add_argument("--mine", action="store_true", help="only skills Jaeger or you wrote")
     overview.set_defaults(_handler=run_overview)
 
-    tree = sub.add_parser(
-        "tree",
-        help="full prereq tree (text-rendered)",
-    )
-    tree.set_defaults(_handler=run_tree)
+    search = sub.add_parser("search", help="filter skills by name or description")
+    search.add_argument("query")
+    search.set_defaults(_handler=run_search)
 
-    view = sub.add_parser(
-        "view",
-        help="detail on one skill (XP, status, unlocks)",
-    )
-    view.add_argument("skill_id", help="e.g. animation.image")
+    view = sub.add_parser("view", help="show one skill")
+    view.add_argument("name")
     view.set_defaults(_handler=run_view)
+
+    history = sub.add_parser("history", help="saved versions of a skill")
+    history.add_argument("name")
+    history.set_defaults(_handler=run_history)
+
+    rollback = sub.add_parser("rollback", help="restore an earlier version of a skill")
+    rollback.add_argument("name")
+    rollback.add_argument("version", help="e.g. v2")
+    rollback.set_defaults(_handler=run_rollback)
 
     notes = sub.add_parser(
         "notes",
@@ -56,7 +59,7 @@ def register(subparsers: Any) -> None:
 
     revisions = sub.add_parser(
         "revisions",
-        help="how recipe-skills changed over time (the self-improvement log)",
+        help="how skills changed over time (the self-improvement log)",
     )
     revisions.add_argument("skill", nargs="?", default="",
                            help="a skill name, or blank for per-skill revision counts")
@@ -71,188 +74,138 @@ def register(subparsers: Any) -> None:
     score.set_defaults(_handler=run_score)
 
 
-# ── status formatting ─────────────────────────────────────────────
-
-_STATUS_GLYPH = {
-    "mastered": "★",
-    "active":   "●",
-    "available":"○",
-    "locked":   "·",
-}
-
-_STATUS_COLOUR = {
-    "mastered": c.yellow,
-    "active":   c.green,
-    "available":c.cyan,
-    "locked":   c.grey,
-}
-
-
-def _status_badge(status: str) -> str:
-    glyph = _STATUS_GLYPH.get(status, "?")
-    colour = _STATUS_COLOUR.get(status, c.dim)
-    return colour(f"{glyph} {status}")
-
-
-def _load_registry() -> Any | None:
-    """Build a registry from the operator's instance state + seed
-    catalog, returning ``None`` if no instance is set up."""
-    from jaeger_ai.features.skill_tree import SkillTreeRegistry, seed_default_tree
-
+def _layout_or_fail() -> Any | None:
     layout = c.get_active_instance_layout()
     if layout is None:
-        return None
-    reg = SkillTreeRegistry.for_instance(layout)
-    seed_default_tree(reg)
-    return reg
+        print(c.red("no active instance — run the setup wizard first"))
+    return layout
 
 
-# ── overview ──────────────────────────────────────────────────────
+def _catalog(layout: Any) -> list[dict[str, Any]]:
+    from jaeger_ai.core.skills import service
+    return list(service.list_skills(layout)["skills"])
+
+
+def _origin_tag(row: dict[str, Any]) -> str:
+    origin = row.get("origin") or "builtin"
+    if origin == "agent":
+        return c.green(" [by Jaeger]")
+    if origin in ("user", "instance", "marketplace"):
+        return c.cyan(f" [{origin}]")
+    return ""
+
+
+def _print_rows(rows: list[dict[str, Any]], title: str) -> None:
+    from jaeger_agent.skill_improvement import skill_revisions
+    layout = c.get_active_instance_layout()
+    revs = skill_revisions.counts(layout) if layout is not None else {}
+    print(f"\n{c.bold(title)} {c.dim(f'({len(rows)} skills)')}\n")
+    by_cat: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        by_cat.setdefault(r.get("category") or "general", []).append(r)
+    for cat in sorted(by_cat):
+        items = by_cat[cat]
+        print(f"  {c.bold(cat)} {c.dim(str(len(items)))}")
+        for r in sorted(items, key=lambda x: x["name"].lower()):
+            desc = (r.get("description") or "").replace("\n", " ")
+            if len(desc) > 80:
+                desc = desc[:77] + "…"
+            off = c.grey(" (off)") if r.get("disabled") else ""
+            rev = c.dim(f" · rev {revs[r['name']]}") if revs.get(r["name"]) else ""
+            print(f"    {r['name']}{_origin_tag(r)}{off}{rev}  {c.dim(desc)}")
+        print()
+
+
+# ── list / search ─────────────────────────────────────────────────
 
 def run_overview(args: Any) -> int:
-    reg = _load_registry()
-    if reg is None:
-        print(c.red("no active instance — run the setup wizard first"))
+    layout = _layout_or_fail()
+    if layout is None:
         return 1
-    skills = list(reg.all())
-    print(f"\n{c.bold('Skill tree')} "
-          f"({c.dim(str(len(skills)) + ' skills total')})\n")
-    # Group by category, sorted by status (mastered first), then by id.
-    categories: dict[str, list] = {}
-    for s in skills:
-        categories.setdefault(s.category or "uncategorised", []).append(s)
-    _order = ("animation", "voice", "vision", "motor", "light", "core")
-    cats_sorted = sorted(
-        categories.keys(),
-        key=lambda k: (_order.index(k) if k in _order else 99, k),
-    )
-    for cat in cats_sorted:
-        nodes = sorted(
-            categories[cat],
-            key=lambda n: (
-                {"mastered": 0, "active": 1, "available": 2,
-                 "locked": 3}.get(n.status, 4),
-                n.id,
-            ),
-        )
-        mastered = sum(1 for n in nodes if n.status == "mastered")
-        total = len(nodes)
-        header = (
-            f"{c.bold(cat.upper())}  "
-            f"{c.dim(f'{mastered}/{total} mastered')}"
-        )
-        print(header)
-        for n in nodes:
-            line = (
-                f"  {_status_badge(n.status):<22}  "
-                f"{c.bold(n.id):<26}  "
-                f"L{n.level}  "
-                f"XP {n.xp:>4}/{n.xp_to_mastery}"
-            )
-            print(line)
-        print()
+    rows = _catalog(layout)
+    if getattr(args, "mine", False):
+        rows = [r for r in rows if r.get("zone") == "instance"]
+    _print_rows(rows, "Skills")
+    print(c.dim("  jaeger skills view <name> · history <name> · rollback <name> <vN>\n"))
     return 0
 
 
-# ── tree ──────────────────────────────────────────────────────────
-
-def run_tree(args: Any) -> int:
-    reg = _load_registry()
-    if reg is None:
-        print(c.red("no active instance — run the setup wizard first"))
+def run_search(args: Any) -> int:
+    layout = _layout_or_fail()
+    if layout is None:
         return 1
-    skills = {s.id: s for s in reg.all()}
-    # Find roots (no prereqs).
-    roots = [s for s in skills.values() if not s.prerequisites]
-    print(f"\n{c.bold('Skill tree (prereq graph)')}\n")
-    visited: set[str] = set()
-    for root in sorted(roots, key=lambda r: r.id):
-        _render_subtree(root.id, skills, "", visited)
-    print()
+    q = (args.query or "").strip().lower()
+    rows = [r for r in _catalog(layout)
+            if q in r["name"].lower() or q in (r.get("description") or "").lower()]
+    _print_rows(rows, f"Skills matching {q!r}")
     return 0
-
-
-def _render_subtree(node_id: str, skills: dict, prefix: str,
-                    visited: set[str]) -> None:
-    node = skills.get(node_id)
-    if node is None:
-        return
-    badge = _status_badge(node.status)
-    line = f"{prefix}{c.bold(node.id)}  {badge}  L{node.level}"
-    if node_id in visited:
-        line += c.dim(" (already shown)")
-        print(line)
-        return
-    visited.add(node_id)
-    print(line)
-    children = sorted(
-        (cid for cid in node.unlocks if cid in skills),
-    )
-    if not children:
-        return
-    for i, child_id in enumerate(children):
-        is_last = i == len(children) - 1
-        branch = "└─ " if is_last else "├─ "
-        next_prefix = prefix + ("   " if is_last else "│  ")
-        _render_subtree(child_id, skills,
-                         prefix + branch, visited)
-        # The above renders the child's id on a single line; chase
-        # its unlocks at next_prefix indent.
-        grand_children_node = skills.get(child_id)
-        if grand_children_node and grand_children_node.unlocks:
-            for j, gid in enumerate(
-                sorted(g for g in grand_children_node.unlocks
-                       if g in skills)
-            ):
-                gis_last = j == len(grand_children_node.unlocks) - 1
-                gb = "└─ " if gis_last else "├─ "
-                _render_subtree(
-                    gid, skills,
-                    next_prefix + gb, visited,
-                )
 
 
 # ── view ──────────────────────────────────────────────────────────
 
 def run_view(args: Any) -> int:
-    reg = _load_registry()
-    if reg is None:
-        print(c.red("no active instance — run the setup wizard first"))
+    layout = _layout_or_fail()
+    if layout is None:
         return 1
-    node = reg.get(args.skill_id)
-    if node is None:
-        print(c.red(f"no such skill: {args.skill_id!r}"))
+    name = (args.name or "").strip()
+    row = next((r for r in _catalog(layout) if r["name"].lower() == name.lower()), None)
+    if row is None:
+        print(c.red(f"no skill named {name!r} — try `jaeger skills search {name}`"))
         return 1
+    print(f"\n{c.bold(row['name'])}{_origin_tag(row)}  {c.dim(row.get('category') or '')}")
+    print(f"  {row.get('description') or ''}")
+    print(c.dim(f"  kinds: {', '.join(row.get('kinds') or [])} · {'editable' if row.get('mutable') else 'builtin (read-only)'}"
+                f"{' · disabled' if row.get('disabled') else ''}"))
+    if "playbook" in (row.get("kinds") or []):
+        try:
+            from jaeger_ai.core.skills import service
+            detail = service.get_skill(layout, row["name"])
+            body = str(detail.get("content") or "")
+            if body:
+                print()
+                print(body if len(body) < 6000 else body[:6000] + c.dim("\n… (truncated)"))
+        except Exception as exc:  # noqa: BLE001
+            print(c.dim(f"  (content unavailable: {exc})"))
     print()
-    print(f"  {c.bold(node.id)}  {_status_badge(node.status)}")
-    print(f"  {c.dim(node.description or '(no description)')}")
+    return 0
+
+
+# ── history / rollback ────────────────────────────────────────────
+
+def run_history(args: Any) -> int:
+    layout = _layout_or_fail()
+    if layout is None:
+        return 1
+    from jaeger_agent.skill_improvement import skill_history as sh
+    try:
+        rows = sh.versions(layout, args.name)
+    except sh.SkillHistoryError as exc:
+        print(c.red(str(exc)))
+        return 1
+    if not rows:
+        print(c.dim(f"{args.name!r} has no saved versions (only skills Jaeger edits through skill_manage are versioned)"))
+        return 0
+    print(f"\n{c.bold(args.name)} {c.dim(f'· {len(rows)} version(s)')}\n")
+    for r in rows:
+        print(f"  {c.bold(r['version']):<6} {c.dim(r['ts'] or 'original')}  {c.dim(r['origin'])}  {r['summary']}")
     print()
-    print(c.kv("Category",  c.cyan(node.category)))
-    print(c.kv("Level",     f"L{node.level} / max L{node.max_level}"))
-    print(c.kv("XP",        f"{node.xp} / {node.xp_to_mastery}"))
-    print(c.kv("Progress",  c.bar(node.xp / max(1, node.xp_to_mastery))))
-    if node.xp_to_next_level is not None:
-        print(c.kv("Next-level threshold",
-                   str(node.xp_to_next_level * node.level)))
-    if node.prerequisites:
-        print()
-        print(f"  {c.bold('Prerequisites')}")
-        for pid in node.prerequisites:
-            prereq = reg.get(pid)
-            if prereq is None:
-                print(f"    - {pid}  {c.red('(unknown)')}")
-            else:
-                print(f"    - {pid}  {_status_badge(prereq.status)}")
-    if node.unlocks:
-        print()
-        print(f"  {c.bold('Unlocks when mastered')}")
-        for cid in node.unlocks:
-            child = reg.get(cid)
-            if child is None:
-                print(f"    - {cid}  {c.dim('(unknown)')}")
-            else:
-                print(f"    - {cid}  {_status_badge(child.status)}")
-    print()
+    return 0
+
+
+def run_rollback(args: Any) -> int:
+    layout = _layout_or_fail()
+    if layout is None:
+        return 1
+    from jaeger_agent.skill_improvement import skill_history as sh
+    try:
+        out = sh.rollback(layout, args.name, args.version, origin="manual")
+    except sh.SkillHistoryError as exc:
+        print(c.red(str(exc)))
+        return 1
+    if out.get("changed"):
+        print(c.green(f"{out['skill']} restored from {args.version} (saved as {out['version']})"))
+    else:
+        print(c.dim(f"{out['skill']} already matches {args.version}"))
     return 0
 
 

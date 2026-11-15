@@ -204,6 +204,12 @@ export class GatewayClient implements JaegerSource {
     list: sessionId => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files`),
     read: (sessionId, id) => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}`),
   };
+  skillRevisions = {
+    recent: () => this.json<{ revisions: import('./source').SkillRevision[]; counts: Record<string, number> }>('/v1/runtime/skills/revisions?limit=50'),
+    history: (name: string) => this.json<{ skill: string; mutable: boolean; versions: { version: string; bytes: number; ts: string; origin: string; summary: string }[] }>(`/v1/runtime/skills/history?name=${encodeURIComponent(name)}`),
+    version: (name: string, version: string) => this.json<{ content: string }>(`/v1/runtime/skills/history/version?name=${encodeURIComponent(name)}&version=${encodeURIComponent(version)}`),
+    rollback: (name: string, version: string) => this.json<{ ok: boolean; version?: string; changed?: boolean; error?: string }>('/v1/runtime/skills/history/rollback', { name, version }),
+  };
   skillDetail(name: string, category: string) { return this.json<import('./source').SkillDetail>(`/v1/runtime/skills/detail?name=${encodeURIComponent(name)}&category=${encodeURIComponent(category)}`); }
   skills(query = "") { return this.json<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>(`/v1/runtime/skills?q=${encodeURIComponent(query)}`); }
   schedules: ScheduleControls = {

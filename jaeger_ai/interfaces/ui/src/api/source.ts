@@ -284,6 +284,12 @@ export interface JaegerSource {
   taskArtifacts?:TaskArtifacts;
   managedSkills?:ManagedSkills;
   skillDetail?(name: string, category: string): Promise<SkillDetail>;
+  skillRevisions?: {
+    recent(): Promise<{ revisions: SkillRevision[]; counts: Record<string, number> }>;
+    history(name: string): Promise<{ skill: string; mutable: boolean; versions: { version: string; bytes: number; ts: string; origin: string; summary: string }[] }>;
+    version(name: string, version: string): Promise<{ content: string }>;
+    rollback(name: string, version: string): Promise<{ ok: boolean; version?: string; changed?: boolean; error?: string }>;
+  };
   mcpControls?: {
     mutate(id:string,action:'disconnect'|'reconnect',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
     operation(id:string):Promise<{receipt:ControlResult|null}>;
@@ -423,3 +429,5 @@ export interface TemplateCatalogState {agent_id:string;source_revision:number;ca
 export type TemplateCatalogIntent={operation_id:string;expected_catalog_revision:number}&({action:'save';expected_revision:number}|{action:'visibility';hidden:boolean});
 export type TemplateCatalogReceipt={operation_id:string;outcome:'saved'|'rejected'|'unknown';error?:string;result?:TemplateCatalogState};
 export interface TemplateCatalogControls {read(id:string):Promise<TemplateCatalogState>;change(id:string,body:TemplateCatalogIntent):Promise<TemplateCatalogReceipt>;operation(id:string):Promise<TemplateCatalogReceipt>}
+
+export type SkillRevision = { skill: string; version: string; origin: string; summary: string; delta: string; ts: string };

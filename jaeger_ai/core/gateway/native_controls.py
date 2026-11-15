@@ -94,6 +94,12 @@ def register(gateway):
                 parent = gateway.store.ensure_session("cron:" + name, title=name, profile="jaeger")
                 result = gateway.task_owner.submit(job["prompt"], context={"session_id": parent["session_id"], "source": "client", "request_id": oid}, key=oid)
                 gateway.task_owner.store.update_task(result["task_id"], lambda task: task.provenance.update(schedule_id=name))
+                try:
+                    from jaeger_ai.core.runtime.background_producers import _log_cron_run
+                    from jaeger_agent.core.workspace import get_layout as _gl
+                    _log_cron_run(_gl(), name, oid, parent["session_id"], {"status": "manual", "text": ""})
+                except Exception:  # noqa: BLE001 — history is best-effort
+                    pass
             else:
                 result = {"pause": owner.pause_job, "resume": owner.resume_job, "delete": owner.cancel_job, "restore": owner.restore_job}[action](name)
                 if not any(result.get(k) for k in ("paused", "resumed", "cancelled", "restored")):
