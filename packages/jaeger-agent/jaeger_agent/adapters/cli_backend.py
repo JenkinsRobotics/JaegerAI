@@ -444,6 +444,25 @@ class CliBackendAdapter(ProviderAdapter):
         self._executable = executable
         self._proc: subprocess.Popen[bytes] | None = None
 
+    @property
+    def spec_id(self) -> str:
+        """Known CLI id (``agy``) even when the picker passed ``agy/<model>``."""
+        try:
+            from jaeger_ai.features.cli_backends.discovery import split_cli_backend_id
+            ident, _model = split_cli_backend_id(self.backend_id)
+            return ident or self.backend_id
+        except Exception:  # noqa: BLE001
+            return self.backend_id
+
+    @property
+    def cli_model(self) -> str | None:
+        try:
+            from jaeger_ai.features.cli_backends.discovery import split_cli_backend_id
+            _ident, model = split_cli_backend_id(self.backend_id)
+            return model
+        except Exception:  # noqa: BLE001
+            return None
+
     def describe(self) -> str:
         exe = self._executable or self.backend_id
         return f"CliBackendAdapter({self.backend_id} @ {exe})"
@@ -478,7 +497,7 @@ class CliBackendAdapter(ProviderAdapter):
         self._pending_tools = list(tools or [])
         self._pending_system = system
         from .cli_turn_mcp import MCP_BACKENDS
-        mcp_capable = self.backend_id in MCP_BACKENDS
+        mcp_capable = self.spec_id in MCP_BACKENDS
         return {"prompt": flatten_messages(
             messages,
             tools if not mcp_capable else [],
@@ -498,18 +517,20 @@ class CliBackendAdapter(ProviderAdapter):
         spec = self._load_spec()
         executable = self._executable or ""
         argv, stdin_bytes = _build_argv(spec, executable, prompt)
+        if self.spec_id == "agy" and self.cli_model:
+            argv.extend(["--model", self.cli_model])
         if self.reasoning_effort:
-            if self.backend_id == "grok":
+            if self.spec_id == "grok":
                 argv.extend(["--reasoning-effort", self.reasoning_effort])
-            elif self.backend_id == "claude":
+            elif self.spec_id in {"claude", "agy"}:
                 argv.extend(["--effort", self.reasoning_effort])
-            elif self.backend_id == "codex":
+            elif self.spec_id == "codex":
                 argv.extend(["-c", 'model_reasoning_effort="' + self.reasoning_effort + '"'])
             else:
                 raise ValueError(f"Explicit reasoning effort is not supported by the {self.backend_id} CLI adapter")
 
-        on_delta = kwargs.get("on_delta") if self.backend_id == "grok" else None
-        on_reasoning = kwargs.get("on_reasoning") if self.backend_id == "grok" else None
+        on_delta = kwargs.get("on_delta") if self.spec_id == "grok" else None
+        on_reasoning = kwargs.get("on_reasoning") if self.spec_id == "grok" else None
         progress = CallProgress()
         # Root cause of the 120s ``StaleCallTimeout`` on grok turns (helpers
         # and any caller without a delta sink): the non-streaming path used
@@ -517,7 +538,7 @@ class CliBackendAdapter(ProviderAdapter):
         # stale detector measured TOTAL elapsed time and killed every healthy
         # CLI completion that took longer than 120s. Grok can always report
         # progress, so stream it even when nobody renders the deltas.
-        if self.backend_id == "grok" and not callable(on_delta):
+        if self.spec_id == "grok" and not callable(on_delta):
             on_delta = lambda _text: None  # noqa: E731 — progress-only sink
         if callable(on_delta) or callable(on_reasoning):
             on_delta = on_delta or (lambda _: None)
@@ -540,8 +561,8 @@ class CliBackendAdapter(ProviderAdapter):
             tools = list(getattr(self, "_pending_tools", []) or [])
             execute = kwargs.get("execute_tool")
             use_workdir = (
-                (self.backend_id == "grok" and "--single" in argv)
-                or (self.backend_id in MCP_BACKENDS and tools and callable(execute))
+                (self.spec_id == "grok" and "--single" in argv)
+                or (self.spec_id in MCP_BACKENDS and tools and callable(execute))
             )
             if not use_workdir:
                 return self._spawn(argv, stdin_bytes, spec, on_delta=on_delta, on_reasoning=on_reasoning, on_progress=progress.touch)
@@ -550,18 +571,18 @@ class CliBackendAdapter(ProviderAdapter):
             # prompt private and out of process listings; delete on exit.
             # The same workdir holds the per-turn Jaeger MCP config.
             from .cli_turn_mcp import stable_cli_workdir
-            folder = stable_cli_workdir(self.backend_id)
+            folder = stable_cli_workdir(self.spec_id)
             live_prompt = prompt
             child_argv = list(argv)
             spawn_stdin = stdin_bytes
             prompt_file = None
-            if self.backend_id == "grok" and "--single" in child_argv:
+            if self.spec_id == "grok" and "--single" in child_argv:
                 prompt_file = os.path.join(folder, "prompt.txt")
                 index = child_argv.index("--single")
                 child_argv[index:index + 2] = ["--prompt-file", prompt_file]
                 child_argv.extend(["--cwd", folder])
             child_argv, extra_env, mcp, text_fallback = attach_cli_mcp(
-                self.backend_id, child_argv, folder, tools, execute if callable(execute) else None,
+                self.spec_id, child_argv, folder, tools, execute if callable(execute) else None,
             )
             if text_fallback and tools:
                 live_prompt = flatten_messages(
@@ -575,7 +596,7 @@ class CliBackendAdapter(ProviderAdapter):
                 with open(prompt_file, "w", encoding="utf-8") as handle:
                     os.chmod(prompt_file, 0o600)
                     handle.write(live_prompt)
-            if self.backend_id == "grok":
+            if self.spec_id == "grok":
                 # --tools "" hid Jaeger MCP tools from the model request.
                 while "--tools" in child_argv:
                     index = child_argv.index("--tools")
@@ -648,12 +669,12 @@ class CliBackendAdapter(ProviderAdapter):
             GROK_LEADER_SOCKET, grok_leader_argv, stable_cli_workdir,
         )
         spec = self._load_spec()
-        folder = stable_cli_workdir(self.backend_id)
+        folder = stable_cli_workdir(self.spec_id)
 
         # Do not start the MCP server with an empty catalog. A reused
         # empty server left Grok with no Jaeger tools. The first real
         # turn starts MCP with the scoped tool set.
-        if self.backend_id != "grok":
+        if self.spec_id != "grok":
             return
         executable = self._executable or ""
         if not executable:
@@ -743,7 +764,7 @@ class CliBackendAdapter(ProviderAdapter):
             if limit:
                 from jaeger_ai.core.models.request_policy import ModelPolicyError
                 raise ModelPolicyError(limit)
-            if self.backend_id == "gemini" and (
+            if self.spec_id == "gemini" and (
                 "IneligibleTierError" in err or "no longer supported for Gemini" in err
             ):
                 from jaeger_ai.core.models.request_policy import ModelPolicyError
@@ -793,8 +814,12 @@ class CliBackendAdapter(ProviderAdapter):
         env = {key: value for key, value in os.environ.items() if key in allowed}
         if extra_env:
             env.update({key: value for key, value in extra_env.items() if value is not None})
-        if self.backend_id == "gemini":
+        if self.spec_id in {"gemini", "agy"}:
             env.setdefault("GEMINI_CLI_TRUST_WORKSPACE", "true")
+            env.setdefault("TERM", "xterm-256color")
+            gemini_bin = os.path.expanduser("~/.gemini/bin")
+            if os.path.isdir(gemini_bin):
+                env["PATH"] = gemini_bin + os.pathsep + env.get("PATH", "")
         return env
 
     def parse_response(self, raw: Any) -> Message:
@@ -830,10 +855,10 @@ class CliBackendAdapter(ProviderAdapter):
 
     def supports(self, feature: str) -> bool:
         if feature == "streaming":
-            return self.backend_id == "grok"
+            return self.spec_id == "grok"
         if feature == "mcp_tools":
             from .cli_turn_mcp import MCP_BACKENDS
-            return self.backend_id in MCP_BACKENDS
+            return self.spec_id in MCP_BACKENDS
         return False
 
     def health_check(self) -> dict[str, Any]:

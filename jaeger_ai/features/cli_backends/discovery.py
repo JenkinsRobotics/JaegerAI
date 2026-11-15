@@ -17,6 +17,7 @@ from pathlib import Path
 EXTRA_PATH_DIRS: tuple[str, ...] = (
     "~/.local/bin",
     "~/.grok/bin",
+    "~/.gemini/bin",
     "~/bin",
     "/opt/homebrew/bin",
 )
@@ -142,17 +143,41 @@ def which_cli(name: str) -> str | None:
     return None
 
 
+def split_cli_backend_id(backend_id: str) -> tuple[str, str | None]:
+    """Return ``(spec_id, model)`` for ids like ``agy/gemini-3.8-flash-low``.
+
+    The chat-bar Gemini tab can list Antigravity models while the adapter
+    still loads the ``agy`` spec and passes ``--model``.
+    """
+    raw = (backend_id or "").strip()
+    if raw.lower().startswith("cli:"):
+        raw = raw.split(":", 1)[1]
+    if raw.lower().endswith("-cli"):
+        raw = raw[: -len("-cli")]
+    known = {spec.id for spec in KNOWN_BACKENDS}
+    for sep in ("/", ":"):
+        if sep in raw:
+            head, tail = raw.split(sep, 1)
+            if head.lower() in known and tail.strip():
+                return head.lower(), tail.strip()
+    return raw.strip().lower(), None
+
+
 def resolve_backend(backend_id: str) -> BackendSpec | None:
     """Look up a known spec by id (``claude``) or catalog name (``cli:claude``)."""
-    raw = (backend_id or "").strip().lower()
-    if raw.startswith("cli:"):
-        raw = raw.split(":", 1)[1]
-    if raw.endswith("-cli"):
-        raw = raw[: -len("-cli")]
+    raw, _model = split_cli_backend_id(backend_id)
     for spec in KNOWN_BACKENDS:
         if spec.id == raw:
             return spec
     return None
+
+
+def preferred_gemini_backend() -> str:
+    """Antigravity (``agy``) when installed, else the legacy Gemini CLI."""
+    spec = resolve_backend("agy")
+    if spec is not None and probe_backend(spec):
+        return "agy"
+    return "gemini"
 
 
 def probe_backend(spec: BackendSpec) -> str | None:

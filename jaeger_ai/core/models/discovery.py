@@ -623,6 +623,96 @@ def _gemini_cli_status(executable: str) -> dict[str, Any]:
     return result
 
 
+
+_AGY_PROBE_CACHE: tuple[float, float, dict[str, Any]] | None = None
+_AGY_PROBE_TTL_S = 15 * 60
+
+
+def _parse_agy_models(blob: str) -> list[dict[str, str]]:
+    """Parse ``agy models`` lines of the form ``id\\tlabel``."""
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in (blob or "").splitlines():
+        line = raw.strip()
+        if not line or line.lower().startswith("fetching"):
+            continue
+        if "\t" in line:
+            mid, _, label = line.partition("\t")
+        else:
+            parts = line.split(None, 1)
+            mid = parts[0]
+            label = parts[1] if len(parts) > 1 else mid
+        mid = mid.strip()
+        label = " ".join(label.split()) or mid
+        if not mid or mid.startswith("-") or mid in seen:
+            continue
+        seen.add(mid)
+        rows.append({"id": mid, "label": label})
+    return rows
+
+
+def _agy_cli_status(executable: str) -> dict[str, Any]:
+    """Confirm the Antigravity CLI is signed in by listing its models.
+
+    ``agy models`` is the cheap official auth check (about 2s here). A
+    failing or unsigned CLI must not enable the Gemini picker row.
+    """
+    global _AGY_PROBE_CACHE
+    now = time.time()
+    if _AGY_PROBE_CACHE and now - _AGY_PROBE_CACHE[0] < _AGY_PROBE_CACHE[1]:
+        return dict(_AGY_PROBE_CACHE[2])
+    result: dict[str, Any] = {
+        "reachable": False,
+        "status": "unavailable",
+        "reason": "Antigravity CLI could not be verified",
+        "models": [],
+    }
+    ttl = 60.0
+    try:
+        env = os.environ.copy()
+        env.setdefault("TERM", "xterm-256color")
+        env.setdefault("NO_COLOR", "1")
+        completed = subprocess.run(  # noqa: S603
+            [executable, "models"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=env,
+        )
+        blob = "\n".join((completed.stdout or "", completed.stderr or ""))
+        lowered = blob.lower()
+        models = _parse_agy_models(completed.stdout or "")
+        if completed.returncode == 0 and models:
+            result = {"reachable": True, "status": "online", "reason": None, "models": models}
+            ttl = _AGY_PROBE_TTL_S
+        elif "not logged in" in lowered or "please login" in lowered or "sign in" in lowered or "unauthenticated" in lowered:
+            result = {
+                "reachable": False,
+                "status": "unavailable",
+                "reason": "Antigravity CLI is installed but is not signed in. In a terminal, run ~/.gemini/bin/agy and complete Google sign-in.",
+                "models": [],
+            }
+        elif completed.returncode != 0:
+            result = {
+                "reachable": False,
+                "status": "unavailable",
+                "reason": "Antigravity CLI is installed but is not ready to run a turn.",
+                "models": [],
+            }
+    except subprocess.TimeoutExpired:
+        result = {"reachable": False, "status": "unavailable", "reason": "Antigravity CLI did not respond in time.", "models": []}
+    except Exception as exc:  # noqa: BLE001
+        result = {
+            "reachable": False,
+            "status": "unavailable",
+            "reason": f"Antigravity CLI could not be verified ({type(exc).__name__}).",
+            "models": [],
+        }
+    _AGY_PROBE_CACHE = (now, ttl, dict(result))
+    return result
+
+
 def discover_subscription_clis() -> list[dict[str, Any]]:
     """Grok, ChatGPT (Codex CLI), and Gemini subscription brains."""
     from jaeger_ai.features.cli_backends.discovery import probe_backend, resolve_backend
@@ -642,10 +732,29 @@ def discover_subscription_clis() -> list[dict[str, Any]]:
         if not reachable:
             reason = f"{label} CLI is not installed"
         elif backend_id == "gemini":
-            probed = _gemini_cli_status(path)
-            reachable = bool(probed.get("reachable"))
-            status = str(probed.get("status") or status)
-            reason = probed.get("reason")
+            # VS Code uses the official Antigravity CLI (~/.gemini/bin/agy),
+            # not the retired Gemini Code Assist client. Prefer that route.
+            agy_spec = resolve_backend("agy")
+            agy_path = probe_backend(agy_spec) if agy_spec is not None else None
+            agy_probed = _agy_cli_status(agy_path) if agy_path else None
+            if agy_probed and agy_probed.get("reachable"):
+                reachable = True
+                status = "online"
+                reason = None
+                path = agy_path
+                # Stash models on the loop via a tagged reason sentinel; applied below.
+                reason = {"__agy_models__": agy_probed.get("models") or []}
+            else:
+                probed = _gemini_cli_status(path)
+                reachable = bool(probed.get("reachable"))
+                status = str(probed.get("status") or status)
+                reason = probed.get("reason")
+                if not reachable and agy_path and agy_probed and agy_probed.get("reason"):
+                    # agy is present but unsigned; say that rather than only the
+                    # retired Code Assist ineligibility, so the operator knows
+                    # which binary to sign in.
+                    if not probed.get("reachable"):
+                        reason = agy_probed.get("reason") or reason
         elif backend_id == "codex":
             # Surface a known usage-limit window without calling the paid API.
             # A live CLI error is parsed when one is recorded on the process.
@@ -661,22 +770,46 @@ def discover_subscription_clis() -> list[dict[str, Any]]:
                 reason = ("limit reached until " + cached) if not cached.lower().startswith("limit reached") else cached
                 reachable = False
                 status = "limit_reached"
+        effective_backend = backend_id
+        models: list[dict[str, Any]] = []
+        public_reason = reason
+        if isinstance(reason, dict) and "__agy_models__" in reason:
+            effective_backend = "agy"
+            public_reason = None
+            models.append({
+                "id": "agy",
+                "name": "agy",
+                "label": "Antigravity default",
+                "available": True,
+            })
+            for item in reason.get("__agy_models__") or []:
+                mid = str((item or {}).get("id") or "").strip()
+                if not mid:
+                    continue
+                models.append({
+                    "id": f"agy/{mid}",
+                    "name": f"agy/{mid}",
+                    "label": str(item.get("label") or mid),
+                    "available": True,
+                })
+        elif path:
+            models.append({
+                "id": model_id,
+                "name": model_id,
+                "label": label if model_id == backend_id else model_id,
+                "available": reachable,
+            })
         rows.append({
             "id": provider_id,
             "display_name": label,
-            "backend_id": backend_id,
+            "backend_id": effective_backend,
             "location": "local-cli",
             "supported": True,
             "configured": bool(path),
             "reachable": reachable,
             "status": status,
-            "reason": reason,
-            "models": [{
-                "id": model_id,
-                "name": model_id,
-                "label": label if model_id == backend_id else model_id,
-                "available": reachable,
-            }] if path else [],
+            "reason": public_reason,
+            "models": models,
         })
     return rows
 

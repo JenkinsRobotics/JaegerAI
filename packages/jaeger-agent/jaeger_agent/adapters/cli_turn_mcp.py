@@ -81,8 +81,14 @@ def permission_argv(backend_id: str, autonomy: str) -> list[str]:
         if mode == "auto":
             argv.extend(["--approval-mode", "yolo"])
     elif backend_id == "agy":
+        # Jaeger still owns approvals in the MCP executor. These flags only
+        # stop the Antigravity CLI from prompting in a headless turn.
         if "--sandbox" not in argv:
             argv.append("--sandbox")
+        if "--dangerously-skip-permissions" not in argv:
+            argv.append("--dangerously-skip-permissions")
+        if "--mode" not in argv:
+            argv.extend(["--mode", "auto"])
     elif backend_id == "hermes":
         if mode == "auto":
             argv.append("--yolo")
