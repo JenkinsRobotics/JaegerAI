@@ -23,7 +23,7 @@ const readEngine=():VoiceEngine=>{try{return localStorage.getItem(ENGINE_KEY)===
  * conversation are saved to this chat.
  */
 export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=false,onOpenChange,history,onSaveTranscript,onClosed}:{
- onTranscript(text:string):Promise<boolean>; reply?:SpokenReply; outcome?:{id:string;state:string}; busy:boolean; disabled?:boolean; primary?:boolean;
+ onTranscript(text:string,opts?:{full?:boolean}):Promise<boolean>; reply?:SpokenReply; outcome?:{id:string;state:string}; busy:boolean; disabled?:boolean; primary?:boolean;
  onOpenChange?:(open:boolean)=>void; history?:()=>{role:string;content:string}[];
  onSaveTranscript?:(role:'user'|'assistant',text:string,engine:VoiceEngine,interrupted?:boolean)=>Promise<unknown>|void; onClosed?:(changed:boolean)=>void;
 }){
@@ -46,6 +46,7 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
   switch(m.t){
    case 'ready':setError('');setP(mutedRef.current?'paused':'listening');break;
    case 'user-speaking':
+    viaJaeger.current=false;
     if(phaseRef.current==='speaking'||(streamId.current&&!streamFinal.current&&engineRef.current==='local'))skipReply();
     setP('hearing');break;
    case 'user-partial':setYou(m.text);break;
@@ -68,17 +69,19 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
     break;
    case 'bot-text':setBot(m.text);break;
    case 'transcript':
-    if(m.text.trim()){saved.current=true;void Promise.resolve(save.current?.(m.role,m.text,engineRef.current,m.interrupted)).catch(()=>{});}
+    if(m.text.trim()&&!viaJaeger.current){saved.current=true;void Promise.resolve(save.current?.(m.role,m.text,engineRef.current,m.interrupted)).catch(()=>{});}
     break;
    case 'tool':
-    toolCall.current=m.id;waiting.current=true;setBot('Working on it in Jaeger…');
-    void submit.current(m.request).then(ok=>{if(!ok&&toolCall.current===m.id){rtc.current?.send({t:'tool-result',id:m.id,text:'Jaeger could not start that request right now.'});toolCall.current=undefined;waiting.current=false;}});
+    // Gemini hands real work to full Jaeger (not the fast voice lane); that turn
+    // records the request and answer in the chat, so this exchange's transcript is skipped.
+    toolCall.current=m.id;waiting.current=true;viaJaeger.current=true;setBot('Working on it in Jaeger…');
+    void submit.current(m.request,{full:true}).then(ok=>{if(!ok&&toolCall.current===m.id){rtc.current?.send({t:'tool-result',id:m.id,text:'Jaeger could not start that request right now.'});toolCall.current=undefined;waiting.current=false;}});
     break;
    case 'error':setError(m.message);break;
   }
  };
  const outcomeRef=useRef(outcome);outcomeRef.current=outcome;
- const working=useRef(busy);working.current=busy;const queued=useRef<string[]>([]);
+ const viaJaeger=useRef(false);const working=useRef(busy);working.current=busy;const queued=useRef<string[]>([]);
  // A follow-up that arrived mid-turn: it becomes the next turn, and its reply
  // is spoken after whatever is playing now.
  const replyRef=useRef(reply);replyRef.current=reply;const queuedAfter=useRef<string|undefined>(undefined);
@@ -136,7 +139,7 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
   if(!open||!reply?.text||reply.id===lastReply.current||!waiting.current)return;
   const final=reply.final!==false&&!busy;
   if(toolCall.current){
-   if(final){rtc.current?.send({t:'tool-result',id:toolCall.current,text:reply.text});toolCall.current=undefined;waiting.current=false;lastReply.current=reply.id;setBot('');settle();}
+   if(final){rtc.current?.send({t:'tool-result',id:toolCall.current,text:reply.text});toolCall.current=undefined;waiting.current=false;lastReply.current=reply.id;setBot('');window.setTimeout(()=>{if(phaseRef.current==='thinking')settle();},4000);}
    return;
   }
   if(engineRef.current!=='local')return;
