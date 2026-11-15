@@ -90,20 +90,49 @@ def deliver_text(layout: Any, name: str, text: str) -> dict[str, Any] | None:
     an exception.
     """
     target = lookup(layout, name)
-    if target is None:
-        return None
     body = (text or "").strip()
     if not body:
         return {"sent": False, "error": "empty body"}
+    if _is_quiet(body):
+        # Heartbeat-style "nothing to report" replies stay in the app.
+        return None
+    if target is None:
+        # Default: the owner's phone channels (Telegram / iMessage self-chat)
+        # through the channels relay outbox, deduped per schedule occurrence.
+        return _relay_enqueue(name, body)
     try:
         from jaeger_agent.tools.messaging import send_message
-        return send_message(
+        sent = send_message(
             channel=target["channel"],
             recipient=target["recipient"],
             text=body,
         )
     except Exception as exc:  # noqa: BLE001
-        return {"sent": False, "error": f"{type(exc).__name__}: {exc}"}
+        sent = {"sent": False, "error": f"{type(exc).__name__}: {exc}"}
+    if not sent.get("sent") and not sent.get("execution_unknown") and target["channel"] in ("telegram", "imessage"):
+        # No in-process bridge: the channels relay owns these transports.
+        return _relay_enqueue(name, body, channels=[target["channel"]])
+    return sent
+
+
+_QUIET = ("HEARTBEAT_OK", "NO_REPLY", "NOTHING_TO_REPORT")
+
+
+def _is_quiet(body: str) -> bool:
+    head = body.strip().strip("`*_ .").upper()
+    return any(head == q or head.startswith(q + " ") or head.endswith(q) for q in _QUIET)
+
+
+def _relay_enqueue(name: str, body: str, channels: list[str] | None = None) -> dict[str, Any]:
+    try:
+        from jaeger_ai.features.channels.relay.outbox import enqueue
+    except Exception as exc:  # noqa: BLE001
+        return {"sent": False, "error": f"channels relay unavailable: {exc}"}
+    import hashlib
+    import time as _time
+    key = f"schedule:{name}:{_time.strftime('%Y-%m-%dT%H')}:{hashlib.sha256(body.encode()).hexdigest()[:12]}"
+    res = enqueue(body, kind="schedule", title=f"⏰ {name}", dedupe_key=key, channels=channels)
+    return {"sent": bool(res.get("queued")), "queued": True, **res}
 
 
 __all__ = [

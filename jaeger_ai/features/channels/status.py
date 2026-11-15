@@ -28,4 +28,16 @@ def snapshot(store=None) -> dict:
                      'thread_state': 'unknown' if thread is None else 'running' if thread.is_alive() else 'stopped',
                      'connection_health': 'not_probed', 'delivery_verified': False,
                      'actions': actions})
-    return {'channels': rows, 'scope': 'current_gateway_process_only'}
+    try:
+        from .relay.routes import snapshot as relay_snapshot
+        relay = relay_snapshot()
+    except Exception:  # noqa: BLE001
+        relay = None
+    if relay:
+        for row in rows:
+            info = relay.get(row['id']) if row['id'] in ('telegram', 'imessage') else None
+            if info:
+                row['relay'] = info
+                row['thread_state'] = 'running' if info.get('live') else row['thread_state']
+                row['connection_health'] = 'live' if info.get('live') else ('error' if info.get('error') else 'not_configured')
+    return {'channels': rows, 'scope': 'current_gateway_process_only', 'relay': relay}

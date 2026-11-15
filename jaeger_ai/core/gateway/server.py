@@ -1441,6 +1441,13 @@ class JaegerGatewayApp:
             self.store.append_message(session_id, "assistant", body)
             self.event_bus.publish(session_id, "notification.proactive", payload)
 
+        # Phone channels (Telegram / iMessage self-chat) via the relay outbox.
+        try:
+            from jaeger_ai.features.channels.relay.outbox import enqueue as _channel_enqueue
+            _channel_enqueue(body, kind="notification", dedupe_key=f"proactive:{request_id}")
+        except Exception:  # noqa: BLE001 — never block the in-app delivery
+            pass
+
         loop = self._loop
         if loop is not None and loop.is_running():
             try:
@@ -1670,6 +1677,8 @@ class JaegerGatewayApp:
         register_notifications(self)
         from jaeger_ai.features.channels.controls import register as register_channel_controls
         register_channel_controls(self)
+        from jaeger_ai.features.channels.relay.routes import register as register_channel_relay
+        register_channel_relay(self)
         from .agent_memory import register as register_agent_memory
         register_agent_memory(self)
         from .agent_templates import register as register_agent_templates
