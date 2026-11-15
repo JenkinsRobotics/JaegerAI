@@ -855,8 +855,14 @@ class CliBackendAdapter(ProviderAdapter):
             # Full schemas and history exceed macOS argv limits. Keep the
             # prompt private and out of process listings; delete on exit.
             # The same workdir holds the per-turn Jaeger MCP config.
-            from .cli_turn_mcp import stable_cli_workdir
+            from .cli_turn_mcp import cli_session_cwd, stable_cli_workdir
             folder = stable_cli_workdir(self.spec_id)
+            # Grok/agy must run in the session folder or Agent worktree so
+            # writes land where Undo/Apply can see them. MCP config and the
+            # prompt file stay in the stable cache so tokens never land in
+            # the owner's project.
+            work_cwd = cli_session_cwd() if self.spec_id in {"grok", "agy"} else None
+            spawn_cwd = work_cwd or folder
             live_prompt = prompt
             child_argv = list(argv)
             spawn_stdin = stdin_bytes
@@ -865,9 +871,10 @@ class CliBackendAdapter(ProviderAdapter):
                 prompt_file = os.path.join(folder, "prompt.txt")
                 index = child_argv.index("--single")
                 child_argv[index:index + 2] = ["--prompt-file", prompt_file]
-                child_argv.extend(["--cwd", folder])
             child_argv, extra_env, mcp, text_fallback = attach_cli_mcp(
-                self.spec_id, child_argv, folder, tools, execute if callable(execute) else None,
+                self.spec_id, child_argv, folder, tools,
+                execute if callable(execute) else None,
+                work_cwd=work_cwd,
             )
             if text_fallback and tools:
                 live_prompt = flatten_messages(
@@ -896,12 +903,16 @@ class CliBackendAdapter(ProviderAdapter):
                 child_argv.extend(["--disallowed-tools", ",".join(_GROK_BUILTIN_TOOLS)])
                 if "--no-plan" not in child_argv:
                     child_argv.append("--no-plan")
+                while "--cwd" in child_argv:
+                    index = child_argv.index("--cwd")
+                    del child_argv[index:index + 2]
+                child_argv.extend(["--cwd", spawn_cwd])
             # Keep the process-global MCP server running between turns.
             return self._spawn(
                 child_argv, spawn_stdin, spec,
                 on_delta=on_delta, on_reasoning=on_reasoning,
                 on_progress=progress.touch,
-                cwd=folder,
+                cwd=spawn_cwd,
                 extra_env=extra_env,
             )
 

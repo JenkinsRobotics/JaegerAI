@@ -11,11 +11,13 @@ cannot start or the backend has no MCP client.
 
 from __future__ import annotations
 
+import contextvars
 import inspect
 import json
 import logging
 import re
 import secrets
+import socket
 import threading
 import time
 from collections.abc import Callable
@@ -319,6 +321,34 @@ class TurnToolMcp:
         self.url = None
         self.token = None
 
+    def write_grok_plugin(self, folder: str) -> str:
+        """Trusted --plugin-dir payload so MCP attaches without a project .grok/."""
+        from pathlib import Path
+
+        if not self.url or not self.token:
+            raise RuntimeError("turn MCP is not running")
+        plugin = Path(folder) / "jaeger-plugin"
+        plugin.mkdir(parents=True, exist_ok=True)
+        os.chmod(plugin, 0o700)
+        (plugin / "plugin.json").write_text(json.dumps({
+            "name": "jaeger-turn-mcp",
+            "description": "Jaeger loopback MCP for this CLI turn",
+            "version": "0.0.0",
+        }, indent=2), encoding="utf-8")
+        payload = {
+            "mcpServers": {
+                "jaeger": {
+                    "type": "http",
+                    "url": self.url,
+                    "headers": {"Authorization": f"Bearer {self.token}"},
+                }
+            }
+        }
+        path = plugin / ".mcp.json"
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        path.chmod(0o600)
+        return str(plugin)
+
     def write_grok_config(self, folder: str) -> None:
         """Project-scoped Grok MCP config (loaded when cwd is this folder)."""
         from pathlib import Path
@@ -385,8 +415,13 @@ class TurnToolMcp:
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         path.chmod(0o600)
 
-    def write_agy_config(self, folder: str) -> None:
-        """Project-scoped Antigravity MCP settings (do not touch the user home)."""
+    def write_agy_config(self, folder: str) -> str:
+        """Project-scoped Antigravity MCP settings (do not touch the user home).
+
+        Returns the ``.gemini/antigravity-cli/settings.json`` path so a turn
+        that runs in the session worktree can pass ``--settings`` instead of
+        writing this file into the owner's project.
+        """
         from pathlib import Path
 
         if not self.url or not self.token:
@@ -400,12 +435,16 @@ class TurnToolMcp:
                 }
             }
         }
+        written = ""
         for relative in (".gemini/antigravity-cli", ".gemini"):
             target = Path(folder) / relative
             target.mkdir(parents=True, exist_ok=True)
             path = target / "settings.json"
             path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             path.chmod(0o600)
+            if not written:
+                written = str(path)
+        return written
 
     def write_hermes_config(self, folder: str) -> str:
         """Sidecar Hermes MCP config. Returns the file path for HERMES_CONFIG_PATH."""
@@ -450,6 +489,7 @@ class _ExecuteHolder:
 
     def __init__(self) -> None:
         self.execute: ExecuteTool | None = None
+        self.context: contextvars.Context | None = None
         self.tools: dict[str, ToolDef] = {}
         self.lock = threading.Lock()
 
@@ -460,25 +500,68 @@ class _ExecuteHolder:
         # Prefer the currently registered tool of this name so a refreshed
         # schema/handler still hits the live approval/session closure.
         live = self.tools.get(getattr(tool, "name", "")) or tool
+        # FastMCP handles tools on worker threads that do not inherit the
+        # turn's ContextVar state. Native tool execution uses copy_context();
+        # without the same wrap here, get_project_root() falls back to the
+        # instance workspace and use_policy approvals never reach the card.
+        ctx = self.context
+        if ctx is not None:
+            return ctx.run(fn, live, args)
         return fn(live, args)
 
 
 def stable_cli_workdir(backend_id: str) -> str:
-    """Persistent per-backend cwd so MCP config can be reused across turns."""
+    """Persistent per-backend folder for MCP config and private prompt files.
+
+    The CLI process may run in the session's resolved cwd or Agent worktree
+    instead; this directory still holds tokens and config so they are not
+    written into the owner's project.
+    """
     folder = _STABLE_ROOT / (backend_id or "cli")
     folder.mkdir(parents=True, exist_ok=True)
     os.chmod(folder, 0o700)
     return str(folder)
 
 
+def cli_session_cwd() -> str | None:
+    """Session folder or Agent-mode worktree this turn is scoped to, if any."""
+    try:
+        from jaeger_agent.core.workspace import get_project_root
+        root = get_project_root()
+    except Exception:  # noqa: BLE001 — absence means the stable config dir
+        return None
+    if root is None:
+        return None
+    path = os.path.realpath(str(root))
+    return path if os.path.isdir(path) else None
+
+
+def _grok_leader_live() -> bool:
+    """True when the Jaeger-specific Grok leader socket accepts a connection."""
+    path = GROK_LEADER_SOCKET
+    if not path.exists():
+        return False
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(0.2)
+        sock.connect(str(path))
+        sock.close()
+        return True
+    except OSError:
+        return False
+
+
 def acquire_cli_mcp(backend_id: str, tools: list[ToolDef], execute: ExecuteTool) -> TurnToolMcp:
     """Reuse a process-global MCP server; refresh the execute closure every turn."""
+    # Capture on the turn thread (already under project_scope / use_policy).
+    turn_ctx = contextvars.copy_context()
     with _POOL_LOCK:
         server = _POOL.get(backend_id)
         if server is None or not server.url:
             server = TurnToolMcp()
             holder = _ExecuteHolder()
             holder.execute = execute
+            holder.context = turn_ctx
             holder.tools = {t.name: t for t in tools}
             server._holder = holder  # type: ignore[attr-defined]
             server.start(tools, holder)
@@ -489,6 +572,7 @@ def acquire_cli_mcp(backend_id: str, tools: list[ToolDef], execute: ExecuteTool)
                 holder = _ExecuteHolder()
                 server._holder = holder  # type: ignore[attr-defined]
             holder.execute = execute
+            holder.context = turn_ctx
             holder.tools = {t.name: t for t in tools}
             # Warmup used to start this server with zero tools; later turns
             # only refreshed the holder, so Grok's tools/list stayed empty.
@@ -508,11 +592,16 @@ def attach_cli_mcp(
     folder: str | None,
     tools: list[ToolDef],
     execute: ExecuteTool | None,
+    work_cwd: str | None = None,
 ) -> tuple[list[str], dict[str, str], TurnToolMcp | None, bool]:
     """Start a turn MCP (when possible) and return argv, extra env, server, text_fallback.
 
     ``text_fallback`` is True when the caller should still inject the Hermes
     text protocol into the prompt.
+
+    ``folder`` is the stable config directory (tokens, MCP config). ``work_cwd``
+    is the session folder or Agent worktree the CLI should treat as cwd.
+    Config is never written into ``work_cwd``.
     """
     if backend_id not in MCP_BACKENDS or not tools or execute is None:
         return argv, {}, None, bool(tools)
@@ -530,6 +619,22 @@ def attach_cli_mcp(
     if backend_id == "grok":
         if folder:
             server.write_grok_config(folder)
+        # When the process runs in the session worktree, Grok will not load
+        # the stable folder's .grok/config.toml. Inject the same MCP via a
+        # trusted --plugin-dir so we never write .grok/ (or the token) into
+        # the owner's project.
+        distinct_work = bool(
+            work_cwd and folder
+            and os.path.realpath(work_cwd) != os.path.realpath(folder)
+        )
+        if distinct_work:
+            plugin = server.write_grok_plugin(folder)
+            if "--plugin-dir" not in child:
+                child.extend(["--plugin-dir", plugin])
+            # Project [cli] use_leader is not in the worktree; attach to the
+            # Jaeger leader when it is already up.
+            if _grok_leader_live() and "--leader" not in child and "--no-leader" not in child:
+                child.append("--leader")
         # Load the project MCP config in the stable cwd without writing the
         # owner's trusted_folders.toml or ~/.grok/config.toml.
         extra_env["GROK_FOLDER_TRUST"] = "0"
@@ -570,9 +675,19 @@ def attach_cli_mcp(
         extra_env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
     elif backend_id == "agy":
         if folder:
-            server.write_agy_config(folder)
+            settings = server.write_agy_config(folder)
         else:
             return argv, {}, None, True
+        # Process cwd may be the session worktree, which has no .gemini/
+        # settings. --settings is session-only and is never written there.
+        distinct_work = bool(
+            work_cwd and folder
+            and os.path.realpath(work_cwd) != os.path.realpath(folder)
+        )
+        if distinct_work:
+            child.extend(["--settings", settings])
+            if "--add-dir" not in child:
+                child.extend(["--add-dir", work_cwd])
     elif backend_id == "hermes":
         if folder:
             config_path = server.write_hermes_config(folder)
