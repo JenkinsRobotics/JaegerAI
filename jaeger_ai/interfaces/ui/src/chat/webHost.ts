@@ -50,6 +50,7 @@ function persistedToPart(p: PersistedPart, agentName: (id: string) => string): C
     case "tool": return {
       kind: "toolInvocation", callId: String(p.call_id ?? ""), toolName: String(p.tool ?? "tool"), input: p.input ?? null,
       state: toolState(p.state ?? p.status), output: p.output, summary:p.summary,
+      elapsedS: typeof p.elapsed_s === "number" && Number.isFinite(p.elapsed_s) ? p.elapsed_s : undefined,
     };
     // Keep the compact Approved / Denied receipt in the feed after reload.
     case "approval": {
