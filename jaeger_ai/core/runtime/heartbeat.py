@@ -28,7 +28,9 @@ DEFAULT_CHECKLIST = """\
 
 This is a read-only check-in. Use only board_view, list_schedules,
 list_background, and todo. At most 8 tool calls. Do not start new
-work, add or unblock cards, edit files, or use a shell.
+work, add or unblock cards, edit files, or use a shell. Do not
+repeat the same tools or take a second pass; after the first read,
+reply immediately.
 
 1. Briefly review the board, schedules, background work, and todos.
 2. If anything is pending, blocked, or finished overnight, write a

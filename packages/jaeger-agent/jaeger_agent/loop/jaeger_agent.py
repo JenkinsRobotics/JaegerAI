@@ -1066,6 +1066,9 @@ class JaegerAgent:
                 if halt:
                     self.last_halt_reason = halt
                     return self._budget_halt_or_stop(halt)
+                early = self._finalize_after_first_tools_if_set()
+                if early is not None:
+                    return early
                 continue
 
             seen_in_batch: dict[str, str] = {}
@@ -1127,6 +1130,9 @@ class JaegerAgent:
 
             if self.last_halt_reason:
                 return self._budget_halt_or_stop(self.last_halt_reason)
+            early = self._finalize_after_first_tools_if_set()
+            if early is not None:
+                return early
 
         # Fell out of the for-loop: max_iterations exhausted with the
         # model still trying to use tools. Spend ONE toolless grace
@@ -1511,6 +1517,64 @@ class JaegerAgent:
         if (tail is not None and expected is not None
                 and tail.get("content") == expected):
             self._pop_message()
+
+    def _finalize_after_first_tools_if_set(self) -> str | None:
+        """Heartbeat / cron check-ins: close after the first read, no second pass."""
+        if not getattr(self, "finalize_after_first_tools", False):
+            return None
+        if getattr(self, "_finalized_after_first_tools", False):
+            return None
+        self._finalized_after_first_tools = True
+        prompt = str(getattr(self, "finalize_after_first_tools_prompt", "") or "").strip()
+        if not prompt:
+            try:
+                from jaeger_ai.core.runtime.cron_turns import HEARTBEAT_FINALIZE_PROMPT
+                prompt = HEARTBEAT_FINALIZE_PROMPT
+            except Exception:  # noqa: BLE001
+                prompt = (
+                    "You have finished the check-in reads. Reply now with "
+                    "exactly HEARTBEAT_OK if nothing needs attention, or a "
+                    "short 3-line summary. Do not call tools."
+                )
+        return self._finalize_without_tools(prompt)
+
+    def _finalize_without_tools(self, prompt: str) -> str:
+        """One toolless close; a clean finish, not a halted budget failure."""
+        self._close_dangling_tool_calls("finalizing")
+        self._append_message({"role": "user", "content": prompt})
+        self.callbacks.on_thinking("[check-in complete — writing the summary, no more tools]")
+        prev_locked = self._tools_filter_locked
+        prev_tools = self._all_tools
+        prev_finalizing = getattr(self, "_finalizing", False)
+        self._finalizing = True
+        self._tools_filter_locked = True
+        self._all_tools = []
+        msg = None
+        try:
+            for attempt in range(2):
+                try:
+                    candidate = self._one_model_step()
+                except Exception:  # noqa: BLE001 — grace call is best-effort
+                    candidate = None
+                if ((candidate or {}).get("content") or "").strip():
+                    msg = candidate
+                    break
+                if attempt == 0:
+                    self.callbacks.on_thinking("[finalize response empty — retrying once without tools]")
+        finally:
+            self._tools_filter_locked = prev_locked
+            self._all_tools = prev_tools
+            self._finalizing = prev_finalizing
+            self._pop_message()
+        text = ((msg or {}).get("content") or "").strip()
+        if text:
+            text = self._apply_mutation_footer(text)
+            summary = {"role": "assistant", "content": text}
+            self._append_message(summary)
+            self.callbacks.on_step(self.last_iteration_count + 1, summary)
+            self.last_halt_reason = None
+            return text
+        return self._halt_turn()
 
     def _wind_down_summary(self) -> str:
         """Iteration budget exhausted: ask the model — WITHOUT tools —

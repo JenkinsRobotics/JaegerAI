@@ -966,6 +966,8 @@ class EntityRuntime:
         on_agent: Callable[[Any], None] | None = None,
         local_only: bool = False,
         attachments: Any = (),
+        finalize_after_first_tools: bool = False,
+        finalize_prompt: str | None = None,
     ) -> dict[str, Any]:
         """Execute subordinate ReAct loop inside the EntityRuntime.
 
@@ -1088,6 +1090,10 @@ class EntityRuntime:
             agent._skill_route_query = ""
         if on_agent is not None:
             on_agent(agent)
+        if finalize_after_first_tools:
+            agent.finalize_after_first_tools = True
+            if finalize_prompt:
+                agent.finalize_after_first_tools_prompt = str(finalize_prompt)
         if cancellation is not None:
             from jaeger_ai.core.runtime.cancellation import bind_agent
             bind_agent(cancellation, agent)

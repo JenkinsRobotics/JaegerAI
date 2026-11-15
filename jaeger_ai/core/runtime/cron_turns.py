@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator
@@ -24,6 +25,16 @@ _PREAMBLE_MARK = "[Heartbeat checklist]"
 
 _cron_turn: ContextVar[bool] = ContextVar("jaeger_cron_turn", default=False)
 _turn_timeout_s: ContextVar[float | None] = ContextVar("jaeger_turn_timeout_s", default=None)
+_turn_deadline_mono: ContextVar[float | None] = ContextVar("jaeger_turn_deadline_mono", default=None)
+
+# After the first check-in reads, force a toolless close so the model
+# cannot spend the rest of the budget on a second verification pass.
+HEARTBEAT_FINALIZE_PROMPT = (
+    "You have finished the check-in reads. Reply now with exactly "
+    "HEARTBEAT_OK if nothing needs attention, or a short 3-line summary "
+    "of what is pending, blocked, or finished. Do not call tools or "
+    "repeat the same reads."
+)
 
 _HEARTBEAT_NAME = re.compile(r"heartbeat", re.I)
 
@@ -53,7 +64,15 @@ def cron_turn_timeout_s() -> float:
 
 
 def active_turn_timeout_s() -> float | None:
-    """Wall-clock cap for the current spawn, or None to use the interactive cap."""
+    """Remaining wall-clock cap for the current spawn, or None for the interactive cap.
+
+    Cron budgets are per admitted turn, not per model spawn: a second
+    ReAct step must inherit whatever time is left of the original 90s.
+    """
+    deadline = _turn_deadline_mono.get()
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        return remaining if remaining > 0 else 0.1
     return _turn_timeout_s.get()
 
 
@@ -70,9 +89,11 @@ def tighten_heartbeat_prompt(prompt: str) -> str:
     return (
         f"{_PREAMBLE_MARK} This is a read-only check-in. "
         f"You may call at most {CRON_MAX_TOOL_CALLS} tools, and only these: {tools}. "
-        "Do not start new work, edit files, or use a shell. Then stop. "
-        "Reply HEARTBEAT_OK if nothing needs attention, or a short 3-line "
-        "summary of what is pending, blocked, or finished.\n\n"
+        "Do not start new work, edit files, or use a shell. "
+        "Do not repeat the same tools or take a second pass. "
+        "After the first read, reply immediately with HEARTBEAT_OK if "
+        "nothing needs attention, or a short 3-line summary of what is "
+        "pending, blocked, or finished. Then stop.\n\n"
         + body
     )
 
@@ -122,13 +143,16 @@ def cron_turn_scope(options: dict[str, Any] | None = None, *, session_id: str = 
             timeout = cron_turn_timeout_s()
         if timeout <= 0:
             timeout = cron_turn_timeout_s()
+    deadline = (time.monotonic() + timeout) if (cron and timeout and timeout > 0) else None
     token_cron = _cron_turn.set(cron)
     token_timeout = _turn_timeout_s.set(timeout)
+    token_deadline = _turn_deadline_mono.set(deadline)
     try:
         yield
     finally:
         _cron_turn.reset(token_cron)
         _turn_timeout_s.reset(token_timeout)
+        _turn_deadline_mono.reset(token_deadline)
 
 
 def apply_cron_turn(
@@ -170,5 +194,7 @@ def apply_cron_turn(
     if is_heartbeat_job(session_id=session_id, prompt=text):
         if requested.get("allowed_tools") is None:
             requested["allowed_tools"] = list(HEARTBEAT_TOOLS)
+        options["finalize_after_first_tools"] = True if options.get("finalize_after_first_tools") is None else options["finalize_after_first_tools"]
         text = tighten_heartbeat_prompt(text)
+        requested["options"] = options
     return text, requested
