@@ -78,7 +78,9 @@ export function messagesToTurns(messages: SessionMessage[] = [], agentName: (id:
       const incoming=m.kind==='channel_message'&&m.channel?.authority==='incoming_data_only'&&['discord','telegram','imessage'].includes(m.channel.channel_id)?m.channel:undefined;
       const messageId=Number(m.id),prefix=incoming?incoming.channel_id+':':'';
       const channelReply=incoming&&Number.isSafeInteger(messageId)&&messageId>0&&incoming.provider_conversation_id.startsWith(prefix)&&incoming.provider_conversation_id.length>prefix.length?{messageId,channel:incoming.channel_id,recipient:incoming.provider_conversation_id.slice(prefix.length)}:undefined;
-      turns.push({ turnId: m.request_id != null ? String(m.request_id) : m.id != null ? String(m.id) : `t${turns.length}`, requestId: m.request_id, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m),channelReply });
+      const versions = Array.isArray(m.versions) ? m.versions.map(v => typeof v === "string" ? v : String(v?.text ?? "")).filter(Boolean) : undefined;
+      const userMessageId = m.id != null && Number.isFinite(Number(m.id)) ? Number(m.id) : undefined;
+      turns.push({ turnId: m.request_id != null ? String(m.request_id) : m.id != null ? String(m.id) : `t${turns.length}`, requestId: m.request_id, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m), channelReply, userMessageId, versions, versionIndex: typeof m.version_index === "number" ? m.version_index : versions ? versions.length - 1 : undefined });
     } else if (m.role === "assistant") {
       // A reply with no user turn before it (proactive note, relayed report) still shows.
       if (!turns.length || m.request_id && turns.at(-1)?.requestId !== m.request_id) turns.push({ turnId: m.request_id ?? `t${turns.length}`, requestId: m.request_id, message: "", parts: [], state: "complete", createdAt: epochMs(m) });
@@ -207,7 +209,6 @@ export class WebHost implements ChatHost {
     /** Owned background work the Stop receipt could not confirm; stays visible after the turn settles. */
     let unconfirmedOwned: string[] = [];
     const requestCancel = () => {
-      onPart({ kind: "progress", message: "Stopping… Waiting for Gateway confirmation." });
       void this.source.cancel(request.sessionId, admittedRequestId).then(receipt=>{
         if(!receipt)return;
         if(receipt.request_id!==admittedRequestId||receipt.session_id!==request.sessionId)throw Error('Stop receipt did not match the original request');
@@ -250,7 +251,13 @@ export class WebHost implements ChatHost {
       }
       let receipt;
       try {
-        receipt = request.fastLane ? await this.source.send(request.sessionId, request.message, requestId, attachmentIds, {fast_lane:true}) : await this.source.send(request.sessionId, request.message, requestId, attachmentIds);
+        const sendOptions = {
+          ...(request.fastLane ? {fast_lane: true} : {}),
+          ...(request.editMessageId != null ? {edit_message_id: request.editMessageId} : {}),
+        };
+        receipt = Object.keys(sendOptions).length
+          ? await this.source.send(request.sessionId, request.message, requestId, attachmentIds, sendOptions)
+          : await this.source.send(request.sessionId, request.message, requestId, attachmentIds);
       } catch (error) {
         // A lost HTTP reply says nothing about admission. Query the same ID,
         // never call send again. A 404 can race admission and remains uncertain.
@@ -423,6 +430,10 @@ export class WebHost implements ChatHost {
     delete: async (id: string) => { localStorage.removeItem(KEY(id)); },
   };
 
+  switchMessageVersion(sessionId: string, messageId: number, index: number) {
+    if (!this.source.switchMessageVersion) throw new Error("Edit history is unavailable on this Gateway");
+    return this.source.switchMessageVersion(sessionId, messageId, index);
+  }
   openExternal(url: string) { window.open(url, "_blank", "noopener"); }
   async copy(text: string) { if (!navigator.clipboard) throw new Error("Clipboard unavailable on this device"); await navigator.clipboard.writeText(text); }
   async listAgents(): Promise<ChatAgentRef[]> {

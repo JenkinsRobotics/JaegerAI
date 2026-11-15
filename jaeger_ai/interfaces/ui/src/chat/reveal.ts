@@ -51,16 +51,17 @@ export function step(state: RevealState, text: string, now: number, params: Stre
   // ~4 chars/token); doubled while behind when catching up by acceleration.
   const perChar = r.mode === "words" ? 1 / 5 : r.mode === "tokens" ? 1 / 4 : 1;
   let rate = r.ratePerSec;
-  if (r.adaptive) rate = Math.max(rate, inRate * perChar);
+  if (r.adaptive) rate = Math.max(rate, Math.min(inRate * perChar, r.ratePerSec * 2.5));
   if (lag > r.maxLagChars && r.catchUp === "accelerate") rate *= 2;
   const units = Math.max(1, Math.round((rate * r.tickMs) / 1000));
   return { shown: advance(text, state.shown, units, r.mode), inRate, lastLen, lastAt };
 }
 
-/** The visible part of a streaming text. Starts from what's already there when it mounts (a reload never
- * replays), paces new text while `live`, and shows everything once the turn ends. */
+/** The visible part of a streaming text. A live mount starts at 0 so the first
+ * chunk types out; a finished or raw reveal shows the full text at once. */
 export function useRevealedText(text: string, live: boolean, params: StreamStyleParams): string {
-  const state = useRef<RevealState>(initialReveal(Date.now(), text.length));
+  const state = useRef<RevealState | null>(null);
+  if (state.current === null) state.current = initialReveal(Date.now(), live ? 0 : text.length);
   const [, force] = useState(0);
   const textRef = useRef(text);
   textRef.current = text;
@@ -68,11 +69,13 @@ export function useRevealedText(text: string, live: boolean, params: StreamStyle
   useEffect(() => {
     if (!paced) return;
     const timer = setInterval(() => {
-      const next = step(state.current, textRef.current, Date.now(), params, true);
-      if (next.shown !== state.current.shown) { state.current = next; force((n) => n + 1); } else state.current = next;
+      const current = state.current ?? initialReveal(Date.now(), 0);
+      const next = step(current, textRef.current, Date.now(), params, true);
+      if (next.shown !== current.shown) { state.current = next; force((n) => n + 1); } else state.current = next;
     }, Math.max(8, params.reveal.tickMs));
     return () => clearInterval(timer);
   }, [paced, params]);
+  if (!state.current) state.current = initialReveal(Date.now(), live ? 0 : text.length);
   if (!paced) { state.current = { ...state.current, shown: text.length, lastLen: text.length }; return text; }
   if (state.current.shown > text.length) state.current = { ...state.current, shown: text.length };
   return text.slice(0, state.current.shown);

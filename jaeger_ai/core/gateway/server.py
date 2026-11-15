@@ -140,8 +140,8 @@ _IMAGE_QUESTION_OPENERS = frozenset({
 
 #: Streamed answer text is batched into durable ``turn.delta`` events at
 #: whichever comes first: this many characters or this many seconds.
-TURN_DELTA_BATCH_CHARS = 96
-TURN_DELTA_BATCH_S = 0.1
+TURN_DELTA_BATCH_CHARS = 24
+TURN_DELTA_BATCH_S = 0.04
 #: Reasoning batches flush on time (TURN_DELTA_BATCH_S) or at this size.
 TURN_REASONING_BATCH_CHARS = 2048
 TOOL_EVENT_NAME_MAX = 80
@@ -1794,6 +1794,7 @@ class JaegerGatewayApp:
             self.app.router.add_route(method, "/v1/sessions/{id}/read-state", self.handle_message_read_state)
         self.app.router.add_post("/v1/sessions/{id}/retry", self.handle_retry_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
+        self.app.router.add_post("/v1/sessions/{id}/messages/{message_id}/edit", self.handle_edit_message)
         self.app.router.add_get("/v1/sessions/{id}/queue", self.handle_get_queue)
         self.app.router.add_post("/v1/sessions/{id}/queue", self.handle_add_queue)
         self.app.router.add_post("/v1/sessions/{id}/queue/reorder", self.handle_reorder_queue)
@@ -4461,6 +4462,70 @@ class JaegerGatewayApp:
         if known:raise ValueError('Selected model is unavailable in the current observed catalog; no request admitted')
         return revision
 
+    async def handle_edit_message(self, request: web.Request) -> web.Response:
+        """Switch a user message to another edit version, or admit a new edit."""
+        session_id = request.match_info["id"]
+        try:
+            message_id = int(request.match_info["message_id"])
+        except (TypeError, ValueError):
+            return web.json_response({"error": "Invalid message id"}, status=400)
+        body = await request.json() if request.can_read_body else {}
+        if "index" in body and "text" not in body:
+            session = self.store.get_session(session_id)
+            if session is None:
+                return web.json_response({"error": "Session not found"}, status=404)
+            if session.get("status") in {"running", "execution_unknown", "cancelling"}:
+                return web.json_response({"error": "Stop the current turn before switching versions"}, status=409)
+            try:
+                updated = self.store.switch_message_version(session_id, message_id, int(body["index"]))
+            except (TypeError, ValueError) as exc:
+                return web.json_response({"error": str(exc)}, status=400)
+            if updated is None:
+                return web.json_response({"error": "User message not found"}, status=404)
+            return web.json_response(updated)
+        text = str(body.get("text") or body.get("input") or "").strip()
+        if not text:
+            return web.json_response({"error": "Missing turn text"}, status=400)
+        request_id = body.get("request_id")
+        if request_id is not None:
+            request_id = str(request_id).strip() or None
+        requested = self._requested_from_body(body)
+        try:
+            model_revision = await self._turn_model_revision(session_id, requested, request_id)
+            timing_admitted_at = time.monotonic()
+            admitted = self.store.admit_request(
+                session_id, text, request_id=request_id, requested=requested,
+                expected_model_revision=model_revision, edit_message_id=message_id,
+            )
+        except RequestConflict as exc:
+            return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
+        except RequestBusy as exc:
+            session = self.store.get_session(session_id) or {}
+            return web.json_response({"error": str(exc), "session_id": session_id, "status": session.get("status")}, status=409)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        if not admitted.get("replayed"):
+            admitted["timing_admitted_at"] = timing_admitted_at
+        self._activate_owner_session(
+            request, session_id,
+            surface=body.get("source") or getattr(self._request_caller(request), "name", None),
+        )
+        if not (admitted.get("execution") or {}).get("options", {}).get("background"):
+            self._last_human_at = time.monotonic()
+            self._last_human_session = session_id
+        self._start_admitted_turn(admitted, session_id, text)
+        payload = {
+            "session_id": session_id,
+            "turn_id": admitted["turn_id"],
+            "request_id": admitted["request_id"],
+            "status": admitted["status"] if admitted.get("replayed") else "running",
+            "replayed": bool(admitted.get("replayed")),
+            "message_id": admitted.get("message_id") or message_id,
+        }
+        if admitted.get("event"):
+            payload["start_event_id"] = admitted["event"]["event_id"]
+        return web.json_response(payload)
+
     async def handle_send_turn(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
@@ -4490,9 +4555,16 @@ class JaegerGatewayApp:
         try:
             model_revision=await self._turn_model_revision(session_id,requested,request_id)
             timing_admitted_at = time.monotonic()
+            edit_message_id = body.get("edit_message_id")
+            if edit_message_id is not None:
+                try:
+                    edit_message_id = int(edit_message_id)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("edit_message_id must be an integer") from exc
             admitted = self.store.admit_request(
                 session_id, text, request_id=request_id, requested=requested,
                 expected_model_revision=model_revision,
+                edit_message_id=edit_message_id,
             )
         except RequestConflict as exc:
             return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
@@ -4539,6 +4611,8 @@ class JaegerGatewayApp:
             # Durable cursor of this turn's turn.start: a client streams
             # ``?last_event_id=<start_event_id - 1>`` to follow just this turn.
             payload["start_event_id"] = admitted["event"]["event_id"]
+        if admitted.get("message_id") is not None:
+            payload["message_id"] = admitted["message_id"]
         return web.json_response(payload)
 
     def _queue_updated(self, session_id: str) -> dict[str, Any]:
@@ -7290,9 +7364,12 @@ class JaegerGatewayApp:
             },
         )
         await response.prepare(request)
+        async def _flush(data: bytes) -> None:
+            await response.write(data)
+            await response.drain()
         # EventSource reconnect delay (SSE spec ``retry:``); with the ``id:``
         # on every frame the browser resumes from Last-Event-ID by itself.
-        await response.write(b"retry: 2000\n\n")
+        await _flush(b"retry: 2000\n\n")
 
         events = (self.event_bus.subscribe(session_id, since_event_id=last_event_id, session_only=True)
                   if session_only else self.event_bus.subscribe(session_id, since_event_id=last_event_id))
@@ -7303,14 +7380,14 @@ class JaegerGatewayApp:
                 "state": "resumed" if last_event_id else "connected", "resumed_from": last_event_id,
                 "latest_event_id": window.get("latest_event_id"), "oldest_event_id": window.get("oldest_event_id"),
                 "replaying": max(0, int(window.get("latest_event_id") or 0) - int(last_event_id or 0))}}
-            await response.write(f"event: stream.status\ndata: {json.dumps(status)}\n\n".encode("utf-8"))
+            await _flush(f"event: stream.status\ndata: {json.dumps(status)}\n\n".encode("utf-8"))
         pending = asyncio.create_task(anext(events))
         try:
             while True:
                 ready, _ = await asyncio.wait({pending}, timeout=getattr(self, "_sse_keepalive_seconds", 10.0))
                 if not ready:
                     # Transport-only comment: no model progress, cursor or durable state.
-                    await response.write(b": keepalive\n\n")
+                    await _flush(b": keepalive\n\n")
                     continue
                 evt = pending.result()
                 payload = json.dumps({
@@ -7322,7 +7399,7 @@ class JaegerGatewayApp:
                     **({"trace": evt.trace} if evt.trace else {}),
                 })
                 chunk = f"id: {evt.event_id}\nevent: {evt.event}\ndata: {payload}\n\n"
-                await response.write(chunk.encode("utf-8"))
+                await _flush(chunk.encode("utf-8"))
                 pending = asyncio.create_task(anext(events))
         except ReplayGap:
             # Tell the client its cursor fell out of retention (reload the
@@ -7330,7 +7407,7 @@ class JaegerGatewayApp:
             gap = {"event": "stream.status", "session_id": session_id, "timestamp": time.time(),
                    "data": {"state": "gap", "resumed_from": last_event_id}}
             try:
-                await response.write(f"event: stream.status\ndata: {json.dumps(gap)}\n\n".encode("utf-8"))
+                await _flush(f"event: stream.status\ndata: {json.dumps(gap)}\n\n".encode("utf-8"))
             except Exception:  # noqa: BLE001
                 pass
         except (asyncio.CancelledError, ConnectionError, StopAsyncIteration):

@@ -60,6 +60,8 @@ export interface StartTurnRequest {
   draftFileIds?: string[];
   draftBody?: string;
   quoteKey?: string;
+  /** Replace this user message and regenerate the following turns. */
+  editMessageId?: number;
 }
 
 export type TurnState = "complete" | "cancelled" | "failed" | "needs_input" | "unknown";
@@ -80,6 +82,11 @@ export interface ChatTurn {
   state: "pending" | TurnState;
   /** PROPOSED addition: epoch ms the turn started, for day/time separators. */
   createdAt?: number;
+  /** Durable user-message id, used for edit-and-regenerate. */
+  userMessageId?: number;
+  /** ChatGPT-style edit history of the user prompt. */
+  versions?: string[];
+  versionIndex?: number;
 }
 
 export interface ChatSessionSummary {

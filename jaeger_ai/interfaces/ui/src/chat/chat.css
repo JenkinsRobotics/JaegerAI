@@ -29,6 +29,7 @@
   mask-image: linear-gradient(to bottom, transparent 0, var(--aether-color-text) 64px);
 }
 .jg-chat__column { width: min(820px,100%); box-sizing: border-box; margin: 0 auto; padding: 48px 24px 24px; }
+.jg-assistant-content, .jg-md, .jg-turn-activity, .jg-bubble--assistant { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
 .jg-chat__empty { text-align: center; color: var(--aether-color-text-dim); margin-top: 22vh; font-size: calc(var(--jg-font-body) * 1.35); }
 /* Turns: 12px before a new sender group, 4px within one. Off-screen turns skip layout. */
 .jg-turn { display: flex; flex-direction: column; content-visibility: auto; contain-intrinsic-size: auto 120px; }
@@ -85,10 +86,18 @@
 .jg-thinking[open] summary::before { transform: rotate(90deg); }
 .jg-thinking p { margin: 0; padding: 0 10px 9px; color: var(--aether-color-text-dim); }
 .jg-thinking summary { display: flex; align-items: center; gap: 8px; }
-.jg-thinking__shimmer { background: linear-gradient(90deg, currentColor 0%, color-mix(in srgb, currentColor 35%, transparent) 50%, currentColor 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; font-variant-numeric: tabular-nums; }
-.jg-thinking--live .jg-thinking__shimmer { animation: jg-think-shimmer 1.6s ease-in-out infinite; }
+.jg-thinking__shimmer { color: inherit; font-variant-numeric: tabular-nums; }
+.jg-thinking--live .jg-thinking__shimmer {
+  background-image: linear-gradient(90deg, var(--aether-color-text-dim) 0%, var(--aether-color-text) 45%, var(--aether-color-text-dim) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: jg-think-shimmer 1.6s ease-in-out infinite;
+}
 @keyframes jg-think-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
-@media (prefers-reduced-motion: reduce) { .jg-thinking--live .jg-thinking__shimmer { animation: none; color: inherit; background: none; } }
+@media (prefers-reduced-motion: reduce) { .jg-thinking--live .jg-thinking__shimmer { animation: none; color: inherit; -webkit-text-fill-color: inherit; background: none; } }
 .jg-thinking__process { margin-left: auto; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--jg-color-text-secondary); }
 .jg-thinking__process:hover { background: var(--jg-color-hover); color: var(--jg-color-text); }
 .jg-tool { font-size: var(--jg-font-small); color: var(--aether-color-text-dim); }
@@ -365,8 +374,7 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-runtime-menu button { font: inherit; color: inherit; cursor: pointer; }
 .jg-runtime-menu > header button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 8px; background: transparent; }
 .jg-runtime-menu button:hover:not(:disabled) { background: var(--jg-color-hover); }
-.jg-runtime-tabs { display: flex; gap: 6px; margin: 0 4px 9px; overflow-x: auto; scrollbar-width: none; }
-.jg-runtime-tabs::-webkit-scrollbar { display: none; }
+.jg-runtime-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 4px 9px; overflow: visible; }
 .jg-runtime-tabs button { display: inline-flex; flex: none; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; border: 1px solid var(--jg-color-border); border-radius: 9px; background: transparent; color: var(--jg-color-text-secondary); font-size: 12px; white-space: nowrap; }
 .jg-runtime-tabs button[aria-selected=true] { border-color: transparent; background: var(--jg-color-active); color: var(--jg-color-text); font-weight: 600; }
 .jg-runtime-search { display: flex; align-items: center; gap: 8px; margin: 0 4px 8px; padding: 0 10px; border: 1px solid var(--jg-color-border); border-radius: 10px; background: var(--jg-color-pane); color: var(--jg-color-text-secondary); }
@@ -399,6 +407,9 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-composer__bar .jg-voice-mode__trigger:not(.jg-send) { display: none; }
 .jg-chat.is-home .jg-composer { margin-bottom: 20px; }
 @media (max-width: 600px) {
+  .jg-chat__column { padding: 48px max(16px, env(safe-area-inset-left)) 16px max(16px, env(safe-area-inset-right)); }
+  .jg-bubble--assistant, .jg-assistant-content, .jg-md, .jg-turn-activity, .jg-tool, .jg-codeblock { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+  .jg-md pre, .jg-md table, .jg-md__table, .jg-codeblock, .jg-codeblock pre { max-width: 100%; overflow-x: auto; }
   .jg-composer { width: calc(100% - 20px); min-height: 124px; margin-bottom: 10px; padding: 12px 12px 10px; border-radius: 26px; }
   .jg-composer__input { min-height: 52px; max-height: clamp(52px,calc(var(--jg-viewport-height,100dvh) * .28),200px); }
   .jg-composer__policy-label { display: inline; font-size: 11px; font-weight: 600; }
@@ -546,11 +557,25 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-error__retry { min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--jg-color-text); color: var(--jg-color-pane, #fff); font: inherit; cursor: pointer; }
 .jg-error details { color: var(--jg-color-text-secondary); font-size: 12px; }
 .jg-error details pre { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.jg-msg-actions { display: flex; align-items: center; gap: 2px; margin: 4px 0 10px; min-height: 28px; color: var(--jg-color-text-secondary); opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.jg-turn { position: relative; z-index: 0; isolation: isolate; }
+.jg-msg-actions { position: relative; z-index: 2; display: flex; align-items: center; gap: 2px; margin: 4px 0 10px; min-height: 36px; color: var(--jg-color-text-secondary); opacity: 0; pointer-events: none; transition: opacity .12s ease; }
 .jg-turn:hover .jg-msg-actions, .jg-turn:focus-within .jg-msg-actions, .jg-msg-actions.is-touch { opacity: 1; pointer-events: auto; }
-.jg-msg-actions button { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
+.jg-msg-actions button { display: grid; place-items: center; width: 36px; height: 36px; min-width: 36px; min-height: 36px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; position: relative; z-index: 2; }
 .jg-msg-actions button:hover, .jg-msg-actions button[aria-pressed=true] { background: var(--jg-color-hover); color: var(--jg-color-text); }
 .jg-msg-actions__time { margin-left: 6px; font-size: 11px; color: var(--jg-color-text-tertiary); font-variant-numeric: tabular-nums; }
 @media (hover: none) {
   .jg-msg-actions { opacity: 1; pointer-events: auto; }
 }
+
+.jg-user-msg { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; align-self: flex-end; max-width: 100%; }
+.jg-user-msg__edit { width: min(100%, 520px); display: flex; flex-direction: column; gap: 8px; }
+.jg-user-msg__edit textarea { width: 100%; min-height: 88px; box-sizing: border-box; resize: vertical; padding: 10px 12px; border: 1px solid var(--jg-color-border); border-radius: 12px; background: var(--jg-color-pane, var(--aether-color-bg-control)); color: inherit; font: inherit; }
+.jg-user-msg__edit-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.jg-user-msg__edit-actions button { min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; font: inherit; cursor: pointer; background: var(--jg-color-hover); color: inherit; }
+.jg-user-msg__edit-actions .jg-user-msg__save { background: var(--jg-color-accent); color: var(--jg-color-on-accent); }
+.jg-msg-versions { display: inline-flex; align-items: center; gap: 4px; margin-top: 2px; color: var(--jg-color-text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.jg-msg-versions button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.jg-msg-versions button:disabled { opacity: .35; cursor: default; }
+.jg-msg-versions button:hover:not(:disabled) { background: var(--jg-color-hover); color: var(--jg-color-text); }
+.jg-user-edit { margin-top: 2px; min-height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--jg-color-text-secondary); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; }
+.jg-turn:hover .jg-user-edit, .jg-turn:focus-within .jg-user-edit, .jg-user-edit.is-touch { opacity: 1; }

@@ -343,7 +343,8 @@ export interface JaegerSource {
   handoffExchange(handoffId: string): Promise<HandoffExchange>;
   /** POST /v1/sessions/{id}/turns. `start_event_id` is the durable cursor of
    * this turn's turn.start (stream from start_event_id - 1). */
-  send(sessionId: string, text: string, requestId: string, attachmentIds?: string[], options?: {fast_lane?:boolean}): Promise<TurnReceipt>;
+  send(sessionId: string, text: string, requestId: string, attachmentIds?: string[], options?: {fast_lane?:boolean; edit_message_id?: number}): Promise<TurnReceipt>;
+  switchMessageVersion?(sessionId: string, messageId: number, index: number): Promise<unknown>;
   /** POST /v1/sessions/{id}/attachments: register a workspace file (the gateway sizes and hashes it). */
   addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }): Promise<{ attachment_id: string }>;
   /** PROVISIONAL (bytes upload, gateway-side staging): the same endpoint with the file's bytes instead
@@ -398,6 +399,7 @@ export interface TurnReceipt {
   start_event_id?: number;
   status?: string;
   replayed?: boolean;
+  message_id?: number;
 }
 
 export interface ManagedSkill {name:string;category:string;zone:string;mutable:boolean;disabled?:boolean;origin?:string;revision:string|null;description:string;management_error?:string}

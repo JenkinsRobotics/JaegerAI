@@ -107,6 +107,8 @@ export interface SessionMessage {
   timestamp?: number | string;
   request_id?: string;
   parts?: PersistedPart[];
+  versions?: Array<string | { text?: string }>;
+  version_index?: number;
 }
 
 export interface SessionDetail extends SessionRow {

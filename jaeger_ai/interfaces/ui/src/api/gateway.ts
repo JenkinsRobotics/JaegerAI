@@ -353,8 +353,11 @@ export class GatewayClient implements JaegerSource {
     return this.json<HandoffExchange>(`/api/handoffs/${encodeURIComponent(handoffId)}/messages`);
   }
   /** attachment_ids is always sent: left out, the gateway would attach every file the chat ever had. */
-  send(sessionId: string, text: string, requestId: string, attachmentIds: string[] = [], options?:{fast_lane?:boolean}) {
-    return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId, attachment_ids: attachmentIds, ...(options?.fast_lane ? {fast_lane:true} : {}) });
+  send(sessionId: string, text: string, requestId: string, attachmentIds: string[] = [], options?:{fast_lane?:boolean; edit_message_id?: number}) {
+    return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId, attachment_ids: attachmentIds, ...(options?.fast_lane ? {fast_lane:true} : {}), ...(options?.edit_message_id != null ? {edit_message_id: options.edit_message_id} : {}) });
+  }
+  switchMessageVersion(sessionId: string, messageId: number, index: number) {
+    return this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(String(messageId))}/edit`, { index });
   }
   sessionControl(sessionId: string) {
     return this.json<{ latest_request?: { request_id: string; status: string } | null }>(`/v1/sessions/${encodeURIComponent(sessionId)}?view=control`);
