@@ -5774,6 +5774,18 @@ class JaegerGatewayApp:
             self._request_tools.setdefault(request_id, []).append(str(name or ""))
             output_text = _tool_output_text(str(name or ""), result)
             sources = _tool_sources(result) if ok else []
+            attachment = None
+            if ok:
+                try:
+                    from jaeger_ai.core.gateway.generated_media import register_generated_image
+                    attachment = register_generated_image(
+                        self, session_id=session_id, request_id=request_id,
+                        tool_name=str(name or ""), result=result,
+                    )
+                except Exception:
+                    logger.warning("Generated image could not be attached to the session", exc_info=True)
+            if attachment and not output_text:
+                output_text = f"Generated {attachment.get('name') or 'image'}"
             plan_payload = None
             if str(name or "") == "update_plan" and ok and isinstance(result, dict) and result.get("ok"):
                 plan_payload = {
@@ -5839,6 +5851,16 @@ class JaegerGatewayApp:
             })
             if sources:
                 self.event_bus.publish(session_id, "sources", {**ids, "sources": sources})
+            if attachment:
+                self.event_bus.publish(session_id, "turn.attachment", {
+                    **ids, **step_ref(),
+                    "attachment_id": attachment["attachment_id"],
+                    "name": attachment.get("name"),
+                    "mime": attachment.get("mime"),
+                    "size": attachment.get("size"),
+                    "sha256": attachment.get("sha256"),
+                    "tool": _safe_tool_event_name(name),
+                })
             if plan_payload is not None:
                 self.event_bus.publish(session_id, "turn.plan", {**ids, **plan_payload})
 

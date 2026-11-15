@@ -125,6 +125,8 @@ CORE: frozenset[str] = frozenset({
     "memory", "recall", "todo", "clarify",
     "list_skills", "delegate_task",
     "get_time", "calculate",
+    # Official Grok Imagine (and later sanctioned backends) via image_generate.
+    "image_generate", "image_edit",
 })
 
 
@@ -141,7 +143,7 @@ LEAN_CORE: frozenset[str] = frozenset({
     "memory",
     "todo", "clarify", "delegate_task", "board_add", "board_view", "list_skills",
     "computer_use", "browser",
-    "vision_analyze", "image_generate", "text_to_speech",
+    "vision_analyze", "image_generate", "image_edit", "text_to_speech",
 })
 
 
@@ -180,9 +182,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
     }),
     "containers": frozenset({"container"}),
     "media": frozenset({
-        "text_to_speech", "listen", "vision_analyze", "view_image", "image_generate",
+        "text_to_speech", "listen", "vision_analyze", "view_image",
         # fal.ai cloud generation (plugins/ai_gen) — the paid counterpart
-        # to the local image_generate.
+        # to image_generate (CORE, official Grok Imagine / cached local).
         "generate_image_fal", "generate_video_fal",
     }),
     "avatar": frozenset({

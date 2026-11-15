@@ -39,7 +39,7 @@ export function toolCategory(name:string):ToolCategory {
   if(/(^|[_.:])(load_tools|list_tools|describe_tool|tool_search)([_.:]|$)/.test(n))return "toolDiscovery";
   if(/(^|[_.:])(use_skill|load_skill|read_skill|list_skills|reload_skills|skill_note|skill_notes|request_skill_review|record_skill_revision)([_.:]|$)/.test(n))return "skill";
   if(/(^|[_.:])(text_to_speech|speech_to_text|transcribe|transcribe_audio|listen|speak|record_audio|insta360_record_audio)([_.:]|$)/.test(n))return "audio";
-  if(/(image_generate|generate_image|imagegen)/.test(n))return "imageGeneration";
+  if(/(image_generate|generate_image|image_edit|imagegen)/.test(n))return "imageGeneration";
   if(/(computer_use|macos_computer|cua_repl|take_screenshot|capture_screen)/.test(full))return "computer";
   if((n==="search" && !full.startsWith("mcp__")) || /(^|[_.:])(web_?search|search_web|internet_search|google|brave|bing)([_.:]|$)/.test(n))return "search";
   if(/(^|[_.:])(search_files|file_search|grep|glob|find_files|find_in_files)([_.:]|$)/.test(n))return "fileSearch";

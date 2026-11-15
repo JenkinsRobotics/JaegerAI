@@ -38,6 +38,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
+import shutil
 from urllib.parse import parse_qs, unquote
 
 OLLAMA = f"http://{LOOPBACK}:{OLLAMA_PORT}"
@@ -204,10 +205,15 @@ def providers() -> list[dict]:
         has_diffusers = False
     local_ok = has_diffusers and _hf_cached("stabilityai/sdxl-turbo")
     fal_ok = _fal_ready()
+    grok_ok = (Path.home() / ".grok" / "auth.json").is_file() and (
+        (Path.home() / ".grok" / "bin" / "grok").is_file() or bool(shutil.which("grok"))
+    )
     return [
+        {"id": "grok-imagine", "name": "Grok Imagine (grok.com OAuth)", "kind": "subscription", "available": grok_ok, "cost": "included in the grok.com subscription",
+         "note": None if grok_ok else "Needs the official grok CLI signed in with grok.com OAuth."},
         {"id": "local-sdxl-turbo", "name": "SDXL-Turbo (on this Mac)", "kind": "local", "available": local_ok, "cost": "free",
          "note": None if local_ok else ("diffusers is installed but the stabilityai/sdxl-turbo weights (~6 GB) are not downloaded. "
-                                        "Ask Jaeger in chat to run image_generate once, or download the model, then reload." if has_diffusers else
+                                        "image_generate will not start that download; use Grok Imagine, or cache the model first." if has_diffusers else
                                         "diffusers is not installed in the Jaeger environment.")},
         {"id": "fal-flux-schnell", "name": "FLUX schnell (fal.ai cloud)", "kind": "cloud", "available": fal_ok, "cost": "paid, a few cents per image",
          "note": None if fal_ok else "Needs the FAL_KEY credential in Jaeger's credential store (Settings → Credentials)."},

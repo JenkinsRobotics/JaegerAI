@@ -595,3 +595,15 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 }
 .jg-source-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jg-source-chip:hover { background: var(--jg-color-hover); }
+
+
+.jg-generated-image { margin: 6px 0 10px; max-width: min(100%, 28rem); }
+.jg-generated-image__caption { font-size: var(--jg-font-small, 13px); color: var(--jg-color-text-secondary, var(--aether-color-text-secondary)); margin: 0 0 6px; }
+.jg-generated-image__frame { display: block; padding: 0; border: 0; background: none; cursor: zoom-in; max-width: 100%; }
+.jg-generated-image__frame img,
+.jg-generated-image__lightbox img { display: block; max-width: 100%; height: auto; border-radius: 12px; }
+.jg-generated-image__actions { display: flex; gap: 8px; margin-top: 6px; }
+.jg-generated-image__error, .jg-generated-image__status { margin: 0; color: var(--jg-color-text-secondary, var(--aether-color-text-secondary)); font-size: var(--jg-font-small, 13px); }
+.jg-generated-image__lightbox { max-width: min(92vw, 1024px); max-height: 92vh; border: 0; padding: 16px; background: var(--jg-color-pane, var(--aether-color-bg, #111)); color: var(--aether-color-text, inherit); }
+.jg-generated-image__lightbox::backdrop { background: color-mix(in srgb, black 55%, transparent); }
+.jg-generated-image__lightbox form { display: flex; gap: 8px; margin-top: 12px; }

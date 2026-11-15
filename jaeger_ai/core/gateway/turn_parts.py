@@ -11,7 +11,7 @@ from typing import Any, Iterable
 _TOOL_END = {"tool.completed": "done", "tool.done": "done", "tool.failed": "error", "tool.error": "error"}
 _HANDOFF = {"agent.handoff": "to", "agent.handoff.finished": "from"}
 PART_EVENTS = ("turn.delta", "turn.steer", "turn.reasoning", "turn.reasoning.done", "tool.started", "agent.knowledge", "turn.context", "turn.model", "tools.selected",
-               *_TOOL_END, "turn.plan", "turn.progress", "turn.checkpoint", "sources", "search.count", "follow_ups", *_HANDOFF)
+               *_TOOL_END, "turn.plan", "turn.progress", "turn.checkpoint", "sources", "search.count", "follow_ups", "turn.attachment", *_HANDOFF)
 
 
 def project_parts(events: Iterable[dict[str, Any]], final_text: str | None = None) -> list[dict[str, Any]]:
@@ -77,6 +77,19 @@ def project_parts(events: Iterable[dict[str, Any]], final_text: str | None = Non
         elif name in {"turn.progress", "turn.checkpoint", "sources", "search.count", "follow_ups"}:
             kind = {"turn.progress": "progress", "turn.checkpoint": "checkpoint", "search.count": "search_count"}.get(name, name)
             parts.append({**{k: v for k, v in data.items() if k not in {"turn_id", "request_id", "session_id", "type"}}, "type": kind})
+        elif name == "turn.attachment":
+            aid = str(data.get("attachment_id") or "")
+            if aid:
+                part = {"type": "attachment", "attachment_id": aid,
+                        "name": data.get("name"), "mime": data.get("mime"),
+                        "size": data.get("size"), "sha256": data.get("sha256")}
+                prior = next((i for i, existing in enumerate(parts)
+                              if existing.get("type") == "attachment"
+                              and existing.get("attachment_id") == aid), None)
+                if prior is None:
+                    parts.append(part)
+                else:
+                    parts[prior] = part
         elif name == "turn.plan":
             parts.append({"type": "plan", **{k: v for k, v in data.items() if k not in {"turn_id", "request_id"}}})
         elif name in _HANDOFF:

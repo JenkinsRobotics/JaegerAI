@@ -21,6 +21,8 @@ export type ChatPart =
   | { kind: "modelContext"; outline: import("./modelContext").ModelContextOutline }
   | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { kind: "markdownContent"; text: string; role?: AssistantContentRole; itemId?: string }
+  /** A session-bound file, usually a generated or uploaded image, rendered in the bubble. */
+  | { kind: "attachment"; attachmentId: string; name: string; mime: string; size?: number; sha256?: string }
   | { kind: "thinking"; text: string; durationMs?: number }
   | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string; elapsedS?: number }
   | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny"; reviewerVerdict?: string; reviewerReason?: string }
@@ -230,6 +232,11 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
     if (last?.kind === "thinking" && last.durationMs == null) {
       return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];
     }
+  }
+  if (part.kind === "attachment") {
+    const existing = parts.findIndex(p => p.kind === "attachment" && p.attachmentId === part.attachmentId);
+    if (existing >= 0) return parts.map((p, i) => i === existing ? { ...p, ...part } as ChatPart : p);
+    return [...parts, part];
   }
   if (part.kind === "toolInvocation" || part.kind === "confirmation" || part.kind === "question") {
     const index = parts.findIndex((p) => p.kind === part.kind && p.callId === part.callId);

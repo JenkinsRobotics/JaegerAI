@@ -67,7 +67,7 @@ EVENT_TYPES = frozenset({
     # DIGEST entries are visual/staged and never ring.
     "notification.proactive", "notifications.changed", "mcp.changed", "channel.changed", "plugins.changed",
     # IDE bridge + attachments + agent lifecycle.
-    "ide.request", "attachment.added",
+    "ide.request", "attachment.added", "turn.attachment",
     "agent.created", "agent.activated", "agent.handoff", "agent.handoff.finished",
     "agent.skills", "agent.knowledge", "agent.memory.changed", "project.created", "project.checked",
     # Sessions contract: every transcript row, and rolling summaries.
