@@ -107,7 +107,11 @@ def sanitize_topic_title(raw: str) -> str:
     if text.endswith(".") and text.count(" ") <= 7:
         text = text[:-1].rstrip()
     lowered = text.lower()
-    if lowered.startswith(("the user", "this conversation", "the assistant", "here is", "sure,", "okay")):
+    if lowered.startswith((
+        "the user", "this conversation", "the assistant", "here is", "here is a",
+        "sure,", "okay", "ok,", "i'll", "i will", "i am", "i'm", "there isn't",
+        "there is", "there isn’t", "listing the", "i can",
+    )):
         return ""
     words = text.split()
     if len(words) < MIN_TITLE_WORDS or len(words) > MAX_TITLE_WORDS:
@@ -453,4 +457,24 @@ def install(app: Any) -> None:
         except Exception:
             logger.warning("session title backfill failed", exc_info=True)
 
+    def repair() -> None:
+        time.sleep(BACKFILL_DELAY_SECONDS + 1)
+        try:
+            for row in app.store.list_sessions():
+                if row.get("title_source") == "user":
+                    continue
+                title = str(row.get("title") or "")
+                if title and sanitize_topic_title(title):
+                    continue
+                generated = ((row.get("metadata") or {}).get("title_auto") or {}).get("generated")
+                if not generated:
+                    continue
+                try:
+                    maybe_update_session_title(app.store, row["session_id"], event_bus=app.event_bus, force=True)
+                except Exception:
+                    logger.info("session title repair failed session=%s", str(row["session_id"])[:12])
+        except Exception:
+            logger.warning("session title repair failed", exc_info=True)
+
     threading.Thread(target=backfill, name="topic-title-backfill", daemon=True).start()
+    threading.Thread(target=repair, name="topic-title-repair", daemon=True).start()

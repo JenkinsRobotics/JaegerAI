@@ -335,3 +335,9 @@
 .jg-conversation-work [hidden] { display:none !important; }
 
 .jg-stable-demo__top-button[aria-expanded=true][data-tooltip]::after { display:none; }
+
+.jg-stable-demo__home-chat { margin: 0 0 8px; }
+.jg-stable-demo__home-chat .jg-stable-demo__session-title { width: 100%; font-weight: 650; color: var(--jg-color-text); }
+.jg-stable-demo__home-chat .jg-stable-demo__session-title[aria-current="true"] { background: var(--jg-color-active); }
+.jg-stable-demo__recents #topics { margin-bottom: 8px; }
+.jg-stable-demo__recents #topics .jg-stable-demo__session-row { padding-left: 8px; }

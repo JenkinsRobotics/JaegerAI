@@ -3,12 +3,13 @@ export function validConversationId(id: string): boolean {
   return id.length > 0 && id.length <= 256 && !/[\s\x00-\x1f\x7f/\\?#]/.test(id);
 }
 
-export function conversationPath(id: string, search = ''): string {
+export function conversationPath(id: string, search = '', topic?: string | null): string {
   if (!validConversationId(id)) throw Error('Invalid conversation ID');
   const previous = new URLSearchParams(search);
   const params = new URLSearchParams({session:id});
   // Native window chrome and an explicit development preview remain local to this client.
   for (const key of ['host','mock']) if (previous.has(key)) params.set(key, previous.get(key)!);
+  if (topic) params.set('topic', topic);
   return '/chat?' + params;
 }
 
