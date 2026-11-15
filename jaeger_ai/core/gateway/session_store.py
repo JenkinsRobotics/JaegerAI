@@ -605,6 +605,7 @@ class GatewaySessionStore:
                 )
             """)
             current = 16
+        self._ensure_title_source(conn)
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -615,6 +616,39 @@ class GatewaySessionStore:
         with self._get_conn() as conn:
             row = conn.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()
             return int(row["value"]) if row else 1
+
+    def _ensure_title_source(self, conn: sqlite3.Connection) -> None:
+        """Add sessions.title_source (auto/user) without bumping a skewed schema version."""
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+        if "title_source" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'auto'")
+        rows = conn.execute("SELECT session_id, metadata_json, title_source FROM sessions").fetchall()
+        for row in rows:
+            meta = _row_meta(row["metadata_json"])
+            org = meta.get("chat_organization") if isinstance(meta.get("chat_organization"), dict) else {}
+            source = row["title_source"] if row["title_source"] in {"auto", "user"} else None
+            if source is None:
+                source = org.get("title_source") if org.get("title_source") in {"auto", "user"} else (
+                    "user" if org.get("manual_title") else "auto"
+                )
+            if org.get("title_source") != source or bool(org.get("manual_title")) != (source == "user") or row["title_source"] != source:
+                org = dict(org)
+                org["title_source"] = source
+                org["manual_title"] = source == "user"
+                meta["chat_organization"] = org
+                conn.execute(
+                    "UPDATE sessions SET title_source=?, metadata_json=? WHERE session_id=?",
+                    (source, json.dumps(meta), row["session_id"]),
+                )
+
+    def _title_source_of(self, row: sqlite3.Row, meta: dict[str, Any] | None = None) -> str:
+        meta = meta if meta is not None else _row_meta(row["metadata_json"] if "metadata_json" in row.keys() else "{}")
+        if "title_source" in row.keys() and row["title_source"] in {"auto", "user"}:
+            return row["title_source"]
+        org = meta.get("chat_organization") if isinstance(meta.get("chat_organization"), dict) else {}
+        if org.get("title_source") in {"auto", "user"}:
+            return org["title_source"]
+        return "user" if org.get("manual_title") else "auto"
 
     def operator_state(self, key: str) -> dict[str, Any] | None:
         """Read one Gateway-owned operator projection."""
@@ -742,6 +776,7 @@ class GatewaySessionStore:
                 row = {
                     "session_id": r["session_id"],
                     "title": r["title"],
+                    "title_source": self._title_source_of(r, meta),
                     "profile": r["profile"],
                     "workspace": r["workspace"],
                     "created_at": r["created_at"],
@@ -868,6 +903,7 @@ class GatewaySessionStore:
             payload = {
                 "session_id": row["session_id"],
                 "title": row["title"],
+                "title_source": self._title_source_of(row, meta),
                 "profile": row["profile"],
                 "workspace": row["workspace"],
                 "created_at": row["created_at"],
@@ -1007,27 +1043,87 @@ class GatewaySessionStore:
             )
         return self.get_session(branch_id) or branch
 
-    def rename_session(self, session_id: str, title: str) -> dict[str, Any] | None:
+    def rename_session(self, session_id: str, title: str, *, source: str = "user") -> dict[str, Any] | None:
         """Set a session's title. The Gateway owns titles; clients project them.
 
         Returns the updated session, or ``None`` when the session is unknown.
         Does not touch ``updated_at``: a rename is not conversation activity and
-        must not reorder the sidebar.
+        must not reorder the sidebar. ``source='user'`` (the default) marks the
+        title as manual so auto-titling will not overwrite it.
         """
+        source = "user" if source != "auto" else "auto"
         with self._get_conn() as conn:
             cursor = conn.execute(
-                "UPDATE sessions SET title = ? WHERE session_id = ?",
-                (title, session_id),
+                "UPDATE sessions SET title = ?, title_source = ? WHERE session_id = ?",
+                (title, source, session_id),
             )
             if cursor.rowcount == 0:
                 return None
             row=conn.execute("SELECT metadata_json FROM sessions WHERE session_id=?",(session_id,)).fetchone()
             meta=json.loads(row[0] or '{}')
-            meta.setdefault('chat_organization', {})['manual_title']=True
+            org=meta.setdefault('chat_organization', {})
+            org['manual_title']=source=="user"
+            org['title_source']=source
             conn.execute("UPDATE sessions SET metadata_json=? WHERE session_id=?",(json.dumps(meta),session_id))
             if conn.execute("SELECT 1 FROM sqlite_master WHERE name='chat_organization'").fetchone():
                 conn.execute("UPDATE chat_organization SET revision=revision+1 WHERE id=1")
         return self.get_session(session_id)
+
+    def apply_auto_title(
+        self,
+        session_id: str,
+        title: str,
+        *,
+        user_turns: int,
+        fingerprint: str,
+        model: str,
+        changed: bool = True,
+        allow_heal: bool = False,
+    ) -> bool:
+        """Write a model-generated title when the user has not renamed this chat.
+
+        Leaves ``updated_at`` alone so the sidebar does not reorder. Returns
+        False when the session is missing or the title is user-owned.
+        """
+        title = (title or "").strip()[:200]
+        if not title:
+            return False
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT title, title_source, metadata_json FROM sessions WHERE session_id=?",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            meta = _row_meta(row["metadata_json"])
+            source = self._title_source_of(row, meta)
+            if source == "user" and not allow_heal:
+                return False
+            org = meta.setdefault("chat_organization", {})
+            if source == "user":
+                org["manual_title"] = False
+            org["title_source"] = "auto"
+            org["manual_title"] = False
+            meta["title_auto"] = {
+                "generated": True,
+                "updated_at": time.time(),
+                "user_turns": int(user_turns),
+                "fingerprint": str(fingerprint or ""),
+                "model": str(model or ""),
+            }
+            if changed:
+                conn.execute(
+                    "UPDATE sessions SET title=?, title_source='auto', metadata_json=? WHERE session_id=?",
+                    (title, json.dumps(meta), session_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE sessions SET title_source='auto', metadata_json=? WHERE session_id=?",
+                    (json.dumps(meta), session_id),
+                )
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='chat_organization'").fetchone():
+                conn.execute("UPDATE chat_organization SET revision=revision+1 WHERE id=1")
+        return bool(changed)
 
     def set_session_archived(self, session_id: str, archived: bool) -> dict[str, Any] | None:
         """Set the Gateway-owned archive flag in session metadata.

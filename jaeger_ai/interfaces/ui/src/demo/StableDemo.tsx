@@ -49,12 +49,6 @@ function isBackgroundSession(row: SessionRow) {
   if (lowered.includes("switch check")) return true;
   return false;
 }
-function titleFromMessage(text: string) {
-  const line = text.trim().replace(/\s+/g, " ");
-  if (line.length <= 60) return line;
-  const clipped = line.slice(0, 60).replace(/\s+\S*$/, "").replace(/[.,;:]+$/, "");
-  return `${clipped || line.slice(0, 60)}…`;
-}
 function SummaryGlyph() { return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6" cy="7" r="2"/><path d="M11 7h8"/><circle cx="6" cy="17" r="2"/><path d="M11 17h8"/></svg>; }
 type HeaderPopup = "menu" | "summary" | null;
 type MenuPage = "main" | "copy" | "open" | "fork";
@@ -427,19 +421,6 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const currentRow = recent.find(row => row.session_id === session) ?? (selectedRow?.session_id === session ? selectedRow : undefined);
   const currentTitle = organization?.sessions.find(row=>row.session_id===session)?.title || currentRow?.title || "New chat";
   const headerTitle = currentRow ? chatTitle({ ...currentRow, title: currentTitle }) : (isGenericTitle(currentTitle) ? "New chat" : currentTitle);
-  useEffect(() => {
-    if (!session || !isGenericTitle(currentTitle) || source.kind !== "live") return;
-    let live = true;
-    void httpGetJson()(`/v1/sessions/${encodeURIComponent(session)}/messages?limit=50`).then(async (payload) => {
-      const page = payload as { messages?: Array<{ role?: string; content?: string }> };
-      const first = [...(page.messages ?? [])].reverse().find((message) => message.role === "user" && message.content?.trim());
-      const title = first?.content ? titleFromMessage(first.content) : "";
-      if (!live || !title) return;
-      await source.updateSession(session, { title });
-      if (live) setRecent((rows) => rows.map((row) => row.session_id === session ? { ...row, title } : row));
-    }).catch(() => { /* Title stays generic until the first message is saved. */ });
-    return () => { live = false; };
-  }, [source, session, currentTitle, currentRow?.last_activity_at, currentRow?.message_count]);
   const togglePopup = (popup: Exclude<HeaderPopup, null>) => {
     setHeaderPopup(value => value === popup ? null : popup);
     setMenuPage("main"); setRenameOpen(false);
