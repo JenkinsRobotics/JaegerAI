@@ -16,6 +16,6 @@ export function getAvatar(character:string,state:ClipState,bundle:AvatarBundle=J
 export function activityState(turn:ChatTurn|undefined,running:boolean):ClipState {
  if(!running && turn?.state!=='pending')return 'idle';
  if(turn?.parts.some(p=>p.kind==='handoff' && ['pending','running','queued','accepted'].includes(p.status||'')))return 'waiting';
- if(turn?.parts.some(p=>p.kind==='toolInvocation' && ['executing','streaming'].includes(p.state) && /(^|[._])(write_file|generate_image|image_generate|render|create_artifact|save_file)([._]|$)/.test(p.toolName)))return 'making_something';
+ if(turn?.parts.some(p=>p.kind==='toolInvocation' && ['executing','streaming'].includes(p.state) && /(^|[._])(write_file|generate_image|image_generate|image_edit|render|create_artifact|save_file)([._]|$)/.test(p.toolName)))return 'making_something';
  return 'working';
 }

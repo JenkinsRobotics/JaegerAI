@@ -32,6 +32,11 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       const documents = Array.isArray(p.documents) ? p.documents.filter((doc): doc is { id: string; revision: number; digest: string; title: string } => Boolean(doc && typeof doc === "object" && typeof doc.id === "string" && typeof doc.revision === "number" && typeof doc.digest === "string" && typeof doc.title === "string")) : [];
       return { parts: [{ kind: "knowledgeContext", documents }] };
     }
+    case "turn.attachment": {
+      const id = str(p.attachment_id);
+      const mime = str(p.mime);
+      return id ? { parts: [{ kind: "attachment", attachmentId: id, name: str(p.name) || "image", mime, size: typeof p.size === "number" ? p.size : undefined, sha256: str(p.sha256) || undefined }] } : null;
+    }
     case "turn.delta":
       return { parts: [{ kind: "markdownContent", text: str(p.delta ?? p.text),
         ...((p.content_type || p.channel) ? {role: ["commentary","final"].includes(str(p.content_type ?? p.channel)) ? str(p.content_type ?? p.channel) as "commentary"|"final" : "provisional" as const} : {}),

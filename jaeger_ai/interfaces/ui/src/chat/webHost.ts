@@ -46,6 +46,7 @@ function persistedToPart(p: PersistedPart, agentName: (id: string) => string): C
     case "model_context": return {kind: "modelContext", outline: modelContext(p.outline)};
     case "knowledge": return { kind: "knowledgeContext", documents: p.documents };
     case "text": return p.text ? { kind: "markdownContent", text: p.text, role:p.role, itemId:p.item_id } : null;
+    case "attachment": return p.attachment_id ? { kind: "attachment", attachmentId: String(p.attachment_id), name: String(p.name || "image"), mime: String(p.mime || ""), size: typeof p.size === "number" ? p.size : undefined, sha256: p.sha256 ? String(p.sha256) : undefined } : null;
     case "reasoning": return { kind: "thinking", text: p.text ?? "", durationMs: p.duration_ms };
     case "tool": return {
       kind: "toolInvocation", callId: String(p.call_id ?? ""), toolName: String(p.tool ?? "tool"), input: p.input ?? null,

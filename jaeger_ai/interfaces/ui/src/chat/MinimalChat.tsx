@@ -1,3 +1,4 @@
+import { AttachmentImage } from "./AttachmentImage";
 import { ToolActivity, ActivityIcon } from "./ToolActivity";
 import {ConversationMinimap} from "./ConversationMinimap";
 import {AgentActivity} from "./AgentActivity";
@@ -100,8 +101,10 @@ export function RevealMarkdown({ text, live, links, style }: { text: string; liv
   );
 }
 
-function BubblePart({ part, links, live = false, style }: { part: ChatPart; links: Links; live?: boolean; style: StreamStyleParams }) {
+function BubblePart({ part, links, live = false, style, sessionId, files }: { part: ChatPart; links: Links; live?: boolean; style: StreamStyleParams; sessionId?: string; files?: import("../api/source").SessionFiles }) {
   switch (part.kind) {
+    case "attachment":
+      return <AttachmentImage part={part} sessionId={sessionId} files={files} />;
     case "plan":
       return <section aria-label="Work plan">{part.explanation && <p>{part.explanation}</p>}<ol>{part.plan.map((item,i)=><li key={i}>{item.step} <small>({item.status.replace("_"," ")})</small></li>)}</ol></section>;
     case "checkpoint":
@@ -1265,7 +1268,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
                 : "activity" in seg ? <ActivityFold key={`work:${turn.turnId || turn.requestId || "pending"}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
                 : "diagnostic" in seg ? null
-                : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant" tabIndex={0} aria-haspopup="menu">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
+                : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant" tabIndex={0} aria-haspopup="menu">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} sessionId={sessionId} files={host.sessionFiles} />)}</div>)}
               <SourceChips sources={webSources(turn.parts)} onOpen={links.onOpen} />
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
               {(turnErrors(turn).length > 0 || turn.state === "failed" || turn.state === "unknown") && (

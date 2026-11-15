@@ -1,20 +1,28 @@
-"""Vision skills — Jaeger-native local vision + local image generator.
+"""Vision skills — Jaeger-native local vision + image generation.
 
   • look_at(image_path, question)       — active llama.cpp + mmproj brain
-  • generate_image(prompt, out_path)    — SDXL-Turbo (lazy MPS load)
+  • generate_image(prompt, out_path)    — official Grok Imagine (grok CLI OAuth),
+                                          with a local SDXL-Turbo fallback only
+                                          when those weights are already cached
+  • edit_image(prompt, source_path)     — official Grok image_edit
 
-The local vision projector is configured by Jaeger; the image generator can
-be overridden with IMAGE_GEN_MODEL_ID.
-
-Ported from pydantic_ai/skills/vision.py. The only Jaeger-specific
-adjustment is sandbox: paths must resolve inside <instance>/skills/.
+The local vision projector is configured by Jaeger. Image generation uses the
+installed grok CLI under the existing grok.com OAuth; it does not invent API
+keys or unofficial routes. Local SDXL-Turbo can be selected with
+IMAGE_GEN_MODEL_ID but is never auto-downloaded from here.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
+import subprocess
+import tempfile
 import threading as _threading
 import time
+import uuid
+from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
@@ -24,13 +32,52 @@ from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 
 # ---------------------------------------------------------------------------
-# Image generation (SDXL-Turbo on MPS)
+# Image generation (official Grok Imagine, optional local SDXL-Turbo)
 # ---------------------------------------------------------------------------
 _imagegen_state: dict[str, Any] = {"pipeline": None, "model_id": None}
 # Atomic load/swap for the shared pipeline — multi-instance agents
 # (delegate sub-agents, deep think) can dispatch concurrently, and a
 # racing reload mid-inference corrupts results silently.
 _imagegen_lock = _threading.Lock()
+
+_GROK_IMAGE_TIMEOUT_S = 120
+_GROK_IMAGE_TURNS = 6
+_RASTER_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+_SAFE_GROK_ENV = frozenset({
+    "COLORTERM", "HOME", "LANG", "LC_ALL", "LOGNAME", "NO_COLOR",
+    "PATH", "SHELL", "TERM", "TMPDIR", "USER",
+    "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+})
+
+
+def _grok_cli_path() -> Path | None:
+    for raw in (os.environ.get("JAEGER_GROK_BIN"), os.environ.get("GROK_CLI")):
+        if raw:
+            candidate = Path(raw).expanduser()
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return candidate
+    which = shutil.which("grok")
+    if which:
+        return Path(which)
+    default = Path.home() / ".grok" / "bin" / "grok"
+    if default.is_file() and os.access(default, os.X_OK):
+        return default
+    return None
+
+
+def _grok_oauth_available() -> bool:
+    """True when the official grok.com OAuth file exists. Never read it."""
+    return (Path.home() / ".grok" / "auth.json").is_file()
+
+
+def _hf_weights_cached(model_id: str) -> bool:
+    cache = Path.home() / ".cache" / "huggingface" / "hub" / ("models--" + model_id.replace("/", "--"))
+    if not cache.is_dir():
+        return False
+    try:
+        return any(path.name == "model_index.json" for path in cache.rglob("model_index.json"))
+    except OSError:
+        return False
 
 
 def _ensure_imagegen_pipeline() -> tuple[Any, str]:
@@ -42,9 +89,13 @@ def _ensure_imagegen_pipeline() -> tuple[Any, str]:
 def _ensure_imagegen_pipeline_locked(model_id: str) -> tuple[Any, str]:
     if _imagegen_state["pipeline"] is not None and _imagegen_state["model_id"] == model_id:
         return _imagegen_state["pipeline"], model_id
+    if not _hf_weights_cached(model_id):
+        raise RuntimeError(
+            f"local image model {model_id} is not cached; image_generate will not "
+            "download the weights automatically (~6 GB). Use Grok Imagine, or "
+            "download the model first."
+        )
 
-    # Optional backend — ensure() gives a clean, actionable error (and
-    # an opt-in auto-install) instead of a raw ImportError.
     from jaeger_agent.util.lazy_deps import FeatureUnavailable, ensure
     try:
         ensure("image.diffusers")
@@ -57,7 +108,10 @@ def _ensure_imagegen_pipeline_locked(model_id: str) -> tuple[Any, str]:
     device = "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() else "cpu"
     dtype = torch.float16 if device != "cpu" else torch.float32
     pipe = AutoPipelineForText2Image.from_pretrained(
-        model_id, torch_dtype=dtype, variant="fp16" if dtype == torch.float16 else None
+        model_id,
+        torch_dtype=dtype,
+        variant="fp16" if dtype == torch.float16 else None,
+        local_files_only=True,
     ).to(device)
     print(f"[image_gen] {model_id} loaded on {device} in {time.perf_counter() - started:.1f}s", flush=True)
     _imagegen_state["pipeline"] = pipe
@@ -65,60 +119,331 @@ def _ensure_imagegen_pipeline_locked(model_id: str) -> tuple[Any, str]:
     return pipe, model_id
 
 
-def generate_image(
-    prompt: str,
-    out_path: str = "generated.png",
-    num_inference_steps: int = 1,
-    guidance_scale: float = 0.0,
-    seed: int | None = None,
-) -> dict[str, Any]:
-    """Generate an image from a text prompt and save to <instance>/skills/.
-
-    SDXL-Turbo at 1-step is the default — fast on Apple Silicon.
-    First call downloads ~6 GB of weights from HF; subsequent calls are
-    ~1–3 s per image. out_path is sandbox-resolved under skills/.
-    """
-    clean_prompt = (prompt or "").strip()
-    if not clean_prompt:
-        return {"generated": False, "error": "empty prompt"}
+def _resolve_image_out(out_path: str) -> tuple[Any, Path] | dict[str, Any]:
     layout = _require_layout()
+    clean = (out_path or "generated/image.png").strip() or "generated/image.png"
     try:
-        target = _resolve_under(layout.skills_dir, out_path)
-    except SandboxError as exc:
-        return {"generated": False, "error": str(exc)}
+        target = _resolve_under(layout.workspace_dir, clean)
+    except SandboxError:
+        try:
+            target = _resolve_under(layout.skills_dir, clean)
+        except SandboxError as exc:
+            return {"generated": False, "error": str(exc)}
+    if target.suffix.lower() not in _RASTER_SUFFIXES:
+        target = target.with_suffix(".png")
+    return layout, target
 
+
+def _copy_raster(src: Path, dest: Path) -> Path:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    return dest
+
+
+def _sniff_image(path: Path) -> bool:
+    try:
+        head = path.read_bytes()[:16]
+    except OSError:
+        return False
+    return (
+        head.startswith(b"\x89PNG\r\n\x1a\n")
+        or head.startswith(b"\xff\xd8\xff")
+        or head.startswith(b"GIF87a")
+        or head.startswith(b"GIF89a")
+        or (head.startswith(b"RIFF") and head[8:12] == b"WEBP")
+    )
+
+
+def _image_meta(path: Path) -> dict[str, Any]:
+    info: dict[str, Any] = {"bytes": path.stat().st_size, "filename": path.name}
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            info["width"], info["height"] = image.size
+            fmt = (image.format or path.suffix.lstrip(".")).lower()
+            info["format"] = fmt
+            info["mime"] = Image.MIME.get(image.format or "", f"image/{fmt}")
+    except Exception:
+        suffix = path.suffix.lower()
+        info["mime"] = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                        ".webp": "image/webp", ".gif": "image/gif"}.get(suffix, "application/octet-stream")
+    return info
+
+
+def _grok_child_env() -> dict[str, str]:
+    env = {key: os.environ[key] for key in _SAFE_GROK_ENV if key in os.environ}
+    # A throwaway session must not attach to Jaeger's grok leader socket.
+    for key in list(os.environ):
+        upper = key.upper()
+        if "GROK" in upper and ("LEADER" in upper or "SOCK" in upper or "SOCKET" in upper):
+            env.pop(key, None)
+    return env
+
+
+def _collect_grok_image(cwd: Path, session_id: str, started: float) -> Path | None:
+    candidates: list[Path] = []
+    for folder in (cwd, cwd / "images"):
+        if folder.is_dir():
+            candidates.extend(
+                path for path in folder.rglob("*")
+                if path.is_file() and path.suffix.lower() in _RASTER_SUFFIXES
+            )
+    sessions_root = Path.home() / ".grok" / "sessions"
+    if sessions_root.is_dir():
+        for session_dir in sessions_root.glob(f"*/{session_id}"):
+            if session_dir.is_dir():
+                candidates.extend(
+                    path for path in session_dir.rglob("*")
+                    if path.is_file() and path.suffix.lower() in _RASTER_SUFFIXES
+                )
+    fresh = [path for path in candidates if path.stat().st_mtime >= started - 2 and _sniff_image(path)]
+    if not fresh:
+        return None
+    return max(fresh, key=lambda path: path.stat().st_mtime)
+
+
+def _run_grok_imagine(prompt: str, *, source: Path | None = None) -> dict[str, Any]:
+    cli = _grok_cli_path()
+    if cli is None:
+        return {"generated": False, "error": "grok CLI is not installed"}
+    if not _grok_oauth_available():
+        return {"generated": False, "error": "grok.com OAuth is not signed in (missing ~/.grok/auth.json)"}
+
+    work = Path(tempfile.mkdtemp(prefix="jaeger-imagine-"))
+    session_id = str(uuid.uuid4())
+    if source is not None:
+        local_source = work / source.name
+        shutil.copy2(source, local_source)
+        instruction = (
+            f"Call the image_edit tool now on the file {local_source.name}. "
+            f"Apply this edit, and no other work: {prompt} "
+            "After it saves, reply with only the relative file path."
+        )
+        backend = "grok-imagine-edit"
+    else:
+        instruction = (
+            f"Call the image_gen tool now. Create this image, and no other work: {prompt} "
+            "After it saves, reply with only the relative file path."
+        )
+        backend = "grok-imagine"
+    stdout_path = work / "stdout.json"
+    stderr_path = work / "stderr.txt"
+    argv = [
+        str(cli), "--single", instruction,
+        "--session-id", session_id,
+        "--cwd", str(work),
+        "--permission-mode", "bypassPermissions",
+        "--always-approve",
+        "--max-turns", str(_GROK_IMAGE_TURNS),
+        "--disable-web-search",
+        "--no-subagents",
+        "--no-plan",
+        "--output-format", "json",
+        "--verbatim",
+    ]
+    started = time.perf_counter()
+    wall_start = time.time()
+    try:
+        with stdout_path.open("wb") as out, stderr_path.open("wb") as err:
+            proc = subprocess.Popen(
+                argv,
+                cwd=str(work),
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=err,
+                env=_grok_child_env(),
+                start_new_session=True,
+            )
+            deadline = time.time() + _GROK_IMAGE_TIMEOUT_S
+            while True:
+                if is_interrupted():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    return {"generated": False, "interrupted": True, "error": "image generation interrupted by user"}
+                try:
+                    proc.wait(timeout=0.5)
+                    break
+                except subprocess.TimeoutExpired:
+                    if time.time() >= deadline:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                        return {"generated": False, "error": "Grok Imagine timed out"}
+        if proc.returncode not in (0, None) and not list(work.rglob("*")):
+            return {"generated": False, "error": f"grok CLI exited {proc.returncode}"}
+        found = _collect_grok_image(work, session_id, wall_start)
+        # Also honour a relative path in the JSON text field, without logging the payload.
+        if found is None and stdout_path.is_file():
+            try:
+                payload = json.loads(stdout_path.read_text(errors="replace") or "{}")
+                text = str(payload.get("text") or "").strip().splitlines()[0] if payload.get("text") else ""
+                if text:
+                    candidate = (work / text).resolve()
+                    if candidate.is_file() and candidate.is_relative_to(work) and _sniff_image(candidate):
+                        found = candidate
+            except (OSError, json.JSONDecodeError, ValueError, IndexError):
+                pass
+        if found is None:
+            return {"generated": False, "error": "Grok Imagine finished without an image file"}
+        elapsed = time.perf_counter() - started
+        return {
+            "generated": True,
+            "source_file": str(found),
+            "backend": backend,
+            "model_id": "grok-imagine",
+            "elapsed_s": round(elapsed, 3),
+            "prompt": prompt,
+        }
+    except FileNotFoundError:
+        return {"generated": False, "error": "grok CLI is not installed"}
+    except Exception as exc:
+        return {"generated": False, "error": f"Grok Imagine failed: {type(exc).__name__}"}
+
+
+def _local_sdxl(prompt: str, *, num_inference_steps: int, guidance_scale: float, seed: int | None) -> dict[str, Any]:
     try:
         pipe, model_id = _ensure_imagegen_pipeline()
     except Exception as exc:
         return {"generated": False, "error": str(exc)}
-
     try:
         import torch
         gen = torch.Generator(device=pipe.device).manual_seed(seed) if seed is not None else None
         started = time.perf_counter()
         result = pipe(
-            prompt=clean_prompt,
+            prompt=prompt,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             generator=gen,
         )
-        elapsed = time.perf_counter() - started
         image = result.images[0]
+        elapsed = time.perf_counter() - started
+        return {
+            "generated": True,
+            "image": image,
+            "backend": "local-sdxl-turbo",
+            "model_id": model_id,
+            "elapsed_s": round(elapsed, 3),
+            "prompt": prompt,
+            "seed": seed,
+        }
     except Exception as exc:
         return {"generated": False, "error": f"inference failed: {exc}"}
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    image.save(target)
+
+def generate_image(
+    prompt: str,
+    out_path: str = "generated/image.png",
+    num_inference_steps: int = 1,
+    guidance_scale: float = 0.0,
+    seed: int | None = None,
+    backend: str = "auto",
+) -> dict[str, Any]:
+    """Generate an image from a text prompt and save it in the instance workspace.
+
+    Default backend is official Grok Imagine via the grok CLI (grok.com OAuth).
+    Local SDXL-Turbo is used only when weights are already cached, or when
+    backend="local". First-time SDXL downloads are not started from this tool.
+    """
+    clean_prompt = (prompt or "").strip()
+    if not clean_prompt:
+        return {"generated": False, "error": "empty prompt"}
+    resolved = _resolve_image_out(out_path)
+    if isinstance(resolved, dict):
+        return resolved
+    layout, target = resolved
+
+    wanted = (backend or "auto").strip().lower()
+    errors: list[str] = []
+
+    if wanted in {"auto", "grok", "grok-imagine", "imagine"}:
+        grok = _run_grok_imagine(clean_prompt)
+        if grok.get("generated"):
+            saved = _copy_raster(Path(grok["source_file"]), target)
+            meta = _image_meta(saved)
+            return {
+                "generated": True,
+                "path": str(saved.relative_to(layout.root)),
+                "absolute_path": str(saved),
+                "backend": grok["backend"],
+                "model_id": grok["model_id"],
+                "elapsed_s": grok["elapsed_s"],
+                "prompt": clean_prompt,
+                **meta,
+            }
+        errors.append(str(grok.get("error") or "Grok Imagine unavailable"))
+        if grok.get("interrupted"):
+            return {"generated": False, "interrupted": True, "error": grok["error"]}
+        if wanted != "auto":
+            return {"generated": False, "error": errors[-1]}
+
+    if wanted in {"auto", "local", "sdxl", "sdxl-turbo"}:
+        local = _local_sdxl(
+            clean_prompt,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+            seed=seed,
+        )
+        if local.get("generated"):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            local["image"].save(target)
+            meta = _image_meta(target)
+            return {
+                "generated": True,
+                "path": str(target.relative_to(layout.root)),
+                "absolute_path": str(target),
+                "backend": local["backend"],
+                "model_id": local["model_id"],
+                "elapsed_s": local["elapsed_s"],
+                "prompt": clean_prompt,
+                "seed": seed,
+                **meta,
+            }
+        errors.append(str(local.get("error") or "local image model unavailable"))
+        if wanted != "auto":
+            return {"generated": False, "error": errors[-1]}
+
+    return {"generated": False, "error": "; ".join(errors) or "no image backend available"}
+
+
+def edit_image(prompt: str, source_path: str, out_path: str = "generated/edited.png") -> dict[str, Any]:
+    """Edit an existing workspace image with official Grok image_edit."""
+    clean_prompt = (prompt or "").strip()
+    if not clean_prompt:
+        return {"generated": False, "error": "empty prompt"}
+    if not (source_path or "").strip():
+        return {"generated": False, "error": "empty source_path"}
+    layout = _require_layout()
+    try:
+        source = _resolve_read(source_path)
+    except SandboxError as exc:
+        return {"generated": False, "error": str(exc)}
+    if not source.is_file() or not _sniff_image(source):
+        return {"generated": False, "error": "source_path is not a readable raster image"}
+    resolved = _resolve_image_out(out_path)
+    if isinstance(resolved, dict):
+        return resolved
+    _layout, target = resolved
+    grok = _run_grok_imagine(clean_prompt, source=source)
+    if not grok.get("generated"):
+        return grok
+    saved = _copy_raster(Path(grok["source_file"]), target)
+    meta = _image_meta(saved)
     return {
         "generated": True,
-        "path": str(target.relative_to(layout.root)),
-        "absolute_path": str(target),
-        "model_id": model_id,
-        "elapsed_s": round(elapsed, 3),
+        "path": str(saved.relative_to(layout.root)),
+        "absolute_path": str(saved),
+        "backend": grok["backend"],
+        "model_id": grok["model_id"],
+        "elapsed_s": grok["elapsed_s"],
         "prompt": clean_prompt,
-        "seed": seed,
+        "source_path": source_path,
+        **meta,
     }
-
 
 # ---------------------------------------------------------------------------
 # look_at — Jaeger-native llama.cpp + mmproj vision
@@ -234,6 +559,7 @@ def look_at(image_path: str, question: str = "Describe this image in one short s
     }
 
 
+
 # ── Agent-tool wrappers (migrated from main.py::_register_builtins) ──
 
 
@@ -248,24 +574,42 @@ def _t_vision_analyze(image_path: str, question: str = "Describe this image in o
 @register_tool_from_function(name="image_generate")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="vision",
                operation="image_generate",
-               summary="generate an image into the skills workspace")
+               summary="generate an image into the workspace")
 def _t_image_generate(
     prompt: str,
-    out_path: str = "generated.png",
+    out_path: str = "generated/image.png",
     num_inference_steps: int = 1,
     guidance_scale: float = 0.0,
     seed: int | None = None,
+    backend: str = "auto",
 ) -> dict:
-    """Generate an image from a text prompt and save under skills/.
-    Default backbone: SDXL-Turbo (1-step). First call downloads ~6 GB
-    of weights; subsequent calls are 1-3s per image. Local + free +
-    offline; for higher quality cloud generation (FLUX, needs FAL_KEY)
-    use generate_image_fal instead."""
+    """Generate an image from a text prompt and save it under the workspace.
+
+    Default: official Grok Imagine via the installed grok CLI (grok.com OAuth).
+    Works from any chat brain (Grok, Ollama, Gemini, …). A local SDXL-Turbo
+    fallback is used only when those weights are already cached; this tool
+    will not start a multi-gigabyte download. For fal.ai FLUX (needs FAL_KEY)
+    use generate_image_fal. Use image_edit to revise an existing image.
+    """
     return generate_image(
         prompt=prompt, out_path=out_path,
         num_inference_steps=num_inference_steps,
-        guidance_scale=guidance_scale, seed=seed,
+        guidance_scale=guidance_scale, seed=seed, backend=backend,
     )
+
+
+@register_tool_from_function(name="image_edit")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="vision",
+               operation="image_edit",
+               summary="edit an existing workspace image with Grok Imagine")
+def _t_image_edit(
+    prompt: str,
+    source_path: str,
+    out_path: str = "generated/edited.png",
+) -> dict:
+    """Edit an existing workspace image with official Grok image_edit.
+    source_path is sandbox-resolved. Requires the grok CLI and grok.com OAuth."""
+    return edit_image(prompt=prompt, source_path=source_path, out_path=out_path)
 
 
 def view_image(path: str, max_edge: int = 1024) -> dict[str, Any]:
