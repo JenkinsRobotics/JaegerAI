@@ -88,6 +88,8 @@ CALLERS: Mapping[str, CallerSpec] = {
         CallerSpec("cli", "owner:cli", _OWNER, description="jaeger CLI, TUI, voice, dev scripts"),
         CallerSpec("webui", "owner:webui", _OWNER, description="WebUI server-side proxy (:8790)"),
         CallerSpec("ide", "owner:ide", _OWNER | {"ide"}, description="VS Code / Cursor extension"),
+        CallerSpec("channels", "owner:channels", frozenset({"read", "turn", "approve"}),
+                   description="Owner phone channels relay (Telegram bot + iMessage self-chat)"),
         CallerSpec("bridge", "owner:bridge", frozenset({"read", "turn", "approve", "stop"}),
                    description="bridge socket (Swift chat, TUI attach)"),
         CallerSpec("jaegerd", "agent:jaeger", frozenset({"read", "turn", "delegate"}),

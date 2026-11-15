@@ -402,6 +402,11 @@ def route(handler, parsed, method: str) -> bool:
     if method == 'GET' and path == '/v1/channels/deliveries':
         return _proxy(handler,method,path+query)
 
+    if path == '/v1/channels/relay' and method in {'GET', 'PATCH'}:
+        return _proxy(handler, method, path, _body_bytes(handler) if method == 'PATCH' else None)
+    if method == 'POST' and path in {'/v1/channels/relay/pair', '/v1/channels/relay/unpair', '/v1/channels/relay/test'}:
+        return _proxy(handler, 'POST', path, _body_bytes(handler))
+
     if method == 'POST' and path.startswith('/v1/channels/'):
         segments=path.split('/')
         if len(segments)==5 and segments[3] in {'discord','telegram','imessage'} and segments[4] in {'bind','connect','disconnect'}:
