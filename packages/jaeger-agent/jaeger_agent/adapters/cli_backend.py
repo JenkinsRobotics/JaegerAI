@@ -1000,7 +1000,15 @@ class CliBackendAdapter(ProviderAdapter):
     ) -> dict[str, Any]:
         env = self._environment(spec, extra_env)
         try:
-            hard = float(os.environ.get("JAEGER_CLI_TURN_TIMEOUT_S") or _CLI_HARD_TURN_TIMEOUT_S)
+            from jaeger_ai.core.runtime.cron_turns import active_turn_timeout_s
+            cron_hard = active_turn_timeout_s()
+        except Exception:  # noqa: BLE001 — fall back to the interactive cap
+            cron_hard = None
+        try:
+            if cron_hard is not None and float(cron_hard) > 0:
+                hard = float(cron_hard)
+            else:
+                hard = float(os.environ.get("JAEGER_CLI_TURN_TIMEOUT_S") or _CLI_HARD_TURN_TIMEOUT_S)
         except (TypeError, ValueError):
             hard = _CLI_HARD_TURN_TIMEOUT_S
         if hard > 0:

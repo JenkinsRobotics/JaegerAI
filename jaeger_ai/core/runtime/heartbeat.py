@@ -26,21 +26,17 @@ _STATE_NAME = "heartbeat_state.json"
 DEFAULT_CHECKLIST = """\
 # Standing heartbeat checklist
 
-On every heartbeat, in this order:
+This is a read-only check-in. Use only board_view, list_schedules,
+list_background, and todo. At most 8 tool calls. Do not start new
+work, add or unblock cards, edit files, or use a shell.
 
-1. Look at the kanban board (`board_view`). If a ready or in_progress
-   card can be worked now, leave it — the idle worker will pick it up.
-   If something important is missing from the board, add one card.
-2. Check blocked cards. If you can unblock one without the user, do
-   that; otherwise leave it.
-3. Morning (6–11) and evening (17–21): if a briefing has not been
-   delivered today, write a short executive brief (calendar, todos,
-   blocked work, one recommended next action). Do not HEARTBEAT_OK a
-   briefing slot unless there is genuinely nothing to report.
-4. If nothing needs doing, reply with exactly HEARTBEAT_OK and nothing
-   else.
+1. Briefly review the board, schedules, background work, and todos.
+2. If anything is pending, blocked, or finished overnight, write a
+   3-line summary for the operator.
+3. If nothing needs attention, reply with exactly HEARTBEAT_OK and
+   nothing else.
 
-Do not invent work. Quality over volume — at most one card per beat.
+Then stop.
 """
 
 # Local-hour windows. Inclusive start, exclusive end.
