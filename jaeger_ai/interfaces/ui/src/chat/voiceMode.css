@@ -8,6 +8,8 @@
 .jg-voice-mode__meter { height:8px; margin-top:18px; border-radius:8px; background:var(--jg-color-active); overflow:hidden; }
 .jg-voice-mode__meter > span { display:block; height:100%; background:var(--jg-color-accent); transform-origin:left; }
 .jg-voice-mode__heard { color:var(--jg-color-text-secondary); max-height:80px; overflow:auto; }
+.jg-voice-mode__caption { color:var(--jg-color-text); }
+.jg-voice-mode__latency { color:var(--jg-color-text-tertiary); font-size:0.85em; }
 .jg-voice-mode__actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }
 .jg-steer-message { margin:18px 0; }
 .jg-voice-mode { max-height:min(540px,calc(var(--jg-viewport-height,100dvh) - 140px)); }

@@ -366,6 +366,12 @@ def route(handler, parsed, method: str) -> bool:
         from api.helpers import j
         j(handler, capability())
         return True
+    if method == "POST" and path == "/api/jaeger/voice/warm":
+        from jaeger_ai.features.voice.web_speech import warm
+        from api.helpers import j
+        warm()
+        j(handler, {'warming': True})
+        return True
     if method == "POST" and path == "/api/jaeger/transcribe":
         from jaeger_ai.features.voice.web_speech import transcribe_recording, MAX_AUDIO_BYTES
         from api.helpers import j, read_body

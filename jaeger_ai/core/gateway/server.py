@@ -5513,6 +5513,7 @@ class JaegerGatewayApp:
         system_prompt: str | None = None, history=None, attachments=None,
         context_ids=None, context_references=(), on_model_identity=None,
         timing=None, on_delta=None, on_reasoning=None, local_only=False, on_route=None,
+        controls=None,
     ) -> str:
         """Model-only cognition: the configured provider, shared adapters and policy."""
         from jaeger_ai.core.entity.runtime import EntityRuntime, load_instance_config_or_default
@@ -5556,6 +5557,7 @@ class JaegerGatewayApp:
                 on_input=observe_input, on_route=observe_route,
                 on_model_identity=on_model_identity, local_only=local_only,
                 default_client=lambda cfg: runtime.local_model_client(cfg),
+                controls=controls,
             )
         finally:
             if timing is not None:
@@ -6369,6 +6371,8 @@ class JaegerGatewayApp:
             active_provider = (execution or {}).get("provider") or req_lane or session_meta.get("provider")
             local_only = bool(((execution or {}).get("options") or {}).get("local_only"))
 
+            voice_brain: dict[str, Any] | None = None
+
             def _model_only_lane(prompt: str) -> dict[str, Any]:
                 """A plain model answer with no tools: text-only chats and specialist agents.
 
@@ -6378,8 +6382,16 @@ class JaegerGatewayApp:
                 do not pass through the agent loop and therefore never call tools.
                 """
                 nonlocal backend, model
-                backend = f"model:{active_provider or 'configured'}"
-                model = active_model or "configured"
+                lane_model, lane_provider, lane_controls = active_model, active_provider, None
+                lane_system = no_tools_lane_system_prompt(system_prompt)
+                if voice_brain:
+                    # Spoken conversation runs on the small local voice brain;
+                    # work requests never reach this lane (they keep the owner loop).
+                    lane_model, lane_provider = voice_brain["model"], voice_brain["provider"]
+                    lane_controls = voice_brain["controls"]
+                    lane_system = f"{lane_system}\n\n{voice_brain['style']}"
+                backend = f"model:{lane_provider or 'configured'}"
+                model = lane_model or "configured"
                 current = self.store.get_session(session_id) or {}
                 callbacks, finish_stream = self._turn_stream_callbacks(session_id, rid)
                 def selected_route(route):
@@ -6389,8 +6401,8 @@ class JaegerGatewayApp:
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._model_chat(
                         prompt,
-                        model=model, provider=active_provider, local_only=local_only,
-                        system_prompt=no_tools_lane_system_prompt(system_prompt),
+                        model=model, provider=lane_provider, local_only=local_only,
+                        system_prompt=lane_system, controls=lane_controls,
                         history=self._history_before_admitted_user(current, admitted_request),
                         attachments=self._turn_attachments(session_id, execution),
                         context_ids=(session_id, request_id or turn_id),
@@ -6480,7 +6492,11 @@ class JaegerGatewayApp:
                 # The worker must know how the owner will check its result.
                 from jaeger_ai.core.tasks.owner import TURN_CARD_GUIDANCE
                 prompt = f"{TURN_CARD_GUIDANCE}\n\n" + prompt
-            if tier == "chat" or self._voice_direct_lane(runtime, prepared, fast_lane=fast_lane):
+            if fast_lane and self._voice_direct_lane(runtime, prepared, fast_lane=fast_lane):
+                model_only = True
+                from jaeger_ai.features.voice.brain import voice_brain as _voice_brain
+                voice_brain = _voice_brain()
+            elif tier == "chat":
                 model_only = True
             else:
                 model_only = (text_only and not actionable) or (
