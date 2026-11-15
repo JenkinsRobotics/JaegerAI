@@ -107,9 +107,11 @@ def status(layout: Any) -> dict[str, Any]:
 
 
 def _transcript(messages: list[dict[str, Any]], cap: int = 12000) -> str:
+    from jaeger_ai.core.runtime.maintenance_text import redact_local_paths
+
     lines, used = [], 0
     for m in messages:
-        text = " ".join(str(m.get("content") or "").split())
+        text = " ".join(redact_local_paths(str(m.get("content") or "")).split())
         if not text:
             continue
         if len(text) > 500:
