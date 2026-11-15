@@ -127,6 +127,9 @@ CORE: frozenset[str] = frozenset({
     "get_time", "get_weather", "calculate",
     # Official Grok Imagine (and later sanctioned backends) via image_generate.
     "image_generate", "image_edit",
+    # Skill authoring + the owner's USER.md profile — advertised in the
+    # system prompt and required on the CLI MCP catalog.
+    "skill_manage", "user_profile",
 })
 
 
@@ -204,7 +207,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # historical callers and the bench corpus's expected_tools
         # entries still work, but hidden from default routing in
         # favour of the umbrella ``memory(action=…)`` (in CORE).
-        "remember", "recall", "forget", "list_facts", "search_memory", "user_profile",
+        "remember", "recall", "forget", "list_facts", "search_memory",
         "record_insight", "recall_insight",
     }),
     # Planning primitives (Codex ``update_plan`` / ``wait``): stateless display
@@ -251,8 +254,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "set_name", "update_soul", "adjust_trait",
     }),
     "skills": frozenset({
-        # Skill authoring + the Deep Think queue. ``list_skills`` stays
-        # in CORE; ``use_skill`` and the lower-level operators load here.
+        # Skill authoring + the Deep Think queue. ``list_skills`` and
+        # ``skill_manage`` stay in CORE; ``use_skill`` and the rest load here.
         "use_skill",
         "reload_skills", "package_skill", "benchmark_skill",
         "propose_deep_think_task", "list_deep_think_queue",
@@ -260,7 +263,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # Skill self-improvement: usage journal + the review trigger/toggle +
         # the revision log (feeds + records the Deep Think review loop).
         "skill_note", "skill_notes", "request_skill_review", "set_skill_review",
-        "record_skill_revision", "skill_manage",
+        "record_skill_revision",
         # Task-level after-action reflection (the REFLECT loop step).
         "reflect",
     }),

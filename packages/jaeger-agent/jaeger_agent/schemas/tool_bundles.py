@@ -152,7 +152,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
         # Umbrella + the granular siblings — keep both so we can A/B
         # which the model routes to better. Phase-7 consolidation may
         # drop the siblings (see ``memory_umbrella_only`` below).
-        tools=_tools(_core("memory", "recall"),
+        tools=_tools(_core("memory", "recall", "user_profile"),
                      _scoping("memory_granular", "identity")),
         includes=[],
     ),
@@ -203,7 +203,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
             "Inspect, package, benchmark, reload skills; the usage journal "
             "+ review loop; the deep-think queue."
         ),
-        tools=_tools(_core("list_skills"), _scoping("skills")),
+        tools=_tools(_core("list_skills", "skill_manage"), _scoping("skills")),
         includes=[],
     ),
     "media": ToolsetDef(

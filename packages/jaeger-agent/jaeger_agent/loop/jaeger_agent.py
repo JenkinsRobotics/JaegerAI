@@ -1963,6 +1963,12 @@ class JaegerAgent:
                     formatted = adapter.format_messages(
                         self.messages, self.tools, self.system_prompt,
                     )
+                    attach = getattr(adapter, "attach_mcp_catalog", None)
+                    if callable(attach):
+                        # Loopback MCP gets the full dispatchable catalog so
+                        # use_tool can invoke prompt-mentioned / on-demand
+                        # tools, not only the scoped schema shown this turn.
+                        attach(self.all_tools)
                     if self.context_guard is not None and isinstance(formatted, dict):
                         for key in ("max_tokens", "max_completion_tokens"):
                             if key in formatted:

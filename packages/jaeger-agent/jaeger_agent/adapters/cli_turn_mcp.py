@@ -28,6 +28,20 @@ logger = logging.getLogger(__name__)
 MCP_BACKENDS = frozenset({"grok", "claude", "codex", "gemini", "agy"})
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9_-]+")
 
+# Always on the loopback MCP, even when the model-facing schema is scoped
+# or a reused server was started with a narrower set. The system prompt
+# names these; Grok looks them up with search_tool / use_tool(jaeger__*).
+REQUIRED_CLI_MCP_TOOLS = frozenset({
+    "list_skill_dir", "list_skills", "read_file", "write_file", "patch",
+    "search_files", "glob", "terminal", "execute_code",
+    "web_search", "web_extract", "x_search",
+    "list_tools", "load_tools", "describe_tool", "tool_search",
+    "memory", "recall", "todo", "clarify", "delegate_task",
+    "get_time", "get_weather", "calculate",
+    "image_generate", "image_edit",
+    "skill_manage", "user_profile",
+})
+
 ExecuteTool = Callable[[ToolDef, dict[str, Any]], Any]
 
 
@@ -98,6 +112,35 @@ def permission_argv(backend_id: str, autonomy: str) -> list[str]:
 def mcp_safe_name(name: str) -> str:
     cleaned = _SAFE_NAME.sub("_", (name or "").strip()).strip("_")
     return cleaned or "tool"
+
+
+def merge_cli_mcp_tools(*groups: list[ToolDef] | None) -> list[ToolDef]:
+    """Union turn tools with the required MCP set, required names first.
+
+    Prompt text and ``use_tool`` must see the same catalog. A reused
+    loopback server that started on a specialist or slim list otherwise
+    drops CORE tools (list_skill_dir, terminal, …) while the override
+    still advertises them.
+    """
+    by_name: dict[str, ToolDef] = {}
+    for group in groups:
+        for tool in group or []:
+            name = getattr(tool, "name", "") or ""
+            if name and name not in by_name:
+                by_name[name] = tool
+    missing = [name for name in REQUIRED_CLI_MCP_TOOLS if name not in by_name]
+    if missing:
+        try:
+            from jaeger_os.core.tools.tool_registry import get_tools
+            for tool in get_tools():
+                name = getattr(tool, "name", "") or ""
+                if name in missing and name not in by_name:
+                    by_name[name] = tool
+        except Exception:  # noqa: BLE001 — turn still proceeds with what we have
+            pass
+    required = [by_name[n] for n in sorted(REQUIRED_CLI_MCP_TOOLS) if n in by_name]
+    rest = [tool for name, tool in by_name.items() if name not in REQUIRED_CLI_MCP_TOOLS]
+    return required + rest
 
 
 def _handler_for(tool: ToolDef, execute: ExecuteTool, lock: threading.Lock):
@@ -253,7 +296,11 @@ class TurnToolMcp:
                 registered.parameters = tool.to_anthropic_schema().get("input_schema") or registered.parameters
             except Exception:  # noqa: BLE001 — inferred signature is enough
                 pass
+        # Never drop tools the prompt / use_tool must be able to call.
+        protected = {mcp_safe_name(n) for n in REQUIRED_CLI_MCP_TOOLS}
         for name in have - want:
+            if name in protected:
+                continue
             try:
                 mcp.remove_tool(name)
             except Exception:  # noqa: BLE001 — stale name must not fail the turn
@@ -469,6 +516,7 @@ def attach_cli_mcp(
     """
     if backend_id not in MCP_BACKENDS or not tools or execute is None:
         return argv, {}, None, bool(tools)
+    tools = merge_cli_mcp_tools(tools)
     try:
         server = acquire_cli_mcp(backend_id, tools, execute)
     except Exception as exc:  # noqa: BLE001
