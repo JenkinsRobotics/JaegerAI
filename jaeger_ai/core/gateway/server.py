@@ -6393,6 +6393,7 @@ class JaegerGatewayApp:
                     # on a local model (the full tool-describing prompt cost
                     # ~14 s on the M1 Max). Stable prefix -> Ollama KV reuse.
                     lane_system = voice_brain["system"]
+                    prompt = voice_prompt(prompt, request_text)
                 backend = f"model:{lane_provider or 'configured'}"
                 model = lane_model or "configured"
                 current = self.store.get_session(session_id) or {}
@@ -6498,7 +6499,7 @@ class JaegerGatewayApp:
                 prompt = f"{TURN_CARD_GUIDANCE}\n\n" + prompt
             if fast_lane and self._voice_direct_lane(runtime, prepared, fast_lane=fast_lane):
                 model_only = True
-                from jaeger_ai.features.voice.brain import voice_brain as _voice_brain, voice_history
+                from jaeger_ai.features.voice.brain import voice_brain as _voice_brain, voice_history, voice_prompt
                 voice_brain = _voice_brain()
             elif tier == "chat":
                 model_only = True
