@@ -19,6 +19,7 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
  const input=useRef(audio.inputId),output=useRef(audio.outputId),submit=useRef(onTranscript),currentReply=useRef(reply),currentOutcome=useRef(outcome),lastReply=useRef<string|undefined>(undefined),baselineOutcome=useRef(''),waiting=useRef(false);
  // Streaming playback: sentences are queued as the reply streams and spoken in order.
  const queue=useRef<string[]>([]),pumping=useRef(0),streamId=useRef<string|undefined>(undefined),streamSpoken=useRef(''),streamFinal=useRef(true),firstAudio=useRef(false);
+ const working=useRef(busy);working.current=busy;
  input.current=audio.inputId;output.current=audio.outputId;submit.current=onTranscript;currentReply.current=reply;currentOutcome.current=outcome;
  const duplex=()=>Boolean(io.fullDuplex && !output.current);
  const wait=(value:boolean)=>{waiting.current=value;setAwaiting(value);};
@@ -50,7 +51,10 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
    if(owner===captureId.current && enabled.current)void listen();
   }catch(e){
    if(owner!==captureId.current || !enabled.current)return;
-   mic.current=undefined;stopCapture.current=undefined;setCapture('off');setLevel(0);wait(false);setError(String((e as Error).message||e));refreshDevices();
+   mic.current=undefined;stopCapture.current=undefined;setCapture('off');setLevel(0);
+   // A failed follow-up must not drop the reply that is still on its way.
+   if(!working.current)wait(false);
+   setError(String((e as Error).message||e));refreshDevices();
   }
  };
  const start=async()=>{
