@@ -124,7 +124,7 @@ CORE: frozenset[str] = frozenset({
     # A few everyday helpers.
     "memory", "recall", "todo", "clarify",
     "list_skills", "delegate_task",
-    "get_time", "calculate",
+    "get_time", "get_weather", "calculate",
     # Official Grok Imagine (and later sanctioned backends) via image_generate.
     "image_generate", "image_edit",
 })
@@ -195,9 +195,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "set_avatar_state", "play_timeline",
     }),
     "web": frozenset({
-        # ``web_search`` and ``web_extract`` are in CORE; weather and
-        # X search load on intent so they don't bloat everyday routing.
-        "get_weather",
+        # web_search, web_extract, x_search, and get_weather are in CORE.
+        # The named group remains so load_tools("web") and weather/X intent
+        # still resolve; there is nothing extra to load.
     }),
     "memory_granular": frozenset({
         # The pre-umbrella granular memory tools — kept registered so
@@ -325,7 +325,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "code": "shell/terminal, ssh, install packages, venv exec",
     "media": "text-to-speech, mic capture, image view, vision, image/video generation (local + fal.ai cloud)",
     "avatar": "avatar face + animation timelines (BETA — dev mode only)",
-    "web": "weather and X (Twitter) search (web_search / web_extract are always-on)",
+    "web": "weather and X (Twitter) search (now always-on via CORE)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
     "planning": "show and update a step plan (update_plan); wait for a bounded time",
     "agent_notes": "a specialist agent's own persistent notes (read / append / replace)",

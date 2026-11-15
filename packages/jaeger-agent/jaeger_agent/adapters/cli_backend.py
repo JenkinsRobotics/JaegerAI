@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import os
 import signal
 import subprocess
@@ -194,14 +195,55 @@ def _strip_pipe_tool_calls(text: str) -> str:
     return out
 
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+_HEX32_RE = re.compile(r"^[0-9a-f]{32}$", re.IGNORECASE)
+_ENVELOPE_ID_KEYS = frozenset({
+    "uuid", "id", "session_id", "sessionId", "prompt_id", "promptId",
+    "request_id", "requestId", "call_id", "callId", "job_id", "jobId",
+    "task_id", "taskId", "tool_use_id", "tool_call_id", "message_id",
+    "thread_id", "run_id", "parent_tool_use_id",
+})
+# tool_calls / arguments hold places and queries, not the final answer.
+_FIND_TEXT_SKIP_KEYS = _ENVELOPE_ID_KEYS | {
+    "tool_calls", "arguments", "input", "tool_input", "usage", "model_fingerprint",
+}
+_CLI_META_TOOLS = frozenset({
+    "search_tool", "use_tool", "load_tools", "list_tools", "describe_tool",
+    "tool_search",
+})
+
+
+def _is_id_like_text(text: str) -> bool:
+    """True when ``text`` is only a UUID / job / session handle, not an answer."""
+    value = (text or "").strip()
+    if not value:
+        return False
+    if _UUID_RE.fullmatch(value) or _HEX32_RE.fullmatch(value):
+        return True
+    return False
+
+
+def _usable_cli_text(text: str) -> str:
+    value = (text or "").strip()
+    return value if value and not _is_id_like_text(value) else ""
+
+
 def parse_cli_stream(stdout: str, stderr: str = "") -> dict[str, Any]:
     """Walk every NDJSON line and keep text plus tool_use / tool_result blocks.
 
     Grok's streaming-messages-json emits many records. The last text line is
     often an intermediate "I'll look that up" message, not the final answer.
-    Prefer the terminal ``type=result`` record. Tool calls that Grok already
-    executed (``use_tool`` / MCP) are recorded but marked executed so the
-    Jaeger loop does not run them a second time.
+    Prefer the terminal ``type=result`` record when it holds real prose.
+    Do not treat a bare UUID in ``result`` (or ``uuid`` / ``session_id`` on
+    the envelope) as the answer — when a turn ends without assistant text,
+    ``_find_text`` used to walk those keys and the chat showed only a job
+    or session id. Tool calls that Grok already executed (``use_tool`` /
+    MCP) are recorded but marked executed so the Jaeger loop does not run
+    them a second time, unless the extracted text is unusable and a Jaeger
+    tool still needs to run.
     """
     clean = (stdout or "").strip()
     if not clean:
@@ -259,37 +301,78 @@ def parse_cli_stream(stdout: str, stderr: str = "") -> dict[str, Any]:
             parts.append(content)
         return "\n".join(parts).strip()
 
+    def _collect_named_calls(value: Any) -> None:
+        """Grok records tool calls as assistant.tool_calls, not type=tool_use."""
+        if not isinstance(value, dict):
+            return
+        calls = value.get("tool_calls")
+        if not isinstance(calls, list):
+            return
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+            name = str(call.get("name") or fn.get("name") or "")
+            if not name:
+                continue
+            raw_args = call.get("arguments", call.get("input", fn.get("arguments", fn.get("input", {}))))
+            if isinstance(raw_args, str):
+                try:
+                    raw_args = json.loads(raw_args)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    raw_args = {}
+            if not isinstance(raw_args, dict):
+                raw_args = {}
+            tool_uses.append({
+                "type": "tool_use",
+                "name": name,
+                "input": raw_args,
+                "id": call.get("id"),
+            })
+
     for value in records:
         if not isinstance(value, dict):
             continue
         _collect_blocks(value)
         if value.get("type") == "result":
             raw_result = value.get("result")
-            if isinstance(raw_result, str) and raw_result.strip():
-                result_text = raw_result
+            if isinstance(raw_result, str):
+                found = _usable_cli_text(raw_result)
+                if found:
+                    result_text = found
             elif raw_result is not None:
-                found = _find_text(raw_result)
+                found = _usable_cli_text(_find_text(raw_result))
                 if found:
                     result_text = found
         if value.get("type") == "assistant":
             found = _assistant_text(value)
             if found:
                 assistant_texts.append(found)
+            _collect_named_calls(value)
 
-    if result_text:
+    if _usable_cli_text(result_text):
         text = result_text
-    elif assistant_texts:
-        text = assistant_texts[-1]
     else:
-        extracted = ""
-        if len(records) == 1:
-            extracted = _find_text(records[0])
-        else:
-            for value in reversed(records):
-                extracted = _find_text(value)
+        text = ""
+        for candidate in reversed(assistant_texts):
+            text = _usable_cli_text(candidate)
+            if text:
+                break
+        if not text:
+            extracted = ""
+            walk = records if len(records) == 1 else list(reversed(records))
+            for value in walk:
+                typ = value.get("type") if isinstance(value, dict) else None
+                # Envelope records are full of ids; never mine those as text.
+                if typ in {"result", "usage", "system", "reasoning", "tool_result", "tool_use", "assistant"}:
+                    continue
+                extracted = _usable_cli_text(_find_text(value))
                 if extracted:
                     break
-        text = extracted or clean[-100_000:]
+            if extracted:
+                text = extracted
+            elif not records:
+                text = clean[-100_000:]
 
     already = False
     for block in tool_uses:
@@ -310,6 +393,78 @@ def parse_cli_stream(stdout: str, stderr: str = "") -> dict[str, Any]:
     }
 
 
+
+def _unwrap_cli_tool(block: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Map a Grok ``use_tool`` / ``jaeger__*`` block to a Jaeger tool name."""
+    name = str(block.get("name") or "")
+    raw = block.get("input") if isinstance(block.get("input"), dict) else {}
+    if name == "use_tool":
+        name = str(raw.get("tool_name") or "")
+        payload = raw.get("tool_input")
+        raw = payload if isinstance(payload, dict) else {}
+    if name.startswith("jaeger__"):
+        name = name[len("jaeger__"):]
+    return name, raw
+
+
+def _tool_result_failed(content: Any) -> bool:
+    if not isinstance(content, str):
+        return False
+    lowered = content.lower()
+    return (
+        "tool not found" in lowered
+        or "user cancelled" in lowered
+        or "failed via" in lowered
+    )
+
+
+def _recover_jaeger_tool_calls(stream: dict[str, Any]) -> list[dict[str, Any]]:
+    """Re-issue failed mid-CLI Jaeger tools so the agent loop can answer.
+
+    Grok often discovers ``get_weather`` via ``describe_tool`` / ``load_tools``
+    and then ``use_tool(jaeger__get_weather)`` fails because that name was
+    not on the turn MCP catalog (or the call was cancelled). The CLI then
+    exits without prose. Re-running the underlying Jaeger tool in-process
+    lets the loop produce the forecast instead of a bare id.
+    """
+    failed_ids: set[str] = set()
+    any_failure = False
+    for block in stream.get("tool_results") or []:
+        if not isinstance(block, dict):
+            continue
+        content = block.get("content")
+        if _tool_result_failed(content):
+            any_failure = True
+            ident = block.get("tool_call_id") or block.get("tool_use_id") or block.get("id")
+            if ident:
+                failed_ids.add(str(ident))
+    recovered: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for block in stream.get("tool_uses") or []:
+        if not isinstance(block, dict):
+            continue
+        name, args = _unwrap_cli_tool(block)
+        if not name or name in _CLI_META_TOOLS:
+            continue
+        ident = str(block.get("id") or "")
+        if failed_ids:
+            # Keep successful MCP results (e.g. web_search) — only retry failures.
+            if ident and ident not in failed_ids:
+                continue
+            if not ident:
+                continue
+        sig = (name, json.dumps(args, sort_keys=True, default=str))
+        if sig in seen:
+            continue
+        seen.add(sig)
+        recovered.append({
+            "id": ident or f"recover-{name}-{len(recovered)+1}",
+            "name": name,
+            "arguments": args,
+        })
+    return recovered
+
+
 def parse_cli_text(stdout: str, stderr: str = "") -> str:
     """Extract assistant text from CLI stdout. JSON if present, else raw."""
     return str(parse_cli_stream(stdout, stderr).get("text") or "")
@@ -322,14 +477,16 @@ def _extract_json_text(text: str) -> str:
 
 def _find_text(value: Any) -> str:
     if isinstance(value, str):
-        return value
+        return _usable_cli_text(value)
     if isinstance(value, dict):
         for key in ("result", "final_response", "response", "message", "content", "text"):
             if key in value:
                 found = _find_text(value[key])
                 if found:
                     return found
-        for child in reversed(tuple(value.values())):
+        for key, child in reversed(tuple(value.items())):
+            if key in _FIND_TEXT_SKIP_KEYS:
+                continue
             found = _find_text(child)
             if found:
                 return found
@@ -837,11 +994,23 @@ class CliBackendAdapter(ProviderAdapter):
         # not dropped in favour of the last text fragment.
         stream = parse_cli_stream(raw if isinstance(raw, str) else str((raw or {}).get("stdout") or ""),
                                   "" if isinstance(raw, str) else str((raw or {}).get("stderr") or ""))
-        text = str(stream.get("text") or text or "")
+        text = _usable_cli_text(str(stream.get("text") or text or ""))
         if stream.get("already_executed"):
             # Grok already ran Jaeger MCP via use_tool; the loopback
-            # executor emitted the tool row. Do not enqueue a second call.
-            return Message(role="assistant", content=_strip_pipe_tool_calls(text).strip() or text, finish_reason="stop")
+            # executor emitted the tool row. Do not enqueue a second call
+            # when the CLI actually answered. If it ended on an empty
+            # message or a session/job UUID, recover any failed Jaeger
+            # tool so the loop can run it and write a real answer.
+            if text:
+                return Message(
+                    role="assistant",
+                    content=_strip_pipe_tool_calls(text).strip() or text,
+                    finish_reason="stop",
+                )
+            recovered = _recover_jaeger_tool_calls(stream)
+            if recovered:
+                return {"role": "assistant", "content": None, "tool_calls": recovered}
+            return Message(role="assistant", content="", finish_reason="stop")
         from jaeger_agent.dialects import extract_tool_calls
         tool_calls = list(extract_tool_calls(text) or [])
         if not tool_calls:
