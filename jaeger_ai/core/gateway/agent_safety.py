@@ -16,6 +16,10 @@ Industry-standard default (as in Codex and Claude Code):
   ``<state>/agent-undo-trash/`` rather than deleted, and the current state is
   snapshotted first so the undo itself can be reverted.
 
+After **Apply**, a worktree turn's Undo is retargeted to the owner's checkout:
+it reverts that turn's diff there (and in the worktree), offered only while
+every file in the checkout still matches what the turn produced.
+
 Undo is offered only while the files are exactly as the turn left them: an
 older turn whose files were changed again later is not silently rolled back.
 Very large or unsafe roots (``/``, the home folder) are never snapshotted.
@@ -152,6 +156,13 @@ class _Shadow:
 
     def tree_of(self, wd: Path, commit: str) -> str:
         return self._g(["rev-parse", f"{commit}^{{tree}}"], wd).stdout.strip()
+
+    def blob(self, wd: Path, commit: str, path: str) -> bytes | None:
+        """File bytes as recorded in a snapshot, or None when absent there."""
+        cp = self._cp()
+        res = subprocess.run(["git", "cat-file", "blob", f"{commit}:{path}"], env=cp._git_env(self.store, wd, None),
+                             capture_output=True, timeout=_GIT_TIMEOUT)
+        return res.stdout if res.returncode == 0 else None
 
     def restore_paths(self, wd: Path, commit: str, paths: list[str]) -> None:
         for i in range(0, len(paths), 200):
@@ -308,7 +319,73 @@ class AgentSafety:
             rec["base"] = head
             rec["applied_at"] = time.time()
             self._write(self._wt_path(session), rec)
+            self._mark_applied(session, rec)
             return {**self.worktree_status(session), "applied": len(files), "appliedFiles": files[:200]}
+
+    def _turns(self, session: str) -> list[tuple[Path, dict[str, Any]]]:
+        folder = self._dir(session)
+        return [(p, self._read(p)) for p in sorted(folder.glob("turn-*.json"))] if folder.is_dir() else []
+
+    def _mark_applied(self, session: str, rec: dict[str, Any]) -> None:
+        """Retarget Undo of every applied worktree turn to the owner's checkout."""
+        wt, repo = Path(rec["path"]).resolve(), Path(rec["repo"])
+        for path, turn in self._turns(session):
+            if turn.get("mode") != "worktree" or turn.get("undone") or turn.get("applied") or not turn.get("files"):
+                continue
+            if (turn.get("worktree") or {}).get("path") != rec["path"]:
+                continue
+            try:
+                rel = Path(turn["dir"]).resolve().relative_to(wt)
+            except ValueError:
+                continue
+            turn["applied"] = {"dir": str(repo / rel), "at": time.time()}
+            self._write(path, turn)
+
+    def _checkout_matches(self, turn: dict[str, Any]) -> tuple[bool, str]:
+        """True while every file in the checkout is exactly what the turn produced."""
+        wd, target = Path(turn["dir"]), Path(turn["applied"]["dir"])
+        for f in turn.get("files") or []:
+            want = self.shadow.blob(wd, turn["after"], f["path"])
+            dest = target / f["path"]
+            have = dest.read_bytes() if dest.is_file() else None
+            if have != want:
+                return False, f"{f['path']} changed in {target.name} after Apply; undo it by hand or with git"
+        return True, ""
+
+    def _undo_applied(self, turn: dict[str, Any], trash: Path) -> list[str]:
+        """Revert the turn's diff in the checkout, then in the worktree, and move the base on."""
+        wd, target = Path(turn["dir"]), Path(turn["applied"]["dir"])
+        moved: list[str] = []
+        for f in turn.get("files") or []:
+            dest = target / f["path"]
+            before = self.shadow.blob(wd, turn["before"], f["path"])
+            if before is None:
+                if dest.exists():
+                    (trash / f["path"]).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(dest), str(trash / f["path"]))
+                    moved.append(f["path"])
+            else:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(before)
+        # Keep the worktree in step so a later Apply does not bring the change back.
+        if wd.is_dir() and self.shadow.tree_now(wd) == self.shadow.tree_of(wd, turn["after"]):
+            others = [f["path"] for f in turn["files"] if self.shadow.blob(wd, turn["before"], f["path"]) is not None]
+            for f in turn["files"]:
+                if f["path"] not in others and (wd / f["path"]).exists():
+                    (trash / "worktree" / f["path"]).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(wd / f["path"]), str(trash / "worktree" / f["path"]))
+            if others:
+                self.shadow.restore_paths(wd, turn["before"], others)
+            rec = self.worktree(turn["session"])
+            if rec:
+                wt = Path(rec["path"])
+                _git(["add", "-A"], wt)
+                if _git(["diff", "--cached", "--quiet"], wt).returncode != 0:
+                    _git(["-c", "user.name=Jaeger", "-c", "user.email=jaeger@localhost", "commit", "-q", "--no-verify",
+                          "-m", "Jaeger: undo applied turn"], wt)
+                rec["base"] = _git(["rev-parse", "HEAD"], wt).stdout.strip() or rec["base"]
+                self._write(self._wt_path(turn["session"]), rec)
+        return moved
 
     def discard(self, session: str) -> dict[str, Any]:
         """Move the worktree aside (kept on branch + folder); the next Agent turn starts fresh."""
@@ -385,9 +462,17 @@ class AgentSafety:
         turn = self._read(self._turn_path(session, request))
         if not turn:
             return {}
+        if turn.get("mode") == "worktree" and not turn.get("applied") and not turn.get("undone"):
+            rec = self.worktree(session) or {}
+            if rec.get("applied_at", 0) > turn.get("settled_at", float("inf")):
+                self._mark_applied(session, rec)   # applied before this record knew about Apply
+                turn = self._read(self._turn_path(session, request))
         files = [{"path": f["path"], "status": f["status"]} for f in turn.get("files") or []]
         can, reason = False, ""
-        if files and not turn.get("undone") and turn.get("after"):
+        applied = turn.get("applied")
+        if files and not turn.get("undone") and turn.get("after") and applied:
+            can, reason = self._checkout_matches(turn)
+        elif files and not turn.get("undone") and turn.get("after"):
             wd = Path(turn["dir"])
             if not wd.is_dir():
                 reason = "The folder this turn worked in is gone"
@@ -397,7 +482,8 @@ class AgentSafety:
                 can = True
         return {"requestId": request, "safety": turn.get("mode"), "dir": turn.get("dir"),
                 "worktree": turn.get("worktree"), "files": files, "undone": bool(turn.get("undone")),
-                "canUndo": can, "undoBlocked": reason or None, "checkpoint": (turn.get("before") or "")[:12]}
+                "canUndo": can, "undoBlocked": reason or None, "checkpoint": (turn.get("before") or "")[:12],
+                "appliedTo": applied["dir"] if applied else None}
 
     def undo(self, session: str, request: str) -> dict[str, Any]:
         with self.lock:
@@ -407,10 +493,15 @@ class AgentSafety:
             if not state.get("canUndo"):
                 raise ValueError(state.get("undoBlocked") or "Nothing to undo for this turn")
             wd = Path(turn["dir"])
+            trash = self.state_root / "agent-undo-trash" / f"{time.strftime('%Y%m%d-%H%M%S')}-{request[:12]}"
+            if turn.get("applied"):
+                moved = self._undo_applied(turn, trash)
+                turn.update(undone=True, undone_at=time.time(), undo_trash=str(trash) if moved else None)
+                self._write(path, turn)
+                return {**self.describe(session, request), "movedToTrash": str(trash) if moved else None}
             safety = self.shadow.snapshot(wd, f"before undo of {request[:12]}")
             added = [f["path"] for f in turn["files"] if f["status"] == "added"]
             others = [f["path"] for f in turn["files"] if f["status"] != "added"]
-            trash = self.state_root / "agent-undo-trash" / f"{time.strftime('%Y%m%d-%H%M%S')}-{request[:12]}"
             for rel in added:
                 src = wd / rel
                 if src.exists() or src.is_symlink():

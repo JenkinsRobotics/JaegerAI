@@ -10,7 +10,7 @@ import { ChevronIcon, UndoIcon } from '../icons';
 import './agentChanges.css';
 
 type Changed = { path:string; status?:'added'|'modified'|'deleted'; added?:number; removed?:number };
-type TurnChangeState = { files:Changed[]; canUndo?:boolean; undone?:boolean; undoBlocked?:string|null; safety?:'worktree'|'checkpoint'; worktree?:{branch:string;repo:string}|null; movedToTrash?:string|null };
+type TurnChangeState = { files:Changed[]; canUndo?:boolean; undone?:boolean; undoBlocked?:string|null; safety?:'worktree'|'checkpoint'; worktree?:{branch:string;repo:string}|null; movedToTrash?:string|null; appliedTo?:string|null };
 type Worktree = { active:boolean; repo?:string; repoName?:string; branch?:string; path?:string; files?:Changed[]; stat?:string; applied?:number; discarded?:boolean; movedTo?:string };
 
 const enc=encodeURIComponent;
@@ -34,11 +34,13 @@ export function TurnChanges({sessionId,requestId,settled}:{sessionId:string;requ
  },[sessionId,requestId,settled,tick]);
  if(!state?.files?.length)return null;
  const undo=async()=>{setBusy(true);setError('');try{setState(await sendJson<TurnChangeState>('POST',`/v1/sessions/${enc(sessionId)}/requests/${enc(requestId)}/changes/undo`,{}));announce();}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
- const where=state.safety==='worktree'&&state.worktree?` in worktree ${state.worktree.branch}`:'';
+ const base=(p:string)=>p.split('/').filter(Boolean).pop()||p;
+ const where=state.appliedTo?` · applied to ${base(state.appliedTo)}`:state.safety==='worktree'&&state.worktree?` in worktree ${state.worktree.branch}`:'';
+ const undoTitle=state.canUndo?(state.appliedTo?`Revert these changes in ${state.appliedTo}`:'Put these files back the way they were before this turn'):state.undoBlocked||'Undo unavailable';
  return <div className="jg-changes" data-undone={state.undone||undefined}>
   <div className="jg-changes__row">
-   <button type="button" className="jg-changes__toggle" aria-expanded={open} onClick={()=>setOpen(o=>!o)}><ChevronIcon className="jg-changes__chev"/>{state.undone?`Undid changes to ${plural(state.files.length,'file')}`:`Changed ${plural(state.files.length,'file')}${where}`}</button>
-   {!state.undone&&<button type="button" className="jg-changes__undo" disabled={busy||!state.canUndo} title={state.canUndo?'Put these files back the way they were before this turn':state.undoBlocked||'Undo unavailable'} onClick={()=>void undo()}><UndoIcon/>{busy?'Undoing…':'Undo'}</button>}
+   <button type="button" className="jg-changes__toggle" aria-expanded={open} onClick={()=>setOpen(o=>!o)}><ChevronIcon className="jg-changes__chev"/>{state.undone?`Undid changes to ${plural(state.files.length,'file')}${state.appliedTo?` in ${base(state.appliedTo)}`:''}`:`Changed ${plural(state.files.length,'file')}${where}`}</button>
+   {!state.undone&&<button type="button" className="jg-changes__undo" disabled={busy||!state.canUndo} title={undoTitle} onClick={()=>void undo()}><UndoIcon/>{busy?'Undoing…':state.appliedTo?'Undo in checkout':'Undo'}</button>}
   </div>
   {open&&<FileList files={state.files}/>}
   {state.undone&&state.movedToTrash&&<small className="jg-changes__note">New files were moved to {state.movedToTrash}</small>}
