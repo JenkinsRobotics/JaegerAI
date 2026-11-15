@@ -205,7 +205,7 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
       else out.push({bubble:[part]});
     }
   }
-  if (activity.length) {
+  if (activity.length || state === "pending") {
     const at = out.findIndex(seg => "card" in seg || "bubble" in seg || "marker" in seg);
     if (at < 0) out.push({ activity });
     else out.splice(at, 0, { activity });
@@ -1263,12 +1263,9 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 : "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
-                : "activity" in seg ? <ActivityFold key={`activity:${i}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
+                : "activity" in seg ? <ActivityFold key={`work:${turn.turnId || turn.requestId || "pending"}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
                 : "diagnostic" in seg ? null
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant" tabIndex={0} aria-haspopup="menu">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
-              {turn.state === "pending" && !segments(turn.parts, turn.state).some(seg => "activity" in seg) && !replyHasText(turn) && (
-                <ActivityFold parts={[]} live links={links} style={streamStyle} />
-              )}
               <SourceChips sources={webSources(turn.parts)} onOpen={links.onOpen} />
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
               {(turnErrors(turn).length > 0 || turn.state === "failed" || turn.state === "unknown") && (
