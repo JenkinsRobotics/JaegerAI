@@ -78,8 +78,14 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
     owner = {"ollama-local": "ollama", "ollama_cloud": "ollama-cloud", "ollamacloud": "ollama-cloud"}.get(owner, owner)
     _CLI_LANES = {"grok": "grok", "chatgpt": "codex", "codex": "codex", "gemini": "gemini", "agy": "agy", "claude": "claude"}
     selected_lane = owner
+    if owner == "gemini":
+        try:
+            from jaeger_ai.features.cli_backends.discovery import preferred_gemini_backend
+            _CLI_LANES = {**_CLI_LANES, "gemini": preferred_gemini_backend()}
+        except Exception:  # noqa: BLE001
+            pass
     if owner in _CLI_LANES:
-        if not name or name in {"default", owner, "chatgpt"}:
+        if not name or name in {"default", owner, "chatgpt", "gemini"}:
             name = _CLI_LANES[owner]
         elif name.startswith("cli:"):
             name = name.split(":", 1)[1]
