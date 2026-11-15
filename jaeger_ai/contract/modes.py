@@ -52,14 +52,26 @@ PLAN_MODE_NOTE = (
 )
 
 # Deny wins. Plan mode is read/inspect only.
+# Short verbs are word-bounded so "skill" is not denied by "kill",
+# "list_skill_dir" stays a read/inspect tool, and instance files remain
+# listable in Plan as well as Agent.
 _PLAN_DENY = re.compile(
-    r"(write|edit|patch|delete|remove|\brm\b|mkdir|rmdir|unlink|move|rename|"
-    r"exec|shell|bash|zsh|\bsh\b|terminal|command|run_|spawn|install|pip|"
-    r"npm|kill|chmod|chown|push|commit|rebase|merge|deploy|send_|mail|"
-    r"cron|schedule|grant|approv|transfer|delegate|call_agent|browser_click|"
-    r"computer_do|computer_use)",
+    r"(write|edit|patch|delete|remove|\brm\b|mkdir|rmdir|unlink|\bmove\b|\brename\b|"
+    r"exec|shell|bash|zsh|\bsh\b|terminal|command|run_|spawn|install|\bpip\b|"
+    r"\bnpm\b|\bkill\b|chmod|chown|\bpush\b|commit|rebase|merge|deploy|send_|"
+    r"\bmail\b|cron|schedule|\bgrant\b|approv|transfer|delegate|call_agent|"
+    r"browser_click|computer_do|computer_use)",
     re.I,
 )
+
+# Read/inspect tools that must stay available in every tool-using mode,
+# including listing Jaeger's own skills and instance files.
+_PLAN_ALLOW = frozenset({
+    "list_skill_dir", "list_skills", "list_tools", "read_file", "search_files",
+    "glob", "web_search", "web_extract", "x_search", "get_time", "get_weather",
+    "memory", "recall", "user_profile", "describe_tool", "load_tools",
+    "tool_search", "calculate",
+})
 
 EntityPresence = Literal[
     "dormant",      # Chat mode / sleeping
@@ -81,11 +93,24 @@ def normalize_interaction_tier(value: str | None) -> InteractionTier:
     return DEFAULT_INTERACTION_TIER
 
 
+# Authoring / write tools whose names don't match the verb regex
+# (skill_manage would otherwise sneak through after "kill" was bounded).
+_PLAN_DENY_NAMES = frozenset({
+    "skill_manage", "record_skill_revision", "write_file", "append_file",
+    "delete_file", "patch", "terminal", "execute_code",
+})
+
+
 def plan_tool_allowed(name: str) -> bool:
     """True when this tool may run in Plan mode (read/inspect only)."""
     tool = str(name or "").strip()
     if not tool:
         return False
+    short = tool.split("__")[-1]
+    if tool in _PLAN_DENY_NAMES or short in _PLAN_DENY_NAMES:
+        return False
+    if tool in _PLAN_ALLOW or short in _PLAN_ALLOW:
+        return True
     return _PLAN_DENY.search(tool) is None
 
 

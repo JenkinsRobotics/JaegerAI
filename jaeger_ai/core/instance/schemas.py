@@ -345,13 +345,13 @@ class DesktopSensorConfig(BaseModel):
 
 
 class ProactiveSensorsConfig(BaseModel):
-    """Tier 3 workspace/host perception. Starts only in Jaeger mode."""
+    """Tier 3 workspace/host perception. Runs in Agent and Plan; not in Chat."""
 
     model_config = ConfigDict(extra="forbid")
     enabled: bool = Field(
         True,
         json_schema_extra=_setting("autonomy"),
-        description="Observe workspace and safe host vitals in Jaeger tier.",
+        description="Observe workspace and safe host vitals in Agent and Plan.",
     )
     interval_seconds: float = Field(
         5.0, ge=1.0, le=3600.0,
