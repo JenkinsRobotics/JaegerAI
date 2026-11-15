@@ -555,8 +555,12 @@ class BackgroundProducers:
                 # What just happened; the talker may tie a greeting to something
                 # useful, or stay silent (NO_REPLY) when nothing is worth saying.
                 facts["events"] = reflection_triggers.summary(triggers)
+            # An approval waiting is urgent: rated as an approval by the droid's
+            # speak/stay-quiet gate and exempt from the hourly initiative cap.
+            approval = any(t.get("event") == "approval_waiting" for t in triggers)
             outcome = self.offer_initiative(Initiative(
-                source="heartbeat", kind="check_in", level=SalienceLevel.DIGEST,
+                source="heartbeat", kind="approval_check_in" if approval else "check_in",
+                level=SalienceLevel.IMMEDIATE if approval else SalienceLevel.DIGEST,
                 summary=f"{facts['slot']} check-in", details=facts,
             ))
             if outcome != "refused":

@@ -30,6 +30,7 @@ from jaeger_ai.core.instance.host_context import operator_name
 SILENT_TOKEN = "NO_MESSAGE"
 # Kinds allowed to break quiet hours (machine is about to be unusable).
 URGENT_KINDS = frozenset({"disk_low", "memory_pressure_critical"})
+APPROVAL_KINDS = frozenset({"approval_check_in"})  # an approval is waiting: never rate-limited
 STATE_NAME = "initiative_state.json"
 AUDIT_NAME = "initiative_decisions.jsonl"
 MAX_HELD = 20
@@ -209,7 +210,7 @@ class InterruptionPolicy:
         if self.in_quiet_hours(now) and not urgent:
             return Decision("hold", "quiet_hours")
         self._sent = [t for t in self._sent if now - t < 3600]
-        if len(self._sent) >= self.max_per_hour:
+        if len(self._sent) >= self.max_per_hour and initiative.kind not in APPROVAL_KINDS:
             return Decision("hold", "rate_limited")
         return Decision("deliver", "allowed")
 
