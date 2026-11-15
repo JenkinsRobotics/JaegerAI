@@ -58,6 +58,8 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
     void submit.current(m.text).then(ok=>{if(ok||owner!==session.current)return;if(wasBusy){if(working.current)queued.current.push(m.text);else sendQueued(m.text);return;}waiting.current=false;setError('That wasn’t sent. Its text is in the message box.');settle();});
     break;}
    case 'interrupted':setP('hearing');break;
+   // Gemini Live: the local VAD marks the end of speech for the latency readout.
+   case 'user-stopped':if(engineRef.current==='gemini'){finalAt.current=performance.now();turnMs.current=m.stopMs||0;firstAudio.current=false;if(phaseRef.current==='hearing')setP('thinking');}break;
    case 'bot-speaking':
     if(m.on){
      if(!firstAudio.current&&finalAt.current){firstAudio.current=true;const ms=Math.round(performance.now()-finalAt.current+turnMs.current);setLatency(ms);window.dispatchEvent(new CustomEvent('jaeger:voice-latency',{detail:{speechEndToFirstAudioMs:ms,engine:engineRef.current}}));}
