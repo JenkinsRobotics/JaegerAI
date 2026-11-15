@@ -125,6 +125,12 @@ def classify(event: str, data: dict, store=None) -> dict | None:
         return {"kind": "approval", "category": cat, "id": item["approval_id"], "risk": item["risk"],
                 "type": item["type"], "title_text": item["title"], "agent_id": item["agent_id"],
                 "expires_at": item["expires_at"], "session_id": item.get("session_id")}
+    if event == "notification.proactive" and data.get("push"):
+        # Droid mode said Matthew is away (or not alone): his phone gets it instead of the room.
+        rid = str(data.get("request_id") or "")
+        return {"kind": "proactive", "category": "proactive_away", "id": f"proactive:{rid}", "risk": "low",
+                "title_text": "Jaeger", "body": str(data.get("body") or ""), "session_id": data.get("session_id"),
+                "tag": "proactive"}
     if event == "approval.resolved" and data.get("approval_id"):
         return {"kind": "resolved", "category": None, "id": data["approval_id"]}
     if event in ("task.updated", "job.updated"):
@@ -162,6 +168,8 @@ def build_payload(c: dict, prefs: dict, badge: int) -> dict:
         title, url = "While quiet hours were on", "/?src=push"
     elif c["kind"] == "resolved":
         title, url = "Resolved", "/?src=push"
+    elif c["kind"] == "proactive":
+        title, url = "Jaeger has something for you", _session_url(c.get("session_id"))
     elif c["kind"] in ("scheduled", "reply"):
         title, url = str(c.get("title_text") or "Jaeger"), _session_url(c.get("session_id"))
     else:
@@ -176,6 +184,8 @@ def build_payload(c: dict, prefs: dict, badge: int) -> dict:
         body = "Tap to see the result"
     elif c["kind"] == "reply":
         body = "Tap to read the reply"
+    elif c["kind"] == "proactive":
+        body = "Tap to read it"
     if preview == "hidden":
         title, body = "Jaeger", ""
     out = {"v": 1, "id": c.get("id"), "type": c["kind"], "kind": c.get("type"), "risk": c.get("risk"),
@@ -339,6 +349,13 @@ class PushDispatcher:
                 c = None
         else:
             c = classify(name, getattr(evt, "data", {}) or {}, self.gw.store)
+        if c and c.get("kind") in ("approval", "finished"):
+            try:  # wake event-driven reflection (heartbeat) for salient moments
+                from jaeger_ai.core.runtime import reflection_triggers
+                reflection_triggers.write("approval_waiting" if c["kind"] == "approval" else "job_finished",
+                                          title=str(c.get("title_text") or "")[:80], risk=c.get("risk"))
+            except Exception:  # noqa: BLE001
+                pass
         if c:
             try:
                 self.enqueue(c)

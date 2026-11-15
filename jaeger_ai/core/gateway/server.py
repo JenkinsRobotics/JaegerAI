@@ -1449,6 +1449,21 @@ class JaegerGatewayApp:
             "kind": str(getattr(initiative, "kind", "") or ""),
             "created_at": time.time(),
         }
+        # Droid mode: say it in the room when Matthew is there and facing the Mac
+        # Studio; otherwise the droid's gate asks for a phone push instead.
+        try:
+            from jaeger_ai.features.droid import route as _droid_route
+            decision = _droid_route.offer(
+                body, kind=_droid_route.droid_kind(payload["kind"], payload["proactive_source"], level))
+        except Exception:  # noqa: BLE001 — the droid is optional
+            decision = None
+        if decision:
+            payload["droid"] = {"action": decision.get("action"), "reason": decision.get("reason")}
+            if decision.get("action") == "speak":
+                payload["speak"] = False  # already spoken by the droid; don't double it in the apps
+                payload["spoken_by"] = "droid"
+            elif decision.get("action") == "push":
+                payload["push"] = True
 
         def _write() -> None:
             self.store.ensure_session(session_id)
