@@ -22,7 +22,9 @@ import urllib.request
 
 DEFAULT_PROVIDER = "ollama"
 DEFAULT_MODEL = "gemma4:latest"
-VOICE_HISTORY = 12  # recent messages carried into a spoken turn
+VOICE_HISTORY = 8  # recent messages carried into a spoken turn
+VOICE_CLIP = 400  # characters kept per history message
+VOICE_BACKGROUND = 1200  # characters of recalled background kept before the request
 VOICE_CTX = 8192
 VOICE_STYLE = (
     "You are Jaeger, the user's personal AI assistant, talking with them by voice. "
@@ -57,19 +59,36 @@ def voice_brain() -> dict:
 def voice_history(rows) -> list:
     """Recent history for a spoken turn, shaped so Ollama can reuse its KV cache.
 
-    The window start moves in steps of six messages (not one per turn), and each
+    The window start moves in steps of four messages (not one per turn), and each
     message is clipped deterministically, so consecutive voice turns share the
     same prompt prefix and only the new utterance is prefilled.
     """
     rows = list(rows or ())
-    step = 6
+    step = 4
     start = 0 if len(rows) <= VOICE_HISTORY else ((len(rows) - VOICE_HISTORY) // step + 1) * step
     out = []
     for row in rows[start:]:
-        if isinstance(row, dict) and isinstance(row.get("content"), str) and len(row["content"]) > 600:
-            row = {**row, "content": row["content"][:600] + " …"}
+        if isinstance(row, dict) and isinstance(row.get("content"), str) and len(row["content"]) > VOICE_CLIP:
+            row = {**row, "content": row["content"][:VOICE_CLIP] + " …"}
         out.append(row)
     return out
+
+
+def voice_prompt(prompt: str, request: str) -> str:
+    """Keep the request intact and only a short slice of recalled background.
+
+    Prefill is the main cost of a local first token (~900 tok/s on Gemma 4 E4B
+    here, and its sliding-window cache is not reused between turns), so the up
+    to 4,000 characters of recall used for typed turns are cut to a short lead.
+    """
+    prompt, request = str(prompt or ""), str(request or "").strip()
+    at = prompt.rfind(request) if request else -1
+    if at <= 0:
+        return prompt if len(prompt) <= VOICE_BACKGROUND + len(request) + 200 else request or prompt
+    background, tail = prompt[:at], prompt[at:]
+    if len(background) > VOICE_BACKGROUND:
+        background = background[:VOICE_BACKGROUND].rstrip() + " …[background clipped for voice]\n\n"
+    return background + tail
 
 
 def warm(timeout: float = 30.0) -> None:

@@ -118,7 +118,7 @@ export class BrowserVoiceIO implements VoiceIO {
           if(elapsed<500){noise=Math.min(0.012,Math.max(noise,rms));return;}
           if(rms>Math.max(0.008,Math.min(0.045,noise*2.2))){if(!speechStartedAt)speechStartedAt=Date.now();speechAt=Date.now();speechFrames++;if(speechFrames===3)onSpeechStart?.();silenceAt=0;}
           else if(speechAt && !silenceAt)silenceAt=Date.now();
-          if((!speechAt && elapsed>20000) || (speechAt && silenceAt && Date.now()-silenceAt>750) || (speechStartedAt && Date.now()-speechStartedAt>30000)){automatic=true;if(speechAt)this.lastSpeechEndAt=speechAt;stop();}
+          if((!speechAt && elapsed>20000) || (speechAt && silenceAt && Date.now()-silenceAt>850) || (speechStartedAt && Date.now()-speechStartedAt>30000)){automatic=true;if(speechAt)this.lastSpeechEndAt=speechAt;stop();}
         },80);
       });
       if(timer){clearInterval(timer);timer=undefined;}stream.getTracks().forEach(track=>track.stop());source?.disconnect();source=undefined;analyser?.disconnect();analyser=undefined;
