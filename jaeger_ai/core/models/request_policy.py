@@ -83,13 +83,17 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
     owner = {"ollama-local": "ollama", "ollama_cloud": "ollama-cloud", "ollamacloud": "ollama-cloud"}.get(owner, owner)
     _CLI_LANES = {"grok": "grok", "chatgpt": "codex", "codex": "codex", "gemini": "gemini", "agy": "agy", "claude": "claude"}
     selected_lane = owner
-    if owner == "gemini":
+    # A bare Gemini/Gemma name (the "Gemini API · AI Studio" picker group) goes to
+    # the Gemini API with the AI Studio key; ``agy``/``agy/...`` stay on the CLI lane.
+    gemini_api = (owner == "gemini" and bool(name) and "/" not in name
+                  and name.startswith(("gemini-", "gemma-")))
+    if owner == "gemini" and not gemini_api:
         try:
             from jaeger_ai.features.cli_backends.discovery import preferred_gemini_backend
             _CLI_LANES = {**_CLI_LANES, "gemini": preferred_gemini_backend()}
         except Exception:  # noqa: BLE001
             pass
-    if owner in _CLI_LANES:
+    if owner in _CLI_LANES and not gemini_api:
         if not name or name in {"default", owner, "chatgpt", "gemini"}:
             name = _CLI_LANES[owner]
         elif name.startswith("cli:"):

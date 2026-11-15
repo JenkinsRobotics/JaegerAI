@@ -4241,6 +4241,18 @@ class JaegerGatewayApp:
                 continue
             if any(str(m.get("id")) == name and m.get("available") is not False for m in provider.get("models") or []):
                 return {"model": name, "provider": provider.get("id")}
+        # Cloud families are not probed into the runtime inventory; accept what the
+        # picker itself lists for a provider whose credential is configured.
+        from jaeger_ai.core.runtime.truth import webui_model_catalog
+        for group in webui_model_catalog().get("groups") or []:
+            provider_id = str(group.get("provider_id") or "")
+            if not group.get("credentials_available") or not str(group.get("endpoint") or "").startswith("cloud:"):
+                continue
+            if lane and provider_id != lane:
+                continue
+            for m in group.get("models") or []:
+                if m.get("available") is not False and (str(m.get("id")) == model_id or str(m.get("name")) == name):
+                    return {"model": str(m.get("name") or name), "provider": provider_id}
         return None
 
     async def handle_patch_session(self, request: web.Request) -> web.Response:

@@ -465,10 +465,48 @@ ANTHROPIC_CURATED: tuple[str, ...] = (
 )
 
 GEMINI_CURATED: tuple[str, ...] = (
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-pro-preview",
     "gemini-2.5-pro",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
 )
+
+#: The API-key Gemini group (Google AI Studio key, free tier by default). Bare
+#: model names route to the Gemini API; ``agy/...`` names are the Antigravity lane.
+GEMINI_API_LABEL = "Gemini API · AI Studio (free tier)"
+_GEMINI_API_SKIP = ("tts", "image", "banana", "transcribe", "robotics", "computer-use", "customtools",
+                    "lyria", "deep-research", "antigravity", "embedding", "aqa", "live", "native-audio")
+_gemini_api_cache: dict[str, Any] = {"at": 0.0, "models": []}
+
+
+def gemini_api_models(api_key: str, *, ttl: float = 3600.0) -> list[tuple[str, str]]:
+    """Chat models the key can call, as ``(name, display_name)``; cached for an hour.
+
+    Falls back to ``GEMINI_CURATED`` when the listing can't be read."""
+    now = time.time()
+    if _gemini_api_cache["models"] and now - float(_gemini_api_cache["at"]) < ttl:
+        return list(_gemini_api_cache["models"])
+    models: list[tuple[str, str]] = []
+    try:
+        req = urllib.request.Request(
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+            headers={"x-goog-api-key": api_key})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            rows = json.loads(resp.read().decode("utf-8")).get("models") or []
+        for row in rows:
+            name = str(row.get("name") or "").removeprefix("models/")
+            if "generateContent" not in (row.get("supportedGenerationMethods") or []):
+                continue
+            if not name.startswith(("gemini-", "gemma-")) or any(k in name for k in _GEMINI_API_SKIP):
+                continue
+            models.append((name, str(row.get("displayName") or name)))
+    except Exception:  # noqa: BLE001 - offline or bad key: show the curated names
+        models = []
+    if not models:
+        return [(m, m) for m in GEMINI_CURATED]
+    _gemini_api_cache.update(at=now, models=models)
+    return list(models)
 
 XAI_CURATED: tuple[str, ...] = (
     "grok-4.6",
@@ -776,6 +814,9 @@ def discover_subscription_clis() -> list[dict[str, Any]]:
         if isinstance(reason, dict) and "__agy_models__" in reason:
             effective_backend = "agy"
             public_reason = None
+            # Subscription lane through the Antigravity CLI; the AI Studio key
+            # (pay-free API tier) is its own "Gemini API" group.
+            label = "Gemini · Antigravity (subscription)"
             models.append({
                 "id": "agy",
                 "name": "agy",
@@ -1104,7 +1145,7 @@ def canonical_runtime_inventory(
     cloud_registry = [
         ("anthropic", "Anthropic", ANTHROPIC_CURATED),
         ("openai", "OpenAI", OPENAI_CURATED),
-        ("gemini", "Google Gemini", GEMINI_CURATED),
+        ("gemini", GEMINI_API_LABEL, GEMINI_CURATED),
         ("xai", "xAI Grok", XAI_CURATED),
     ]
 
@@ -1113,14 +1154,15 @@ def canonical_runtime_inventory(
         has_key = bool(key)
         models = []
         if has_key:
-            for m_name in curated:
+            named = gemini_api_models(key) if p_id == "gemini" else [(m, m) for m in curated]
+            for m_name, m_label in named:
                 caps = capabilities_for(m_name)
                 c_roles = [r.upper() for r, s in caps.items() if s == "pass"]
                 features = features_dict_for_inventory(m_name, provider_id=p_id)
                 models.append({
                     "id": f"@{p_id}:{m_name}",
                     "name": m_name,
-                    "label": m_name,
+                    "label": m_label,
                     "capabilities": ["completion"] + (["tools"] if features.get("tool_use") else []),
                     "certified_roles": c_roles,
                     "multimodal": bool(features.get("vision")),
