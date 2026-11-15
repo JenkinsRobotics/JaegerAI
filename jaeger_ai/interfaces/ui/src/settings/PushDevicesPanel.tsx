@@ -13,6 +13,7 @@ type Prefs = {
 const TOPICS: { label: string; hint: string; keys: string[] }[] = [
   { label: "Approvals that need you", hint: "Actions waiting for your OK", keys: ["approvals_urgent", "approvals_routine", "spend_send", "design_reviews"] },
   { label: "Replies while you're away", hint: "When a longer reply finishes and Jaeger isn't open", keys: ["replies_away"] },
+  { label: "Jaeger speaking up", hint: "When Jaeger has something to say and you aren't at the Mac Studio", keys: ["proactive_away"] },
   { label: "Scheduled job results", hint: "Results from your scheduled jobs", keys: ["scheduled"] },
   { label: "Problems", hint: "A task or job failed or is blocked", keys: ["task_failed"] },
 ];

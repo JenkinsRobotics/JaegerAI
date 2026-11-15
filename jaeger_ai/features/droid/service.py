@@ -706,7 +706,7 @@ class Droid:
 
         try:
             result = await asyncio.to_thread(
-                self.gateway.stream_turn, self.cfg["session_id"], persona.frame(text), on_event=on_event,
+                self.gateway.stream_turn, self.cfg["session_id"], persona.frame(text, self.life.drives.tone()), on_event=on_event,
                 request_id=rid, timeout_s=900, fast_lane=not full, display_text=text)
             if full:
                 return result.text if result.ok else f"Jaeger could not finish: {result.error or result.status}"
@@ -924,7 +924,7 @@ def app(droid: Droid) -> web.Application:
     async def decisions(request):
         return web.json_response({"items": droid.life.decisions.recent(int(request.query.get("limit") or 100))})
 
-    @routes.post("/noticed/delete")
+    @routes.post("/noticed-delete")
     async def noticed_delete(request):
         body = await request.json() if request.can_read_body else {}
         which = (body or {}).get("id")

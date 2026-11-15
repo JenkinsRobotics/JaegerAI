@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { getJson, sendJson } from '../unified/webui'
+import { DroidLife } from './DroidLife'
 import './droidView.css'
 
 /** Live Droid view: what the droid sees (camera), what it is doing on the Mac
@@ -7,12 +8,12 @@ import './droidView.css'
 interface DroidStatus {
   state: string; awake: boolean; muted?: boolean; heard?: string; said?: string; error?: string | null
   latency_ms?: number | null; camera?: string; faces?: number; present?: boolean; action?: string | null
-  pending_approval?: string | null; speaker?: string; microphone?: string; vision_ms?: number
+  pending_approval?: string | null; speaker?: string; microphone?: string; vision_ms?: number; mode?: string
 }
 interface Line { role: 'user' | 'assistant'; text: string; at: number }
 
 const LABEL: Record<string, string> = {
-  off: 'Standby', waking: 'Waking…', listening: 'Listening', hearing: 'Hearing you', thinking: 'Thinking',
+  off: 'Off', present: 'Present · watching quietly', waking: 'Waking…', listening: 'Listening', hearing: 'Hearing you', thinking: 'Thinking',
   speaking: 'Speaking', sleeping: 'Going to standby', error: 'Needs attention', unavailable: 'Service offline',
 }
 const base = '/api/jaeger/droid'
@@ -69,7 +70,8 @@ export function DroidView() {
         <div><h1>Droid</h1><p role="status">{LABEL[status.state] || status.state}{status.muted ? ' · mic muted' : ''}{status.action ? ` · ${status.action}` : ''}</p></div>
       </div>
       <div className="jg-droid__actions">
-        <button type="button" className="jg-droid__primary" disabled={busy || status.state === 'unavailable'} onClick={() => void act(awake ? 'sleep' : 'wake')}>{awake ? 'Put to sleep' : 'Wake droid'}</button>
+        <button type="button" className="jg-droid__primary" disabled={busy || status.state === 'unavailable'} onClick={() => void act(awake && status.mode !== 'present' ? 'sleep' : 'wake')}>{!awake ? 'Wake droid' : status.mode === 'present' ? 'Talk' : 'Put to sleep'}</button>
+        {awake && status.mode === 'present' && <button type="button" disabled={busy} onClick={() => void act('sleep')}>Sleep till morning</button>}
         <button type="button" disabled={!awake || busy} aria-pressed={!!status.muted} onClick={() => void act('mute')}>{status.muted ? 'Unmute' : 'Mute'}</button>
         <button type="button" disabled={!awake || busy} onClick={() => void act('look', { around: true, question: 'Look around the room. What do you see?' })}>Look around</button>
         <button type="button" disabled={!awake || busy} onClick={() => void act('stop')}>Stop</button>
@@ -100,5 +102,6 @@ export function DroidView() {
         </section>
       </aside>
     </div>
+    <DroidLife />
   </div>
 }

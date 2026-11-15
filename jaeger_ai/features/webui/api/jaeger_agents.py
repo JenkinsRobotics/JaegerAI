@@ -222,7 +222,11 @@ def _serve_rtc(handler, method: str, action: str) -> bool:
 
 _DROID_ACTIONS = {("GET", "status"), ("GET", "transcript"), ("GET", "display"), ("GET", "camera.jpg"),
                   ("GET", "screen.jpg"), ("POST", "wake"), ("POST", "sleep"), ("POST", "toggle"),
-                  ("POST", "mute"), ("POST", "stop"), ("POST", "say"), ("POST", "look")}
+                  ("POST", "mute"), ("POST", "stop"), ("POST", "say"), ("POST", "look"),
+                  # Droid Life: presence, "what I noticed", gate log, identity (all local to this Mac)
+                  ("GET", "life"), ("GET", "noticed"), ("GET", "decisions"), ("POST", "noticed-delete"),
+                  ("POST", "enrol"), ("POST", "forget"), ("POST", "quiet"), ("POST", "unquiet"),
+                  ("POST", "standby"), ("POST", "present")}
 
 
 def _serve_droid(handler, method: str, action: str) -> bool:

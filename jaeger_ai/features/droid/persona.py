@@ -21,8 +21,9 @@ FRAME = (
 )
 
 
-def frame(said: str) -> str:
-    return f"{FRAME}\n\n{said}"
+def frame(said: str, tone: str = "") -> str:
+    mood = f"\n[Current mood: {tone}]" if tone else ""
+    return f"{FRAME}{mood}\n\n{said}"
 
 
 def greeting(name: str = "Matthew", now: datetime | None = None) -> str:
