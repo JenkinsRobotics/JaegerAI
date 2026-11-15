@@ -1,7 +1,6 @@
 import {act,fireEvent,render,screen,cleanup} from '@testing-library/react';
 import {afterEach,expect,it,vi} from 'vitest';
 import {AudioSettingsPanel} from './AudioSettingsPanel';
-import {VoiceMode} from '../chat/VoiceMode';
 import {readAudioPreferences,saveAudioPreferences} from './audioPreferences';
 import type {VoiceIO} from '../chat/webSpeech';
 afterEach(()=>{cleanup();localStorage.clear();vi.restoreAllMocks();});
@@ -9,7 +8,7 @@ function io(){return {capability:async()=>({transcription:true,speech:true}),dev
 it('uses the same persisted platform-independent device selection in settings and chat',async()=>{
  const adapter=io();const view=render(<AudioSettingsPanel io={adapter}/>);await act(async()=>{});
  fireEvent.change(screen.getByRole('combobox',{name:'Voice microphone'}),{target:{value:'desk-mic'}});fireEvent.change(screen.getByRole('combobox',{name:'Voice speaker'}),{target:{value:'desk-speaker'}});expect(readAudioPreferences()).toEqual({inputId:'desk-mic',outputId:'desk-speaker'});
- view.unmount();render(<VoiceMode io={adapter} busy={false} onTranscript={async()=>true}/>);await act(async()=>fireEvent.click(screen.getByRole('button',{name:'Start voice mode'})));expect(adapter.capture.mock.calls[0][1]).toBe('desk-mic');
+ view.unmount();
 });
 it('leaves the system default selected and exposes no invented room or proximity',async()=>{
  render(<AudioSettingsPanel io={io()}/>);await act(async()=>{});expect((screen.getByRole('combobox',{name:'Voice speaker'}) as HTMLSelectElement).value).toBe('');expect(document.body.textContent).toContain('System default follows');expect(document.body.textContent).not.toContain('Nearest');

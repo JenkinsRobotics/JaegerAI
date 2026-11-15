@@ -46,6 +46,7 @@ PREFIXES: tuple[str, ...] = (
     "/api/checkpoints/",
     "/api/auth/",
     "/api/jaeger/sessions",
+    "/api/jaeger/rtc/",
 )
 
 

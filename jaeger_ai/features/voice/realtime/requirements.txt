@@ -1,0 +1,5 @@
+# Realtime voice service venv (~/.jaeger/voice-venv, Python 3.12). Not part of Jaeger's main env.
+pipecat-ai[webrtc,silero,local-smart-turn,google]==1.16.0
+parakeet-mlx
+aiohttp
+fastapi

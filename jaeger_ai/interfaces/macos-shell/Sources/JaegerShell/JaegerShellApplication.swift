@@ -522,6 +522,19 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         return nil
     }
 
+    /// Voice mode (and, later, camera) asks for capture from Jaeger's own page only.
+    /// macOS still shows its one-time privacy prompt using the Info.plist strings.
+    func webView(
+        _ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        let request = BridgeFrame(isMainFrame: frame.isMainFrame, scheme: origin.protocol, host: origin.host, port: origin.port)
+        let ok = BridgeOriginPolicy.accepts(request, allowed: start.origin)
+        shellLog("[shell][media] \(ok ? "grant" : "deny") \(type.rawValue) for \(request.description)")
+        decisionHandler(ok ? .grant : .deny)
+    }
+
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
         download.delegate = self
     }
