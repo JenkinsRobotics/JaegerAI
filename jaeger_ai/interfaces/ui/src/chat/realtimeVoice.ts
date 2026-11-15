@@ -11,6 +11,7 @@ export type ServiceMessage =
  | {t:'user-speaking';bot?:boolean}
  | {t:'user-partial';text:string}
  | {t:'user-final';text:string;turnMs?:number}
+ | {t:'user-stopped';stopMs?:number}
  | {t:'interrupted'}
  | {t:'bot-speaking';on:boolean;ttsMs?:number}
  | {t:'bot-text';text:string}

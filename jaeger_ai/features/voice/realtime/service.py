@@ -208,15 +208,19 @@ class GeminiBridge(FrameProcessor):
             if isinstance(frame, TranscriptionFrame):
                 await self.push_frame(_msg("user-partial", text=frame.text))
             elif isinstance(frame, TTSTextFrame):
-                self._bot_text = (self._bot_text + " " + frame.text).strip()
+                self._bot_text = re.sub(r"\s+", " ", f"{self._bot_text} {frame.text}").strip()
                 await self.push_frame(_msg("bot-text", text=self._bot_text))
-            elif isinstance(frame, (UserStartedSpeakingFrame, InterruptionFrame)):
+            elif isinstance(frame, (UserStartedSpeakingFrame, VADUserStartedSpeakingFrame, InterruptionFrame)):
+                # Local Silero drives the orb only; Gemini decides the turn itself.
+                self._bot_text = ""
                 await self.push_frame(_msg("user-speaking"))
+            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                await self.push_frame(_msg("user-stopped", stopMs=round(VAD_STOP * 1000)))
         else:
             if isinstance(frame, BotStartedSpeakingFrame):
-                self._bot_text = ""
                 await self.push_frame(_msg("bot-speaking", on=True))
             elif isinstance(frame, BotStoppedSpeakingFrame):
+                self._bot_text = ""
                 await self.push_frame(_msg("bot-speaking", on=False))
         await self.push_frame(frame, direction)
 
@@ -242,7 +246,7 @@ def _gemini_pipeline(transport, request_data: dict, pending: dict, send):
     from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
     from pipecat.processors.aggregators.llm_context import LLMContext
     from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
-    from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
+    from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService, GeminiVADParams
 
     @tool_options(cancel_on_interruption=False)
     async def ask_jaeger(params):
@@ -274,8 +278,13 @@ def _gemini_pipeline(transport, request_data: dict, pending: dict, send):
     llm = GeminiLiveLLMService(
         api_key=gemini_key(),
         settings=GeminiLiveLLMService.Settings(model=GEMINI_MODEL, system_instruction=GEMINI_SYSTEM,
-                                               voice=GEMINI_VOICE),
+                                               voice=GEMINI_VOICE,
+                                               # Turns come from local Silero + Smart Turn (same as the
+                                               # Jaeger engine), so barge-in and follow-ups are reliable.
+                                               vad=GeminiVADParams(disabled=True)),
         tools=ToolsSchema(standard_tools=[tool]),
+        # Silent until the user speaks, like ChatGPT voice mode; the seed is history only.
+        inference_on_context_initialization=False,
     )
     context = LLMContext(messages=history)
     user_agg, assistant_agg = LLMContextAggregatorPair(context)
@@ -283,6 +292,7 @@ def _gemini_pipeline(transport, request_data: dict, pending: dict, send):
     @user_agg.event_handler("on_user_turn_message_added")
     async def _user_said(_agg, message):
         if (message.content or "").strip():
+            send({"t": "user-partial", "text": message.content})
             send({"t": "transcript", "role": "user", "text": message.content})
 
     @assistant_agg.event_handler("on_assistant_turn_stopped")
@@ -291,7 +301,8 @@ def _gemini_pipeline(transport, request_data: dict, pending: dict, send):
             send({"t": "transcript", "role": "assistant", "text": message.content,
                   "interrupted": bool(getattr(message, "interrupted", False))})
 
-    return Pipeline([transport.input(), user_agg, llm, GeminiBridge(pending), transport.output(),
+    vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(confidence=0.5, start_secs=0.15, stop_secs=VAD_STOP)))
+    return Pipeline([transport.input(), vad, user_agg, llm, GeminiBridge(pending), transport.output(),
                      assistant_agg])
 
 
@@ -324,6 +335,10 @@ async def _run_session(connection: SmallWebRTCConnection, request_data: dict):
 
     @transport.event_handler("on_client_connected")
     async def _connected(_t, _c):
+        if engine == "gemini":
+            # Gemini Live takes no audio until it has its first context.
+            from pipecat.frames.frames import LLMRunFrame
+            await worker.queue_frames([LLMRunFrame()])
         send({"t": "ready", "engine": engine})
 
     @transport.event_handler("on_client_disconnected")
