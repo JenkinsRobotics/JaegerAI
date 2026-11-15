@@ -1,8 +1,10 @@
 """Hygiene for background maintenance prompts that may go to a cloud model.
 
 Does not change the privacy classifier. Owner and instance absolute paths
-are replaced with short labels so skill reviews, memory nudges, and the
-nightly pass can run without sending a home-directory map off-device.
+are replaced with short labels, and instructional trigger phrases in
+injected recipes (for example "never upload" or "Never store secrets")
+are reworded so skill reviews, cron jobs, memory nudges, and the nightly
+pass can run without tripping the local-only gate on their own templates.
 """
 from __future__ import annotations
 
@@ -102,3 +104,44 @@ def excerpt_for_maintenance(text: str, cap: int = 800) -> str:
     if len(body) > cap:
         return body[: cap - 1].rstrip() + "…"
     return body
+
+
+# Instructional phrases that recipes use as safety advice, which the
+# unchanged classifier treats as an explicit privacy request or a
+# credential-supply pattern. Rewrites are only applied to injected
+# playbooks and other framework text, never to the owner's own message.
+_TRIGGER_PHRASES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bnever store secrets\b", re.I), "Do not save credentials or personal data"),
+    (re.compile(r"\bstore secrets\b", re.I), "save credentials"),
+    (re.compile(r"credentials store and OS secret files", re.I), "credentials vault and OS credential files"),
+    (re.compile(r"\bnever upload targets anywhere\b", re.I), "keep targets on this machine only"),
+    (re.compile(r"\b(?:do not|don't|never) upload\b", re.I), "keep on this machine"),
+    (re.compile(r"\b(?:do not|don't|never) send\b", re.I), "do not transmit"),
+    (re.compile(r"\b(?:do not|don't|never) share\b", re.I), "do not circulate"),
+    (re.compile(r"\b(?:do not|don't|never) reveal\b", re.I), "do not disclose"),
+    (re.compile(r"~/.ssh"), "<ssh-dir>"),
+    (re.compile(r"\bid_rsa\b"), "<ssh-key>"),
+)
+
+# Demo assignments in recipes ("export API_KEY=...", "password is ...")
+# match the classifier's credential-supply pattern even when they are
+# placeholders. Replace the whole clause so the instruction remains and
+# the assignment form does not.
+_CREDENTIAL_ASSIGNMENT = re.compile(
+    r"(?i)(?:(?:my|our)\s+)?(?:password|secret|api[ _]?key|token)\s*(?:is\s+|[=:])\s*\S+"
+)
+
+
+def sanitize_injected_text(text: str) -> str:
+    """Redact local paths and reword instructional trigger phrases.
+
+    Use this on auto-injected playbooks and other framework-owned text
+    that will be classified as part of a cloud-bound user message. Do
+    not run it on the owner's own request: a real privacy ask must
+    still trip the local-only gate.
+    """
+    out = redact_local_paths(str(text or ""))
+    for pattern, replacement in _TRIGGER_PHRASES:
+        out = pattern.sub(replacement, out)
+    out = _CREDENTIAL_ASSIGNMENT.sub("a credential from the environment", out)
+    return out

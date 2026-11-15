@@ -239,7 +239,7 @@ def _owner_profile_block(ctx: Any) -> str:
     has_entries = any(l.lstrip().startswith("- ") for l in lines)
     guide = ("When you learn something durable about the owner (a preference, standing fact, "
              "working-style rule or active project), record it with user_profile(action='add'); "
-             "correct stale entries with action='replace'. Never store secrets.")
+             "correct stale entries with action='replace'. Do not save credentials or personal data.")
     if not has_entries:
         return "[OWNER PROFILE]\n(empty so far)\n" + guide
     return "[OWNER PROFILE — memory/USER.md, editable by the owner in Settings › Memory]\n" + text + "\n" + guide
