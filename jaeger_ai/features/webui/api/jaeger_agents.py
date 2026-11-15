@@ -170,6 +170,56 @@ def warm_kokoro_in_background():
     return t
 
 
+_RTC_BASE = "http://127.0.0.1:8794"
+_RTC_ROUTES = {("POST", "offer"): "/offer", ("POST", "ice"): "/ice", ("GET", "status"): "/status"}
+
+
+def _serve_rtc(handler, method: str, action: str) -> bool:
+    """Forward WebRTC signalling to the local realtime voice service.
+
+    Only the signed-in WebUI reaches it; the service itself binds to loopback."""
+    import urllib.error
+    import urllib.request
+    from api.helpers import j
+
+    target = _RTC_ROUTES.get((method, action))
+    if target is None:
+        j(handler, {"error": "Not found"}, status=404)
+        return True
+    data = None
+    if method == "POST":
+        raw = getattr(handler, "_json_body_bytes", None)
+        if raw is None:
+            length = int(handler.headers.get("Content-Length", "0") or 0)
+            if length > 1024 * 1024:
+                j(handler, {"error": "Signalling body too large"}, status=413)
+                return True
+            raw = handler.rfile.read(length) if length else b"{}"
+            from api.helpers import mark_request_body_consumed
+            mark_request_body_consumed(handler)
+        data = raw
+    req = urllib.request.Request(_RTC_BASE + target, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload, status = resp.read(), resp.status
+    except urllib.error.HTTPError as exc:
+        payload, status = exc.read(), exc.code
+    except OSError:
+        if action == "status":
+            j(handler, {"ok": False, "engines": {}, "error": "Realtime voice service is not running"})
+        else:
+            j(handler, {"error": "Realtime voice service is not running"}, status=503)
+        return True
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+    return True
+
+
 def _serve_kokoro(handler) -> bool:
     from api.helpers import read_body
 
@@ -366,6 +416,9 @@ def route(handler, parsed, method: str) -> bool:
         from api.helpers import j
         j(handler, capability())
         return True
+    # Realtime voice (WebRTC signalling) for the voice service on 127.0.0.1:8794.
+    if path.startswith("/api/jaeger/rtc/"):
+        return _serve_rtc(handler, method, path[len("/api/jaeger/rtc/"):])
     if method == "POST" and path == "/api/jaeger/voice/warm":
         from jaeger_ai.features.voice.web_speech import warm
         from api.helpers import j

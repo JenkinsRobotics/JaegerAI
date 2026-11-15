@@ -1787,6 +1787,7 @@ class JaegerGatewayApp:
         self.app.router.add_patch("/v1/sessions/{id}", self.handle_patch_session)
         self.app.router.add_post("/v1/sessions/{id}/branch", self.handle_branch_session)
         self.app.router.add_post("/v1/sessions/{id}/feedback", self.handle_message_feedback)
+        self.app.router.add_post("/v1/sessions/{id}/voice-transcript", self.handle_voice_transcript)
         self.app.router.add_get("/v1/sessions/{id}/clarify", self.handle_list_clarify)
         self.app.router.add_post("/v1/sessions/{id}/clarify/{clarify_id}", self.handle_answer_clarify)
         self.app.router.add_get("/v1/sessions/{id}/feedback", self.handle_message_feedback)
@@ -4053,6 +4054,29 @@ class JaegerGatewayApp:
         if event:
             self.event_bus.fanout(event)
         return web.json_response(snapshot)
+
+    async def handle_voice_transcript(self, request: web.Request) -> web.Response:
+        """Record one spoken line from a speech-to-speech voice session (Gemini Live).
+
+        The local voice engine sends real turns; a realtime model answers on its
+        own, so its transcript is written here to keep the chat complete. The row
+        is a plain message with ``meta.voice``; no turn runs."""
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return web.json_response({"error": "JSON object required"}, status=400)
+        role, text = body.get("role"), str(body.get("text") or "").strip()
+        engine = str(body.get("engine") or "realtime")[:40]
+        if role not in {"user", "assistant"} or not text:
+            return web.json_response({"error": "role user|assistant and text required"}, status=400)
+        meta = {"voice": {"engine": engine, "interrupted": bool(body.get("interrupted"))}}
+        message_id = self.store.append_message(session_id, role, text[:8000], meta=meta)
+        return web.json_response({"message_id": message_id})
 
     async def handle_message_feedback(self, request: web.Request) -> web.Response:
         from jaeger_ai.contract.message_feedback import REACTION_EMOJIS

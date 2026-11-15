@@ -46,7 +46,9 @@
   <key>JaegerHotkey</key>
   <string>ctrl-opt-space</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Jaeger uses your microphone for local voice dictation when you press the mic button.</string>
+  <string>Jaeger uses your microphone for voice mode and dictation when you start them.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Jaeger uses your camera only when you turn it on in voice mode. Frames stay on this Mac unless you allow cloud vision in Settings.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>Jaeger uses speech recognition (on-device when available) to turn your dictation into text.</string>
   <key>JaegerDevBuild</key>

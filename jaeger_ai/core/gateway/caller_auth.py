@@ -154,6 +154,7 @@ TURN_ROUTES = frozenset({
     ("POST", "/v1/sessions/{id}/attachments"),
     ("POST", "/v1/sessions/{id}/attachments/upload"),
     ("POST", "/v1/sessions/{id}/feedback"),
+    ("POST", "/v1/sessions/{id}/voice-transcript"),
     ("POST", "/v1/sessions/{id}/branch"),
     ("POST", "/v1/sessions/{id}/retry"),
     # AppControl proposals only queue a needs-confirmation approval; nothing is applied.
