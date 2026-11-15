@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { speakablePrefix, speechSentences } from './webSpeech';
 import { RealtimeVoice, realtimeStatus, type ServiceMessage, type VoiceEngine } from './realtimeVoice';
 import { useAudioPreferences } from '../settings/audioPreferences';
-import { CloseIcon, MicIcon, WaveIcon } from '../icons';
+import { CameraIcon, CloseIcon, MicIcon, ScreenIcon, WaveIcon } from '../icons';
+import { sendJson } from '../unified/webui';
 import './voiceMode.css';
 
 /** The reply being spoken. ``final`` is false while it is still streaming. */
@@ -11,6 +12,20 @@ export interface SpokenReply { id:string; text:string; final?:boolean }
 type Phase='connecting'|'listening'|'hearing'|'thinking'|'speaking'|'paused';
 const ENGINE_KEY='jaeger.voice.engine';
 const readEngine=():VoiceEngine=>{try{return localStorage.getItem(ENGINE_KEY)==='gemini'?'gemini':'local';}catch{return 'local';}};
+
+type Sight='camera'|'screen';
+/** One JPEG frame from a live video element, longest edge capped. */
+const grabFrame=(video:HTMLVideoElement,edge=768):string|undefined=>{
+ const w=video.videoWidth,h=video.videoHeight;if(!w||!h)return undefined;
+ const k=Math.min(1,edge/Math.max(w,h)),c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);
+ c.getContext('2d')?.drawImage(video,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.82);
+};
+/** Ask the local VISION model about a frame (never a cloud service). */
+async function describeFrame(image:string,question:string):Promise<string|undefined>{
+ const ask=sendJson<{ok?:boolean;answer?:string}>('POST','/api/jaeger/vision/describe',{image_base64:image,question:`The user is talking to you while showing this. They said: "${question}". Describe what is relevant to that in at most three sentences; read any visible text that matters.`});
+ const timeout=new Promise<undefined>(r=>window.setTimeout(()=>r(undefined),15000));
+ try{const res=await Promise.race([ask,timeout]);return res?.ok&&res.answer?res.answer:undefined;}catch{return undefined;}
+}
 
 /**
  * ChatGPT-style voice mode: a full-screen orb with live captions over a WebRTC
@@ -22,6 +37,11 @@ const readEngine=():VoiceEngine=>{try{return localStorage.getItem(ENGINE_KEY)===
  * sentence. Gemini Live engine: Gemini talks directly, hands real work to
  * Jaeger through ``ask_jaeger`` (a normal turn here), and both sides of the
  * conversation are saved to this chat.
+ *
+ * Camera / screen (local engine): frames stay on this Mac. At the end of each
+ * utterance one frame goes to Jaeger's VISION-certified local model and its
+ * description rides along with the words. With Gemini Live the camera is off,
+ * because that would stream video to Google and cloud vision is off by default.
  */
 export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=false,onOpenChange,history,onSaveTranscript,onClosed}:{
  onTranscript(text:string,opts?:{full?:boolean}):Promise<boolean>; reply?:SpokenReply; outcome?:{id:string;state:string}; busy:boolean; disabled?:boolean; primary?:boolean;
@@ -38,6 +58,25 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
  const waiting=useRef(false),streamId=useRef<string|undefined>(undefined),streamSpoken=useRef(''),streamFinal=useRef(true),lastReply=useRef<string|undefined>(undefined),baselineOutcome=useRef('');
  const finalAt=useRef(0),turnMs=useRef(0),firstAudio=useRef(true),toolCall=useRef<string|undefined>(undefined),saved=useRef(false),engineRef=useRef(engine),mutedRef=useRef(false);
  engineRef.current=engine;mutedRef.current=muted;
+ const [sight,setSight]=useState<Sight|undefined>(),sightStream=useRef<MediaStream|undefined>(undefined),sightVideo=useRef<HTMLVideoElement>(null),sightRef=useRef<Sight|undefined>(undefined);sightRef.current=sight;
+ const stopSight=()=>{sightStream.current?.getTracks().forEach(t=>t.stop());sightStream.current=undefined;setSight(undefined);};
+ const toggleSight=async(kind:Sight)=>{
+  if(sight===kind){stopSight();return;}
+  if(engineRef.current!=='local'){setError('Camera and screen work with the Jaeger engine. Gemini Live would send video to Google; cloud vision is off.');return;}
+  stopSight();
+  try{
+   const media=kind==='camera'?await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280}},audio:false}):await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+   sightStream.current=media;media.getVideoTracks()[0]?.addEventListener('ended',()=>{if(sightStream.current===media)stopSight();});setSight(kind);setError('');
+  }catch(e){const name=(e as Error)?.name;if(name!=='NotAllowedError'&&name!=='AbortError')setError(kind==='camera'?'Camera unavailable.':'Screen sharing unavailable.');}
+ };
+ useEffect(()=>{const v=sightVideo.current;if(v&&sightStream.current&&v.srcObject!==sightStream.current){v.srcObject=sightStream.current;void v.play().catch(()=>{});}},[sight]);
+ /** The words to send, plus what the local vision model sees right now. */
+ const withSight=async(text:string):Promise<string>=>{
+  const v=sightVideo.current,kind=sightRef.current;if(!kind||!v||engineRef.current!=='local')return text;
+  const frame=grabFrame(v);if(!frame)return text;
+  const seen=await describeFrame(frame,text);
+  return seen?`${text}\n\n[${kind==='camera'?'Camera':'Screen'} view, described by Jaeger's local vision model: ${seen}]`:text;
+ };
 
  const skipReply=()=>{if(streamId.current)lastReply.current=streamId.current;streamFinal.current=true;setBot('');};
  const settle=()=>{if(phaseRef.current==='connecting'||phaseRef.current==='paused')return;setP(mutedRef.current?'paused':waiting.current||toolCall.current?'thinking':'listening');};
@@ -57,7 +96,7 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
     // While a turn is running the words steer it; if it can't take them, they
     // go next, as soon as Jaeger is free.
     const wasBusy=working.current;
-    void submit.current(m.text).then(ok=>{if(ok||owner!==session.current)return;if(wasBusy){if(working.current)queued.current.push(m.text);else sendQueued(m.text);return;}waiting.current=false;setError('That wasn’t sent. Its text is in the message box.');settle();});
+    void withSight(m.text).then(t=>submit.current(t)).then(ok=>{if(ok||owner!==session.current)return;if(wasBusy){if(working.current)queued.current.push(m.text);else sendQueued(m.text);return;}waiting.current=false;setError('That wasn’t sent. Its text is in the message box.');settle();});
     break;}
    case 'interrupted':setP('hearing');break;
    // Gemini Live: the local VAD marks the end of speech for the latency readout.
@@ -115,17 +154,17 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
  };
  const close=()=>{
   session.current++;rtc.current?.close();rtc.current=undefined;cancelAnimationFrame(frame.current);
-  setOpen(false);onOpenChange?.(false);setMuted(false);waiting.current=false;toolCall.current=undefined;
+  stopSight();setOpen(false);onOpenChange?.(false);setMuted(false);waiting.current=false;toolCall.current=undefined;
   onClosed?.(saved.current);saved.current=false;
  };
- useEffect(()=>()=>{session.current++;rtc.current?.close();cancelAnimationFrame(frame.current);},[]);
+ useEffect(()=>()=>{session.current++;rtc.current?.close();cancelAnimationFrame(frame.current);sightStream.current?.getTracks().forEach(t=>t.stop());},[]);
  useEffect(()=>{if(!open)return;const k=(e:KeyboardEvent)=>{if(e.key==='Escape')close();};window.addEventListener('keydown',k);return()=>window.removeEventListener('keydown',k);},[open]);
 
  const switchEngine=(next:VoiceEngine)=>{
   if(next===engine)return;
   if(next==='gemini'&&geminiReady===false){setError('Gemini Live needs a Google AI Studio key (GEMINI_API_KEY in ~/.jaeger/secrets.env).');return;}
   try{localStorage.setItem(ENGINE_KEY,next);}catch{/* private mode */}
-  setEngine(next);if(open)void connect(next);
+  if(next!=='local')stopSight();setEngine(next);if(open)void connect(next);
  };
  const toggleMute=()=>{const next=!muted;setMuted(next);mutedRef.current=next;rtc.current?.setMuted(next);setP(next?'paused':waiting.current||toolCall.current?'thinking':'listening');};
  const tapOrb=()=>{
@@ -177,6 +216,7 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
     </div>
     {latency!==undefined&&<span className="jg-vmode__latency" title="From the end of your speech to Jaeger's first audio">{(latency/1000).toFixed(1)} s</span>}
    </header>
+   {sight&&<div className="jg-vmode__sight" data-kind={sight}><video ref={sightVideo} muted playsInline autoPlay aria-label={sight==='camera'?'Camera preview':'Shared screen preview'}/><span>{sight==='camera'?'Camera':'Screen'} · seen on this Mac only</span></div>}
    <button type="button" ref={orb} className="jg-vmode__orb" data-phase={phase} aria-label={phase==='speaking'?'Interrupt Jaeger':muted?'Unmute microphone':'Voice activity'} onClick={tapOrb}><span/></button>
    <p className="jg-vmode__status" role="status">{status}</p>
    <div className="jg-vmode__captions" aria-live="polite">
@@ -185,7 +225,9 @@ export function VoiceMode({onTranscript,reply,outcome,busy,disabled,primary=fals
     {error&&<p className="jg-vmode__error" role="alert">{error}</p>}
    </div>
    <footer className="jg-vmode__controls">
+    <button type="button" className="jg-vmode__control" aria-pressed={sight==='camera'} data-active={sight==='camera'} aria-disabled={engine!=='local'} aria-label={sight==='camera'?'Turn camera off':'Turn camera on'} title={engine==='local'?'Show Jaeger your camera (local vision, stays on this Mac)':'Camera needs the Jaeger engine; cloud vision is off'} onClick={()=>void toggleSight('camera')}><CameraIcon/></button>
     <button type="button" className="jg-vmode__control" aria-pressed={muted} aria-label={muted?'Unmute microphone':'Mute microphone'} data-active={muted} onClick={toggleMute}><MicIcon/></button>
+    {typeof navigator!=='undefined'&&'getDisplayMedia' in (navigator.mediaDevices||{})&&<button type="button" className="jg-vmode__control" aria-pressed={sight==='screen'} data-active={sight==='screen'} aria-disabled={engine!=='local'} aria-label={sight==='screen'?'Stop sharing screen':'Share screen'} title={engine==='local'?'Show Jaeger your screen (local vision, stays on this Mac)':'Screen sharing needs the Jaeger engine; cloud vision is off'} onClick={()=>void toggleSight('screen')}><ScreenIcon/></button>}
     <button type="button" className="jg-vmode__control jg-vmode__end" aria-label="End voice mode" onClick={close}><CloseIcon/></button>
    </footer>
   </section>,document.body)}

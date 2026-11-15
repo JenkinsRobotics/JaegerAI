@@ -25,3 +25,10 @@
 .jg-vmode__end { background:var(--jg-color-active); }
 @media (prefers-reduced-motion: reduce) { .jg-vmode__orb > span { transition:none; animation:none !important; } }
 .jg-steer-message { margin:18px 0; }
+
+/* Camera / screen preview: a small picture-in-picture above the orb. */
+.jg-vmode__sight { position:relative; width:min(240px,56vw); aspect-ratio:4/3; border-radius:16px; overflow:hidden; border:1px solid var(--jg-color-border); background:var(--jg-color-elevated); box-shadow:0 8px 24px var(--aether-color-shadow); }
+.jg-vmode__sight video { width:100%; height:100%; object-fit:cover; display:block; }
+.jg-vmode__sight[data-kind="screen"] video { object-fit:contain; }
+.jg-vmode__sight span { position:absolute; left:8px; bottom:8px; padding:2px 8px; border-radius:999px; font-size:11px; color:var(--jg-color-text); background:var(--jg-color-elevated); opacity:0.9; }
+.jg-vmode__control[aria-disabled="true"] { opacity:0.45; }
