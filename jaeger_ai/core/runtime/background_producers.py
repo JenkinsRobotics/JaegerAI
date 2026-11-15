@@ -15,6 +15,7 @@ import json
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any, Protocol
 
 LEASE_SLOT = "background_producers"
@@ -63,6 +64,32 @@ def background_producers_enabled() -> bool:
         (_env_flag("JAEGER_TEST_HEADLESS") or bool(os.environ.get("PYTEST_CURRENT_TEST")))
         and not _env_flag("JAEGER_BACKGROUND_PRODUCERS")
     )
+
+
+def cron_runs_path(layout: Any) -> Path | None:
+    mem = getattr(layout, "memory_dir", None)
+    return Path(mem) / "cron_runs.jsonl" if mem is not None else None
+
+
+def _log_cron_run(layout: Any, name: str, request_id: str, session: str, result: dict[str, Any]) -> None:
+    """Append one line per schedule firing (ran, skipped and why) for run history."""
+    path = cron_runs_path(layout)
+    if path is None:
+        return
+    import json as _json
+    status = result.get("status") or ("skipped" if result.get("skipped") else "unknown")
+    row = {
+        "job_id": name, "fired_at": time.time(), "request_id": request_id, "session_id": session,
+        "status": status, "halt_reason": result.get("halt_reason"),
+        "error": (str(result.get("error"))[:300] if result.get("error") else None),
+        "chars": len(str(result.get("text") or "")),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(row) + "\n")
+    except OSError:
+        pass
 
 
 def _float_env(name: str, default: float) -> float:
@@ -355,6 +382,7 @@ class BackgroundProducers:
             _restore_claimed_schedule(name)
             print(f"[background] cron submit failed: {exc}", flush=True)
             return
+        _log_cron_run(self.layout, name, request_id, session, result)
         if result.get("halt_reason") == "tier_disabled":
             # The tier forbids background turns: drop this occurrence
             # instead of restoring it (a restore re-fires every poll).
