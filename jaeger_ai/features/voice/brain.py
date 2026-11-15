@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import urllib.request
+from datetime import datetime
 
 DEFAULT_PROVIDER = "ollama"
 DEFAULT_MODEL = "gemma4:latest"
@@ -32,8 +34,52 @@ VOICE_STYLE = (
     "Answer in one to three short, natural sentences. Lead with the answer. "
     "No markdown, lists, tables, emoji, code or URLs. Spell out symbols. "
     "If the person asks for real work (files, tools, research, messages), say briefly "
-    "that you're on it; the work itself runs in the chat."
+    "that you're on it; the work itself runs in the chat. "
+    "The current local date and time are given with each request; use them. "
+    "Never guess live facts you were not given (time in other places, weather, news, "
+    "prices, scores, anything in files or accounts); say you'll check instead."
 )
+
+# Requests that need live facts or the user's data go to full Jaeger (tools), never
+# to the small voice model, which would otherwise guess. Plain local time/date
+# questions stay here: the model is handed the clock below.
+_LIVE = re.compile(
+    r"\b(?:"
+    r"weather|forecast|temperature|rain(?:ing)?|snow(?:ing)?|humid|sunrise|sunset"
+    r"|news|headlines?|stocks?|share price|price of|how much (?:is|does|are)|exchange rate|bitcoin|crypto"
+    r"|scores?|who won|standings|game tonight|traffic|flights?|open now|hours (?:for|of)"
+    r"|search|google|look (?:it |that )?up|find out|browse|website|web|online|latest|current(?:ly)?(?! (?:time|date|day))|recent|this week'?s"
+    r"|files?|folders?|documents?|downloads|desktop|notes?|calendar|meetings?|schedule|emails?|inbox|messages?|texts?|slack"
+    r"|reminders?|remind me|tasks?|to-?do|contacts?|photos?|screenshot|open (?:the |my )?\w+|run |install|repo|github|code"
+    r"|time (?:is it )?(?:in|at)\s+\w|time zone in|what day is it in|in (?:tokyo|london|paris|new york|sydney|berlin|beijing|dubai|delhi|mumbai)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def needs_live_facts(request: str) -> bool:
+    """True when a spoken request needs tools, live data or the user's files/accounts."""
+    return bool(_LIVE.search(str(request or "")))
+
+
+def _zone_name() -> str:
+    name = os.environ.get("TZ", "").strip()
+    if not name:
+        try:
+            real = os.path.realpath("/etc/localtime")
+            name = real.split("zoneinfo/", 1)[1] if "zoneinfo/" in real else ""
+        except OSError:
+            name = ""
+    return name
+
+
+def clock_line(now: datetime | None = None) -> str:
+    """The local date, time and zone, e.g. ``Sunday, November 15, 2026, 12:58 AM PST``."""
+    now = (now or datetime.now()).astimezone()
+    zone = _zone_name()
+    hour = now.strftime("%I").lstrip("0") or "12"
+    text = f"{now.strftime('%A, %B')} {now.day}, {now.year}, {hour}:{now.strftime('%M %p %Z')}"
+    return f"{text} ({zone})" if zone else text
 
 
 def selection() -> tuple[str, str]:
@@ -82,6 +128,11 @@ def voice_prompt(prompt: str, request: str) -> str:
     to 4,000 characters of recall used for typed turns are cut to a short lead.
     """
     prompt, request = str(prompt or ""), str(request or "").strip()
+    # The clock rides at the end (not in the system prompt) so the cached prefix holds.
+    return _voice_background(prompt, request) + f"\n\n[Local date and time now: {clock_line()}]"
+
+
+def _voice_background(prompt: str, request: str) -> str:
     at = prompt.rfind(request) if request else -1
     if at <= 0:
         return prompt if len(prompt) <= VOICE_BACKGROUND + len(request) + 200 else request or prompt
