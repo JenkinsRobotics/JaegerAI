@@ -254,7 +254,13 @@ GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
 
 
 def passthrough_match(path: str, method: str) -> bool:
-    return any(method in methods and rx.match(path) for methods, rx in GATEWAY_PASSTHROUGH)
+    # Match on the decoded path: the UI percent-encodes ids (``native%3Ajaeger``),
+    # which ``_ID`` would otherwise reject and the request would 404 here.
+    from urllib.parse import unquote
+    if "%2f" in path.lower():
+        return False  # an encoded slash must never widen a route
+    decoded = unquote(path)
+    return any(method in methods and rx.match(decoded) for methods, rx in GATEWAY_PASSTHROUGH)
 
 
 #: Team pack avatars (gateway/team_routes.py ``avatar``): the one binary route relayed.
