@@ -855,7 +855,7 @@ class CliBackendAdapter(ProviderAdapter):
             # Full schemas and history exceed macOS argv limits. Keep the
             # prompt private and out of process listings; delete on exit.
             # The same workdir holds the per-turn Jaeger MCP config.
-            from .cli_turn_mcp import cli_session_cwd, stable_cli_workdir
+            from .cli_turn_mcp import cli_session_cwd, stable_cli_workdir, stage_session_cli_config
             folder = stable_cli_workdir(self.spec_id)
             # Grok/agy must run in the session folder or Agent worktree so
             # writes land where Undo/Apply can see them. MCP config and the
@@ -908,13 +908,19 @@ class CliBackendAdapter(ProviderAdapter):
                     del child_argv[index:index + 2]
                 child_argv.extend(["--cwd", spawn_cwd])
             # Keep the process-global MCP server running between turns.
-            return self._spawn(
-                child_argv, spawn_stdin, spec,
-                on_delta=on_delta, on_reasoning=on_reasoning,
-                on_progress=progress.touch,
-                cwd=spawn_cwd,
-                extra_env=extra_env,
-            )
+            # Grok headless reads MCP from --cwd/.grok; stage a temporary
+            # link or overlay, then always remove it after the process exits.
+            cleanup_config = stage_session_cli_config(self.spec_id, work_cwd, folder)
+            try:
+                return self._spawn(
+                    child_argv, spawn_stdin, spec,
+                    on_delta=on_delta, on_reasoning=on_reasoning,
+                    on_progress=progress.touch,
+                    cwd=spawn_cwd,
+                    extra_env=extra_env,
+                )
+            finally:
+                cleanup_config()
 
         def _abandon() -> None:
             self._kill()
