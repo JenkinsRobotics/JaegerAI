@@ -1181,7 +1181,8 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   const hasText = Boolean(draft.trim()) || files.length > 0;
   const unread = atBottom ? 0 : unreadSince(unreadBase.current, messageCount(session?.turns ?? []));
   const primary = primaryAction({ running: Boolean(active), hasContent: hasText, voiceChat, dictation });
-  const spokenTurn = [...(session?.turns || [])].reverse().find(turn => turn.state === 'complete' && replyText(turn).trim());
+  // Voice mode speaks the newest reply while it streams (pending) and finishes it on complete.
+  const spokenTurn = [...(session?.turns || [])].reverse().find(turn => (turn.state === 'complete' || turn.state === 'pending') && replyText(turn).trim());
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
   return (
     <ClarificationAnswers key={sessionId}>
@@ -1350,7 +1351,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
           <RunModeControl host={host} onTier={setRunTier} />
           <span className="jg-composer__spacer" />
           <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} />
-          {host instanceof WebHost && <>{!voiceModeOpen && <VoiceDictation />}<VoiceMode primary={!active && !hasText} onOpenChange={setVoiceModeOpen} disabled={Boolean(listening) || !session || !draftReady || preparingFiles || files.length>0 || Boolean(quote) || recoveryBlocked || recoveryStatus === 'unknown'} busy={Boolean(active)} outcome={session?.turns.at(-1) ? {id:session.turns.at(-1)!.requestId || session.turns.at(-1)!.turnId,state:session.turns.at(-1)!.state} : undefined} reply={spokenTurn ? {id:spokenTurn.requestId || spokenTurn.turnId,text:replyText(spokenTurn)} : undefined} onTranscript={async text=>{const accepted=active?await submitWhileBusy('steer',text):send(text,true);if(!accepted)setDraft(draft=>draft?draft+'\n'+text:text);return Boolean(accepted);}} /></>}
+          {host instanceof WebHost && <>{!voiceModeOpen && <VoiceDictation />}<VoiceMode primary={!active && !hasText} onOpenChange={setVoiceModeOpen} disabled={Boolean(listening) || !session || !draftReady || preparingFiles || files.length>0 || Boolean(quote) || recoveryBlocked || recoveryStatus === 'unknown'} busy={Boolean(active)} outcome={session?.turns.at(-1) ? {id:session.turns.at(-1)!.requestId || session.turns.at(-1)!.turnId,state:session.turns.at(-1)!.state} : undefined} reply={spokenTurn ? {id:spokenTurn.requestId || spokenTurn.turnId,text:replyText(spokenTurn),final:spokenTurn.state === 'complete'} : undefined} onTranscript={async text=>{const accepted=active?await submitWhileBusy('steer',text):send(text,true);if(!accepted)setDraft(draft=>draft?draft+'\n'+text:text);return Boolean(accepted);}} /></>}
         {active
           ? <button type="button" className="jg-send jg-send--stop" aria-label="Stop current turn (⌘Esc)" onClick={stop}><StopIcon /></button>
           : hasText || primary === "send"

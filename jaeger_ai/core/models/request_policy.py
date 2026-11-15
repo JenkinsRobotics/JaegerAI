@@ -74,7 +74,7 @@ def require_egress(route: ModelRoute, payload: Any, *, local_only: bool = False)
             "or remove the private content. This payload was not sent to the cloud.")
 
 
-def select_request_client(config, layout, *, model=None, provider=None, default_client=None):
+def select_request_client(config, layout, *, model=None, provider=None, default_client=None, controls=None):
     """Preserve the admitted provider/model pair, including CLI and local lanes."""
     from .external_model import ExternalModelClient
     from .configuration import _BASE_URLS, _CREDENTIALS, _reject_cross_vendor_pair
@@ -167,6 +167,11 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
                 ext.base_url = alternative.base_url
             break
     ext.enabled, ext.provider, ext.model = True, owner, name
+    # Per-request lane controls (voice brain: small window, thinking off,
+    # short answers). Only known model fields; never credentials or URLs.
+    for key, value in (controls or {}).items():
+        if key in {"ctx", "reasoning_effort", "max_tokens", "temperature", "first_progress_timeout_s"} and value is not None:
+            setattr(ext, key, value)
     client = ExternalModelClient(ext, layout)
     client.selected_lane = selected_lane
     return client

@@ -33,7 +33,7 @@ def user_content(text, attachments, adapter, route):
 def complete(config, layout, text, *, model=None, provider=None, system_prompt="",
              history=(), attachments=(), interrupt_event=None, on_delta=None, on_reasoning=None,
              on_input=None, on_route=None, on_model_identity=None, local_only=False,
-             default_client=None):
+             default_client=None, controls=None):
     from jaeger_ai.contract.channel_messages import model_content
     from jaeger_agent.loop.runtime_bridge import _adapter_for_client
     from jaeger_agent.loop.interrupt import AgentInterrupted
@@ -42,7 +42,7 @@ def complete(config, layout, text, *, model=None, provider=None, system_prompt="
     if interrupt.is_set():
         raise AgentInterrupted("Cancelled before model dispatch")
     client = select_request_client(config, layout, model=model, provider=provider,
-                                   default_client=default_client)
+                                   default_client=default_client, controls=controls)
     route = route_for(client)
     adapter = _adapter_for_client(client)
     messages = [{"role": row["role"], "content": model_content(row)} for row in history

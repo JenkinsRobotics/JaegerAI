@@ -26,6 +26,7 @@ EXACT: frozenset[str] = frozenset({
     "/api/jaeger/voice/capability",
     "/api/jaeger/tts",
     "/api/jaeger/transcribe",
+    "/api/jaeger/voice/warm",
     "/api/jaeger/gateway/health",
     "/api/file",
     "/api/file/raw",
