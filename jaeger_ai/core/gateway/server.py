@@ -6406,7 +6406,7 @@ class JaegerGatewayApp:
                         prompt,
                         model=model, provider=lane_provider, local_only=local_only,
                         system_prompt=lane_system, controls=lane_controls,
-                        history=(self._history_before_admitted_user(current, admitted_request)[-voice_brain["history"]:]
+                        history=(voice_history(self._history_before_admitted_user(current, admitted_request))
                                  if voice_brain else self._history_before_admitted_user(current, admitted_request)),
                         attachments=self._turn_attachments(session_id, execution),
                         context_ids=(session_id, request_id or turn_id),
@@ -6498,7 +6498,7 @@ class JaegerGatewayApp:
                 prompt = f"{TURN_CARD_GUIDANCE}\n\n" + prompt
             if fast_lane and self._voice_direct_lane(runtime, prepared, fast_lane=fast_lane):
                 model_only = True
-                from jaeger_ai.features.voice.brain import voice_brain as _voice_brain
+                from jaeger_ai.features.voice.brain import voice_brain as _voice_brain, voice_history
                 voice_brain = _voice_brain()
             elif tier == "chat":
                 model_only = True
