@@ -21,10 +21,20 @@ class ChatOrganization:
     def _snapshot(self, conn):
         row = conn.execute("SELECT * FROM chat_organization WHERE id=1").fetchone()
         sessions = []
-        for s in conn.execute("SELECT session_id,title,workspace,metadata_json FROM sessions"):
+        has_title_source = 'title_source' in {row['name'] for row in conn.execute("PRAGMA table_info(sessions)")}
+        query = "SELECT session_id,title,workspace,metadata_json,title_source FROM sessions" if has_title_source else "SELECT session_id,title,workspace,metadata_json FROM sessions"
+        for s in conn.execute(query):
             meta = json.loads(s['metadata_json'] or '{}')
+            org = meta.get('chat_organization') or {}
+            keys = ('pinned','manual_title','title_source','project_id','section_id','position')
+            extra = {k:v for k,v in org.items() if k in keys}
+            if has_title_source and s['title_source'] in ('auto','user'):
+                extra['title_source'] = s['title_source']
+                extra['manual_title'] = s['title_source']=='user'
+            elif extra.get('title_source') not in ('auto','user'):
+                extra['title_source'] = 'user' if extra.get('manual_title') else 'auto'
             sessions.append({'session_id': s['session_id'], 'title': s['title'], 'workspace': s['workspace'],
-                'archived': bool(meta.get('archived')), **{k:v for k,v in (meta.get('chat_organization') or {}).items() if k in ('pinned','manual_title','project_id','section_id','position')}})
+                'archived': bool(meta.get('archived')), **extra})
         return {'revision': row['revision'], 'groups': json.loads(row['groups_json']), 'sessions': sessions}
 
     def snapshot(self):
@@ -87,7 +97,12 @@ class ChatOrganization:
                     s=rows[ident]
                     if kind == 'rename':
                         s['title']=self._name(action.get('title'))
-                        s['manual_title']=action.get('title_source')!='ai'
+                        if action.get('title_source')=='ai':
+                            s['manual_title']=False
+                            s['title_source']='auto'
+                        else:
+                            s['manual_title']=True
+                            s['title_source']='user'
                     elif kind in ('pin','archive'):
                         if not isinstance(action.get('value'),bool): raise ValueError('Expected true or false')
                         s['pinned' if kind=='pin' else 'archived']=action['value']
@@ -110,7 +125,15 @@ class ChatOrganization:
             meta=json.loads(row[0] or '{}')
             meta['archived']=s['archived']
             meta['chat_organization']={k:v for k,v in s.items() if k not in ('session_id','title','workspace','archived')}
-            conn.execute('UPDATE sessions SET title=?,metadata_json=? WHERE session_id=?',(s['title'],json.dumps(meta),s['session_id']))
+            source = s.get('title_source')
+            if source not in ('auto','user'):
+                source = 'user' if s.get('manual_title') else 'auto'
+            meta['chat_organization']['title_source']=source
+            meta['chat_organization']['manual_title']=source=='user'
+            if 'title_source' in {row['name'] for row in conn.execute("PRAGMA table_info(sessions)")}:
+                conn.execute('UPDATE sessions SET title=?,title_source=?,metadata_json=? WHERE session_id=?',(s['title'],source,json.dumps(meta),s['session_id']))
+            else:
+                conn.execute('UPDATE sessions SET title=?,metadata_json=? WHERE session_id=?',(s['title'],json.dumps(meta),s['session_id']))
         conn.execute('UPDATE chat_organization SET revision=revision+1,groups_json=? WHERE id=1',(json.dumps(after['groups']),))
 
     def apply(self, revision, actions, operation_id):

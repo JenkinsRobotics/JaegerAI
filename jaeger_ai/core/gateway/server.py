@@ -1026,6 +1026,11 @@ class JaegerGatewayApp:
             _install_hooks(self.event_bus)
         except Exception:  # noqa: BLE001 — hooks never block startup
             logger.warning("lifecycle hooks bridge unavailable", exc_info=True)
+        try:
+            from jaeger_ai.core.gateway.session_titles import install as _install_session_titles
+            _install_session_titles(self)
+        except Exception:  # noqa: BLE001 — title generation never blocks startup
+            logger.warning("session title generation unavailable", exc_info=True)
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
         self._install_otel_export()
