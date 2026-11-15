@@ -725,7 +725,11 @@ class BackgroundProducers:
             self.sensor_bus.start()
 
     def _sensor_action(self, cfg: Any) -> None:
-        if self._current_tier(cfg) != "jaeger":
+        # Perception used to require the retired resident 'jaeger' mode,
+        # which meant the bus never started after that value began
+        # normalizing to Agent. Observe in Agent and Plan; Chat is
+        # conversational-only, so the bus stays down there.
+        if self._current_tier(cfg) == "chat":
             if self.sensor_bus is not None:
                 self.sensor_bus.stop()
                 self.sensor_bus = None

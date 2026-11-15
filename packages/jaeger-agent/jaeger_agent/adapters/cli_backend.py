@@ -252,7 +252,12 @@ _ENVELOPE_ID_KEYS = frozenset({
 # tool_calls / arguments hold places and queries, not the final answer.
 _FIND_TEXT_SKIP_KEYS = _ENVELOPE_ID_KEYS | {
     "tool_calls", "arguments", "input", "tool_input", "usage", "model_fingerprint",
+    "type", "role", "name", "event",
 }
+_ENVELOPE_TYPE_NAMES = frozenset({
+    "tool_result", "tool_use", "tool_call", "function_call", "assistant",
+    "user", "system", "result", "usage", "reasoning", "message",
+})
 _CLI_META_TOOLS = frozenset({
     "search_tool", "use_tool", "load_tools", "list_tools", "describe_tool",
     "tool_search",
@@ -278,7 +283,12 @@ _DEAD_END_TEXT = re.compile(
 
 def _usable_cli_text(text: str) -> str:
     value = (text or "").strip()
-    if not value or _is_id_like_text(value) or _DEAD_END_TEXT.search(value):
+    if (
+        not value
+        or _is_id_like_text(value)
+        or _DEAD_END_TEXT.search(value)
+        or value.lower() in _ENVELOPE_TYPE_NAMES
+    ):
         return ""
     return value
 
@@ -460,6 +470,10 @@ def _unwrap_cli_tool(block: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 
 
 def _tool_result_failed(content: Any) -> bool:
+    if isinstance(content, dict):
+        if content.get("ok") is False or content.get("error"):
+            return True
+        content = content.get("error") or content.get("text") or content.get("content") or ""
     if not isinstance(content, str):
         return False
     lowered = content.lower()
@@ -467,7 +481,53 @@ def _tool_result_failed(content: Any) -> bool:
         "tool not found" in lowered
         or "user cancelled" in lowered
         or "failed via" in lowered
+        or "outside this request scope" in lowered
+        or "permission_denied" in lowered
+        or "permission denied" in lowered
     )
+
+
+def _tool_result_text(content: Any) -> str:
+    if isinstance(content, dict):
+        for key in ("error", "text", "content", "message", "summary"):
+            value = content.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    return str(content or "").strip()
+
+
+def _tool_result_recoverable(content: Any) -> bool:
+    """True when the CLI failed for a missing/cancelled tool we can retry."""
+    text = _tool_result_text(content).lower()
+    return (
+        "tool not found" in text
+        or "user cancelled" in text
+        or "failed via" in text
+    )
+
+
+def _denied_tool_message(stream: dict[str, Any]) -> str:
+    """A real visible sentence when the CLI ended on a denied tool, not 'tool_result'."""
+    uses = {str(b.get("id") or ""): b for b in (stream.get("tool_uses") or []) if isinstance(b, dict)}
+    lines: list[str] = []
+    seen: set[str] = set()
+    for block in stream.get("tool_results") or []:
+        if not isinstance(block, dict) or not _tool_result_failed(block.get("content")):
+            continue
+        ident = str(block.get("tool_call_id") or block.get("tool_use_id") or block.get("id") or "")
+        name, _ = _unwrap_cli_tool(uses.get(ident) or {"name": block.get("name") or "", "input": {}})
+        name = name or str(block.get("name") or "tool")
+        detail = _tool_result_text(block.get("content"))
+        line = f"{name} was denied" + (f": {detail}" if detail else ".")
+        if line not in seen:
+            seen.add(line)
+            lines.append(line)
+    if not lines:
+        return ""
+    if len(lines) == 1:
+        return lines[0]
+    return "Some tools were denied:\n- " + "\n- ".join(lines)
 
 
 def _recover_jaeger_tool_calls(stream: dict[str, Any]) -> list[dict[str, Any]]:
@@ -485,11 +545,15 @@ def _recover_jaeger_tool_calls(stream: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(block, dict):
             continue
         content = block.get("content")
-        if _tool_result_failed(content):
+        # Recover infrastructure failures only. A permission denial
+        # would fail again in-process; parse_response shows that error.
+        if _tool_result_recoverable(content):
             any_failure = True
             ident = block.get("tool_call_id") or block.get("tool_use_id") or block.get("id")
             if ident:
                 failed_ids.add(str(ident))
+    if not any_failure:
+        return []
     recovered: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for block in stream.get("tool_uses") or []:
@@ -1045,9 +1109,18 @@ class CliBackendAdapter(ProviderAdapter):
             # Grok already ran Jaeger MCP via use_tool; the loopback
             # executor emitted the tool row. Do not enqueue a second call
             # when the CLI actually answered. If it ended on an empty
-            # message or a session/job UUID, recover any failed Jaeger
-            # tool so the loop can run it and write a real answer.
-            if text:
+            # message, a session/job UUID, or a bare envelope type such as
+            # "tool_result", recover failed Jaeger tools or surface the
+            # denial instead of that type name. A mid-turn "I'll list..."
+            # line is not an answer when every tool was denied.
+            results = [
+                b for b in (stream.get("tool_results") or [])
+                if isinstance(b, dict) and (
+                    b.get("tool_call_id") or b.get("tool_use_id") or _tool_result_text(b.get("content"))
+                )
+            ]
+            all_denied = bool(results) and all(_tool_result_failed(b.get("content")) for b in results)
+            if text and not all_denied:
                 return Message(
                     role="assistant",
                     content=_strip_pipe_tool_calls(text).strip() or text,
@@ -1056,6 +1129,15 @@ class CliBackendAdapter(ProviderAdapter):
             recovered = _recover_jaeger_tool_calls(stream)
             if recovered:
                 return {"role": "assistant", "content": None, "tool_calls": recovered}
+            denied = _denied_tool_message(stream)
+            if denied:
+                return Message(role="assistant", content=denied, finish_reason="stop")
+            if text:
+                return Message(
+                    role="assistant",
+                    content=_strip_pipe_tool_calls(text).strip() or text,
+                    finish_reason="stop",
+                )
             return Message(role="assistant", content="", finish_reason="stop")
         from jaeger_agent.dialects import extract_tool_calls
         tool_calls = list(extract_tool_calls(text) or [])

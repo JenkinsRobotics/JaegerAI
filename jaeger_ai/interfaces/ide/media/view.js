@@ -992,10 +992,10 @@ function renderComposerBar() {
     subswitch.hidden = (currentTier !== 'agent');
   }
 
-  // Render Jaeger Autonomous Indicator (visible in jaeger tier; hidden in chat/agent)
+  // The resident 'jaeger' autonomous indicator retired with that run mode.
   const jaegerIndicator = $('jaeger-autonomous-indicator');
   if (jaegerIndicator) {
-    jaegerIndicator.hidden = (currentTier !== 'jaeger');
+    jaegerIndicator.hidden = true;
   }
   // Visual steering feedback
   const prompt = $('prompt');

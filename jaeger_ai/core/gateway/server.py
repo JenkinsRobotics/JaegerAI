@@ -1524,13 +1524,19 @@ class JaegerGatewayApp:
         allowed_tools: list[str] | None = None,
     ) -> dict[str, Any]:
         tier = self._current_tier()
-        # The resident 'jaeger' tier was retired into Agent; owner-created
-        # scheduled jobs and Jaeger's own upkeep passes run in Agent mode.
+        # Skill reviews, memory nudges, the nightly memory pass, and owner
+        # scheduled jobs are internal maintenance. They run as Agent-tier
+        # work under autonomy regardless of the foreground Chat/Agent/Plan
+        # selection. The retired 'jaeger' resident mode is not a gate.
         # Other unprompted producers stay off (no surprise background work).
-        if not (tier == "agent" and source in OWNER_BACKGROUND_SOURCES):
+        if source not in OWNER_BACKGROUND_SOURCES:
             return {
                 "text": "",
-                "error": f"Proactive background turns are disabled in '{tier}' mode (requires 'jaeger' mode)",
+                "error": (
+                    f"Proactive background turns from source {source!r} are "
+                    f"not internal maintenance and stay off "
+                    f"(foreground mode is {tier!r})"
+                ),
                 "status": "disabled",
                 "replayed": False,
                 "skipped": True,
@@ -1539,7 +1545,7 @@ class JaegerGatewayApp:
         options = {"source": source, "background": True}
         if salience is not None:
             options["proactive_salience"] = _normalize_salience(salience)
-        requested: dict[str, Any] = {"options": options}
+        requested: dict[str, Any] = {"options": options, "interaction_tier": "agent"}
         if allowed_tools is not None:
             # [] = a compose-only turn: the agent is built with no tools.
             requested["allowed_tools"] = list(allowed_tools)
@@ -8109,8 +8115,9 @@ class JaegerGatewayApp:
             logger.debug("plan-mode tool catalog unavailable", exc_info=True)
         # Conservative read-only fallback if discovery fails.
         return [
-            "read_file", "list_dir", "list_directory", "search_files", "grep",
-            "glob", "web_search", "retrieve", "memory_get", "get_file",
+            "read_file", "list_skill_dir", "list_dir", "list_directory",
+            "search_files", "grep", "glob", "web_search", "retrieve",
+            "memory_get", "get_file", "get_time", "get_weather",
         ]
 
     async def handle_get_tier(self, request: web.Request) -> web.Response:
