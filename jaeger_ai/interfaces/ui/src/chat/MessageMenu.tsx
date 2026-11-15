@@ -6,11 +6,11 @@ import { useExclusivePopup } from "../popups/coordinator";
 import { Icon, type IconName } from "../icons/Icon";
 import type { MessageAnchor } from "./useMessagePress";
 
-export type MessageAction = "reply" | "mark-unread" | "copy" | "select-text" | "copy-id" | `react:${string}`;
+export type MessageAction = "reply" | "edit" | "mark-unread" | "copy" | "select-text" | "copy-id" | `react:${string}`;
 
-export function MessageMenu({ at, requestId, reactionEmojis = [], activeReactions = [], unreadAvailable = false, replyAvailable = true, onAction, onClose }: {
+export function MessageMenu({ at, requestId, reactionEmojis = [], activeReactions = [], unreadAvailable = false, replyAvailable = true, editAvailable = false, onAction, onClose }: {
   at: MessageAnchor | null; requestId?: string; reactionEmojis?: readonly string[]; activeReactions?: readonly string[];
-  unreadAvailable?: boolean; replyAvailable?: boolean; onAction: (a: MessageAction) => void; onClose: () => void;
+  unreadAvailable?: boolean; replyAvailable?: boolean; editAvailable?: boolean; onAction: (a: MessageAction) => void; onClose: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; bottom: number; maxHeight: number } | null>(null);
@@ -37,6 +37,7 @@ export function MessageMenu({ at, requestId, reactionEmojis = [], activeReaction
   if (!at) return null;
   const items: { id: MessageAction; label: string; icon: IconName; disabled?: boolean; reason?: string }[] = [
     { id: "reply", label: "Reply", icon: "reply", disabled: !replyAvailable, reason: "Wait until your draft is ready" },
+    ...(editAvailable ? [{ id: "edit" as const, label: "Edit", icon: "edit" as const }] : []),
     { id: "mark-unread", label: "Mark as unread", icon: "mail-read", disabled: !unreadAvailable, reason: "Unread markers are unavailable for this message on this Gateway" },
     { id: "copy", label: "Copy", icon: "copy" },
     { id: "select-text", label: "Select Text", icon: "edit" },

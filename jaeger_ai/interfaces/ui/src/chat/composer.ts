@@ -2,7 +2,7 @@
  * caps and the auto-grow fallback for WebKit builds that ignore `field-sizing: content`. */
 import type { HostAttachment } from "./hostH8";
 
-export type Primary = "stop" | "send" | "voice" | "dictate";
+export type Primary = "stop" | "send" | "voice" | "dictate" | "idle";
 /** Stop while a turn runs, Send once there is text or a file; on an empty composer, Start voice chat
  * when the host has it, else Dictate when it can only take speech-to-text, else a (disabled) Send.
  * The ghost mic beside it is dictation, shown only while voice chat holds the primary. */
@@ -11,7 +11,7 @@ export function primaryAction(o: { running: boolean; hasContent: boolean; voiceC
   if (o.hasContent) return "send";
   if (o.voiceChat) return "voice";
   if (o.dictation) return "dictate";
-  return "send";
+  return "idle";
 }
 
 export const MAX_ATTACHMENTS = 8;

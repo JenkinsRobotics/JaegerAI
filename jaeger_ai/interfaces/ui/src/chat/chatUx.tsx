@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Copy, RefreshCw, ThumbsDown, ThumbsUp, Workflow } from "../components/Icons";
 import { navigate } from "../shell/router";
 
@@ -31,14 +31,18 @@ export function ThinkingRow({ startedAt, durationMs, text, live, sessionId }: {
   startedAt?: number | string; durationMs?: number; text?: string; live: boolean; sessionId?: string;
 }): ReactNode {
   const [now, setNow] = useState(Date.now());
+  const started = useRef<number | undefined>(undefined);
+  const shown = text && !isDebugThinking(text) ? text : undefined;
+  if (live && started.current === undefined && (shown || startedAt != null || durationMs != null)) started.current = Date.now();
   useEffect(() => {
     if (!live) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [live]);
-  const seconds = durationMs !== undefined ? Math.max(0, Math.round(durationMs / 1000)) : thinkingSeconds(startedAt, now);
-  const label = live ? `Thinking… ${seconds}s` : `Thought for ${seconds}s`;
-  const shown = text && !isDebugThinking(text) ? text : undefined;
+  const hasClock = startedAt != null || durationMs != null || started.current != null;
+  const seconds = durationMs !== undefined ? Math.max(0, Math.round(durationMs / 1000)) : thinkingSeconds(startedAt ?? started.current, now);
+  if (!live && !shown && !(durationMs && durationMs > 0)) return null;
+  const label = live ? (hasClock ? `Thinking… ${seconds}s` : "Thinking…") : `Thought for ${seconds}s`;
   const href = sessionId ? `/work/process?session=${encodeURIComponent(sessionId)}` : undefined;
   return (
     <details className={`jg-thinking${live ? " jg-thinking--live" : ""}`} open={live && shown ? true : undefined}>

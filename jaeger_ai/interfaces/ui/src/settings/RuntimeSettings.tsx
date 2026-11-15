@@ -13,9 +13,13 @@ export const contextBadge = (value?: number | null) => {
   return value.toLocaleString("en-US");
 };
 
-const isCloudModel = (id: string, remoteHost?: string | null) => Boolean(remoteHost) || id.endsWith(":cloud") || id.endsWith("-cloud");
+const isOllamaCloudProvider = (id: string) => /ollama[-_]?cloud/i.test(id);
+const isCloudModel = (id: string, remoteHost?: string | null, providerId?: string) =>
+  Boolean(providerId && isOllamaCloudProvider(providerId)) || Boolean(remoteHost) || /(:cloud|-cloud)$/i.test(id);
 function providerStatus(provider: ModelInventory["providers"][number]): string {
-  if (provider.reason) return provider.reason;
+  const raw = typeof provider.reason === "string" ? provider.reason.trim() : "";
+  if (raw && /connectionerror|exception|traceback|econnrefused|timed out|timeout|failed/i.test(raw)) return "Unavailable right now";
+  if (raw) return raw;
   if (provider.availability === "unknown") return "Configuration unknown";
   if (provider.availability === "not_probed") return "Configured · health not probed";
   if (provider.reachable) return "Reachable";
@@ -26,17 +30,18 @@ function providerStatus(provider: ModelInventory["providers"][number]): string {
 export function runtimeChoices(inventory?: ModelInventory): RuntimeChoice[] {
   return inventory?.providers.flatMap(provider => {
     const ollama = provider.id === "ollama" || provider.id.startsWith("ollama-");
-    const group = provider.id === "ollama" ? "ollama-local" : provider.id;
+    const providerCloud = isOllamaCloudProvider(provider.id);
+    const group = providerCloud ? "ollama-cloud" : provider.id === "ollama" ? "ollama-local" : provider.id;
     const groupLabel = provider.display_name;
     const models = provider.models.filter(model => !model.capabilities?.length || model.capabilities.includes("completion"));
     if (!models.length) {
       return [{
         id: `@${provider.id}:`,
-        model: providerStatus(provider),
+        model: provider.display_name,
         provider: provider.id,
         providerLabel: provider.display_name,
         group,
-        groupLabel,
+        groupLabel: providerCloud ? "Ollama Cloud" : groupLabel,
         certified: undefined,
         contextLength: undefined,
         selectable: false,
@@ -44,7 +49,7 @@ export function runtimeChoices(inventory?: ModelInventory): RuntimeChoice[] {
       }];
     }
     return models.map(model => {
-      const cloud = ollama && isCloudModel(model.id, model.remote_host);
+      const cloud = providerCloud || (ollama && isCloudModel(model.id, model.remote_host, provider.id));
       const selectable = Boolean(provider.reachable) && model.available !== false;
       return {
         id: `@${provider.id}:${model.id}`,

@@ -224,6 +224,13 @@ def title_from_user_text(content: str) -> str:
     return line[:200]
 
 
+_HIDDEN_SQL = "(json_extract(meta_json, '$.hidden') IS NULL OR json_extract(meta_json, '$.hidden') = 0)"
+
+
+def _message_hidden(meta_json: Any) -> bool:
+    return bool(_row_meta(meta_json).get("hidden"))
+
+
 def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
     """One transcript row in the sessions-contract shape (plus the legacy keys)."""
     keys = m.keys() if hasattr(m, "keys") else []
@@ -253,6 +260,10 @@ def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
         out["channel"] = _channel_message_view(extra)
     if out["kind"] == "summary" and isinstance(extra.get("summary"), dict):
         out["summary"] = extra["summary"]
+    if isinstance(extra.get("versions"), list) and extra["versions"]:
+        out["versions"] = extra["versions"]
+        idx = extra.get("version_index")
+        out["version_index"] = idx if isinstance(idx, int) else len(extra["versions"]) - 1
     return out
 
 
@@ -265,6 +276,10 @@ def _typed_fields(m: Any) -> dict[str, Any]:
     for key in ("request_id", "turn_id"):
         if isinstance(extra.get(key), str):
             out[key] = extra[key]
+    if isinstance(extra.get("versions"), list) and extra["versions"]:
+        out["versions"] = extra["versions"]
+        idx = extra.get("version_index")
+        out["version_index"] = idx if isinstance(idx, int) else len(extra["versions"]) - 1
     kind = m["kind"] if "kind" in keys else None
     if kind and kind != "message":
         out["kind"] = kind
@@ -915,7 +930,8 @@ class GatewaySessionStore:
             if not row:
                 return None
             messages = conn.execute(
-                "SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC, id ASC",
+                "SELECT * FROM messages WHERE session_id = ? AND " + _HIDDEN_SQL +
+                " ORDER BY timestamp ASC, id ASC",
                 (session_id,),
             ).fetchall()
             meta = _row_meta(row["metadata_json"])
@@ -1261,6 +1277,7 @@ class GatewaySessionStore:
         if until is not None:
             clauses.append("id<=?")
             params.append(int(until))
+        clauses.append(_HIDDEN_SQL)
         sql = "SELECT * FROM messages WHERE " + " AND ".join(clauses) + " ORDER BY id DESC LIMIT ?"
         params.append(limit + 1)
         with self._get_conn() as conn:
@@ -1273,8 +1290,10 @@ class GatewaySessionStore:
     def messages_after(self, session_id: str, after_id: int = 0) -> list[dict[str, Any]]:
         """Oldest first, every row with id > ``after_id`` (summarizer input)."""
         with self._get_conn() as conn:
-            rows = conn.execute("SELECT * FROM messages WHERE session_id=? AND id>? ORDER BY id ASC",
-                                (session_id, int(after_id or 0))).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM messages WHERE session_id=? AND id>? AND " + _HIDDEN_SQL + " ORDER BY id ASC",
+                (session_id, int(after_id or 0)),
+            ).fetchall()
         return [message_dict(r, session_id) for r in rows]
 
     def delete_session(self, session_id: str) -> bool:
@@ -1720,6 +1739,7 @@ class GatewaySessionStore:
         expected_model_revision: int | None = None,
         admission_guard: Callable[[sqlite3.Connection], None] | None = None,
         retry_of: str | None = None,
+        edit_message_id: int | None = None,
         _ack_events: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Atomically accept a client request and freeze what it executes.
@@ -1856,6 +1876,62 @@ class GatewaySessionStore:
                     "DELETE FROM messages WHERE session_id=? AND role='assistant' "
                     "AND json_extract(meta_json, '$.request_id')=?", (session_id, retry_of),
                 )
+            elif edit_message_id is not None:
+                mid = int(edit_message_id)
+                original = conn.execute(
+                    "SELECT * FROM messages WHERE id=? AND session_id=? AND role='user'",
+                    (mid, session_id),
+                ).fetchone()
+                if original is None:
+                    raise ValueError("User message is unavailable to edit")
+                self._ensure_session_topics(conn)
+                topic = conn.execute(
+                    "SELECT start_message_id, end_message_id FROM session_topics "
+                    "WHERE session_id=? AND archived=0 AND start_message_id<=? "
+                    "AND (end_message_id IS NULL OR end_message_id>=?) "
+                    "ORDER BY start_message_id DESC LIMIT 1",
+                    (session_id, mid, mid),
+                ).fetchone()
+                end_id = int(topic["end_message_id"]) if topic and topic["end_message_id"] is not None else None
+                following = conn.execute(
+                    "SELECT id, meta_json FROM messages WHERE session_id=? AND id>? "
+                    "AND (? IS NULL OR id<=?) ORDER BY id",
+                    (session_id, mid, end_id, end_id),
+                ).fetchall()
+                visible_following = [int(row["id"]) for row in following if not _message_hidden(row["meta_json"])]
+                meta_msg = _row_meta(original["meta_json"])
+                versions = list(meta_msg.get("versions") or [])
+                if not versions:
+                    versions.append({
+                        "text": original["content"] or "",
+                        "following_ids": visible_following,
+                        "created_at": original["timestamp"],
+                    })
+                else:
+                    idx = meta_msg.get("version_index")
+                    idx = idx if isinstance(idx, int) else len(versions) - 1
+                    if 0 <= idx < len(versions) and not versions[idx].get("following_ids"):
+                        versions[idx] = {**versions[idx], "following_ids": visible_following}
+                versions.append({"text": visible, "following_ids": [], "created_at": now})
+                new_meta = {
+                    **meta_msg,
+                    "request_id": rid,
+                    "turn_id": turn_id,
+                    "versions": versions,
+                    "version_index": len(versions) - 1,
+                    "hidden": False,
+                }
+                conn.execute(
+                    "UPDATE messages SET content=?, meta_json=?, timestamp=? WHERE id=?",
+                    (visible, json.dumps(new_meta), now, mid),
+                )
+                for fid in visible_following:
+                    row = conn.execute("SELECT meta_json FROM messages WHERE id=?", (fid,)).fetchone()
+                    extra = _row_meta(row["meta_json"] if row else None)
+                    extra["hidden"] = True
+                    extra["hidden_by_edit"] = mid
+                    conn.execute("UPDATE messages SET meta_json=? WHERE id=?", (json.dumps(extra), fid))
+                msg_id = mid
             else:
                 msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn,
                                              meta={"request_id": rid, "turn_id": turn_id},
@@ -1891,6 +1967,62 @@ class GatewaySessionStore:
                 "replayed": False,
                 "accepted": True,
             }
+
+    def switch_message_version(self, session_id: str, message_id: int, index: int) -> dict[str, Any] | None:
+        """Show a previous edit of a user message and restore its following turns."""
+        now = time.time()
+        with self._immediate() as conn:
+            row = conn.execute(
+                "SELECT * FROM messages WHERE id=? AND session_id=? AND role='user'",
+                (int(message_id), session_id),
+            ).fetchone()
+            if row is None:
+                return None
+            meta = _row_meta(row["meta_json"])
+            versions = list(meta.get("versions") or [])
+            if not (0 <= int(index) < len(versions)):
+                raise ValueError("Version is not available")
+            all_ids: set[int] = set()
+            for version in versions:
+                for mid in version.get("following_ids") or []:
+                    try:
+                        all_ids.add(int(mid))
+                    except (TypeError, ValueError):
+                        continue
+            selected = set()
+            for mid in versions[int(index)].get("following_ids") or []:
+                try:
+                    selected.add(int(mid))
+                except (TypeError, ValueError):
+                    continue
+            for mid in all_ids:
+                stored = conn.execute(
+                    "SELECT meta_json FROM messages WHERE id=? AND session_id=?",
+                    (mid, session_id),
+                ).fetchone()
+                if stored is None:
+                    continue
+                extra = _row_meta(stored["meta_json"])
+                if mid in selected:
+                    extra.pop("hidden", None)
+                    extra.pop("hidden_by_edit", None)
+                else:
+                    extra["hidden"] = True
+                    extra["hidden_by_edit"] = int(message_id)
+                conn.execute("UPDATE messages SET meta_json=? WHERE id=?", (json.dumps(extra), mid))
+            meta["version_index"] = int(index)
+            conn.execute(
+                "UPDATE messages SET content=?, meta_json=? WHERE id=?",
+                (str(versions[int(index)].get("text") or ""), json.dumps(meta), int(message_id)),
+            )
+            conn.execute("UPDATE sessions SET updated_at=? WHERE session_id=?", (now, session_id))
+            event = self._insert_event(
+                conn, session_id, "session.updated",
+                {"message_id": int(message_id), "version_index": int(index), "reason": "edit_version"},
+                now,
+            )
+        self._emit([event])
+        return self.get_session(session_id, conversation=True)
 
     def session_local_only(self, session_id: str) -> bool:
         """Keep explicit local-only history local, including auxiliary requests."""

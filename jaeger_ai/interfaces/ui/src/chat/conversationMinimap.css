@@ -1,4 +1,5 @@
-.jg-conversation-minimap { position:absolute; z-index:3; left:2px; top:12px; bottom:180px; width:24px; overflow-y:auto; scrollbar-width:none; display:flex; flex-direction:column; align-items:center; }
+.jg-conversation-minimap { position:absolute; z-index:3; left:0; top:12px; bottom:180px; width:28px; overflow-y:auto; scrollbar-width:none; display:flex; flex-direction:column; align-items:center; opacity:0; transition:opacity .15s ease; pointer-events:auto; }
+.jg-conversation-minimap:hover, .jg-conversation-minimap:focus-within { opacity:1; }
 .jg-conversation-minimap button { flex:0 0 20px; display:grid; place-items:center; width:24px; height:20px; padding:0; border:0; background:transparent; cursor:pointer; }
 .jg-conversation-minimap button span { width:8px; height:2px; background:var(--jg-color-text-tertiary); opacity:.45; }
 .jg-conversation-minimap button[aria-current] span,.jg-conversation-minimap button:hover span { width:12px; opacity:1; background:var(--jg-color-text); }

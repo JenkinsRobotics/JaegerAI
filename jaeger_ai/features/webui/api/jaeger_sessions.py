@@ -242,6 +242,7 @@ GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
         ({"POST"}, rf"^/v1/approvals/{_ID}/(?:decide|viewed)$"),
         ({"GET", "POST"}, r"^/v1/chat-organization$"),
         ({"GET", "POST"}, rf"^/v1/sessions/{_ID}/topics$"),
+        ({"POST"}, rf"^/v1/sessions/{_ID}/messages/{_ID}/edit$"),
         ({"PATCH", "DELETE"}, rf"^/v1/topics/{_ID}$"),
         ({"POST"}, rf"^/v1/agents/{_ID}/home/topics$"),
         ({"GET", "PATCH"}, r"^/v1/notifications$"),
@@ -602,6 +603,8 @@ def route(handler, parsed, method: str) -> bool:
     # /v1/sessions/{id}/{messages|events} — read routes, query string relayed
     if len(parts) == 2 and method == "GET" and parts[1] in {"messages", "events", "feedback", "trace-history"}:
         return _proxy(handler, "GET", f"/v1/sessions/{session_id}/{parts[1]}{query}")
+    if len(parts) == 4 and parts[1] == "messages" and parts[3] == "edit" and method == "POST":
+        return _proxy(handler, "POST", f"/v1/sessions/{session_id}/messages/{parts[2]}/edit", _body_bytes(handler))
 
     if len(parts)==2 and parts[1]=='uploads' and method in {'GET','POST'}:
         return _proxy(handler,method,f'/v1/sessions/{session_id}/uploads'+query,None if method=='GET' else _body_bytes(handler))
