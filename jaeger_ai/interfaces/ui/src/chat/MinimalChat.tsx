@@ -30,6 +30,7 @@ import { RuntimeSettings } from "../settings/RuntimeSettings";
 import { SessionFiles } from "./SessionFiles";
 import { VoiceDictation } from "./VoiceDictation";
 import { VoiceMode } from "./VoiceMode";
+import { TurnChanges, WorktreeBar } from "./AgentChanges";
 import { sendJson } from "../unified/webui";
 import { queuePrefix } from "./SessionQueue";
 import { WebHost } from "./webHost";
@@ -1276,6 +1277,9 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
               {(turnErrors(turn).length > 0 || turn.state === "failed" || turn.state === "unknown") && (
                 <ModelError details={turnErrors(turn)} onRetry={turn.message && !active ? () => send(turn.message) : undefined} />
               )}
+              {sessionId && turn.requestId && host instanceof WebHost && turn.state !== "pending" && session && session.turns.indexOf(turn) >= session.turns.length - 30 && (
+                <TurnChanges sessionId={sessionId} requestId={turn.requestId} settled />
+              )}
               {replyHasText(turn) && (
                 <MessageActions
                   createdAt={turn.createdAt}
@@ -1316,6 +1320,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       {actionNotice && <p className="jg-message-notice" role={actionNotice.error ? "alert" : "status"}>{actionNotice.text}<button type="button" aria-label="Dismiss message action notice" onClick={() => setActionNotice(undefined)}>×</button></p>}
       {reactionError && <p role="alert">{reactionError}</p>}
       {session && <AgentActivity turns={session.turns} onOpen={host.openHandoff ? id=>host.openHandoff?.(id) : undefined}/> }
+      {sessionId && host instanceof WebHost && <WorktreeBar key={`worktree:${sessionId}`} sessionId={sessionId} refreshKey={`${session?.turns.length ?? 0}:${session?.turns.at(-1)?.state ?? ""}`} />}
       <form ref={composer} className="jg-composer" data-expanded={Boolean(composerExpanded || draft || files.length || quote || preparingFiles || draftError || deliveryNotice || fileNote)} onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
