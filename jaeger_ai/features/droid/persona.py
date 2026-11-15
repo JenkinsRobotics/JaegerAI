@@ -44,22 +44,37 @@ def farewell() -> str:
     ])
 
 
-_SLEEP = re.compile(r"^(?:(?:hey |ok |okay )?jaeger[, ]+)?(?:please )?(?:go to sleep|go to standby|power down|"
-                    r"droid off|droid mode off|stop droid mode|shut down droid mode|sleep now|goodnight jaeger|that'?s all)\W*$", re.I)
-_STOP = re.compile(r"^(?:(?:hey |ok |okay )?jaeger[, ]+)?(?:stop|stop talking|quiet|be quiet|hush|never ?mind|cancel|shush)\W*$", re.I)
+_LEAD = r"^(?:(?:hey |ok |okay )?jaeger[, ]+)?(?:please )?"
+_SLEEP = re.compile(_LEAD + r"(?:go to sleep|power down|droid off|droid mode off|stop droid mode|shut down droid mode|"
+                    r"sleep now|goodnight(?: jaeger)?|good night(?: jaeger)?|turn off(?: your)? (?:camera|eyes))\W*$", re.I)
+_STANDBY = re.compile(_LEAD + r"(?:(?:ok(?:ay)? |thanks?,? |thank you,? )?that'?s all(?: for now)?|go to standby|standby|"
+                      r"stand by|that will be all|i'?m done)\W*$", re.I)
+_QUIET = re.compile(_LEAD + r"(?:quiet|be quiet|quiet mode|hush|shush|shh+|stop chatting|don'?t talk(?: for a while)?)\W*$", re.I)
+_UNQUIET = re.compile(_LEAD + r"(?:you can (?:talk|speak|chat) (?:again|now)|quiet mode off|stop being quiet|unquiet)\W*$", re.I)
+_STOP = re.compile(_LEAD + r"(?:stop|stop talking|never ?mind|cancel)\W*$", re.I)
 _YES = re.compile(r"^(?:yes|yeah|yep|yup|sure|do it|go ahead|proceed|approved?|ok(?:ay)?|affirmative|please do|confirm(?:ed)?)\b", re.I)
 _ALWAYS = re.compile(r"\b(?:always|every time|don'?t ask again)\b", re.I)
 _NO = re.compile(r"^(?:no|nope|nah|don'?t|do not|stop|cancel|deny|negative|never ?mind)\b", re.I)
 
 
 def command(said: str) -> str | None:
-    """A local control phrase: ``sleep`` / ``stop``, else ``None``."""
+    """A local control phrase: ``sleep`` / ``standby`` / ``quiet`` / ``unquiet`` / ``stop``, else ``None``."""
     text = said.strip()
-    if _SLEEP.match(text):
-        return "sleep"
-    if _STOP.match(text):
-        return "stop"
+    for name, pattern in (("sleep", _SLEEP), ("standby", _STANDBY), ("quiet", _QUIET), ("unquiet", _UNQUIET),
+                          ("stop", _STOP)):
+        if pattern.match(text):
+            return name
     return None
+
+
+def attention(name: str = "Matthew") -> str:
+    """Present -> conversation (the droid was already awake in the room)."""
+    return random.choice([f"Yes, {name}?", f"At your service, {name}.", "I'm listening.", f"How may I help, {name}?"])
+
+
+def standby_line() -> str:
+    return random.choice(["Very good. I'll be right here.", "Of course. Standing by.",
+                          "Certainly. Just say the word if you need me."])
 
 
 def decision(said: str) -> str | None:

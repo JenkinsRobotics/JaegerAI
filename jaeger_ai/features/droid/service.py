@@ -1,6 +1,10 @@
 """Droid mode service: Jaeger's body on the Mac Studio.
 
-Always resident and idle (microphone closed) until woken. Waking opens one
+Always resident. Three modes: ``off`` (night, or told to sleep: camera and
+microphone closed), ``present`` (active hours 9-23 by default: low-power eyes
+and a VAD-only ear run locally through ``life.Life``; nothing is recorded or
+transcribed, the voice connection receives silence) and ``conversation``.
+Waking into a conversation opens one
 voice-processed audio engine on the Mac's own microphone and speakers and
 joins the realtime voice service (:8794) exactly as a browser would: Silero +
 Smart Turn decide when Matthew is done, Parakeet transcribes, Phonon speaks.
@@ -15,6 +19,9 @@ Control (owner-only unix socket ``~/.jaeger/run/droid/control.sock``)::
     POST /mute /stop          microphone mute toggle; stop talking now
     POST /say  {"text"}       speak a line (proactive messages)
     POST /hear {"text"}       treat text as heard speech (diagnostics)
+    POST /proactive {"text","kind","private"}  unprompted line: speak / push / quiet (gate)
+    GET  /life /noticed /decisions   presence, drives, "what I noticed", gate log
+    POST /enrol /forget /quiet /unquiet /standby /present   identity and modes
 
 Runs in the realtime voice venv under the Jaeger Droid host app, which holds
 the macOS microphone and camera permissions.
@@ -37,7 +44,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 
 from collections import deque
 
-from . import coreaudio, persona, vision
+from . import coreaudio, life, persona, vision
 from .audio import BLOCK, RATE, DuplexAudio
 
 log = logging.getLogger("jaeger.droid")
@@ -47,7 +54,8 @@ CONFIG = STATE / "droid.json"
 VOICE_URL = os.environ.get("JAEGER_VOICE_URL", "http://127.0.0.1:8794")
 DEFAULTS = {"speaker": "Mac Studio Speakers", "microphone": "Insta360 Link 2", "camera": "Insta360 Link 2",
             "engine": "local", "session_id": "agent-native:jaeger", "name": "Matthew", "max_spoken_chars": 700,
-            "presence_greet_after_s": 600, "narrate_tools": True}
+            "presence_greet_after_s": 600, "narrate_tools": True,
+            "presence": True, "active_hours": [9, 23], "conversation_idle_s": 120}
 BIN = STATE / "droid" / "bin"
 CUA = Path.home() / ".local/bin/cua-driver"
 _SENTENCE = re.compile(r"[.!?](?:[\"')\]]*)(?:\s|$)|\n")
@@ -110,11 +118,18 @@ class Droid:
         self.transcript: deque = deque(maxlen=60)
         self.narrated = {"at": 0.0, "count": 0}
         self.screen_cache = (0.0, b"")
+        self.mic_open = False          # False in present mode: the voice service hears silence
+        self.reply_until = 0.0         # short open-mic window after an unprompted line
+        self.unprompted_speaking = False
+        self.busy_moving = False
+        self.activity_at = time.time()
+        self.life = life.Life(self)
         self.status = {"state": "off", "awake": False, "muted": False, "engine": self.cfg["engine"],
                        "heard": "", "said": "", "latency_ms": None, "error": None,
                        "speaker": self.cfg["speaker"], "microphone": self.cfg["microphone"],
                        "voice_processing": None, "pending_approval": None, "since": time.time(),
-                       "camera": "off", "faces": 0, "present": False, "action": None}
+                       "camera": "off", "faces": 0, "present": False, "action": None, "mode": "off",
+                       "presence_blocked": None, "quiet_until": 0, "slept_until": 0}
         self.write()
 
     # status ------------------------------------------------------------
@@ -129,12 +144,23 @@ class Droid:
         tmp.replace(RUN / "status.json")
 
     # wake / sleep --------------------------------------------------------
-    async def wake(self, ears: bool = True):
+    def idle_state(self) -> str:
+        return "listening" if self.status.get("mode") == "conversation" else "present"
+
+    async def wake(self, ears: bool = True, present: bool = False):
         async with self.lock:
+            if not present:
+                self.life.bb["slept_until"] = 0.0
+                self.set(slept_until=0)
             if self.status["awake"]:
+                if not present and self.status.get("mode") != "conversation":
+                    self._converse(greet=True)
                 return
             self.cfg = config()
             mic = permission("microphone")
+            if present and mic != "authorized":
+                self.set(presence_blocked=f"microphone {mic}")
+                return
             if ears and mic != "authorized":
                 self.set(state="error", error=(
                     "Microphone permission needed: click Allow on the 'Jaeger Droid' prompt on the Mac, "
@@ -145,7 +171,9 @@ class Droid:
                 _system_say("I can't hear yet. Please allow microphone access for Jaeger Droid on the Mac.",
                             self.cfg["speaker"])
                 return
-            self.set(state="waking", awake=True, error=None, engine=self.cfg["engine"], since=time.time())
+            self.set(state="waking", awake=True, error=None, engine=self.cfg["engine"], since=time.time(),
+                     presence_blocked=None, mode="present" if present else "conversation")
+            self.mic_open = not present
             try:
                 await asyncio.to_thread(_stop_old_conversation)
                 self._route_speaker()
@@ -154,22 +182,51 @@ class Droid:
                 self.audio = DuplexAudio(self._mic, listen=ears)
                 await asyncio.to_thread(self.audio.start)
                 self.set(voice_processing=self.audio.voice_processing, ears=ears)
-                self.audio.chime("wake")
+                if not present:
+                    self.audio.chime("wake")
                 await self._connect()
                 await asyncio.wait_for(self.ready.wait(), 30)
-                self.say(persona.greeting(self.cfg["name"]))
-                self.set(state="listening")
+                if not present:
+                    self.say(persona.greeting(self.cfg["name"]))
+                self.activity_at = time.time()
+                self.set(state=self.idle_state())
                 self._open_eyes()
+                self.life.start_senses()
                 asyncio.create_task(asyncio.to_thread(_ensure_cua_driver))
             except Exception as exc:
                 log.exception("wake failed")
                 await self._teardown()
-                self.set(state="error", awake=False, error=f"Could not wake: {exc}")
+                self.set(state="error", awake=False, mode="off", error=f"Could not wake: {exc}")
 
-    async def sleep(self, farewell: bool = True):
+    def _converse(self, greet: bool = True):
+        """present -> conversation: open the microphone to the voice service."""
+        self.mic_open, self.reply_until = True, 0.0
+        self.activity_at = time.time()
+        self.set(mode="conversation", state="listening")
+        if greet:
+            self.audio and self.audio.chime("wake")
+            self.say(persona.attention(self.cfg["name"]))
+
+    def standby(self, chime: bool = True):
+        """conversation -> present: close the microphone to the voice service, keep sensing."""
+        if not self.status["awake"] or self.status.get("mode") == "present":
+            return
+        self.mic_open, self.reply_until = False, 0.0
+        if self.bot_speaking:
+            self._barge_in()
+        if chime and self.audio:
+            self.audio.chime("sleep")
+        self.set(mode="present", state="present", heard="", pending_approval=None)
+        self.pending_approval = None
+
+    async def sleep(self, farewell: bool = True, until_morning: bool = True):
+        if until_morning:
+            self.life.bb["slept_until"] = life.next_morning(self.cfg)
+            self.set(slept_until=self.life.bb["slept_until"])
         async with self.lock:
             if not self.status["awake"]:
                 return
+            farewell = farewell and self.status.get("mode") == "conversation"
             self.set(state="sleeping")
             if farewell and self.dc is not None and self.ready.is_set():
                 self.say(persona.farewell())
@@ -183,11 +240,62 @@ class Droid:
             if self.audio:
                 self.audio.chime("sleep")
                 await asyncio.sleep(0.6)
+            self.life.stop_senses("asleep" if until_morning else "outside active hours")
             await self._teardown()
-            self.set(state="off", awake=False, heard="", latency_ms=None, pending_approval=None, since=time.time())
+            self.mic_open = False
+            self.set(state="off", awake=False, mode="off", heard="", latency_ms=None, pending_approval=None,
+                     since=time.time())
 
     async def toggle(self):
-        await (self.sleep() if self.status["awake"] else self.wake())
+        if self.status["awake"] and self.status.get("mode") == "conversation":
+            await self.sleep()
+        else:
+            await self.wake()
+
+    def say_unprompted(self, text: str):
+        """A line the gate allowed: speak it, then leave the mic open briefly for a reply."""
+        if not (self.status["awake"] and self.dc is not None):
+            return
+        self.unprompted_speaking = True
+        self.say(text)
+        if self.status.get("mode") == "present":
+            self.mic_open, self.reply_until = True, time.time() + 25
+
+    async def keep_time(self):
+        """Mode scheduler: present during active hours, back to present after a quiet conversation."""
+        while True:
+            try:
+                await self._tick()
+            except Exception:
+                log.exception("droid scheduler")
+            await asyncio.sleep(5)
+
+    async def _tick(self):
+        now = time.time()
+        self.cfg = config()
+        st = self.status
+        active = life.in_active_hours(self.cfg)
+        want = active and self.cfg.get("presence", True) and now >= self.life.bb["slept_until"]
+        if self.life.bb["slept_until"] and now >= self.life.bb["slept_until"]:
+            self.life.bb["slept_until"] = 0.0
+            self.set(slept_until=0)
+        if want and not st["awake"] and st["state"] not in ("waking", "sleeping"):
+            await self.wake(present=True)
+        elif st["awake"] and st.get("mode") == "present" and not want:
+            await self.sleep(farewell=False, until_morning=False)
+        if st.get("mode") == "present" and self.reply_until:
+            if now > self.reply_until and not self.bot_speaking and not self.life.ears_busy():
+                self.mic_open, self.reply_until = False, 0.0
+        idle = float(self.cfg.get("conversation_idle_s") or 120)
+        if (st.get("mode") == "conversation" and now - self.activity_at > idle and not self.bot_speaking
+                and not self.request_id and not self.pending_approval and not self.life.ears_busy()):
+            if active and self.cfg.get("presence", True):
+                self.standby()
+            else:
+                await self.sleep(until_morning=False)
+        quiet = self.life.bb["quiet_until"]
+        if st.get("quiet_until") != (quiet if quiet > now else 0):
+            self.set(quiet_until=quiet if quiet > now else 0)
 
     def _open_eyes(self):
         if permission("camera") != "authorized":
@@ -208,8 +316,8 @@ class Droid:
         asyncio.create_task(asyncio.to_thread(ready_head))
 
     def _presence(self, away: float, faces: int):
-        """Someone came into view: welcome them back after a real absence."""
-        if (not self.status["awake"] or self.bot_speaking or self.request_id or self.pending_approval
+        """Someone came into view: Life now owns greetings (once per 30+ min absence, gated)."""
+        if self.life is not None or (not self.status["awake"] or self.bot_speaking or self.request_id or self.pending_approval
                 or away < float(self.cfg.get("presence_greet_after_s") or 600)):
             return
         self.say(f"Ah, welcome back, {self.cfg['name']}." if faces == 1 else "Hello there, everyone.")
@@ -257,8 +365,14 @@ class Droid:
     # media -------------------------------------------------------------
     def _mic(self, block: np.ndarray):
         loop, track = self.loop, self.track
+        try:
+            self.life.hear(block)        # local VAD only; nothing kept or sent
+        except Exception:
+            log.exception("ears")
         if loop is None or track is None:
             return
+        if not self.mic_open:
+            block = np.zeros_like(block)
 
         def put():
             if track.queue.full():
@@ -321,7 +435,7 @@ class Droid:
             self.track = MicTrack()
             await self._connect()
             await asyncio.wait_for(self.ready.wait(), 30)
-            self.set(state="listening", error=None)
+            self.set(state=self.idle_state(), error=None)
         except Exception as exc:
             self.set(state="error", error=f"Voice service unavailable: {exc}")
 
@@ -359,6 +473,7 @@ class Droid:
         if kind == "ready":
             self.ready.set()
         elif kind == "user-speaking":
+            self.activity_at = time.time()
             if self.bot_speaking:
                 self._barge_in()
             self.set(state="hearing")
@@ -366,16 +481,24 @@ class Droid:
             self.set(heard=str(m.get("text") or ""))
         elif kind == "user-final":
             text = str(m.get("text") or "").strip()
-            self.heard_at = time.time()
+            self.heard_at = self.activity_at = time.time()
             if text:
+                if self.status.get("mode") == "present" and self.reply_until:
+                    self.mic_open, self.reply_until = True, 0.0   # a reply: this is a conversation now
+                    self.set(mode="conversation")
                 self.set(heard=text)
                 asyncio.create_task(self.on_heard(text))
             else:
-                self.set(state="listening")
+                self.set(state=self.idle_state())
         elif kind == "interrupted":
             self.audio and self.audio.flush()
         elif kind == "bot-speaking":
             self.bot_speaking = bool(m.get("on"))
+            self.activity_at = time.time()
+            if not self.bot_speaking:
+                self.unprompted_speaking = False
+                if self.reply_until:
+                    self.reply_until = time.time() + 25
             if self.bot_speaking:
                 fields = {"state": "speaking"}
                 if self.heard_at:
@@ -383,7 +506,7 @@ class Droid:
                     self.heard_at = 0.0
                 self.set(**fields)
             elif self.status["state"] == "speaking":
-                self.set(state="thinking" if self.request_id else "listening")
+                self.set(state="thinking" if self.request_id else self.idle_state())
         elif kind == "tool":  # Gemini Live hands real work to full Jaeger
             asyncio.create_task(self._tool(str(m.get("id")), str(m.get("request") or "")))
         elif kind == "transcript":
@@ -419,7 +542,8 @@ class Droid:
 
     def stop_talking(self):
         self._barge_in()
-        self.set(state="listening")
+        self.unprompted_speaking = False
+        self.set(state=self.idle_state() if self.status["awake"] else "off")
 
     # turns -------------------------------------------------------------
     async def on_heard(self, text: str):
@@ -445,8 +569,25 @@ class Droid:
         if action == "sleep":
             await self.sleep()
             return
+        if action == "standby":
+            self.say(persona.standby_line())
+            await asyncio.sleep(2.5)
+            self.standby(chime=False)
+            return
+        if action == "quiet":
+            self.stop_talking()
+            self.life.quiet(60)
+            self.say("Of course. I'll keep quiet for the next hour.")
+            await asyncio.sleep(2.5)
+            self.standby(chime=False)
+            return
+        if action == "unquiet":
+            self.life.unquiet()
+            self.say("Thank you. I'm happy to chat again.")
+            return
         if action == "stop":
             self.stop_talking()
+            self.life.halt(60, "asked to stop")
             return
         move = persona.head_move(text)
         if move:
@@ -472,7 +613,12 @@ class Droid:
         label = persona.move_phrase(pan, tilt, absolute)
         self.say(label)
         head = self.eyes.head
-        ok = await asyncio.to_thread(head.point if absolute else head.nudge, pan, tilt)
+        self.busy_moving = True
+        try:
+            ok = await asyncio.to_thread(head.point if absolute else head.nudge, pan, tilt)
+        finally:
+            self.busy_moving = False
+            self.life.bb["last_move_at"] = time.time() + 20   # hold the pose a while
         if not ok:
             self.say("I'm afraid my neck isn't responding.")
 
@@ -487,15 +633,18 @@ class Droid:
         elif not await asyncio.to_thread(vision.is_warm):
             self.say("One moment, my eyes are still focusing.")
         started = time.time()
+        self.busy_moving = True
         try:
             answer = await asyncio.to_thread(self.eyes.look_around if around else self.eyes.look, question)
         except Exception as exc:
             log.warning("vision failed: %s", exc)
             answer = "I'm afraid my vision system isn't answering right now."
+        finally:
+            self.busy_moving = False
         self.set(action=None, vision_ms=round((time.time() - started) * 1000))
         self.say(answer)
         if self.status["state"] == "thinking":
-            self.set(state="listening")
+            self.set(state=self.idle_state())
 
         def save():
             for role, text in (("user", question), ("assistant", answer)):
@@ -579,8 +728,9 @@ class Droid:
             if self.request_id == rid:
                 self.request_id = None
                 self.set(action=None)
+                self.activity_at = time.time()
                 if self.status["state"] == "thinking":
-                    self.set(state="listening")
+                    self.set(state=self.idle_state())
 
     async def _tool(self, call_id: str, request: str):
         text = await self.turn(request, full=True)
@@ -740,9 +890,72 @@ def app(droid: Droid) -> web.Application:
     routes.post("/sleep")(action(lambda b: droid.sleep()))
     routes.post("/toggle")(action(lambda b: droid.toggle()))
     routes.post("/mute")(action(mute))
-    routes.post("/stop")(action(lambda b: droid.stop_talking()))
+    def stop(_b):
+        droid.stop_talking()
+        droid.life.halt(120, "STOP pressed")
+
+    routes.post("/stop")(action(stop))
     routes.post("/say")(action(lambda b: droid.say(str(b.get("text") or ""))))
     routes.post("/hear")(action(lambda b: droid.on_heard(str(b.get("text") or "")) if droid.status["awake"] else None))
+    routes.post("/standby")(action(lambda b: droid.standby()))
+    routes.post("/present")(action(lambda b: droid.wake(present=True)))
+    routes.post("/quiet")(action(lambda b: droid.life.quiet(float(b.get("minutes") or 60))))
+    routes.post("/unquiet")(action(lambda b: droid.life.unquiet()))
+
+    @routes.post("/proactive")
+    async def proactive(request):
+        body = await request.json()
+        text = str(body.get("text") or "").strip()
+        if not text:
+            return web.json_response({"action": "quiet", "reason": "empty"})
+        kind = str(body.get("kind") or "info")
+        return web.json_response(droid.life.offer(text, kind=kind, private=body.get("private") is not False))
+
+    @routes.get("/life")
+    async def life_state(_r):
+        return web.json_response({**droid.life.snapshot(), "status": droid.status})
+
+    @routes.get("/noticed")
+    async def noticed(request):
+        return web.json_response({"items": droid.life.noticed.recent(int(request.query.get("limit") or 200)),
+                                  "keep_days": life.KEEP_DAYS})
+
+    @routes.get("/decisions")
+    async def decisions(request):
+        return web.json_response({"items": droid.life.decisions.recent(int(request.query.get("limit") or 100))})
+
+    @routes.post("/noticed/delete")
+    async def noticed_delete(request):
+        body = await request.json() if request.can_read_body else {}
+        which = (body or {}).get("id")
+        removed = droid.life.noticed.delete(str(which) if which else None)
+        if not which:
+            droid.life.decisions.delete(None)
+        return web.json_response({"ok": True, "removed": removed})
+
+    @routes.post("/enrol")
+    async def enrol(request):
+        body = await request.json() if request.can_read_body else {}
+        kind = str((body or {}).get("kind") or "")
+        if (body or {}).get("cancel"):
+            droid.life.cancel_enrol()
+            return web.json_response({"ok": True})
+        result = droid.life.start_enrol(kind)
+        if result.get("ok") and kind == "voice" and droid.dc is not None:
+            droid.say_unprompted("Please talk to me for about fifteen seconds, in your normal voice.")
+            droid.mic_open, droid.reply_until = False, 0.0
+        elif result.get("ok") and kind == "face" and droid.dc is not None:
+            droid.say("Please look at me for a few seconds, and turn your head slightly.")
+        return web.json_response(result)
+
+    @routes.post("/forget")
+    async def forget(request):
+        body = await request.json() if request.can_read_body else {}
+        kind = str((body or {}).get("kind") or "")
+        if kind not in ("face", "voice"):
+            return web.json_response({"ok": False, "error": "kind must be face or voice"}, status=400)
+        return web.json_response({"ok": droid.life.forget(kind)})
+
     application = web.Application()
     application.add_routes(routes)
     return application
@@ -768,10 +981,13 @@ async def main():
     import signal
     for sig in (signal.SIGTERM, signal.SIGINT):
         asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+    droid.loop = asyncio.get_running_loop()
     if config().get("wake_on_start"):
         asyncio.create_task(droid.wake())
+    scheduler = asyncio.create_task(droid.keep_time())
     await stop.wait()
-    await droid.sleep(farewell=False)
+    scheduler.cancel()
+    await droid.sleep(farewell=False, until_morning=False)
     await runner.cleanup()
     sock.unlink(missing_ok=True)
     if keeper:
