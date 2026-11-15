@@ -17,6 +17,8 @@ from pathlib import Path
 
 import json
 import os
+import subprocess
+import time
 import pathlib
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -530,6 +532,64 @@ def parse_cli_usage_limit(text: str) -> str | None:
     return "limit reached until Nov 16, 2026, 8:03 PM PT"
 
 
+_GEMINI_PROBE_CACHE: tuple[float, dict[str, Any]] | None = None
+_GEMINI_PROBE_TTL_S = 15 * 60
+
+
+def _gemini_cli_status(executable: str) -> dict[str, Any]:
+    """A --version probe is not enough: Gemini can be installed and still rejected.
+
+    Individual Gemini Code Assist clients now fail with IneligibleTierError.
+    Cache the result so inventory refreshes do not pay for a new CLI start
+    every time the picker opens.
+    """
+    global _GEMINI_PROBE_CACHE
+    now = time.time()
+    if _GEMINI_PROBE_CACHE and now - _GEMINI_PROBE_CACHE[0] < _GEMINI_PROBE_TTL_S:
+        return dict(_GEMINI_PROBE_CACHE[1])
+    result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI could not be verified"}
+    try:
+        env = os.environ.copy()
+        env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
+        completed = subprocess.run(  # noqa: S603
+            [executable, "-p", "Reply with the single word ready.", "--skip-trust", "--approval-mode", "plan"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=env,
+            cwd="/tmp",
+        )
+        blob = "\n".join((completed.stdout or "", completed.stderr or ""))
+        lowered = blob.lower()
+        if "ineligibletiererror" in lowered or "no longer supported" in lowered or "unsupported_client" in lowered:
+            result = {
+                "reachable": False,
+                "status": "unavailable",
+                "reason": (
+                    "Gemini CLI is installed, but this client is no longer "
+                    "supported for individual Gemini Code Assist. Use Google's "
+                    "Antigravity suite, or pick another provider."
+                ),
+            }
+        elif completed.returncode == 0 and "ready" in lowered:
+            result = {"reachable": True, "status": "online", "reason": None}
+        elif "not logged in" in lowered or "please login" in lowered or "unauthenticated" in lowered:
+            result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI is installed but is not signed in."}
+        elif completed.returncode == 55 or "exit 55" in lowered or ("trusted" in lowered and "folder" in lowered):
+            result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI rejected this workspace (trusted-folder check)."}
+        elif completed.returncode == 0:
+            result = {"reachable": True, "status": "online", "reason": None}
+        else:
+            result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI is installed but is not ready to run a turn."}
+    except subprocess.TimeoutExpired:
+        result = {"reachable": False, "status": "unavailable", "reason": "Gemini CLI did not respond in time."}
+    except Exception as exc:  # noqa: BLE001
+        result = {"reachable": False, "status": "unavailable", "reason": f"Gemini CLI could not be verified ({type(exc).__name__})."}
+    _GEMINI_PROBE_CACHE = (now, dict(result))
+    return result
+
+
 def discover_subscription_clis() -> list[dict[str, Any]]:
     """Grok, ChatGPT (Codex CLI), and Gemini subscription brains."""
     from jaeger_ai.features.cli_backends.discovery import probe_backend, resolve_backend
@@ -548,6 +608,11 @@ def discover_subscription_clis() -> list[dict[str, Any]]:
         status = "online" if reachable else "unavailable"
         if not reachable:
             reason = f"{label} CLI is not installed"
+        elif backend_id == "gemini":
+            probed = _gemini_cli_status(path)
+            reachable = bool(probed.get("reachable"))
+            status = str(probed.get("status") or status)
+            reason = probed.get("reason")
         elif backend_id == "codex":
             # Surface a known usage-limit window without calling the paid API.
             # A live CLI error is parsed when one is recorded on the process.

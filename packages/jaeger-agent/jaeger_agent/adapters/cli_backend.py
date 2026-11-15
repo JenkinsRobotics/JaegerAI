@@ -404,7 +404,26 @@ def _build_argv(spec: Any, executable: str, prompt: str) -> tuple[list[str], byt
     return argv, None
 
 
+def _leader_socket_live(path) -> bool:
+    """True when the Jaeger Grok leader socket already accepts clients."""
+    try:
+        sock = str(path)
+        if not sock or not __import__("os").path.exists(sock):
+            return False
+        import socket
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(0.2)
+            probe.connect(sock)
+            return True
+        finally:
+            probe.close()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class CliBackendAdapter(ProviderAdapter):
+
     """Spawn an installed agent CLI for one completion."""
 
     name = "cli"
@@ -573,15 +592,17 @@ class CliBackendAdapter(ProviderAdapter):
                 )
                 override = (
                     "You are Jaeger's language model. Follow the System "
-                    "section and the current request. Jaeger MCP tools are "
-                    "named jaeger__<tool> (for example jaeger__list_skill_dir, "
-                    "jaeger__read_file, jaeger__terminal). Available short "
-                    "names: " + (tool_names or "list_skill_dir, read_file, terminal")
-                    + ". Look a tool up with search_tool if needed, then call "
-                    "it with use_tool using the jaeger__ name. To list the "
-                    "current workspace, use_tool tool_name=jaeger__list_skill_dir "
-                    "with path '.'. Do not use built-in file, editor, X search, "
-                    "or web tools. The CLI cache directory is not the workspace."
+                    "section and the current request. Answer with the fewest "
+                    "Jaeger MCP tool calls and stop as soon as you know the "
+                    "answer. Do not search for or load a tool that is already "
+                    "available. File tools already on this turn include "
+                    "jaeger__list_skill_dir, jaeger__read_file, jaeger__glob, "
+                    "jaeger__search_files, and jaeger__terminal. Short names: "
+                    + (tool_names or "list_skill_dir, read_file, glob, terminal")
+                    + ". To list the current workspace, call "
+                    "jaeger__list_skill_dir with path '.'. Do not use built-in "
+                    "file, editor, X search, or web tools. The CLI cache "
+                    "directory is not the workspace."
                 )
                 child_argv.extend(["--system-prompt-override", override])
                 child_argv.extend(["--disallowed-tools", ",".join(_GROK_BUILTIN_TOOLS)])
@@ -637,19 +658,26 @@ class CliBackendAdapter(ProviderAdapter):
         executable = self._executable or ""
         if not executable:
             return
-        argv = [executable, *grok_leader_argv(), "--cwd", folder, "doctor"]
+        # `grok doctor` does not leave a leader running. Start the shared
+        # leader and keep it up after clients disconnect so later turns reuse it.
+        if _leader_socket_live(GROK_LEADER_SOCKET):
+            return
+        argv = [
+            executable, "agent", "leader",
+            "--no-exit-on-disconnect", "--no-auto-update",
+            *grok_leader_argv(),
+        ]
         env = os.environ.copy()
         env["GROK_LEADER_SOCKET"] = str(GROK_LEADER_SOCKET)
         env["GROK_FOLDER_TRUST"] = "0"
         try:
-            subprocess.run(
+            subprocess.Popen(
                 argv,
                 cwd=folder,
                 env=env,
-                timeout=20,
-                check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
         except Exception:  # noqa: BLE001
             pass
