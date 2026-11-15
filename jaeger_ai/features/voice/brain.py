@@ -6,9 +6,11 @@ conversation (DIRECT_RESPONSE), the reply comes from this fast local model so
 first audio arrives in about a second. Utterances that ask for work keep the
 owner loop and the operator's selected model, with tools.
 
-Chosen 2026-11-14 on the M1 Max 32 GB: ``gemma4:12b`` (Ollama, Q4_K_M) with
-thinking off and an 8K window: ~0.3 s prompt + ~32 tok/s warm, tools, vision
-and audio capable. ``qwen3:4b`` ignored ``think: false`` and rambled for 50 s.
+Chosen 2026-11-14 on the M1 Max 32 GB: ``gemma4:latest`` (Gemma 4 E4B, 8B,
+Q4_K_M; tools, vision, audio) with thinking off and an 8K window. Measured
+prefill ~900 tok/s and decode ~51 tok/s. ``gemma4:12b`` prefilled at only
+~210 tok/s (a 2.7K-token voice turn waited 14 s for its first token);
+``qwen3:4b`` ignored ``think: false`` and rambled for 50 s.
 Override with JAEGER_VOICE_MODEL=provider:model (e.g. ``ollama:gemma4:12b``).
 """
 from __future__ import annotations
@@ -19,10 +21,12 @@ import threading
 import urllib.request
 
 DEFAULT_PROVIDER = "ollama"
-DEFAULT_MODEL = "gemma4:12b"
+DEFAULT_MODEL = "gemma4:latest"
+VOICE_HISTORY = 12  # recent messages carried into a spoken turn
 VOICE_CTX = 8192
 VOICE_STYLE = (
-    "[Voice conversation] Your reply is spoken aloud the moment you write it. "
+    "You are Jaeger, the user's personal AI assistant, talking with them by voice. "
+    "Your reply is spoken aloud the moment you write it. "
     "Answer in one to three short, natural sentences. Lead with the answer. "
     "No markdown, lists, tables, emoji, code or URLs. Spell out symbols. "
     "If the person asks for real work (files, tools, research, messages), say briefly "
@@ -45,7 +49,8 @@ def voice_brain() -> dict:
         "provider": provider,
         "model": model,
         "controls": {"ctx": VOICE_CTX, "reasoning_effort": "none", "max_tokens": 400},
-        "style": VOICE_STYLE,
+        "system": VOICE_STYLE,
+        "history": VOICE_HISTORY,
     }
 
 

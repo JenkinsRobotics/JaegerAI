@@ -6389,7 +6389,10 @@ class JaegerGatewayApp:
                     # work requests never reach this lane (they keep the owner loop).
                     lane_model, lane_provider = voice_brain["model"], voice_brain["provider"]
                     lane_controls = voice_brain["controls"]
-                    lane_system = f"{lane_system}\n\n{voice_brain['style']}"
+                    # A compact prompt: prefill dominates first-token latency
+                    # on a local model (the full tool-describing prompt cost
+                    # ~14 s on the M1 Max). Stable prefix -> Ollama KV reuse.
+                    lane_system = voice_brain["system"]
                 backend = f"model:{lane_provider or 'configured'}"
                 model = lane_model or "configured"
                 current = self.store.get_session(session_id) or {}
@@ -6403,7 +6406,8 @@ class JaegerGatewayApp:
                         prompt,
                         model=model, provider=lane_provider, local_only=local_only,
                         system_prompt=lane_system, controls=lane_controls,
-                        history=self._history_before_admitted_user(current, admitted_request),
+                        history=(self._history_before_admitted_user(current, admitted_request)[-voice_brain["history"]:]
+                                 if voice_brain else self._history_before_admitted_user(current, admitted_request)),
                         attachments=self._turn_attachments(session_id, execution),
                         context_ids=(session_id, request_id or turn_id),
                         context_references=context_references,
