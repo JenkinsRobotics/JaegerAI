@@ -579,3 +579,19 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-msg-versions button:hover:not(:disabled) { background: var(--jg-color-hover); color: var(--jg-color-text); }
 .jg-user-edit { margin-top: 2px; min-height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--jg-color-text-secondary); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; }
 .jg-turn:hover .jg-user-edit, .jg-turn:focus-within .jg-user-edit, .jg-user-edit.is-touch { opacity: 1; }
+
+.jg-turn-activity__current {
+  margin: 0 0 8px 24px; color: var(--jg-color-text-secondary); font-size: var(--jg-font-small);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.jg-work-thinking { color: var(--jg-color-text-secondary); font-size: var(--jg-font-small); }
+.jg-work-thinking strong { display: block; font-weight: 600; margin-bottom: 4px; }
+.jg-work-thinking p { margin: 0; white-space: pre-wrap; }
+.jg-source-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; padding: 0; list-style: none; }
+.jg-source-chip {
+  display: inline-flex; align-items: center; max-width: 100%; min-height: 28px; padding: 0 10px;
+  border: 1px solid var(--jg-color-border); border-radius: 999px; background: var(--jg-color-elevated, var(--aether-color-bg-control));
+  color: inherit; font-size: 12px; text-decoration: none; overflow: hidden;
+}
+.jg-source-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-source-chip:hover { background: var(--jg-color-hover); }

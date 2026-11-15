@@ -14,6 +14,11 @@ export interface MappedEvent {
 }
 
 type Payload = Record<string, unknown>;
+function elapsedSeconds(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 const str = (value: unknown): string => (typeof value === "string" ? value : value == null ? "" : String(value));
 
 export function mapEvent(event: GatewayEvent, agentName: (id: string) => string = (id) => id): MappedEvent | null {
@@ -65,13 +70,12 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "executing" }] };
     case "tool.done":
     case "tool.completed":
-      return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "completed", output: p.output ?? p.result, summary: str(p.summary ?? p.text) || undefined }] };
+      return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "completed", output: p.output ?? p.result, summary: str(p.summary ?? p.text) || undefined, elapsedS: elapsedSeconds(p.elapsed_s) }] };
     case "tool.error":
     case "tool.failed":
       return {
         parts: [
-          { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: (["denied", "rejected", "unsupported", "unknown", "cancelled"].includes(str(p.outcome)) ? str(p.outcome) : "failed") as ToolInvocationState, output: p.error, summary: str(p.summary ?? p.text) || undefined },
-          { kind: "error", message: str(p.error ?? p.message ?? "Tool failed") },
+          { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: (["denied", "rejected", "unsupported", "unknown", "cancelled"].includes(str(p.outcome)) ? str(p.outcome) : "failed") as ToolInvocationState, output: p.error, summary: str(p.summary ?? p.text) || undefined, elapsedS: elapsedSeconds(p.elapsed_s) },
         ],
       };
     case "approval.request": {

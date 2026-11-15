@@ -22,7 +22,7 @@ export type ChatPart =
   | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { kind: "markdownContent"; text: string; role?: AssistantContentRole; itemId?: string }
   | { kind: "thinking"; text: string; durationMs?: number }
-  | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string }
+  | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string; elapsedS?: number }
   | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny"; reviewerVerdict?: string; reviewerReason?: string }
   | { kind: "progress"; message: string }
   /** Live loop position (model.started/finished); one per turn, replaced in place. */
@@ -219,8 +219,17 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
       (part.role ?? "provisional") === (last.role ?? "provisional") && (part.itemId ?? "") === (last.itemId ?? "")) {
     return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text }];
   }
-  if (part.kind === "thinking" && last?.kind === "thinking") {
-    return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];
+  if (part.kind === "thinking") {
+    // A duration-only close belongs on the open reasoning run, even if a tool
+    // arrived first; never start a new empty "Thought for Ns" pill.
+    if (!part.text && part.durationMs != null) {
+      const open = [...parts].map((p, i) => p.kind === "thinking" && p.durationMs == null ? i : -1).filter(i => i >= 0).at(-1);
+      if (open == null) return parts;
+      return parts.map((p, i) => i === open && p.kind === "thinking" ? { ...p, durationMs: part.durationMs } : p);
+    }
+    if (last?.kind === "thinking" && last.durationMs == null) {
+      return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];
+    }
   }
   if (part.kind === "toolInvocation" || part.kind === "confirmation" || part.kind === "question") {
     const index = parts.findIndex((p) => p.kind === part.kind && p.callId === part.callId);

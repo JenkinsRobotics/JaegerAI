@@ -37,7 +37,7 @@ import { ChatHome } from "./ChatHome";
 import { navigate } from "../shell/router";
 import { stageSavedMedia, addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
-import { stepsSummary, type ToolPart } from "./activity";
+import { stepsSummary, stepLine, type ToolPart } from "./activity";
 import { applyPart, isSessionMissingError, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type ClarifyAnswerResult, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
 import { SessionApprovals } from "./SessionApprovals";
@@ -107,7 +107,7 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
     case "checkpoint":
       return <p>{part.text}</p>;
     case "sources":
-      return <section aria-label="Sources"><strong>Sources</strong><ul>{part.sources.map((source,i)=><li key={i}>{source.kind==="url" && /^https?:\/\//i.test(source.location) ? <a href={source.location} target="_blank" rel="noopener noreferrer">{source.title || source.location}</a> : <span>{source.location}</span>}</li>)}</ul></section>;
+      return null;
     case "searchCount":
       return <small>{part.searches} searches · {part.completed} completed · {part.failed} failed</small>;
     case "followUps":
@@ -171,20 +171,17 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
   const out: Array<{ guidance: Extract<ChatPart,{kind:"userGuidance"}> } | { marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { activity: ChatPart[] } | { diagnostic: ChatPart[] }> = [];
   parts = parts.filter(p => p.kind !== "step"); // shown on the live progress line only
   const {work,visible} = partitionChatParts(parts);
-  // Reuse shared classification while preserving the original event order.
-  // Commentary is always readable, even when more tool rounds follow it.
-  const workIndices = new Set(work.filter(row=>row.part.kind!=="markdownContent").map(row=>row.index));
+  // All thinking, tools, commentary and other work share one disclosure.
+  // Interactive cards, the final answer, and web citations stay outside it.
+  const workIndices = new Set(work.map(row => row.index));
   const ended = state !== "pending";
+  const activity: ChatPart[] = [];
   const ordered = [...work,...visible].sort((a,b)=>a.index-b.index);
   for (const {part:original,index} of ordered) {
     const part = original.kind === "toolInvocation" && ended && (original.state === "executing" || original.state === "streaming")
       ? {...original,state:state === "cancelled" ? "cancelled" as const : "unknown" as const} : original;
-    if(workIndices.has(index)) {
-      const previous=out.at(-1);
-      const reasoning=part.kind==="thinking";
-      const sameActivity=previous && "activity" in previous && previous.activity.every(item=>(item.kind==="thinking")===reasoning);
-      if(sameActivity && previous && "activity" in previous) previous.activity.push(part);
-      else out.push({activity:[part]});
+    if (workIndices.has(index) || part.kind === "thinking" || part.kind === "toolInvocation" || part.kind === "progress" || part.kind === "plan" || part.kind === "checkpoint") {
+      if (!(part.kind === "thinking" && !part.text && part.durationMs == null)) activity.push(part);
       continue;
     }
     const last = out.at(-1);
@@ -208,29 +205,141 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
       else out.push({bubble:[part]});
     }
   }
+  if (activity.length) {
+    const at = out.findIndex(seg => "card" in seg || "bubble" in seg || "marker" in seg);
+    if (at < 0) out.push({ activity });
+    else out.splice(at, 0, { activity });
+  }
   return out;
+}
+
+function isWebSource(source: { kind?: string; location: string }): boolean {
+  if (source.kind === "file") return false;
+  try {
+    const url = new URL(source.location);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function sourceLabel(source: { location: string; title?: string }): string {
+  if (source.title) return source.title;
+  try {
+    const url = new URL(source.location);
+    const host = url.hostname.replace(/^www\./, "");
+    const path = url.pathname.replace(/\/$/, "");
+    return path && path !== "/" ? `${host}${path.length > 32 ? path.slice(0, 31) + "…" : path}` : host;
+  } catch {
+    return source.location;
+  }
+}
+
+export function webSources(parts: ChatPart[]): Array<{ kind: "url" | "file"; location: string; title?: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ kind: "url" | "file"; location: string; title?: string }> = [];
+  for (const part of parts) {
+    if (part.kind !== "sources") continue;
+    for (const source of part.sources) {
+      if (!isWebSource(source) || seen.has(source.location)) continue;
+      seen.add(source.location);
+      out.push(source);
+    }
+  }
+  return out;
+}
+
+function SourceChips({ sources, onOpen }: { sources: Array<{ location: string; title?: string }>; onOpen?: (url: string) => void }) {
+  if (!sources.length) return null;
+  return (
+    <ul className="jg-source-chips" aria-label="Sources">
+      {sources.map(source => (
+        <li key={source.location}>
+          <a className="jg-source-chip" href={source.location} target="_blank" rel="noopener noreferrer"
+            onClick={event => { if (onOpen) { event.preventDefault(); onOpen(source.location); } }}
+            title={source.location}>
+            <span>{sourceLabel(source)}</span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function workStepCount(parts: ChatPart[]): number {
+  return parts.filter(part =>
+    (part.kind === "thinking" && ((part.text && !isDebugThinking(part.text)) || (part.durationMs != null && part.durationMs > 0))) ||
+    part.kind === "toolInvocation" ||
+    (part.kind === "progress" && part.message) ||
+    (part.kind === "markdownContent" && part.text)
+  ).length;
+}
+
+function workDurationMs(parts: ChatPart[]): number {
+  const thinking = parts.filter((part): part is Extract<ChatPart,{kind:"thinking"}> => part.kind === "thinking")
+    .reduce((total, part) => total + (part.durationMs ?? 0), 0);
+  const tools = parts.filter((part): part is ToolPart => part.kind === "toolInvocation")
+    .reduce((total, part) => total + (part.elapsedS != null ? Math.round(part.elapsedS * 1000) : 0), 0);
+  return thinking + tools;
+}
+
+function currentWorkLabel(parts: ChatPart[]): string | undefined {
+  const running = [...parts].reverse().find((part): part is ToolPart =>
+    part.kind === "toolInvocation" && ["executing", "streaming", "waitingForConfirmation"].includes(part.state));
+  if (running) {
+    const { verb, target } = stepLine(running);
+    return target ? `${verb} ${target}` : verb;
+  }
+  if (parts.some(part => part.kind === "thinking" && part.durationMs == null)) return "Thinking…";
+  const progress = [...parts].reverse().find(part => part.kind === "progress" && part.message);
+  return progress && progress.kind === "progress" ? progress.message : undefined;
 }
 
 export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boolean;links:Links;style:StreamStyleParams}) {
   const [open,setOpen]=useState(false);
+  const [now,setNow]=useState(Date.now());
+  const started = useRef<number | undefined>(undefined);
+  if (live && started.current == null) started.current = Date.now();
   useEffect(()=>{if(!live)setOpen(false);},[live]);
+  useEffect(() => {
+    if (!live) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [live]);
   const tools=parts.filter((p):p is ToolPart=>p.kind==="toolInvocation");
-  const runningTool=[...tools].reverse().find(tool=>["executing","streaming","waitingForConfirmation"].includes(tool.state));
-  const reasoning=parts.filter((p):p is Extract<ChatPart,{kind:"thinking"}>=>p.kind==="thinking");
-  const reasoningMs=reasoning.reduce((total,part)=>total+(part.durationMs??0),0);
-  const summary=tools.length ? stepsSummary(tools) : reasoning.length
-    ? (live && reasoning.some(part=>part.durationMs===undefined) ? "Thinking…" : reasoningMs ? `Thought for ${seconds(reasoningMs)} s` : "Reasoning")
-    : live ? "Working" : "Activity";
+  const liveMs = started.current != null ? Math.max(0, now - started.current) : 0;
+  const finishedMs = workDurationMs(parts);
+  const steps = workStepCount(parts);
+  const clock = live ? liveMs : finishedMs;
+  const clockLabel = clock >= 1000 || !live ? `${seconds(clock)}s` : undefined;
+  const current = live ? currentWorkLabel(parts) : undefined;
+  const summary = live
+    ? (clockLabel ? `Working… ${clockLabel}` : "Working…")
+    : tools.length
+      ? `Worked for ${seconds(finishedMs)}s · ${steps} step${steps === 1 ? "" : "s"}`
+      : finishedMs
+        ? `Thought for ${seconds(finishedMs)}s`
+        : "Thought";
+  const visibleSteps = parts.filter(part =>
+    !(part.kind === "thinking" && !part.text && !(part.durationMs != null && part.durationMs > 0)) &&
+    part.kind !== "sources"
+  );
   return <div className="jg-steps jg-turn-activity" data-sender="assistant">
-    <button type="button" className="jg-steps__summary" aria-label={`${open ? "Hide" : "Show"} activity${tools.length ? ": "+stepsSummary(tools) : ""}`} aria-expanded={open} onClick={()=>setOpen(!open)}>
-      <span className="jg-stream-icon" aria-hidden="true">{reasoning.length ? <WaveIcon/> : <ActivityIcon tool={tools.at(-1)} />}</span>
+    <button type="button" className="jg-steps__summary" aria-label={`${open ? "Hide" : "Show"} work: ${summary}`} aria-expanded={open} onClick={()=>setOpen(!open)}>
+      <span className="jg-stream-icon" aria-hidden="true">{tools.length ? <ActivityIcon tool={tools.at(-1)} /> : <WaveIcon/>}</span>
       <span className="jg-steps__text">{summary}</span>
-      <span className="jg-steps__toggle" aria-label={open ? "Hide activity" : "Show activity"}><ChevronIcon/></span>
+      <span className="jg-steps__toggle" aria-label={open ? "Hide work" : "Show work"}><ChevronIcon/></span>
     </button>
-    {!open && live && runningTool && <div className="jg-turn-activity__live"><ToolActivity part={runningTool} /></div>}
-    {open && <div className="jg-turn-activity__body">{parts.map((part,i)=>
+    {!open && live && current && <p className="jg-turn-activity__current">{current}</p>}
+    {open && <div className="jg-turn-activity__body">{visibleSteps.map((part,i)=>
       part.kind==="progress" ? <p key={i}>{part.message}</p> :
-      part.kind==="thinking" ? <section key={i} className="jg-reasoning-diagnostic" aria-label="Reasoning diagnostic"><strong>{part.durationMs === undefined ? "Reasoning" : `Reasoning · ${seconds(part.durationMs)} s`}</strong>{part.text && <p>{part.text}</p>}</section> :
+      part.kind==="thinking" && !isDebugThinking(part.text) ? (
+        <section key={i} className="jg-work-thinking" aria-label={part.durationMs != null ? `Thought for ${seconds(part.durationMs)}s` : "Thinking"}>
+          <strong>{part.durationMs != null ? `Thought for ${seconds(part.durationMs)}s` : "Thinking…"}</strong>
+          {part.text ? <p>{part.text}</p> : null}
+        </section>
+      ) :
+      part.kind==="toolInvocation" ? <ToolActivity key={part.callId || i} part={part} /> :
       <BubblePart key={i} part={part} links={links} style={style} live={false}/>
     )}</div>}
   </div>;
@@ -1154,14 +1263,13 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 : "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
-                : "activity" in seg ? (seg.activity.every(part => part.kind === "thinking" || part.kind === "progress")
-                  ? <ThinkingRow key={`activity:${i}`} live={turn.state === "pending" && !replyHasText(turn)} sessionId={session?.id} durationMs={seg.activity.filter((part): part is Extract<ChatPart,{kind:"thinking"}> => part.kind === "thinking").reduce((total, part) => total + (part.durationMs ?? 0), 0) || undefined} text={seg.activity.filter((part): part is Extract<ChatPart,{kind:"thinking"}> => part.kind === "thinking").map(part => part.text).filter(text => text && !isDebugThinking(text)).join("\n") || undefined} />
-                  : <ActivityFold key={`activity:${i}`} parts={seg.activity.filter(part => part.kind !== "thinking")} live={turn.state === "pending"} links={links} style={streamStyle} />)
+                : "activity" in seg ? <ActivityFold key={`activity:${i}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
                 : "diagnostic" in seg ? null
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant" tabIndex={0} aria-haspopup="menu">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
-              {turn.state === "pending" && !replyHasText(turn) && !turn.parts.some(part => part.kind === "thinking" || (part.kind === "toolInvocation" && ["executing","streaming","waitingForConfirmation"].includes(part.state))) && (
-                <ThinkingRow live sessionId={session?.id} />
+              {turn.state === "pending" && !segments(turn.parts, turn.state).some(seg => "activity" in seg) && !replyHasText(turn) && (
+                <ActivityFold parts={[]} live links={links} style={streamStyle} />
               )}
+              <SourceChips sources={webSources(turn.parts)} onOpen={links.onOpen} />
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
               {(turnErrors(turn).length > 0 || turn.state === "failed" || turn.state === "unknown") && (
                 <ModelError details={turnErrors(turn)} onRetry={turn.message && !active ? () => send(turn.message) : undefined} />

@@ -91,7 +91,7 @@ export type PersistedPart =
   | { type: "knowledge"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { type: "text"; text: string; role?: "provisional"|"commentary"|"final"; item_id?: string }
   | { type: "reasoning"; text: string; duration_ms?: number }
-  | { type: "tool"; call_id?: string | null; tool?: string; status?: string; state?: string; input?: unknown; output?: unknown; summary?: string }
+  | { type: "tool"; call_id?: string | null; tool?: string; status?: string; state?: string; input?: unknown; output?: unknown; summary?: string; elapsed_s?: number }
   /** 417d8a0c: an approval the turn asked for. call_id is usually null, so it matches its tool on tool+target. */
   | { type: "approval"; approval_id: string; call_id?: string | null; tool?: string; target?: string; status?: string; state?: string; decision?: string | null; reviewer_verdict?: string; reviewer_reason?: string }
   | { type: "plan"; [key: string]: unknown }
