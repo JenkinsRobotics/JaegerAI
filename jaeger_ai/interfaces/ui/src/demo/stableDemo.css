@@ -338,6 +338,9 @@
 
 .jg-stable-demo__home-chat { margin: 0 0 8px; }
 .jg-stable-demo__home-chat .jg-stable-demo__session-title { width: 100%; font-weight: 650; color: var(--jg-color-text); }
+.jg-stable-demo__home-chat .jg-stable-demo__session-row[data-selected=true],
 .jg-stable-demo__home-chat .jg-stable-demo__session-title[aria-current="true"] { background: var(--jg-color-active); }
 .jg-stable-demo__recents #topics { margin-bottom: 8px; }
 .jg-stable-demo__recents #topics .jg-stable-demo__session-row { padding-left: 8px; }
+.jg-stable-demo__recents #recents { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--jg-color-border); }
+.jg-stable-demo__recents #recents .jg-stable-demo__date-group h2 { margin: 6px 10px 4px; color: var(--jg-color-text-tertiary); font-size: 12px; font-weight: 500; }

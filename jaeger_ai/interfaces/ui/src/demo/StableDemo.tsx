@@ -709,12 +709,14 @@ export function StableDemo({ source }: { source: JaegerSource }) {
               {resultGroups.map(group => <div className="jg-stable-demo__date-group" key={group.label}><h2>{group.label}</h2>{group.rows.map(row => conversationRow(row, pinnedSessions.has(row.session_id)))}</div>)}
             </> : <>
               <div className="jg-stable-demo__home-chat">
-                <button className="jg-stable-demo__session-title" type="button" data-home="true" title="Jaeger" aria-current={isJaegerHome(session) && !topic ? "true" : undefined} onClick={() => selectSession(JAEGER_HOME_ID)}>{homeRow.title || "Jaeger"}</button>
+                <div className="jg-stable-demo__session-row" data-selected={isJaegerHome(session) || undefined} data-active={isJaegerHome(session) || undefined}>
+                  <button className="jg-stable-demo__session-title" type="button" data-home="true" title="Jaeger" aria-current={isJaegerHome(session) ? "true" : undefined} onClick={() => selectSession(JAEGER_HOME_ID, null)}>{homeRow.title || "Jaeger"}</button>
+                </div>
               </div>
               {topicList.length > 0 && <ConversationSection id="topics" title="Topics">{topicList.map(row => conversationRow(row, false))}</ConversationSection>}
               {pinnedRows.length > 0 && <ConversationSection id="pinned" title="Pinned">{pinnedRows.map(row => conversationRow(row, true))}</ConversationSection>}
               {projectGroups.length > 0 && <ConversationSection id="projects" title="Projects">{projectGroups.map(({group, rows}) => <div className="jg-stable-demo__project" key={group.id}><h3 title={group.name}><FolderOpen size={15} />{group.name}</h3>{rows.map(row => conversationRow(row, false))}</div>)}</ConversationSection>}
-              {resultGroups.map(group => <div className="jg-stable-demo__date-group" key={group.label}><h2>{group.label}</h2>{group.rows.map(row => conversationRow(row, false))}</div>)}
+              {resultGroups.length > 0 && <ConversationSection id="recents" title="Recents">{resultGroups.map(group => <div className="jg-stable-demo__date-group" key={group.label}><h2>{group.label}</h2>{group.rows.map(row => conversationRow(row, false))}</div>)}</ConversationSection>}
               {!resultGroups.length && !pinnedRows.length && !projectGroups.length && !topicList.length && !historyError && <p>Your conversations will appear here.</p>}
             </>}
           </div>
