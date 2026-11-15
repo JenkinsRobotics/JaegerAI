@@ -141,7 +141,7 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
     ),
     "web": ToolsetDef(
         description="Web search, content extraction, current weather.",
-        tools=_tools(_core("web_search", "web_extract"), _scoping("web")),
+        tools=_tools(_core("web_search", "web_extract", "get_weather"), _scoping("web")),
         includes=[],
     ),
     "memory": ToolsetDef(
