@@ -57,9 +57,21 @@ _LIVE = re.compile(
 )
 
 
+# A camera/screen voice turn carries what the local vision model saw. Words like
+# "note", "document" or "photo" then mean the thing in view, which is already
+# described, not the user's files; the fast voice model can answer from it.
+_SIGHT = re.compile(r"\n\n\[(?:Camera|Screen) view, described by Jaeger's local vision model: .*\]\s*$", re.S)
+_IN_VIEW = re.compile(r"^(?:files?|folders?|documents?|notes?|photos?|screenshot|messages?|texts?|code|website|web)$", re.I)
+
+
 def needs_live_facts(request: str) -> bool:
     """True when a spoken request needs tools, live data or the user's files/accounts."""
-    return bool(_LIVE.search(str(request or "")))
+    text = str(request or "")
+    sight = _SIGHT.search(text)
+    if sight is None:
+        return bool(_LIVE.search(text))
+    spoken = text[:sight.start()]
+    return any(not _IN_VIEW.match(m.group(0).strip()) for m in _LIVE.finditer(spoken))
 
 
 def _zone_name() -> str:
