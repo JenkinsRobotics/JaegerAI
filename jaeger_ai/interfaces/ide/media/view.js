@@ -944,7 +944,6 @@ window.addEventListener('message', ({ data }) => {
 const TIER_OPTIONS = [
   { id: 'tier-chat', value: 'chat', label: 'Chat', hint: 'Chat (Tier 1): Pure conversational intelligence. Zero tool calls, commands, or file edits.' },
   { id: 'tier-agent', value: 'agent', label: 'Agent', hint: 'Agent (Tier 2): Interactive task worker with tools upon your request.' },
-  { id: 'tier-jaeger', value: 'jaeger', label: 'Jaeger', hint: 'Jaeger (Tier 3): Autonomous companion with continuous background awareness & durable tasks.' },
 ];
 
 const MODE_OPTIONS = [
@@ -954,7 +953,9 @@ const MODE_OPTIONS = [
 ];
 
 function selectedTier() {
-  return state.tier?.current || 'agent';
+  const current = state.tier?.current || 'agent';
+  // Retired resident mode is Agent.
+  return current === 'jaeger' ? 'agent' : current;
 }
 
 function selectedMode() {
@@ -986,17 +987,12 @@ function renderComposerBar() {
     }
   }
 
-  // Render Autonomy Sub-switch (visible in agent tier; hidden in chat/jaeger)
+  // Render Autonomy Sub-switch (visible in Agent; hidden in Chat)
   const subswitch = $('autonomy-subswitch');
   if (subswitch) {
     subswitch.hidden = (currentTier !== 'agent');
   }
 
-  // The resident 'jaeger' autonomous indicator retired with that run mode.
-  const jaegerIndicator = $('jaeger-autonomous-indicator');
-  if (jaegerIndicator) {
-    jaegerIndicator.hidden = true;
-  }
   // Visual steering feedback
   const prompt = $('prompt');
   const sendBtn = $('send');
@@ -1039,7 +1035,7 @@ function setComposerExpanded(open) {
   const barRight = document.querySelector('.bar-right');
   const execution = document.querySelector('.execution-row');
   if (!form || !options || !flow || !barLeft || !barRight || !execution) return;
-  const advanced = ['mode-switch', 'autonomy-subswitch', 'jaeger-autonomous-indicator', 'ide-context', 'queue-next', 'worktree'];
+  const advanced = ['mode-switch', 'autonomy-subswitch', 'ide-context', 'queue-next', 'worktree'];
   if (composerExpanded) {
     for (const id of advanced) { const node = $(id); if (node) flow.append(node); }
     options.hidden = false;
@@ -1059,8 +1055,9 @@ function setComposerExpanded(open) {
 }
 
 function setTier(tier) {
-  state.tier = { ...(state.tier || {}), current: tier };
-  post('setTier', { tier });
+  const next = tier === 'jaeger' ? 'agent' : tier;
+  state.tier = { ...(state.tier || {}), current: next };
+  post('setTier', { tier: next });
   persistView(); renderComposerBar();
 }
 
@@ -1088,10 +1085,8 @@ window.addEventListener('keydown', event => {
 });
 $('workspace').onclick = () => post('executionLocation');
 $('worktree').onclick = () => post('selectWorktree');
-if ($('jaeger-autonomous-indicator')) $('jaeger-autonomous-indicator').onclick = () => post('info', { what: 'cognitiveRouting' });
 if ($('tier-chat')) $('tier-chat').onclick = () => setTier('chat');
 if ($('tier-agent')) $('tier-agent').onclick = () => setTier('agent');
-if ($('tier-jaeger')) $('tier-jaeger').onclick = () => setTier('jaeger');
 if ($('mode-deep-think')) {
   $('mode-deep-think').onclick = () => {
     deepThinkOn = !deepThinkOn;

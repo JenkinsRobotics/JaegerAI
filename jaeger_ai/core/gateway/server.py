@@ -1504,6 +1504,8 @@ class JaegerGatewayApp:
         blocked = _control_plane_block()
         if blocked:
             return {"text": "", "error": blocked, "halt_reason": "stopped", "skipped": True, "replayed": False}
+        from jaeger_ai.core.runtime.maintenance_text import redact_local_paths
+        prompt = redact_local_paths(prompt)
         future = asyncio.run_coroutine_threadsafe(
             self._run_background_turn(
                 prompt, session_id=session_id, request_id=request_id, source=source,
@@ -6335,20 +6337,23 @@ class JaegerGatewayApp:
         if now - type(self)._last_skill_review_at < float(os.environ.get("JAEGER_SKILL_NUDGE_COOLDOWN_S") or 600):
             return
         type(self)._last_skill_review_at = now
+        from jaeger_ai.core.runtime.maintenance_text import excerpt_for_maintenance
         seq = ", ".join(used[:40]) + (" …" if len(used) > 40 else "")
-        answer = str(result.get("text") or "")[:1500]
+        request_excerpt = excerpt_for_maintenance(prompt, 800)
+        answer_excerpt = excerpt_for_maintenance(str(result.get("text") or ""), 800)
         review = (
             "Skill review (background, no one is waiting for a reply).\n"
             f"A task just finished using {len(used)} tool calls.\n\n"
-            f"Owner request:\n{prompt[:2000]}\n\nTools used, in order: {seq}\n\n"
-            f"Final answer (truncated):\n{answer}\n\n"
+            f"Owner request (local paths redacted):\n{request_excerpt}\n\n"
+            f"Tools used, in order: {seq}\n\n"
+            f"Final answer (local paths redacted):\n{answer_excerpt}\n\n"
             "Decide whether this produced a reusable procedure worth keeping as a skill "
             "(a non-obvious workflow, a fix that took trial and error, or something the owner "
             "will likely ask again). First check existing skills with list_skills(action='search', "
             "query=...). If a matching skill of yours exists and this run taught something new, "
             "update it with skill_manage(action='patch' or 'edit'). If nothing fits and it is worth "
             "keeping, skill_manage(action='create') with frontmatter name/description and concise "
-            "steps, pitfalls and how to verify. Never store secrets, tokens or personal data. "
+            "steps, pitfalls and how to verify. Do not save credentials or personal data. "
             "If nothing is worth saving, reply exactly NO_REPLY. Otherwise reply with one line "
             "naming the skill and what changed."
         )
