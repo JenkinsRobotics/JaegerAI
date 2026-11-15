@@ -492,6 +492,10 @@ def _route_template(request: web.Request) -> str | None:
     return getattr(resource, "canonical", None) if resource is not None else None
 
 
+#: Background turn sources allowed in Agent mode (owner schedules + upkeep).
+OWNER_BACKGROUND_SOURCES = frozenset({"cron", "memory_upkeep", "skill_review"})
+
+
 def _control_plane_block() -> str | None:
     """In-process producers bypass HTTP middleware. They still honor Stop and the lease."""
     from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
@@ -1510,7 +1514,10 @@ class JaegerGatewayApp:
         allowed_tools: list[str] | None = None,
     ) -> dict[str, Any]:
         tier = self._current_tier()
-        if tier != "jaeger":
+        # The resident 'jaeger' tier was retired into Agent; owner-created
+        # scheduled jobs and Jaeger's own upkeep passes run in Agent mode.
+        # Other unprompted producers stay off (no surprise background work).
+        if not (tier == "agent" and source in OWNER_BACKGROUND_SOURCES):
             return {
                 "text": "",
                 "error": f"Proactive background turns are disabled in '{tier}' mode (requires 'jaeger' mode)",

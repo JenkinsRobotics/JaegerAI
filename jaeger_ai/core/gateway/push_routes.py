@@ -37,6 +37,15 @@ KEY = "push:queue"
 BATCH_S = 30 * 60
 EXPIRY_LEAD_S = 30 * 60
 TICK_S = 60
+STALE_S = 24 * 3600
+MAX_LANE = 50
+
+
+def _has_subscribers() -> bool:
+    try:
+        return bool(webpush.list_subscriptions())
+    except Exception:  # noqa: BLE001
+        return False
 SUBJECT = "mailto:owner@localhost"
 
 
@@ -158,6 +167,15 @@ class PushDispatcher:
         q = json.loads(row[0]) if row else {}
         q.setdefault("now", []); q.setdefault("batch", []); q.setdefault("held", []); q.setdefault("scheduled", [])
         q.setdefault("pushed_tags", []); q.setdefault("batch_since", None); q.setdefault("quiet_until", None)
+        # Stale items are noise, not news: drop anything queued more than a day
+        # ago (or with no queue time at all) and cap each lane.
+        cutoff = self.clock() - STALE_S
+        for k in ("now", "batch", "held", "scheduled"):
+            q[k] = [x for x in q[k] if float(x.get("queued_at") or 0) >= cutoff][-MAX_LANE:]
+        if not q["batch"]:
+            q["batch_since"] = None
+        if not q["held"]:
+            q["quiet_until"] = None
         return q
 
     def _save(self, q: dict) -> None:
@@ -185,6 +203,9 @@ class PushDispatcher:
 
     def enqueue(self, c: dict) -> str:
         now = self.clock()
+        if c.get("kind") != "resolved" and not _has_subscribers():
+            return "drop"  # no device to push to; the in-app inbox still has it
+        c = {**c, "queued_at": now}
         with self._lock:
             prefs = _prefs(self.gw.store)
             q = self._load()
@@ -283,6 +304,16 @@ class PushDispatcher:
             self._save(q)
         return {"sent": sent}
 
+    def discard_undeliverable(self) -> None:
+        """No push subscription: nothing can be delivered, so don't let a queue pile up."""
+        with self._lock:
+            q = self._load()
+            if any(q[k] for k in ("now", "batch", "held", "scheduled")):
+                for k in ("now", "batch", "held", "scheduled"):
+                    q[k] = []
+                q["batch_since"] = q["quiet_until"] = None
+                self._save(q)
+
     def status(self) -> dict:
         q = self._load()
         return {k: len(q[k]) for k in ("now", "batch", "held", "scheduled")} | {"batch_since": q["batch_since"],
@@ -296,6 +327,8 @@ class PushDispatcher:
                 try:
                     if webpush.list_subscriptions():
                         self.tick()
+                    else:
+                        self.discard_undeliverable()
                 except Exception:  # noqa: BLE001
                     logger.warning("push tick failed", exc_info=True)
         self._thread = threading.Thread(target=loop, name="jaeger-push", daemon=True)

@@ -32,7 +32,23 @@ def register(gateway):
         tasks = [t.to_dict() for t in gateway.task_owner.store.list_tasks()
                  if t.provenance.get("schedule_id") == name]
         requests = [r for r in gateway.store.list_requests() if r["session_id"] == "cron:" + name]
-        return web.json_response({"tasks": tasks, "requests": requests})
+        runs = []
+        try:
+            import json as _json
+            from jaeger_agent.core.workspace import get_layout
+            from jaeger_ai.core.runtime.background_producers import cron_runs_path
+            path = cron_runs_path(get_layout())
+            if path is not None and path.exists():
+                for line in path.read_text(encoding="utf-8").splitlines()[-2000:]:
+                    try:
+                        row = _json.loads(line)
+                    except ValueError:
+                        continue
+                    if not name or row.get("job_id") == name:
+                        runs.append(row)
+        except Exception:  # noqa: BLE001 — history is best-effort
+            pass
+        return web.json_response({"tasks": tasks, "requests": requests, "runs": runs[-200:][::-1]})
 
     async def mutate(request):
         from jaeger_ai.core.runtime import schedules as owner

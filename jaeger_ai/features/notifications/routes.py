@@ -6,6 +6,9 @@ from aiohttp import web
 
 KEY='notifications:operator'
 NOTIFICATION_EVENTS=('approval.request','task.updated','agent.handoff.finished','notification.proactive','turn.failed','turn.unknown')
+# Routine task/delegate status changes stay in the feed but don't light the badge.
+BADGE_EVENTS=('approval.request','notification.proactive','turn.failed','turn.unknown')
+UNREAD_WINDOW_S=72*3600
 CATEGORIES={'all':('All activity',NOTIFICATION_EVENTS),'approvals':('Approvals',('approval.request',)),'tasks':('Tasks',('task.updated',)),'delegates':('Delegated work',('agent.handoff.finished',)),'errors':('Conversation failures and unknowns',('turn.failed','turn.unknown')),'proactive':('Proactive notifications',('notification.proactive',))}
 
 
@@ -97,7 +100,7 @@ def feed(store,*,before=None,category='all'):
             if identity in seen:continue
             seen.add(identity)
             title={'approval.request':'Approval requested','notification.proactive':'New proactive notification','turn.failed':'Conversation failed','turn.unknown':'Conversation outcome unknown','task.updated':'Task status changed','agent.handoff.finished':'Delegated work status changed'}[event]
-            result.append({'event_id':row['event_id'],'session_id':row['session_id'],'agent_id':agent_id,'title':title,'status':status,'timestamp':row['timestamp'],'unread':row['event_id']>prefs['read_through']})
+            result.append({'event_id':row['event_id'],'session_id':row['session_id'],'agent_id':agent_id,'title':title,'status':status,'timestamp':row['timestamp'],'unread':row['event_id']>prefs['read_through'] and event in BADGE_EVENTS and row['timestamp']>=__import__('time').time()-UNREAD_WINDOW_S})
             if len(result)==50:break
         # Presence over retained activity, never a total unread count. Older or
         # category pages cannot establish the current global presence. A full
@@ -110,7 +113,10 @@ def feed(store,*,before=None,category='all'):
                 presence = 'present'
             elif result or scanned < 500:
                 presence = 'absent'  # newest visible row is at/below read watermark
-        unread=conn.execute("SELECT COUNT(*) FROM (SELECT 1 FROM activity_history WHERE event_id>? AND event IN ("+','.join('?' for _ in NOTIFICATION_EVENTS)+") LIMIT 1000)",(prefs['read_through'],*NOTIFICATION_EVENTS)).fetchone()[0] if prefs['enabled'] else 0
+        # Badge = recent things worth a look. Unread older than UNREAD_WINDOW_S
+        # expires instead of accumulating forever (the inbox still lists it).
+        import time as _time
+        unread=conn.execute("SELECT COUNT(*) FROM (SELECT 1 FROM activity_history WHERE event_id>? AND timestamp>=? AND event IN ("+','.join('?' for _ in BADGE_EVENTS)+") LIMIT 1000)",(prefs['read_through'],_time.time()-UNREAD_WINDOW_S,*BADGE_EVENTS)).fetchone()[0] if prefs['enabled'] else 0
         pending=conn.execute("SELECT COUNT(*) FROM approvals WHERE status='pending'").fetchone()[0]
         return {'unread_count':unread,'pending_approvals':pending,'badge':unread+pending,'retained_unread_presence':presence,'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled'],'observed_through':observed,'next_before':last if last and (len(result)==50 or scanned==500) else None,'category':category,'categories':[{'id':key,'label':value[0]} for key,value in CATEGORIES.items()],'pagination_scope':'retained_activity_per_page_entity_dedupe'}
 
