@@ -384,10 +384,12 @@ class GatewayTaskOwner:
                 if verified:
                     state, error = TaskState.COMPLETED_VERIFIED, None
                 elif evidence == UNVERIFIABLE and not _asserts_success(result):
-                    # Nothing the owner can check (an answer, not an artifact). That is
-                    # the owner's call, not a failure and never a verified completion.
+                    # Nothing the owner can check (an answer, not an artifact). The
+                    # reply was delivered, so the card is done (completed, never
+                    # verified), the way Codex/Claude Code end a turn when the agent
+                    # stops. Parking every answer in "Needs you" buried real asks.
                     # A worker that asserted success it cannot show still fails.
-                    state, error = TaskState.NEEDS_OWNER, UNVERIFIABLE
+                    state, error = TaskState.COMPLETED, None
                     evidence = {'unverified_answer': str(result.get('text') or '')[:2000]}
                 else:
                     state, error = TaskState.FAILED, str(evidence)
