@@ -2475,7 +2475,11 @@ class JaegerAgent:
         if self._interrupt_event.is_set():
             return cancelled_tool_result()
         if not tool_permitted(name):
-            return {"ok": False, "error": "Tool is outside this request scope", "error_type": "permission_denied", "retryable": False}
+            from jaeger_agent.skill_registry.tool_selection import tool_denial_reason
+            why = tool_denial_reason(name) or "scope"
+            import logging as _logging
+            _logging.getLogger("jaeger.tool_scope").warning("tool %s denied: %s", name, why)
+            return {"ok": False, "error": f"Tool is outside this request scope ({why})", "error_type": "permission_denied", "retryable": False}
         if name in self._CACHEABLE_READ_TOOLS and prep["sig"] in self._read_result_cache:
             import copy
             prep["cache_hit"] = True
