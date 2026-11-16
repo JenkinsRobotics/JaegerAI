@@ -100,6 +100,10 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       return { parts: [{ kind: "question", callId: str(p.clarify_id), title: str(p.question), sessionId: str(p.session_id) || undefined,
         revision: typeof p.revision === "number" ? p.revision : 1, status: "pending", options: choices.map((label, i) => ({ id: `c${i}`, label })) }] };
     }
+    case "secret.request":
+      return { parts: [{ kind: "secret", callId: `secret:${str(p.name)}`, name: str(p.name), prompt: str(p.prompt), sessionId: str(p.session_id) || undefined, status: "pending" }] };
+    case "secret.resolved":
+      return { parts: [{ kind: "secret", callId: `secret:${str(p.name)}`, name: str(p.name), prompt: "", status: p.status === "saved" ? "saved" : "expired" }] };
     case "clarify.resolved": {
       const status = p.status === "answered" || p.status === "cancelled" || p.status === "expired" ? p.status : undefined;
       return status ? { parts: [{ kind: "question", callId: str(p.clarify_id), title: "", options: [], status } as ChatPart] } : null;

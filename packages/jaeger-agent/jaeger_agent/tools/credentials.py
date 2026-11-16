@@ -54,8 +54,11 @@ def _t_list_credentials() -> dict:
 
 @register_tool_from_function(name="set_credential", side_effect="write")
 def _t_set_credential(name: str, value: str) -> dict:
-    """Save a secret (API key, token, chat ID) the user gave you into
-    the instance's credentials/ store, by name. Use this to PERSIST a
+    """Save a secret (API key, token, chat ID) the user ALREADY pasted
+    into the instance's credentials/ store, by name. To ASK for a secret,
+    call request_secret(name, prompt) instead: it shows a masked vault card
+    in the chat so the value never appears in the conversation. Never ask
+    the user to type a password or key into ordinary chat. Use this to PERSIST a
     credential the user just provided — do NOT tell them to run a CLI
     or set an env var; store it here. The value is written 0600 and is
     NEVER echoed back (the result returns only the name). Pick a clear
