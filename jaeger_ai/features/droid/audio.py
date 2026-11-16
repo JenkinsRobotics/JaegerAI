@@ -35,8 +35,10 @@ class DuplexAudio:
         self.voice_processing = False
 
     # lifecycle -----------------------------------------------------------
-    def start(self) -> None:
+    def start(self, output_device: int = 0) -> None:
         import AVFoundation as A
+
+        from . import coreaudio
 
         engine = A.AVAudioEngine.alloc().init()
         node = None
@@ -65,6 +67,14 @@ class DuplexAudio:
         engine.attachNode_(player)
         engine.connect_to_format_(player, engine.mainMixerNode(), fmt)
         engine.prepare()
+        speaker = coreaudio.device_name(output_device) if output_device else coreaudio.device_name(coreaudio.default_device(True))
+        if output_device and not coreaudio.set_engine_output(engine, output_device):
+            if node is not None:
+                try:
+                    node.removeTapOnBus_(0)
+                except Exception:
+                    pass
+            raise RuntimeError(f"Could not use speaker '{speaker or output_device}'")
         last = None
         for _ in range(3):
             ok, err = engine.startAndReturnError_(None)
@@ -73,10 +83,13 @@ class DuplexAudio:
             last = err.localizedDescription() if err else "unknown"
             engine.stop()
             engine.reset()
+            if output_device:
+                coreaudio.set_engine_output(engine, output_device)
         else:
             if node is not None:
                 node.removeTapOnBus_(0)
-            raise RuntimeError(f"Audio engine would not start: {last}")
+            where = f" on {speaker}" if speaker else ""
+            raise RuntimeError(f"Audio engine would not start{where}: {last}")
         player.play()
         self.engine, self.player, self.fmt = engine, player, fmt
 
