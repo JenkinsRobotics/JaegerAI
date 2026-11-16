@@ -21,7 +21,6 @@ import { CHARACTERS } from '../components/CharacterLibrary'
 import { usePhone } from '../phone/usePhone'
 import { navigate, useRoute, PAGES, PRIMARY_PAGES, SUBTABS, pathOf, type PageId } from '../shell/router'
 import { parseSettingsRest, type Tab as SettingsTab } from '../settings/SettingsDialog'
-import { HomeDashboard } from '../unified/HomeDashboard'
 import { ApprovalTray } from '../unified/ApprovalTray'
 import './windows.css'
 import '../unified/unified.css'
@@ -37,7 +36,6 @@ const CheckpointsView = lazy(() => import('../unified/CheckpointsView').then((m)
 const WorkspaceBrowser = lazy(() => import('../unified/WorkspaceBrowser').then((m) => ({ default: m.WorkspaceBrowser })))
 const MachineControlPanel = lazy(() => import('../machine-control/MachineControlPanel').then((m) => ({ default: m.MachineControlPanel })))
 const SharePointPanel = lazy(() => import('../sharepoint/SharePointPanel').then((m) => ({ default: m.SharePointPanel })))
-const EnginePanel = lazy(() => import('../unified/EnginePanel').then((m) => ({ default: m.EnginePanel })))
 const AgentsRoster = lazy(() => import('../unified/AgentsRoster').then((m) => ({ default: m.AgentsRoster })))
 const AgentsActivityPage = lazy(() => import('../orchestration/AgentsActivityPage').then((m) => ({ default: m.AgentsActivityPage })))
 const CharactersPage = lazy(() => import('../unified/CharactersPage').then((m) => ({ default: m.CharactersPage })))
@@ -51,11 +49,8 @@ const YouTubePage = lazy(() => import('../research/YouTubePage').then((m) => ({ 
 const UsagePage = lazy(() => import('../unified/UsagePage').then((m) => ({ default: m.UsagePage })))
 const DocumentsPage = lazy(() => import('../unified/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
 const KnowledgePage = lazy(() => import('../unified/KnowledgePage').then((m) => ({ default: m.KnowledgePage })))
-const BacklogPage = lazy(() => import('../unified/BacklogPage').then((m) => ({ default: m.BacklogPage })))
 const CalendarPage = lazy(() => import('../unified/CalendarPage').then((m) => ({ default: m.CalendarPage })))
-const PipelinePage = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.PipelinePage })))
 const ProcessView = lazy(() => import('../process/ProcessView').then((m) => ({ default: m.ProcessView })))
-const ProductionPage = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.ProductionPage })))
 const TaskBanner = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.TaskBanner })))
 const PageFallback = () => <div className="jg-u-page"><SkeletonRows n={6} /></div>
 
@@ -94,12 +89,11 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
     { id: 'new', label: 'New chat', shortcut: '⌘N', run: () => go('/chat') },
     ...PAGES.map((p) => ({ id: `page:${p}`, label: `Go to ${WINDOW_DEFINITIONS[p].title}`, hint: WINDOW_DEFINITIONS[p].description, shortcut: p === 'settings' ? '⌘,' : undefined, run: () => go(pathOf(p)) })),
     ...PAGES.flatMap((p) => (SUBTABS[p] ?? []).slice(1).map((t) => ({ id: `sub:${p}:${t.id}`, label: `Go to ${t.title}`, hint: `${WINDOW_DEFINITIONS[p].title} › ${t.title}`, run: () => go(pathOf(p, t.id)) }))),
-    { id: 'backlog:needs-ok', label: 'Backlog: needs my OK', hint: 'Work › Backlog', run: () => go('/work/backlog?status=needs_ok') },
     { id: 'settings:integrations', label: 'Integrations', hint: 'Settings → Integrations', run: () => go('/settings/integrations') },
     { id: 'settings:agents', label: 'Manage agents', hint: 'Settings → Agents', run: () => go('/settings/agents') },
     { id: 'settings:general', label: 'Appearance and text size', hint: 'Settings → General', run: () => go('/settings/general') },
     ...['library', 'compare', 'usage'].map((section) => ({ id: `models:${section}`, label: `Go to ${section === 'library' ? 'Model library' : section === 'compare' ? 'Compare' : 'Usage'}`, hint: 'Settings → Models', run: () => go(`/settings/models/${section}`) })),
-    ...['openclaw', 'sharepoint'].map((section) => ({ id: `integration:${section}`, label: `Go to ${section === 'openclaw' ? 'OpenClaw' : 'SharePoint'}`, hint: 'Settings → Integrations', run: () => go(`/settings/integrations/${section}`) })),
+    ...['sharepoint'].map((section) => ({ id: `integration:${section}`, label: 'Go to SharePoint', hint: 'Settings → Integrations', run: () => go(`/settings/integrations/${section}`) })),
     ...['checkpoints', 'widgets'].map((section) => ({ id: `settings:${section}`, label: `Go to ${section === 'widgets' ? 'Home widgets' : 'Checkpoints'}`, hint: 'Settings', run: () => go(`/settings/${section}`) })),
     ...CHARACTERS.map((c) => ({ id: `character:${c.id}`, label: `New agent: ${c.name}`, hint: c.role, run: () => go(`/agents/characters?character=${encodeURIComponent(c.id)}`) })),
   ], [go])
@@ -132,14 +126,12 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
                 <TasksPage source={source} />
               </div>
             : <TasksWorkspace source={source} agents={store.agents} params={paramsOf('work')} onNavigate={go} />
-          case 'production': return <ProductionPage source={source} params={active === 'work' && route.sub === 'production' ? route.params : new URLSearchParams()} onNavigate={go} />
           case 'calendar': return <CalendarPage source={source} onNavigate={go} />
           case 'process': return <ProcessView source={source} params={paramsOf('work')} />
-          case 'backlog': return <BacklogPage params={paramsOf('work')} />
           case 'youtube': return <YouTubePage params={paramsOf('work')} onNavigate={go} />
-          default: return <><HomeDashboard source={source} store={store} onNavigate={go} /><PipelinePage source={source} params={active === 'work' && route.sub === 'pipeline' ? route.params : new URLSearchParams()} onNavigate={go} /></>
+          default: return <TasksWorkspace source={source} agents={store.agents} params={paramsOf('work')} onNavigate={go} />
         }
-      }, banner('work', 'production', 'production'))
+      })
       case 'research': return tabbed('research', (t) => {
         switch (t) {
           case 'documents': return <DocumentsPage params={active === 'research' && route.sub === 'documents' ? route.params : new URLSearchParams()} />
@@ -167,7 +159,6 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
                 { id: 'usage', title: 'Usage', body: <UsagePage /> },
               ]} />,
               integrations: <MovedSections active={settingsTab === 'integrations' ? settingsSegment : undefined} sections={[
-                { id: 'openclaw', title: 'OpenClaw', body: <EnginePanel engine="openclaw" /> },
                 { id: 'sharepoint', title: 'SharePoint', body: <SharePointPanel source={source} /> },
               ]} />,
               checkpoints: <CheckpointsView source={source} params={paramsOf('settings')} />,

@@ -25,7 +25,6 @@ export const REGISTRY: Entry[] = [
   e("models", "library", "Model library", "models", "inventory"),
   e("models", "compare", "Compare models", "compare"),
   e("models", "usage", "Model usage", "usage"),
-  e("integrations", "openclaw", "OpenClaw", "engine"),
   e("integrations", "sharepoint", "SharePoint", "documents"),
   e("appearance", "theme", "Theme (Light, Dark, System)", "theme", "dark", "light", "mode", "appearance"),
   e("appearance", "feel", "Accent color", "feel", "style", "colors", "accent", "jaeger blue", "skin"),
