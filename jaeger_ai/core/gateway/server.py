@@ -652,13 +652,15 @@ class _GatewayToolConfirmationProvider:
         # Plan mode: write/exec tools are blocked, not offered as a card.
         if self._plan_mode() and self._write_or_exec(request):
             return False
-        if self._in_saved_scope(request):
-            return True
         from jaeger_ai.core.runtime.autonomy import effective_autonomy
         try:
             mode = effective_autonomy(self.app._config_path())
         except Exception:
             mode = "ask"
+        # Ask means ask: only explicit owner grants (session/skill/project)
+        # skip the card, not the standing filesystem-write policy (P17).
+        if self._in_saved_scope(request, standing_policy=(mode != "ask")):
+            return True
         if mode == "auto":
             return True
         if mode == "ask" and getattr(request, "tier", None) != PermissionTier.READ_ONLY:
@@ -684,7 +686,7 @@ class _GatewayToolConfirmationProvider:
         except Exception:  # noqa: BLE001
             return False
 
-    def _in_saved_scope(self, request: Any) -> bool:
+    def _in_saved_scope(self, request: Any, standing_policy: bool = True) -> bool:
         """Standing session, skill, project, or read-only grants — 'Approve for me' auto-run."""
         from jaeger_os.core.safety.permissions import PermissionTier
         skill_name = str(getattr(request, "skill", "") or "")
@@ -710,7 +712,7 @@ class _GatewayToolConfirmationProvider:
             tier = getattr(request, "tier", None)
             if tier == PermissionTier.READ_ONLY:
                 return True
-            if tier == PermissionTier.WRITE_LOCAL and bool((policy.get("filesystem") or {}).get("write")):
+            if standing_policy and tier == PermissionTier.WRITE_LOCAL and bool((policy.get("filesystem") or {}).get("write")):
                 return True
         except Exception:
             pass
