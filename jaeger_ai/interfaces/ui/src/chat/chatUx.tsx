@@ -23,8 +23,23 @@ export function isDebugThinking(text?: string): boolean {
   return Boolean(text && /^\s*\[adapter\b/i.test(text));
 }
 
-export function modelErrorTitle(): string {
-  return "Couldn't reach the model";
+/** Plain-language headline for a failed turn; the raw text stays under Details. */
+const FRIENDLY_ERRORS: Array<[RegExp, string]> = [
+  [/took too long|timed? ?out|no progress for/i, "This took too long, so Jaeger stopped it."],
+  [/permanently BLOCKED|turn_failed/i, "Jaeger stopped after repeated failures on this request."],
+  [/local-only content|on-device model/i, "This message has private content only a local model may see. Pick a local model or remove the private part."],
+  [/Connection refused|ECONNREFUSED|Lost the connection|gateway lost track|Failed to fetch|NetworkError/i, "Jaeger's engine wasn't reachable. It may be restarting; try again in a moment."],
+  [/unknown CLI backend|not configured|no (api )?key|unauthori[sz]ed|401|403/i, "The selected model isn't set up. Pick another model in the composer."],
+  [/does not support reasoning effort|thinking values/i, "This model doesn't support that thinking level. Pick another level or model."],
+  [/rate limit|429|quota|usage limit/i, "The model's usage limit was hit. Try again later or pick another model."],
+  [/cancel/i, "This request was cancelled."],
+  [/Not sent/i, "Your message wasn't sent."],
+];
+
+export function modelErrorTitle(details: string[] = []): string {
+  const text = details.join("\n");
+  for (const [pattern, title] of FRIENDLY_ERRORS) if (pattern.test(text)) return title;
+  return details.length ? "Something went wrong with this reply." : "Couldn't reach the model";
 }
 
 export function ThinkingRow({ startedAt, durationMs, text, live, sessionId }: {
@@ -65,7 +80,7 @@ export function ModelError({ details, onRetry }: { details: string[]; onRetry?: 
   return (
     <div className="jg-error" role="alert">
       <div className="jg-error__row">
-        <p className="jg-error__message">{modelErrorTitle()}</p>
+        <p className="jg-error__message">{modelErrorTitle(unique)}</p>
         {onRetry && <button type="button" className="jg-error__retry" onClick={onRetry}>Retry</button>}
       </div>
       {unique.length > 0 && (
