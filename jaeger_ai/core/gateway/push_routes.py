@@ -269,6 +269,9 @@ class PushDispatcher:
                     "title_text": f"⏰ {job}", "body": text, "session_id": sid, "tag": f"schedule-{job}"[:60]}
         if not rid or data.get("replayed"):
             return None
+        live = getattr(self.gw, "live_tasks", None)
+        if live is not None and rid in getattr(live, "pushed", ()):
+            return None  # live_tasks already sent started/progress and sends the done push on the same tag
         meta = self._request_meta(rid)
         if self._is_background(meta):
             return None
