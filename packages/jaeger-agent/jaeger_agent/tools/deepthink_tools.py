@@ -51,7 +51,13 @@ def queue_background_task(description: str, artifact_paths: list[str] | None = N
     owner preserves workspace, model and authorization; results return to this chat.
     Do not queue the current task again from a background worker.
     """
-    return _submit(description, artifact_paths)
+    result = _submit(description, artifact_paths)
+    if isinstance(result, dict) and result.get('ok', True) and not result.get('error'):
+        # Grok Bot-style hand-off (parity P2): the worker owns the job now.
+        result = {**result, 'next': ('Queued once. Do not queue it again and do not do the work in this turn. '
+                                     'Reply now in one short line that it is running in the background and the '
+                                     'result will be posted here when it finishes.')}
+    return result
 
 
 @register_tool_from_function(name='list_deep_think_queue', side_effect='read')
