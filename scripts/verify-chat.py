@@ -21,6 +21,8 @@ def main(argv=None) -> int:
     ap.add_argument("--url", default="http://127.0.0.1:8790")
     ap.add_argument("--label", default="smoke")
     ap.add_argument("--timeout", type=float, default=180.0)
+    ap.add_argument("--text", default="Reply with exactly the word: pong", help="Turn text")
+    ap.add_argument("--tier", choices=["chat", "agent", "plan"], default=None, help="Run mode for this turn")
     args = ap.parse_args(argv)
     base = args.url.rstrip("/")
     jar = http.cookiejar.CookieJar()
@@ -51,14 +53,16 @@ def main(argv=None) -> int:
     created = call("/v1/sessions", {"session_id": sid, "source": "webui", "title": f"Chat check {args.label}"})
     sid = created.get("session_id") or created.get("id") or sid
     started = time.time()
-    call(f"/v1/sessions/{sid}/turns", {"text": "Reply with exactly the word: pong",
-                                         "request_id": str(uuid.uuid4()), "attachment_ids": []})
+    turn = {"text": args.text, "request_id": str(uuid.uuid4()), "attachment_ids": []}
+    if args.tier:
+        turn["interaction_tier"] = args.tier
+    call(f"/v1/sessions/{sid}/turns", turn)
     reply = None
     while time.time() - started < args.timeout and not reply:
         time.sleep(2)
         reply, _ = assistant_reply(call(f"/v1/sessions/{sid}"))
     _, msgs = assistant_reply(call(f"/v1/sessions/{sid}"))
-    print(json.dumps({"session": sid, "reply": str(reply)[:120] if reply else None,
+    print(json.dumps({"session": sid, "reply": str(reply)[:600] if reply else None,
                       "persisted_messages": len(msgs), "secs": round(time.time() - started, 1)}))
     return 0 if reply and len(msgs) >= 2 else 1
 
