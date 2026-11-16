@@ -2219,11 +2219,17 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         print(f"[bridge] plugin autostart skipped: {exc}",
               file=sys.stderr, flush=True)
 
-    # Cron / idle / webhooks: one lease per instance. The Gateway takes it
-    # when it is resident OWNER; this local-execution bridge takes it only
-    # when that lease is free. Gateway-backed bridges never reach here.
+    # Cron / idle / webhooks: ONE engine. The Gateway owns them (resident
+    # owner lease). The bridge used to grab the lease whenever it was free,
+    # which happened on every Gateway restart, and then ran schedules, board
+    # work and heartbeats as in-process turns outside the Gateway (audit
+    # D1/D3, 2026-11-16). Only an explicit standalone setup opts back in.
     try:
-        _start_local_producers(proto, ctx)
+        if os.environ.get("JAEGER_BRIDGE_LOCAL_PRODUCERS", "").strip() == "1":
+            _start_local_producers(proto, ctx)
+        else:
+            print("[bridge] background producers left to the Gateway (one engine)",
+                  file=sys.stderr, flush=True)
     except Exception as exc:  # noqa: BLE001 — no producers is degraded, not fatal
         print(f"[bridge] background producers skipped: {exc}",
               file=sys.stderr, flush=True)
