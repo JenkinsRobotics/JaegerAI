@@ -4,7 +4,7 @@
 ``POST /v1/mac/action``  — {"action": "lock_screen" | "display_off" | "open_app" | "status", "app": "Safari"}
 
 Owner-only: unlisted POST routes need the ``admin`` grant (caller_auth), and
-the WebUI proxy (features/webui/api/jaeger_sessions.py) forwards only these two
+the WebUI proxy (core/gateway/webapp/jaeger_sessions.py) forwards only these two
 paths. The fixed action list is deliberate; anything broader goes through a
 chat turn so Autonomy and the approval flow still apply. Every action is
 logged on the ``jaeger.mac_actions`` logger.

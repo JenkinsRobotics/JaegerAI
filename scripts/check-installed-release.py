@@ -54,7 +54,7 @@ def main():
             if key.startswith(('JAEGER_', 'HERMES_')): os.environ.pop(key)
         os.environ.update({k: v for k, v in env.items() if k.startswith(('JAEGER_', 'HERMES_'))})
         from jaeger_ai.core.gateway.caller_auth import CALLERS
-        from jaeger_ai.features.webui.api import ui_shell
+        from jaeger_ai.core.gateway.webapp import ui_shell
         tokens = state / 'tokens'; tokens.mkdir(mode=0o700)
         for caller in CALLERS:
             p = tokens / f'{caller}.token'; p.write_text(secrets.token_urlsafe(32)); p.chmod(0o600)

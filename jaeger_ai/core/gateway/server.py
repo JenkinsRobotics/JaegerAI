@@ -9231,6 +9231,13 @@ async def run_gateway_forever(
         except Exception:
             logger.debug("CLI brain warmup skipped", exc_info=True)
     threading.Thread(target=_warmup_cli_brains, name="jaeger-cli-warmup", daemon=True).start()
+    if os.environ.get("JAEGER_WEBAPP_DISABLE") != "1":
+        # The browser surface on :8790 (R11: folded in from the old WebUI service).
+        try:
+            from jaeger_ai.core.gateway.webapp.server import start as start_webapp
+            start_webapp()
+        except Exception:
+            logger.exception("web app failed to start")
     if getattr(gateway, "_pending_recovery_report", False):
         try:
             gateway._preserve_unknown_requests()

@@ -33,7 +33,7 @@ def _cmd_webui_argv(argv: Sequence[str]) -> int:
 
     verb, rest = argv[0], list(argv[1:])
     if verb == "servers":
-        from jaeger_ai.features.webui.server_controls import main
+        from jaeger_ai.core.runtime.server_controls import main
         return main(rest)
     if verb == "start":
         return _webui_start(rest)
@@ -55,7 +55,7 @@ def _parse_instance(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
 
 
 def _webui_start(argv: list[str]) -> int:
-    from jaeger_ai.features.webui import WebUIService
+    from jaeger_ai.core.gateway.webapp.service import WebUIService
 
     base, rest = _parse_instance(argv)
     parser = argparse.ArgumentParser(prog="jaeger webui start")
@@ -76,7 +76,7 @@ def _webui_start(argv: list[str]) -> int:
 
 
 def _webui_stop(argv: list[str]) -> int:
-    from jaeger_ai.features.webui import WebUIService
+    from jaeger_ai.core.gateway.webapp.service import WebUIService
 
     base, rest = _parse_instance(argv)
     argparse.ArgumentParser(prog="jaeger webui stop").parse_args(rest)
@@ -90,7 +90,7 @@ def _webui_stop(argv: list[str]) -> int:
 
 
 def _webui_status(argv: list[str]) -> int:
-    from jaeger_ai.features.webui import WebUIService
+    from jaeger_ai.core.gateway.webapp.service import WebUIService
 
     base, rest = _parse_instance(argv)
     parser = argparse.ArgumentParser(prog="jaeger webui status")
@@ -128,7 +128,7 @@ def _webui_status(argv: list[str]) -> int:
 
 
 def _webui_url(argv: list[str]) -> int:
-    from jaeger_ai.features.webui import WebUIService
+    from jaeger_ai.core.gateway.webapp.service import WebUIService
 
     base, _rest = _parse_instance(argv)
     svc = WebUIService(base.instance)

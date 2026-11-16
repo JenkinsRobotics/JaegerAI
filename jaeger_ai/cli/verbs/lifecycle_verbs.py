@@ -237,7 +237,7 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
             print("  [dry-run] Would stop Jaeger WebUI")
         else:
             try:
-                from jaeger_ai.features.webui import WebUIService
+                from jaeger_ai.core.gateway.webapp.service import WebUIService
                 WebUIService().stop()
                 print("  Stopped Jaeger WebUI")
             except Exception:
@@ -423,14 +423,14 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
             print("  [dry-run] Would start Jaeger WebUI")
         else:
             try:
-                from jaeger_ai.features.webui import WebUIService
+                from jaeger_ai.core.gateway.webapp.service import WebUIService
                 webui_svc = WebUIService()
                 w_status = webui_svc.status()
                 webui_running = bool(w_status.get("webui", {}).get("running")) or _is_port_open(WEBUI_PORT)
                 if webui_running:
                     ts = None
                     try:
-                        from jaeger_ai.features.webui.service.service import _tailscale_ipv4
+                        from jaeger_ai.core.gateway.webapp.service.service import _tailscale_ipv4
                         ts = _tailscale_ipv4()
                     except Exception:
                         ts = None
@@ -442,7 +442,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                     if res.get("ok"):
                         ts = None
                         try:
-                            from jaeger_ai.features.webui.service.service import _tailscale_ipv4
+                            from jaeger_ai.core.gateway.webapp.service.service import _tailscale_ipv4
                             ts = _tailscale_ipv4()
                         except Exception:
                             ts = None
@@ -600,8 +600,8 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
 
     # Collect Web UI status
     try:
-        from jaeger_ai.features.webui import WebUIService
-        from jaeger_ai.features.webui.service.service import _tailscale_ipv4
+        from jaeger_ai.core.gateway.webapp.service import WebUIService
+        from jaeger_ai.core.gateway.webapp.service.service import _tailscale_ipv4
         wsvc = WebUIService()
         wstatus = wsvc.status()
         webui_running = bool(wstatus.get("webui", {}).get("running")) or _is_port_open(WEBUI_PORT)

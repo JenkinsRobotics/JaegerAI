@@ -85,7 +85,7 @@ class Indexer:
         # Load average counts runnable work across the whole Mac and is not a
         # useful admission signal for this low-priority embedding job.
         try:
-            from jaeger_ai.features.webui.api.resource_manager import ResourceManager
+            from jaeger_ai.core.gateway.webapp.resource_manager import ResourceManager
             manager = ResourceManager(lambda: STATE_DIR)
             snap = manager.snapshot().copy()
             snap["cpu_load"] = None

@@ -344,7 +344,7 @@ class Runs:
                 self.ownership.release(run_id)
                 if not saved.get('execution_unknown') and saved.get('status') in TERMINAL:
                     try:
-                        from jaeger_ai.features.webui.service.session_unify import close_reconciled_webui_session
+                        from jaeger_ai.core.gateway.webapp.service.session_unify import close_reconciled_webui_session
                         close_reconciled_webui_session(str(saved.get('session_id') or ''))
                     except Exception:
                         pass
