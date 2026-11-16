@@ -527,6 +527,32 @@ def _tool_result_recoverable(content: Any) -> bool:
     )
 
 
+def _only_meta_denied(stream: dict[str, Any]) -> bool:
+    """True when every denied call is a CLI meta tool and a Jaeger tool ran."""
+    uses = {str(b.get("id") or ""): b for b in (stream.get("tool_uses") or []) if isinstance(b, dict)}
+    denied_meta = False
+    jaeger_ran = False
+    for block in stream.get("tool_results") or []:
+        if not isinstance(block, dict):
+            continue
+        ident = str(block.get("tool_call_id") or block.get("tool_use_id") or block.get("id") or "")
+        use = uses.get(ident) or {"name": block.get("name") or "", "input": {}}
+        raw_name = str(use.get("name") or "")
+        name, _ = _unwrap_cli_tool(use)
+        failed = _tool_result_failed(block.get("content"))
+        target = str((use.get("input") or {}).get("tool_name") or "") if isinstance(use.get("input"), dict) else ""
+        meta = raw_name in _CLI_META_TOOLS and (
+            not name or name in _CLI_META_TOOLS or (raw_name == "use_tool" and not target.startswith("jaeger__")))
+        if failed and not meta:
+            return False
+        if failed:
+            denied_meta = True
+        elif name and name not in _CLI_META_TOOLS:
+            jaeger_ran = True
+    return denied_meta and (jaeger_ran or any(
+        str(u.get("name") or "") not in _CLI_META_TOOLS for u in uses.values()))
+
+
 def _denied_tool_message(stream: dict[str, Any]) -> str:
     """A real visible sentence when the CLI ended on a denied tool, not 'tool_result'."""
     uses = {str(b.get("id") or ""): b for b in (stream.get("tool_uses") or []) if isinstance(b, dict)}
@@ -1177,6 +1203,11 @@ class CliBackendAdapter(ProviderAdapter):
             recovered = _recover_jaeger_tool_calls(stream)
             if recovered:
                 return {"role": "assistant", "content": None, "tool_calls": recovered}
+            if _only_meta_denied(stream):
+                # Grok's own search_tool/use_tool on a non-Jaeger name was
+                # cancelled after real Jaeger tools ran (parity P15). That is
+                # not the answer; an empty reply lets the loop nudge once.
+                return Message(role="assistant", content="", finish_reason="stop")
             denied = _denied_tool_message(stream)
             if denied:
                 return Message(role="assistant", content=denied, finish_reason="stop")
