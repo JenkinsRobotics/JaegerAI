@@ -281,11 +281,31 @@ _DEAD_END_TEXT = re.compile(
 )
 
 
+_RAW_TOOL_EVENT = re.compile(r'^\{\s*"(?:type|tool_name|server_name)"\s*:\s*"(?:MCP|mcp|tool_result|tool_call)?')
+
+
+def _is_raw_tool_event(value: str) -> bool:
+    """A Grok tool event serialized as the 'answer' (parity P18/P9 ended on
+    {"type":"MCP","tool_name":...,"output":{"OkayOutput":...}}). Not prose."""
+    if not value.startswith("{"):
+        return False
+    if '"OkayOutput"' in value[:4000] or '"ErrorOutput"' in value[:4000]:
+        return True
+    if not _RAW_TOOL_EVENT.match(value):
+        return False
+    try:
+        obj = json.loads(value)
+    except (TypeError, ValueError):
+        return '"tool_name"' in value[:400]
+    return isinstance(obj, dict) and bool(obj.get("tool_name") or obj.get("type") in {"MCP", "tool_result", "tool_call"})
+
+
 def _usable_cli_text(text: str) -> str:
     value = (text or "").strip()
     if (
         not value
         or _is_id_like_text(value)
+        or _is_raw_tool_event(value)
         or _DEAD_END_TEXT.search(value)
         or value.lower() in _ENVELOPE_TYPE_NAMES
     ):
