@@ -717,13 +717,10 @@ def _wait_for_backend(bridge: Any, *, wait_s: float | None = None, poll_s: float
             health = {}
         if health.get("ok"):
             return health
-        try:
-            from jaeger_ai.core.gateway.client import GatewayTurnClient
-            probe = GatewayTurnClient(caller="mcp").probe()
-            if probe.get("service") == "jaeger-gateway" or probe.get("component") == "jaeger-gateway":
-                return health
-        except Exception:  # noqa: BLE001
-            pass
+        # The Gateway often comes up in the same second as the bridge. Do not
+        # short-circuit to gateway-fallback while the bridge may still be
+        # booting — that leaves HTTP MCP without bridge_health and stuck in
+        # gateway mode until the process is restarted.
         if time.monotonic() >= deadline:
             return health
         print("[jaeger-mcp] waiting for bridge/Gateway...", file=sys.stderr, flush=True)

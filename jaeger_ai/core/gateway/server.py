@@ -1192,10 +1192,18 @@ class JaegerGatewayApp:
                 rt.register_cognition_handler(_on_cognition_wake)
                 rt._gateway_cognition_handler_registered = True
             logger.info(
-                "Gateway attached EntityRuntime %s resident=%s",
+                "Gateway attached EntityRuntime %s mode=%s resident=%s",
                 rt.identity.entity_id,
+                getattr(getattr(rt, "mode", None), "value", rt.mode),
                 getattr(rt, "is_resident", False),
             )
+            if rt.mode != EntityRuntimeMode.OWNER or not getattr(rt, "is_resident", False):
+                logger.error(
+                    "Gateway EntityRuntime is not the resident OWNER (mode=%s resident=%s); "
+                    "chat health will stay degraded until this process starts as OWNER",
+                    getattr(getattr(rt, "mode", None), "value", rt.mode),
+                    getattr(rt, "is_resident", False),
+                )
             try:
                 from jaeger_ai.core.entity.recovery import RecoveryManager
                 rt._recovery_report = RecoveryManager().scan_resumable_runs()
@@ -1226,7 +1234,7 @@ class JaegerGatewayApp:
                 self._owner_task = asyncio.create_task(self._owner_maintenance_loop(rt))
                 self._pending_recovery_report = True
         except Exception as exc:
-            logger.debug("Gateway EntityRuntime attach skipped: %s", exc)
+            logger.exception("Gateway EntityRuntime attach skipped: %s", exc)
         if runtime_for_producers is not None and getattr(runtime_for_producers, "layout", None) is not None:
             try:
                 self.task_owner.migrate_legacy(runtime_for_producers.layout)
@@ -2129,6 +2137,7 @@ class JaegerGatewayApp:
                     chat_available = bool(names & {"chat", "jaeger_chat"})
                     health_tool = next((n for n in ("jaeger_bridge_health", "bridge_health") if n in names), None)
                     agent_ready = False
+                    readiness_source = None
                     if chat_available and health_tool:
                         health_result = await rpc(client, "tools/call", {"name": health_tool, "arguments": {}}, 3)
                         if not health_result.get("isError"):
@@ -2136,15 +2145,31 @@ class JaegerGatewayApp:
                             if not isinstance(health, dict):
                                 health = json.loads(self._mcp_chat_text(health_result))
                             agent_ready = bool(health.get("ok")) and health.get("ready", {}).get("agent") == "ready"
+                            readiness_source = "mcp_bridge_health"
+                    elif chat_available:
+                        # HTTP MCP started in gateway-fallback mode has `chat`
+                        # but not `bridge_health`. The chat tool still reaches
+                        # the agent through the Gateway; use the live bridge
+                        # socket for the same readiness check.
+                        from jaeger_ai.interfaces.bridge_client import bridge_health
+                        health = await asyncio.to_thread(bridge_health)
+                        agent_ready = bool(health.get("ok")) and (
+                            health.get("ready", {}) or {}
+                        ).get("agent") == "ready"
+                        readiness_source = "unix_bridge_health"
                     transport_ready = chat_available
                     ok = chat_available and agent_ready
+                    note = "Native bridge readiness; model execution not probed"
+                    if readiness_source == "unix_bridge_health":
+                        note = "MCP chat is up; agent readiness from the live bridge socket"
                     return {
                         "ok": ok, "required": True, "url": MCP_URL,
                         "transport_ready": transport_ready,
                         "chat_tool_available": chat_available,
                         "agent_ready": agent_ready,
                         "execution_verified": False,
-                        "note": "Native bridge readiness; model execution not probed",
+                        "readiness_source": readiness_source,
+                        "note": note,
                     }
         except Exception as exc:
             return {

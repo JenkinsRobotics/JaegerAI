@@ -204,6 +204,15 @@ class EntityRuntime:
                 resolved_mode = mode or infer_runtime_mode()
                 cls._instance = cls(state_root=state_root, mode=resolved_mode)
                 created = True
+            elif (
+                mode == EntityRuntimeMode.OWNER
+                and cls._instance.mode != EntityRuntimeMode.OWNER
+            ):
+                logger.error(
+                    "EntityRuntime already bound as %s when OWNER was requested; "
+                    "the Gateway cannot become the resident owner in this process",
+                    cls._instance.mode,
+                )
             instance = cls._instance
         if created and instance.mode == EntityRuntimeMode.OWNER and instance.is_resident:
             try:

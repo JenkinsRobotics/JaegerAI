@@ -172,6 +172,9 @@ def _gateway_env() -> dict[str, str]:
         "JAEGER_GATEWAY_HOST": LOOPBACK,
         "JAEGER_GATEWAY_PORT": str(GATEWAY_PORT),
         "JAEGER_WEBUI_URL": f"http://{LOOPBACK}:{WEBUI_PORT}",
+        # launchd argv is `python -m jaeger_ai.core.gateway.server`; do not
+        # rely on argv inference alone to make this process the OWNER.
+        "JAEGER_RUNTIME_MODE": "owner",
     })
     return env
 
