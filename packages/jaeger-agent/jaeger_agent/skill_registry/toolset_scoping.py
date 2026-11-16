@@ -73,6 +73,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "goals": (r"\b(goal|objective|project status|spawn task|my projects?)\b",),
     "skills": (r"\b(skill|deep think|reflection)\b",),
     "computer_use": (r"\b(click|screen|browser|website|open app|computer)\b",),
+    "share": (r"\b(download(?:able)?|attach(?:ed|ment)?|send me (?:the|a|that) (?:file|csv|pdf|zip)|give (?:it|them) to me as a)\b",),
     "template": (r"\b(template|export|share)\b.*\b(setup|bot|yourself|config|skills)\b", r"\bbot template\b"),
     "credentials": (r"\b(credential|api key|secret|password|vault|login|token)s?\b",),
     "plugins": (r"\b(plugin|discord|telegram|slack|message)\b",),
@@ -254,6 +255,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "stop_background", "pending_background", "open_on_host",
     }),
     "template": frozenset({"export_bot_template"}),
+    "share": frozenset({"share_file"}),
     "identity": frozenset({
         # Self-modifying tools — should never fire by accident on a
         # routine chat turn. Loadable explicitly when the user asks
@@ -346,6 +348,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "kanban": "multi-agent worker/orchestrator protocol — claim, heartbeat, "
               "block, review, link and attach on shared board cards",
     "scheduling": "schedule, list, cancel cron prompts",
+    "share": "share_file: give the owner a file as a download card in this chat",
     "template": "export a shareable template of this bot's setup (skills, routines, settings; no secrets/memory)",
     "background": "background agent tasks that report back to this chat (queue_background_task); long-running processes; open URLs/apps",
     "identity": "set_name and update_soul — modify the agent's own identity",

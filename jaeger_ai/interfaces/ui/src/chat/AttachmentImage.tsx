@@ -14,7 +14,49 @@ function decodeVerified(data: string, expected: { size: number; sha256?: string 
 
 /** First-class session image in a chat bubble. Bytes come from the session
  *  attachment store (never a markdown <img> or a remote URL). */
+/** Non-image file the agent shared (parity P14): a chip whose Download button
+ *  fetches verified bytes from the session attachment store on click. */
+function AttachmentFile({ part, sessionId, files }: { part: AttachmentPart; sessionId?: string; files?: SessionFiles }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const download = async () => {
+    if (!sessionId || !files) { setError("File is not available in this conversation."); return; }
+    setBusy(true); setError(undefined);
+    try {
+      const result = await files.read(sessionId, part.attachmentId);
+      if (result.session_id !== sessionId || result.attachment_id !== part.attachmentId) throw Error("File identity mismatch");
+      if (part.sha256 && result.sha256 !== part.sha256) throw Error("File digest mismatch");
+      const bytes = decodeVerified(result.data_base64, { size: result.size, sha256: part.sha256 });
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = (part.name || "file").replace(/[\\/\x00-\x1f]/g, "_");
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (err) { setError(String((err as Error).message || err)); }
+    finally { setBusy(false); }
+  };
+  const size = typeof part.size === "number" ? (part.size < 1024 ? `${part.size} B` : `${(part.size / 1024).toFixed(1)} KB`) : "";
+  return (
+    <div className="jg-card jg-file-card" role="group" aria-label={`File ${part.name}`} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <span aria-hidden="true">📄</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="jg-card__title" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{part.name || "file"}</div>
+        <div className="jg-card__message">{[part.mime, size].filter(Boolean).join(" · ")}</div>
+        {error && <div className="jg-card__message" role="alert">{error}</div>}
+      </div>
+      <button type="button" className="jg-action" disabled={busy} onClick={() => void download()}>{busy ? "Downloading…" : "Download"}</button>
+    </div>
+  );
+}
+
 export function AttachmentImage({ part, sessionId, files }: { part: AttachmentPart; sessionId?: string; files?: SessionFiles }) {
+  const kind = (part.mime || "").split(";")[0].trim().toLowerCase();
+  if (!RASTER.has(kind)) return <AttachmentFile part={part} sessionId={sessionId} files={files} />;
+  return <AttachmentRaster part={part} sessionId={sessionId} files={files} />;
+}
+
+function AttachmentRaster({ part, sessionId, files }: { part: AttachmentPart; sessionId?: string; files?: SessionFiles }) {
   const [url, setUrl] = useState<string>();
   const [error, setError] = useState<string>();
   const [open, setOpen] = useState(false);
