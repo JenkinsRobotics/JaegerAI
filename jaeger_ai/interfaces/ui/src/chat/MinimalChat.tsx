@@ -48,6 +48,7 @@ import { SessionClarifications } from "./SessionClarifications";
 import { GatewayError } from "../api/gateway";
 import { ClarificationAnswers, clarificationAnswerKey } from "./clarificationAnswers";
 import { ApprovalCard, QuestionCard } from "./ApprovalCard";
+import { SecretCard } from "./SecretCard";
 import { MessageMenu, MessageTextSelection, Reactions, type MessageAction } from "./MessageMenu";
 import { useMessagePress, type MessageAnchor } from "./useMessagePress";
 import { useRevealedText } from "./reveal";
@@ -61,7 +62,7 @@ const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
 type Decide = (callId: string, decision: "approve" | "deny", scope?: "once" | "session") => void;
 type BusyMessage = { id: string; text: string; delivery: "queued"; createdAt: number };
 type SteerIntent = { steeringId: string; requestId: string; text: string };
-type CardPart = Extract<ChatPart, { kind: "confirmation" | "question" }>;
+type CardPart = Extract<ChatPart, { kind: "confirmation" | "question" | "secret" }>;
 type MarkerPart = Extract<ChatPart, { kind: "handoff" }>;
 type Links = { onSuggest?: (text:string)=>void; onCopy: (text: string) => void; onOpen: (url: string) => void };
 
@@ -166,6 +167,7 @@ export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; d
 }
 
 function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onDecide: Decide; onAnswer?: (clarifyId: string, revision: number, response: string) => Promise<ClarifyAnswerResult>; tool?: { toolName: string; input: unknown }; decided?: "approve" | "deny" }) {
+  if (part.kind === "secret") return <SecretCard name={part.name} prompt={part.prompt} status={part.status} sessionId={part.sessionId} />;
   if (part.kind === "question") return <QuestionCard title={part.title} options={part.options} chosenId={part.chosenId} status={part.status} answerKey={clarificationAnswerKey(part.callId, part.revision ?? 1)}
     onAnswer={onAnswer && part.status === "pending" ? (response) => onAnswer(part.callId, part.revision ?? 1, response) : undefined} />;
   return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided ?? part.decision} reviewerVerdict={part.kind === "confirmation" ? part.reviewerVerdict : undefined} reviewerReason={part.kind === "confirmation" ? part.reviewerReason : undefined} onDecide={(d) => onDecide(part.callId, d === "deny" ? "deny" : "approve", d === "session" ? "session" : "once")} />;
@@ -198,7 +200,7 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
         if (!agents.some(a=>a.id===part.agentId)) agents.push({id:part.agentId,name:part.agentName});
         out[out.length-1] = {marker:{...prev,agents}};
       } else out.push({marker:part});
-    } else if (part.kind === "confirmation" || part.kind === "question") out.push({card:part});
+    } else if (part.kind === "confirmation" || part.kind === "question" || part.kind === "secret") out.push({card:part});
     else if (["modelIdentity", "modelContext", "knowledgeContext", "toolSelection"].includes(part.kind)) {
       const previous = out.at(-1);
       if (previous && "diagnostic" in previous) previous.diagnostic.push(part);

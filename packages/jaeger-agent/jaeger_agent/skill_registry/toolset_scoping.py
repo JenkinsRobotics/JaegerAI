@@ -73,7 +73,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "goals": (r"\b(goal|objective|project status|spawn task|my projects?)\b",),
     "skills": (r"\b(skill|deep think|reflection)\b",),
     "computer_use": (r"\b(click|screen|browser|website|open app|computer)\b",),
-    "credentials": (r"\b(credential|api key|secret|password)\b",),
+    "credentials": (r"\b(credential|api key|secret|password|vault|login|token)s?\b",),
     "plugins": (r"\b(plugin|discord|telegram|slack|message)\b",),
     "email": (r"\b(e-?mail|inbox|mailbox)\b",),
     "smart_home": (r"\b(home assistant|smart home|light|thermostat)\b",),

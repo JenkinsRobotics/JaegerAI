@@ -38,6 +38,8 @@ export type ChatPart =
   | { kind: "question"; callId: string; title: string; options: Array<{ id: string; label: string }>; chosenId?: string;
       /** Server clarify form (GB-033): answerable only while pending, at this revision. */
       revision?: number; status?: "pending" | "answered" | "cancelled" | "expired"; sessionId?: string }
+  /** Vault request (parity P24): masked input that saves straight to the vault, never into chat. */
+  | { kind: "secret"; callId: string; name: string; prompt: string; sessionId?: string; status?: "pending" | "saved" | "expired" }
   /** Centered hand-off marker. `agents` set means a grouped "Messaged X and Y". */
   | { kind: "handoff"; status?: string; handoffId: string; agentId: string; agentName: string; count: number; direction: "to" | "from"; agents?: Array<{ id: string; name: string }> };
 
@@ -236,6 +238,11 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
   if (part.kind === "attachment") {
     const existing = parts.findIndex(p => p.kind === "attachment" && p.attachmentId === part.attachmentId);
     if (existing >= 0) return parts.map((p, i) => i === existing ? { ...p, ...part } as ChatPart : p);
+    return [...parts, part];
+  }
+  if (part.kind === "secret") {
+    const index = parts.findIndex((p) => p.kind === "secret" && p.callId === part.callId);
+    if (index >= 0) return parts.map((p, i) => i === index ? { ...p, ...(part.prompt ? part : { status: part.status }) } as ChatPart : p);
     return [...parts, part];
   }
   if (part.kind === "toolInvocation" || part.kind === "confirmation" || part.kind === "question") {

@@ -1307,7 +1307,12 @@ def _register_builtins(client: Any) -> None:
         if not callable(sink):
             return {"received": False, "name": name,
                     "error": "no secure interactive surface is connected"}
-        value = str(sink("secret", prompt, ()) or "")
+        value = str(sink("secret", prompt, (name,)) or "")
+        if value == "__stored__":
+            # Gateway vault card: the owner typed it into a masked field that
+            # saved straight to the vault. The value never passes through here.
+            return {"received": True, "name": name, "stored_in_vault": True,
+                    "note": f"Saved. Use get_credential('{name}') inside the tool call that needs it; never show it."}
         return {"received": bool(value), "name": name, "secret": value}
 
     # help_me is owned by jaeger_agent.tools.delegation (annotated

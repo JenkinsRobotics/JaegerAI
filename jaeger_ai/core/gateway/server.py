@@ -1856,6 +1856,8 @@ class JaegerGatewayApp:
         register_live_tasks(self)  # running tasks + step for the Mac menu, step-by-step phone push
         from .mac_actions import register as register_mac_actions
         register_mac_actions(self)  # lock / display off / open app / status from the phone web app
+        from .vault_routes import register as register_vault
+        register_vault(self)  # owner vault: names only out, masked card in (request_secret)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_post("/v1/approvals/{id}/decision", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
@@ -7793,6 +7795,43 @@ class JaegerGatewayApp:
         return {**row, "origin": origin} if origin else row
 
     # ── clarify forms (GB-033) ─────────────────────────────────────────
+    def _secret_wait(self, session_id: str, request_id: str, prompt: str, options: tuple[str, ...]) -> str:
+        """request_secret in a Gateway turn (parity P24): show a masked vault card
+        in the chat and wait until the owner saves that name. The value goes
+        straight to the vault (POST /v1/vault/secrets); this returns only the
+        marker ``__stored__`` so the secret never enters the transcript."""
+        name = str((options or ("",))[0] or "").strip()
+        if not name:
+            return ""
+        try:
+            from jaeger_agent.core import credentials as creds
+            from jaeger_agent.core.workspace import _require_layout
+            layout = _require_layout()
+            before = set(creds.list_credentials(layout))
+        except Exception:  # noqa: BLE001
+            return ""
+        self.event_bus.publish(session_id, "secret.request", {
+            "name": name, "prompt": prompt, "session_id": session_id, "request_id": request_id,
+            "replace": name in before})
+        try:
+            path = creds._credential_path(layout, name)
+            start_mtime = path.stat().st_mtime if path.exists() else 0.0
+        except Exception:  # noqa: BLE001
+            return ""
+        scope = self._cancellations.get(request_id)
+        deadline = time.monotonic() + CLARIFY_WAIT_S
+        while time.monotonic() < deadline:
+            if scope is not None and scope.cancelled:
+                break
+            try:
+                if path.exists() and path.stat().st_mtime > start_mtime:
+                    return "__stored__"
+            except OSError:
+                pass
+            time.sleep(0.5)
+        self.event_bus.publish(session_id, "secret.resolved", {"name": name, "status": "expired"})
+        return ""
+
     def _clarify_sink(self, session_id: str, request_id: str) -> Callable[[str, str, tuple[str, ...]], str]:
         """Interaction sink for an in-process turn: park a revisioned clarify form and wait.
 
@@ -7803,6 +7842,8 @@ class JaegerGatewayApp:
         def sink(kind: str, prompt: str, options: tuple[str, ...] = ()) -> str:
             loop = getattr(self, "_loop", None)
             question = str(prompt or "").strip()
+            if kind == "secret" and question and loop is not None and loop.is_running():
+                return self._secret_wait(session_id, request_id, question, options)
             if kind != "clarify" or not question or loop is None or not loop.is_running():
                 return ""
             box: dict[str, Any] = {"done": threading.Event(), "answer": "", "row": None}
