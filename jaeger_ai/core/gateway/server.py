@@ -1241,9 +1241,6 @@ class JaegerGatewayApp:
             except Exception:
                 logger.exception("Legacy task import failed; original queue retained")
         self.task_owner.start()
-        from jaeger_ai.core.runtime.background_producers import background_producers_enabled
-        if background_producers_enabled():
-            self._backlog_sweep_task = asyncio.create_task(self._backlog_sweep_loop())
         self._drain_all_queues()
         resume_workers = getattr(self.orchestration, 'resume_pending', None)
         if callable(resume_workers):
@@ -1256,11 +1253,6 @@ class JaegerGatewayApp:
     async def _bounded_shutdown(self, app: web.Application) -> None:
         if not self._owns_store:
             return
-        task = getattr(self, "_backlog_sweep_task", None)
-        if task is not None:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-            self._backlog_sweep_task = None
         await self.task_owner.stop()
         if self._background_task is not None:
             self._background_task.cancel()
@@ -1664,48 +1656,6 @@ class JaegerGatewayApp:
         if unknown:
             logger.warning("Preserving %d execution_unknown requests without replay", len(unknown))
 
-    async def _backlog_sweep_loop(self) -> None:
-        """Reconcile and flag backlog items on the Gateway's existing process lease."""
-        while True:
-            try:
-                from jaeger_ai.features.backlog.reconcile import reconcile
-                from jaeger_ai.features.backlog.store import sweep
-                store = getattr(self, "backlog_store", None)
-                if store is not None:
-                    repaired = await asyncio.to_thread(reconcile, store, self.store, apply=True)
-                    flagged = await asyncio.to_thread(sweep, store, time.time(), 86400)
-                    # Publish a flag only when it is new or its reasons changed:
-                    # re-announcing every flagged item every 5 minutes filled
-                    # ~95% of the 5,000-event replay window (events audit 2026-11-11).
-                    first_pass = "_backlog_flags_seen" not in self.__dict__
-                    seen = self.__dict__.setdefault("_backlog_flags_seen", {})
-                    current = {str(i["task"]["id"]): repr(i.get("reasons")) for i in flagged}
-                    # After a restart the first pass only learns what is already
-                    # flagged; re-announcing all of it was the boot-time flood.
-                    fresh = [] if first_pass else [
-                        i for i in flagged if seen.get(str(i["task"]["id"])) != current[str(i["task"]["id"])]]
-                    seen.clear()
-                    seen.update(current)
-                    for item in fresh:
-                        task = item["task"]
-                        self.event_bus.publish("*", "backlog.updated", {
-                            "caller": {"caller_id": "jaegerd", "caller_kind": "owner"},
-                            "task_id": task["id"], "title": task["title"][:200],
-                            "action": "sweep.flagged", "status": task["status"],
-                            "priority": task["priority"], "worker": task["worker"],
-                            "reasons": item["reasons"], "at": time.time()})
-                    for task_id in repaired["changed"]:
-                        task = store.get(task_id)
-                        self.event_bus.publish("*", "backlog.updated", {
-                            "caller": {"caller_id": "jaegerd", "caller_kind": "owner"},
-                            "task_id": task_id, "title": task["title"][:200],
-                            "action": "reconciled", "status": task["status"],
-                            "priority": task["priority"], "worker": task["worker"],
-                            "at": time.time()})
-            except Exception:
-                logger.warning("Backlog scheduled sweep failed", exc_info=True)
-            await asyncio.sleep(300)
-
     async def _background_loop(self) -> None:
         while True:
             try:
@@ -1749,8 +1699,6 @@ class JaegerGatewayApp:
         register_oss_stack(self)
         from jaeger_ai.features.browser.routes import register as register_browser
         self.browser_runtime = register_browser(self)
-        from jaeger_ai.features.backlog.routes import register as register_backlog
-        register_backlog(self)
         from jaeger_ai.features.engines.catalog import register as register_engine_catalog
         register_engine_catalog(self)
         from jaeger_ai.features.ui_layout.routes import register as register_ui_layout
@@ -3235,19 +3183,6 @@ class JaegerGatewayApp:
             self._publish_delegate(event, record)
             return
         self.event_bus.publish("*", event, {"handoff": record})
-        try:
-            from jaeger_ai.features.backlog.reconcile import record_native_handoff
-            if getattr(self, "backlog_store", None) is not None:
-                task = record_native_handoff(self.backlog_store, record)
-                if task:
-                    self.event_bus.publish("*", "backlog.updated", {
-                        "caller": {"caller_id": "jaegerd", "caller_kind": "owner"},
-                        "task_id": task["id"], "title": task["title"][:200],
-                        "action": "native_handoff", "status": task["status"],
-                        "priority": task["priority"], "worker": task["worker"],
-                        "handoff_id": record.get("id")})
-        except Exception:
-            logger.warning("Native handoff backlog mirror failed", exc_info=True)
         origin = self._origin_turn(record)
         if origin:
             self.event_bus.publish(origin[0], event, {"handoff": record, "request_id": origin[1]})
