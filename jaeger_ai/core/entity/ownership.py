@@ -34,15 +34,33 @@ class EntityRuntimeMode(str, Enum):
     TEST = "test"
 
 
+def _is_gateway_process() -> bool:
+    """True when this process is the Jaeger Gateway entry point.
+
+    ``python -m jaeger_ai.core.gateway.server`` (the launchd job) puts the
+    filesystem path in ``sys.argv[0]`` — slashes, not dots — so a dotted
+    module-name match alone would treat the Gateway as an attached client
+    and skip the resident OWNER lock.
+    """
+    import sys
+    blob = " ".join(str(a).replace("\\", "/") for a in sys.argv[:4])
+    if "jaeger_ai.core.gateway.server" in blob or "jaeger_ai/core/gateway/server" in blob:
+        return True
+    main = sys.modules.get("__main__")
+    main_file = str(getattr(main, "__file__", "") or "").replace("\\", "/")
+    if main_file.endswith("jaeger_ai/core/gateway/server.py"):
+        return True
+    name = str(getattr(getattr(main, "__spec__", None), "name", "") or "")
+    return name in {"jaeger_ai.core.gateway.server", "jaeger_ai.core.gateway.server.__main__"}
+
+
 def infer_runtime_mode() -> EntityRuntimeMode:
     explicit = (os.environ.get("JAEGER_RUNTIME_MODE") or "").strip().lower()
     if explicit in {m.value for m in EntityRuntimeMode}:
         return EntityRuntimeMode(explicit)
     if "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("JAEGER_NO_ATTACH") == "1":
         return EntityRuntimeMode.TEST
-    import sys
-    argv0 = " ".join(sys.argv[:3])
-    if "jaeger_ai.core.gateway.server" in argv0 or "gateway.server" in argv0:
+    if _is_gateway_process():
         return EntityRuntimeMode.OWNER
     return EntityRuntimeMode.ATTACHED_CLIENT
 
