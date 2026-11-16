@@ -95,7 +95,11 @@ def budget_visible_tools(tools, selection, guard, system_prompt: str, query: str
     # CORE must stay visible. A large system prompt used to shrink the
     # schema budget so read_file / search_files / terminal were dropped
     # and Grok fell back to a leftover directory tool.
-    required = discovery | set(CORE) | selection.names | resolve_groups(selection.groups)
+    # Intent-matched tools (infer_toolsets) are required too: ranking them
+    # under the 2k-token schema budget dropped them behind CORE, so a
+    # "run it in the background" turn never saw queue_background_task
+    # (parity P2, 2026-11-16) and agents burned turns in tool_search.
+    required = discovery | set(CORE) | selection.names | resolve_groups(selection.groups) | set(selection.inferred)
     limit = max(0, min(2048, guard.budget.prompt_budget
                        - guard.estimate_text_tokens(system_prompt) - 1536))
     costs = {t.name: guard.estimate_text_tokens(json.dumps(t.to_openai_schema())) + 2
