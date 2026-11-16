@@ -252,7 +252,7 @@ CHECKS = [
     ("G09", "No Hermes WebUI copy", c_no_hermes_webui, False),
     ("G10", "No stale failed/waiting tasks", c_no_stale_tasks, False),
     ("G11", "Turn success above floor", c_turn_success, False),
-    ("G12", "Mac control actions", c_mac_control_tools, False),
+    ("G12", "Mac control actions", c_mac_control_tools, True),
     ("G13", "Telegram token configured", c_telegram_ready, False),
     ("G14", "Phone push signed up", c_push_device, False),
     ("G15", "OpenTelemetry in runtime", c_otel, False),
