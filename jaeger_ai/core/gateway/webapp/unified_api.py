@@ -963,7 +963,7 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
             if method == "PUT":
                 return j(handler, write_board(body)) or True
         if p == "/v1/models/cloud" and method == "GET":
-            from jaeger_ai.features.webui.api.ollama_cloud import catalog
+            from jaeger_ai.core.gateway.webapp.ollama_cloud import catalog
             return j(handler, catalog(refresh=parse_qs(parsed.query).get("refresh") == ["1"])) or True
         if p == "/v1/models/local" and method == "GET":
             return j(handler, local_models()) or True
