@@ -67,7 +67,8 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "agent_notes": (r"\b(notes?|remember|preferences?|keep track)\b",),
     "frameworks": (r"\b(claude code|claude|codex|gemini|antigravity|grok|other agents?|frameworks?)\b",),
     "scheduling": (r"\b(schedule|cron|remind|recurring)\b",),
-    "background": (r"\b(background|long[- ]running|process|job)\b",),
+    "background": (r"\b(background|long[- ]running|process|job)\b",
+                   r"\b(report back|let me know when|when (?:it'?s|you'?re) done|while i)\b"),
     "identity": (r"\b(your name|identity|soul|persona)\b",),
     "goals": (r"\b(goal|objective|project status|spawn task|my projects?)\b",),
     "skills": (r"\b(skill|deep think|reflection)\b",),
@@ -244,6 +245,10 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "schedule_prompt", "list_schedules", "cancel_schedule",
     }),
     "background": frozenset({
+        # queue_background_task: a Gateway background agent task that reports
+        # back to this chat (Grok Bot-style worker, parity P2). start_background
+        # is only for raw long-running Python processes.
+        "queue_background_task", "background_task_status",
         "start_background", "list_background", "check_background",
         "stop_background", "pending_background", "open_on_host",
     }),
@@ -339,7 +344,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "kanban": "multi-agent worker/orchestrator protocol — claim, heartbeat, "
               "block, review, link and attach on shared board cards",
     "scheduling": "schedule, list, cancel cron prompts",
-    "background": "long-running background processes; open URLs/apps",
+    "background": "background agent tasks that report back to this chat (queue_background_task); long-running processes; open URLs/apps",
     "identity": "set_name and update_soul — modify the agent's own identity",
     "skills": "reload, package, benchmark skills; deep-think queue",
     "computer_use": "Mac-driving + browser automation",
