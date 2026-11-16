@@ -80,8 +80,6 @@ def _route(argv: list[str], py: str) -> list[str]:
         return [py, "-m", "jaeger_ai.core.frameworks.recovery", *rest]
     if cmd == "doctor":
         return [py, "-m", "jaeger_ai.cli.run", "--doctor", *rest]
-    if cmd == "finance":
-        return [py, "-m", "jaeger_ai.features.finance.cli", *rest]
     if cmd == "update":
         # One updater owns product pins, developer pulls, preflight and migrations.
         return [py, "-m", "jaeger_ai.cli.verbs.dispatch", "update", *rest]

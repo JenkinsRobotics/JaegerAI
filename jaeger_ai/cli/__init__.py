@@ -44,7 +44,6 @@ def main(argv: list[str] | None = None) -> int:
     from . import (
         avatar_cmd,
         backends_cmd,
-        channel_cmd,
         config_cmd,
         personality_cmd,
         prompt_cmd,
@@ -110,7 +109,6 @@ def main(argv: list[str] | None = None) -> int:
         metavar="<subcommand>",
     )
     avatar_cmd.register(subparsers)
-    channel_cmd.register(subparsers)
     skills_cmd.register(subparsers)
     personality_cmd.register(subparsers)
     sessions_cmd.register(subparsers)
