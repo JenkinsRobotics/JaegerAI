@@ -46,8 +46,8 @@ storing a `task` message never admits tool execution.
 ## Muse confinement
 
 Muse's authenticated Gateway access is limited to hub messages, roster and
-approval-count reads, goal-result reads, and bounded backlog operations. It
-cannot admit turns/goals, generate models, import backlog items, or use native
+approval-count reads and goal-result reads. It
+cannot admit turns/goals, generate models, or use native
 bridge controls. MCP `send_message` and `handoff_task` are unavailable to Muse;
 `post_result` remains available. The separately configured filesystem Muse
 bridge retains its existing inert inbox-message workflow; storing a message
@@ -218,3 +218,6 @@ truncated to 4 KiB (`truncated: true`). The worker sends at most 20 POSTs per ro
 minute (excess waits) and marks never-attempted rows older than 2 hours `expired`
 so enabling delivery does not replay a stale backlog. Dedupe stays on
 `(sender, message_id)` plus the `Idempotency-Key` header.
+
+
+> 2026-11-16 (audit C2/C3): the project backlog (`features/backlog`, `jaeger.backlog_*` MCP tools), the ARES Codex worker poller (`ares_worker.py`) and the Muse file bridge (`muse_file_bridge.py`) were archived to `~/Desktop/Jaeger-removed-features-2026-11-16/backlog-and-ares-muse-bridge/` with Matthew's approval. Hub messaging, handoffs and delegation stay.

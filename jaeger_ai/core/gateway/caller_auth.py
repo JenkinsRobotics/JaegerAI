@@ -175,10 +175,7 @@ STOP_ROUTES = frozenset({("POST", "/v1/stop")})
 SEARCH_ROUTES = frozenset({("POST", "/v1/search"), ("POST", "/v1/fetch"),
                            # OSS stack (features.oss_stack): model router, shared MCP tools, Documents RAG
                            ("POST", "/v1/models/route"), ("POST", "/v1/models/generate"),
-                           ("POST", "/v1/tools/list"), ("POST", "/v1/tools/call"), ("POST", "/v1/docs/search"),
-                           # Backlog (features.backlog): read/add/update/assign; approve + import are owner-only in the handler
-                           ("POST", "/v1/backlog"), ("POST", "/v1/backlog/{id}"), ("POST", "/v1/backlog/{id}/assign"),
-                           ("POST", "/v1/backlog/import")})
+                           ("POST", "/v1/tools/list"), ("POST", "/v1/tools/call"), ("POST", "/v1/docs/search")})
 #: Lead → specialist handoff (``call_agent``): owners and jaegerd, never outside callers.
 #: Inner helpers use ``delegate`` (and its ``call_agent`` alias) on the same grant.
 DELEGATE_ROUTES = frozenset({("POST", "/v1/agents/{id}/handoff"), ("POST", "/v1/sessions/{id}/transfer")})
@@ -269,9 +266,7 @@ def required_scope(method: str, route: str | None) -> str | None:
 #: Extra read-only GET routes for one named outside caller (not every prefixed caller).
 #: grokbot reads the Agents-tab activity feed (handoff.sent / handoff.result rows).
 CALLER_READ_ROUTES: Mapping[str, frozenset[str]] = {
-    "grokbot": frozenset({"/v1/activity", "/v1/backlog", "/v1/backlog/sweep"}),
-    "ares": frozenset({"/v1/backlog", "/v1/backlog/sweep"}),
-    "muse": frozenset({"/v1/backlog", "/v1/backlog/sweep"}),
+    "grokbot": frozenset({"/v1/activity"}),
 }
 
 
@@ -283,9 +278,6 @@ CALLER_ONLY_ROUTES: Mapping[str, frozenset[tuple[str, str]]] = {
         ("POST", "/v1/agent-messages"),
         ("GET", "/v1/agents"), ("GET", "/v1/approvals/counts"),
         ("GET", "/v1/agent-goals/{goal_id}"),
-        ("GET", "/v1/backlog"), ("GET", "/v1/backlog/sweep"),
-        ("POST", "/v1/backlog"), ("POST", "/v1/backlog/{id}"),
-        ("POST", "/v1/backlog/{id}/assign"),
     }),
     "hermes": frozenset({
         ("GET", "/v1/agent-messages"), ("GET", "/v1/agent-threads/{thread}"),

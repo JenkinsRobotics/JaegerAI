@@ -228,10 +228,8 @@ GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
         ({"GET"}, r"^/v1/activity$"),
         # Team runtime (gateway/team_routes.py): roster, rooms, room messages.
         ({"GET"}, r"^/v1/team$"),
-        ({"GET", "POST"}, r"^/v1/backlog$"),
         ({"GET", "POST"}, r"^/v1/ui/layout$"),
         ({"GET", "POST"}, r"^/v1/ui/logo$"),
-        ({"POST"}, r"^/v1/backlog/(?:import|bl-[a-f0-9]{10}(?:/assign)?)$"),
         ({"POST"}, rf"^/v1/handoffs/{_ID}/check$"),
         ({"GET"}, r"^/v1/companion/[a-z0-9_]+/(?:ccv3|memories)$"),
         ({"POST"}, r"^/v1/companion/(?:import|[a-z0-9_]+/chat)$"),
