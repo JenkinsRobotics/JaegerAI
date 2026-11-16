@@ -52,6 +52,11 @@ REA_READ_ONLY_TOOLS: tuple[str, ...] = (
 #: (``call_agent`` runs under the Gateway's delegation depth/approval caps).
 ROUTED_HANDOFF_TOOLS: tuple[str, ...] = ("call_agent", "get_agent_result")
 
+#: Discovery only lists/loads tools already inside the specialist's grant
+#: (every call is re-checked), so every specialist keeps it. Without it a
+#: specialist could not find its own tools (parity P5/P7 audit 2026-11-16).
+DISCOVERY_TOOLS: tuple[str, ...] = ("list_tools", "describe_tool", "tool_search", "load_tools")
+
 STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
     {
         "name": "surfaces",
@@ -59,7 +64,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "surfaces",
         "internal": True,
         "summary": "Mac app + WebUI chrome, nav, branding, and session UX.",
-        "allowed_tools": ("read_file", "search_files", "write_file", "patch", "terminal", "ide_context", "ide_diagnostics", "ide_open_file", "vision_analyze", "web_search", "web_extract", "update_plan", "get_time", "agent_notes", *ROUTED_HANDOFF_TOOLS),
+        "allowed_tools": ("read_file", "search_files", "write_file", "patch", "terminal", "ide_context", "ide_diagnostics", "ide_open_file", "vision_analyze", "web_search", "web_extract", "update_plan", "get_time", "agent_notes", *ROUTED_HANDOFF_TOOLS, *DISCOVERY_TOOLS),
         "keywords": ("webui", "menu bar", "menubar", "sidebar", "avatar", "branding", "mac app", "swift"),
     },
     {
@@ -68,7 +73,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "gateway",
         "internal": True,
         "summary": f"Spine health, agents catalog, sessions, and approvals on :{GATEWAY_PORT}.",
-        "allowed_tools": ("read_file", "search_files", "terminal", "exec_command", "system_status", "self_check", "list_background", "check_background", "web_search", "update_plan", "get_time", "calculate", "agent_notes", *ROUTED_HANDOFF_TOOLS),
+        "allowed_tools": ("read_file", "search_files", "terminal", "exec_command", "system_status", "self_check", "list_background", "check_background", "web_search", "update_plan", "get_time", "calculate", "agent_notes", *ROUTED_HANDOFF_TOOLS, *DISCOVERY_TOOLS),
         "keywords": ("gateway", str(GATEWAY_PORT), "sse", "approval", "approvals", "session store", "agents catalog"),
     },
     {
@@ -76,7 +81,11 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "display_name": "Everyday",
         "specialty": "everyday",
         "summary": "Daily-driver tasks: calendar, mail, reminders, host helpers.",
-        "allowed_tools": ("get_events", "create_event", "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "move_mail", "sweep_mail", "send_email", "lookup_contact", "todo", "notify", "list_schedules", "schedule_prompt", "get_time", "calculate", "get_weather", "web_search", "web_extract", "update_plan", "agent_notes", *ROUTED_HANDOFF_TOOLS),
+        "allowed_tools": ("get_events", "create_event", "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "move_mail", "sweep_mail", "send_email", "lookup_contact", "todo", "notify", "list_schedules", "schedule_prompt", "cancel_schedule", "get_time", "calculate", "get_weather", "web_search", "web_extract", "update_plan", "agent_notes",
+                          # Mac apps: Reminders/Notes run through their skills (remindctl, memo) in
+                          # the terminal; lock/display/app control through system_control.
+                          "mac_status", "system_control", "terminal", "read_file", "search_files", "list_skills", "use_skill", "skill",
+                          *ROUTED_HANDOFF_TOOLS, *DISCOVERY_TOOLS),
         "keywords": ("calendar", "email", "mail", "inbox", "reminder", "reminders", "meeting", "schedule"),
     },
     # Project team roles. No keywords: the lead assigns them explicitly
@@ -87,7 +96,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "reverse-engineering",
         "team_role": "reverse-engineer",
         "summary": "Studies shipped apps read-only with REA and reports structure and features with evidence.",
-        "allowed_tools": (*(f"mcp__rea__{n}" for n in REA_READ_ONLY_TOOLS), "read_file", "search_files", "web_search", "web_extract", "update_plan", "get_time", "agent_notes", "use_skill", "skill"),
+        "allowed_tools": (*(f"mcp__rea__{n}" for n in REA_READ_ONLY_TOOLS), "read_file", "search_files", "web_search", "web_extract", "update_plan", "get_time", "agent_notes", "use_skill", "skill", *DISCOVERY_TOOLS),
         "skills": ("reverse-engineer-anything", "jaeger-reverse-engineer"),
         "keywords": (),
     },
@@ -97,7 +106,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "builder",
         "team_role": "builder",
         "summary": "Implements apps inside the project root, builds and tests them, and proves it with the checker.",
-        "allowed_tools": ("read_file", "search_files", "write_file", "append_file", "patch", "move_file", "copy_file", "terminal", "exec_command", "write_stdin", "kill_command", "list_background", "check_background", "run_build_check", "update_plan", "get_time", "agent_notes", "use_skill", "skill"),
+        "allowed_tools": ("read_file", "search_files", "write_file", "append_file", "patch", "move_file", "copy_file", "terminal", "exec_command", "write_stdin", "kill_command", "list_background", "check_background", "run_build_check", "update_plan", "get_time", "agent_notes", "use_skill", "skill", *DISCOVERY_TOOLS),
         "skills": ("jaeger-builder",),
         "keywords": (),
     },
@@ -107,7 +116,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "reviewer",
         "team_role": "reviewer",
         "summary": "Reviews builds against the spec and reruns the build/test checker.",
-        "allowed_tools": ("read_file", "search_files", "run_build_check", "update_plan", "get_time", "agent_notes", "use_skill", "skill"),
+        "allowed_tools": ("read_file", "search_files", "run_build_check", "update_plan", "get_time", "agent_notes", "use_skill", "skill", *DISCOVERY_TOOLS),
         "skills": ("jaeger-reviewer",),
         "keywords": (),
     },
@@ -117,7 +126,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "researcher",
         "team_role": "researcher",
         "summary": "Answers outside-knowledge questions from the web and local files, with sources.",
-        "allowed_tools": ("web_search", "web_extract", "read_file", "search_files", "update_plan", "get_time", "agent_notes", "use_skill", "skill"),
+        "allowed_tools": ("web_search", "web_extract", "read_file", "search_files", "update_plan", "get_time", "agent_notes", "use_skill", "skill", *DISCOVERY_TOOLS),
         "skills": ("jaeger-researcher",),
         "keywords": (),
     },
@@ -127,7 +136,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "designer",
         "team_role": "designer",
         "summary": "Turns findings into screen lists and UI specs a builder can implement.",
-        "allowed_tools": ("read_file", "search_files", "write_file", "patch", "vision_analyze", "web_search", "update_plan", "get_time", "agent_notes", "use_skill", "skill"),
+        "allowed_tools": ("read_file", "search_files", "write_file", "patch", "vision_analyze", "web_search", "update_plan", "get_time", "agent_notes", "use_skill", "skill", *DISCOVERY_TOOLS),
         "skills": ("jaeger-designer",),
         "keywords": (),
     },

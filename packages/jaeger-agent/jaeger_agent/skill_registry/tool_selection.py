@@ -66,7 +66,7 @@ def tool_denial_reason(name: str) -> str | None:
         return "untrusted-content turn"
     allowed = active_tool_allowlist()
     if allowed is not None and name not in allowed:
-        return "not in the host tool grant"
+        return f"not in the host tool grant: {', '.join(sorted(allowed)[:12]) or 'no tools'}"
     state = current_selection()
     if state is None:
         return None
