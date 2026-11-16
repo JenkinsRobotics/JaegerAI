@@ -130,6 +130,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             return
         }
         UNUserNotificationCenter.current().delegate = self
+        statusController?.startLiveTasks()
         if VisibleChecker.enabled {
             shellLog("[shell][visible-check] enabled")
             let checker = VisibleChecker(app: self)
