@@ -372,7 +372,7 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
     chats,
     openChatId: sessionId,
     onSelect: (next) => {
-      if (onNavigate && next.type !== "agent") { onNavigate(next.type === "grok" ? "/home/widgets" : `/${next.type}`); return; }
+      if (onNavigate && next.type !== "agent") { onNavigate(next.type === "grok" ? "/" : `/${next.type}`); return; }
       if (next.type === "agent" && next.agentId === selectedAgentId) void store.seeAgent(next.agentId);
       setSelection(next);
     },

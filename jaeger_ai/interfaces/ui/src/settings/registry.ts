@@ -1,27 +1,28 @@
 /** Settings search registry (TAB-01 §3): every searchable row → panel + anchor id. */
-export type PanelId = "checkpoints" | "widgets" | "appearance" | "general" | "voice" | "notifications" | "agents" | "memory" | "integrations" | "models" | "automations" | "machine" | "privacy" | "limits" | "about";
+export type PanelId = "checkpoints" | "appearance" | "general" | "voice" | "notifications" | "agents" | "memory" | "integrations" | "models" | "automations" | "machine" | "privacy" | "about";
 export interface Entry { id: string; panel: PanelId; anchor: string; label: string; keywords: string[] }
 export const PANEL_LABEL: Record<PanelId, string> = {
-  checkpoints: "Checkpoints", widgets: "Home widgets", appearance: "Appearance", general: "General", voice: "Voice & audio", notifications: "Notifications", agents: "Agents", memory: "Memory & skills",
-  integrations: "Integrations & MCP", models: "Models & Providers", automations: "Automations", machine: "Machine & devices", privacy: "Privacy & data", limits: "Spending limits", about: "About & diagnostics",
+  checkpoints: "Checkpoints", appearance: "Appearance", general: "General", voice: "Voice & audio", notifications: "Notifications", agents: "Agents", memory: "Memory & skills",
+  integrations: "Integrations & MCP", models: "Models & Providers", automations: "Automations", machine: "Machine & devices", privacy: "Privacy & data", about: "About & diagnostics",
 };
 export const GROUPS: { id: string; label: string; panels: PanelId[] }[] = [
   { id: "you", label: "You", panels: ["appearance", "general", "voice", "notifications"] },
   { id: "agents", label: "Agents", panels: ["agents", "memory"] },
   { id: "connections", label: "Connections", panels: ["integrations", "models", "automations"] },
   { id: "machine", label: "Machine", panels: ["machine"] },
-  { id: "privacy", label: "Privacy", panels: ["privacy", "limits"] },
-  { id: "system", label: "System", panels: ["checkpoints", "widgets", "about"] },
+  { id: "privacy", label: "Privacy", panels: ["privacy"] },
+  { id: "system", label: "System", panels: ["checkpoints", "about"] },
 ];
 /** Old /settings/<id> → new panel (+ optional segment). */
 export const LEGACY_SETTINGS: Record<string, string> = {
   providers: "models", connection: "models", tools: "integrations/tools", workflows: "automations", channels: "automations",
-  skills: "memory", library: "memory", diagnostics: "about", reset: "about", finance: "limits",
+  skills: "memory", library: "memory", diagnostics: "about", reset: "about",
+  // Retired 2026-11-15: Spending limits (finance) and Home widgets (Home page removed).
+  finance: "privacy", limits: "privacy", widgets: "appearance",
 };
 const e = (panel: PanelId, anchor: string, label: string, ...keywords: string[]): Entry => ({ id: `${panel}.${anchor}`, panel, anchor, label, keywords });
 export const REGISTRY: Entry[] = [
   e("checkpoints", "checkpoints", "Checkpoints", "workspace", "versions", "restore"),
-  e("widgets", "widgets", "Home widgets", "personalisation", "layout", "my widgets"),
   e("models", "library", "Model library", "models", "inventory"),
   e("models", "compare", "Compare models", "compare"),
   e("models", "usage", "Model usage", "usage"),
@@ -53,7 +54,6 @@ export const REGISTRY: Entry[] = [
   e("machine", "gateway", "Gateway address", "gateway", "api", "address", "loopback"),
   e("privacy", "uploads", "Send file contents with messages", "files", "upload", "privacy", "attachments"),
   e("privacy", "storage", "Where your data lives", "data", "storage", "on device", "local", "export", "telemetry"),
-  e("limits", "limits", "Spending limits", "spending", "limits", "finance", "money", "budget"),
   e("about", "version", "Version & updates", "version", "updates", "about"),
   e("about", "diagnostics", "Diagnostics", "diagnostics", "logs", "debug"),
   e("about", "reset", "Reset", "reset", "danger", "erase"),

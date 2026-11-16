@@ -31,7 +31,6 @@ const DroidView = lazy(() => import('../droid/DroidView').then(m => ({ default: 
 // Route-level code splitting: every page but Home loads on first open.
 const App = lazy(() => import('../App').then((m) => ({ default: m.App })))
 const TasksPage = lazy(() => import('./TasksPage').then((m) => ({ default: m.TasksPage })))
-const WorkspacePage = lazy(() => import('./WorkspacePage').then((m) => ({ default: m.WorkspacePage })))
 const CheckpointsView = lazy(() => import('../unified/CheckpointsView').then((m) => ({ default: m.CheckpointsView })))
 const WorkspaceBrowser = lazy(() => import('../unified/WorkspaceBrowser').then((m) => ({ default: m.WorkspaceBrowser })))
 const MachineControlPanel = lazy(() => import('../machine-control/MachineControlPanel').then((m) => ({ default: m.MachineControlPanel })))
@@ -95,7 +94,7 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
     { id: 'settings:general', label: 'Appearance and text size', hint: 'Settings → General', run: () => go('/settings/general') },
     ...['library', 'compare', 'usage'].map((section) => ({ id: `models:${section}`, label: `Go to ${section === 'library' ? 'Model library' : section === 'compare' ? 'Compare' : 'Usage'}`, hint: 'Settings → Models', run: () => go(`/settings/models/${section}`) })),
     ...['sharepoint'].map((section) => ({ id: `integration:${section}`, label: 'Go to SharePoint', hint: 'Settings → Integrations', run: () => go(`/settings/integrations/${section}`) })),
-    ...['checkpoints', 'widgets'].map((section) => ({ id: `settings:${section}`, label: `Go to ${section === 'widgets' ? 'Home widgets' : 'Checkpoints'}`, hint: 'Settings', run: () => go(`/settings/${section}`) })),
+    ...['checkpoints'].map((section) => ({ id: `settings:${section}`, label: `Go to Checkpoints`, hint: 'Settings', run: () => go(`/settings/${section}`) })),
     ...CHARACTERS.map((c) => ({ id: `character:${c.id}`, label: `New agent: ${c.name}`, hint: c.role, run: () => go(`/agents/characters?character=${encodeURIComponent(c.id)}`) })),
   ], [go])
 
@@ -164,7 +163,6 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
                 { id: 'sharepoint', title: 'SharePoint', body: <SharePointPanel source={source} /> },
               ]} />,
               checkpoints: <CheckpointsView source={source} params={paramsOf('settings')} />,
-              widgets: <WorkspacePage source={source} />,
             }} view={appView} settingsTab={settingsTab} settingsSegment={settingsSegment} onSettingsTab={(t) => navigate(t ? `/settings/${t}` : '/settings', { replace: !!t && !!settingsTab })}
               onNavigate={go} requestedAgent={active === 'chat' ? route.params.get('agent') : null} onOpenPalette={() => setPaletteOpen(true)} /></Suspense>);
 

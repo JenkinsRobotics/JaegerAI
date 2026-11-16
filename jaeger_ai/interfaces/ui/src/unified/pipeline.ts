@@ -21,7 +21,7 @@ export function stagePath(stage: Stage, taskId: string): string {
   switch (stage) {
     case "research": return `/research${q}`;
     case "studio": return `/studio${q}`;
-    case "production": return `/work/production${q}`;
+    // Production page retired 2026-11-15: production-stage work lives on Tasks.
     default: return `/work${q}`;
   }
 }
