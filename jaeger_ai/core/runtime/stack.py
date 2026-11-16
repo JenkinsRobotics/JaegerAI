@@ -99,19 +99,6 @@ def _bridge_command() -> list[str]:
     return [_default_python(), "-u", "-B", "-m", "jaeger_ai.interfaces.bridge", "jaeger"]
 
 
-def _webui_command() -> list[str]:
-    # server.py imports its siblings as top-level ``api.*`` and only starts
-    # from its own directory with the launcher's environment; ``python -m``
-    # crash-loops under launchd.
-    run_script = REPO_ROOT / "scripts" / "run-jaeger-webui.sh"
-    if not run_script.exists():
-        raise RuntimeError(
-            f"Web UI launcher missing at {run_script}; set JAEGER_INSTALL_ROOT "
-            "to the JaegerAI checkout (the ./jaeger wrapper does this)."
-        )
-    return ["/bin/zsh", str(run_script)]
-
-
 def _mcp_command() -> list[str]:
     return [
         _default_python(),
@@ -214,15 +201,8 @@ STACK_SERVICES: list[ServiceDef] = [
         command_builder=_bridge_command,
         env_builder=_bridge_env,
     ),
-    ServiceDef(
-        id="webui",
-        name="Web UI",
-        label="com.jenkinsrobotics.jaeger-webui",
-        port=WEBUI_PORT,
-        health_path="/health",
-        command_builder=_webui_command,
-        env_builder=_common_env,
-    ),
+    # The web UI on WEBUI_PORT (:8790) is served by the Gateway process itself
+    # (jaeger_ai/core/gateway/webapp, R11); the separate jaeger-webui job is retired.
     ServiceDef(
         id="mcp",
         name="Native MCP",

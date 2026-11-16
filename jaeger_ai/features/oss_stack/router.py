@@ -161,7 +161,7 @@ def mac_gate_default(state_root: Path | None = None):
 
     def gate(kind, model):
         try:
-            from jaeger_ai.features.webui.api.resource_manager import ResourceManager
+            from jaeger_ai.core.gateway.webapp.resource_manager import ResourceManager
             return ResourceManager(lambda: root).check(kind, model)
         except Exception:  # noqa: BLE001 - broken probe must not block forever
             return []

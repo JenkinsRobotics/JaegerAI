@@ -368,7 +368,7 @@ def enable(*, https_port: int = HTTPS_PORT, start_webui: bool = True, serve: boo
         pw = str(password.get("password") or os.environ.get("HERMES_WEBUI_PASSWORD") or "")
         launchagent = _apply_webui_launchagent(pw) if pw else {"ok": False, "reason": "no password"}
         if not launchagent.get("ok"):
-            from jaeger_ai.features.webui.service.service import WebUIService
+            from jaeger_ai.core.gateway.webapp.service.service import WebUIService
             svc = WebUIService()
             try:
                 svc.stop()
@@ -507,7 +507,7 @@ def status_report() -> dict[str, Any]:
     state = store.load()
     phones = 0
     try:
-        from jaeger_ai.features.webui.api import auth as webui_auth
+        from jaeger_ai.core.gateway.webapp import auth as webui_auth
         phones = len([s for s in webui_auth.list_sessions() if s.get("remote")])
     except Exception:
         phones = 0

@@ -63,10 +63,8 @@ def run(state: Path, ui_dist: Path) -> None:
                JAEGER_BACKGROUND_PRODUCERS='0', JAEGER_GATEWAY_HOST='127.0.0.1',
                JAEGER_GATEWAY_PORT=str(gateway_port), JAEGER_GATEWAY_URL=gateway_url,
                JAEGER_WEBUI_UI_DIST=str(ui_dist), JAEGER_OLLAMA_URL='http://127.0.0.1:9',
-               HERMES_HOME=str(state / 'webui-agent'), HERMES_WEBUI_STATE_DIR=str(state / 'webui'),
-               HERMES_WEBUI_DEFAULT_WORKSPACE=str(state / 'workspace'),
-               HERMES_WEBUI_HOST='127.0.0.1', HERMES_WEBUI_PORT=str(webui_port),
-               HERMES_WEBUI_PASSWORD=secrets.token_urlsafe(32), HERMES_WEBUI_TEST_NETWORK_BLOCK='1')
+               JAEGER_WEBAPP_PORT=str(webui_port), JAEGER_WEBUI_STATE_DIR=str(state / 'webui'),
+               JAEGER_WEBUI_WORKSPACE=str(state / 'workspace'))
     children = []
     logs = []
     stopping = False
@@ -80,8 +78,8 @@ def run(state: Path, ui_dist: Path) -> None:
         owner.write_text(json.dumps({'nonce': nonce, 'supervisor_pid': os.getpid()})); owner.chmod(0o600)
         try:
             for name, command, cwd in (
-                ('gateway', [sys.executable, '-B', '-m', 'jaeger_ai.core.gateway.server', '--host', '127.0.0.1', '--port', str(gateway_port)], state),
-                ('webui', [sys.executable, '-B', str(REPO / 'jaeger_ai/features/webui/server.py')], REPO / 'jaeger_ai/features/webui')):
+                # The Gateway serves the web app itself on JAEGER_WEBAPP_PORT (R11).
+                ('gateway', [sys.executable, '-B', '-m', 'jaeger_ai.core.gateway.server', '--host', '127.0.0.1', '--port', str(gateway_port)], state),):
                 log = (state / f'{name}.log').open('w'); logs.append(log)
                 children.append(subprocess.Popen(command, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT))
             deadline = time.monotonic() + 60
@@ -101,7 +99,7 @@ def run(state: Path, ui_dist: Path) -> None:
                                 raise RuntimeError('WebUI did not return HTTP 200')
                         ready = True
                         result = {'state': str(state), 'gateway_url': gateway_url, 'webui_url': webui_url,
-                                  'gateway_pid': children[0].pid, 'webui_pid': children[1].pid}
+                                  'gateway_pid': children[0].pid, 'webui_pid': children[0].pid}
                         (state / 'ready.json').write_text(json.dumps(result))
                         print(json.dumps(result), flush=True)
                         print(f'Stop: JAEGER_STATE_DIR={state} ./scripts/stop-test-env.sh', flush=True)

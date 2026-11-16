@@ -219,7 +219,7 @@ class SessionStore:
         return str(row[0] if row and row[0] else origin)
 
     def _backfill_profiles(self) -> None:
-        from jaeger_ai.features.webui.service.session_unify import infer_session_profile
+        from jaeger_ai.core.gateway.webapp.service.session_unify import infer_session_profile
 
         rows = self._conn.execute(
             "SELECT id, origin FROM sessions WHERE profile IS NULL OR profile=''"
@@ -242,7 +242,7 @@ class SessionStore:
         origin: object = None,
     ) -> str:
         """Set profile on first write only. Returns the durable key."""
-        from jaeger_ai.features.webui.service.session_unify import infer_session_profile
+        from jaeger_ai.core.gateway.webapp.service.session_unify import infer_session_profile
 
         profile = infer_session_profile(session_id, explicit, origin=origin)
         self._conn.execute(
@@ -302,7 +302,7 @@ class SessionStore:
         """Append one message; upsert the session (first user line = preview)."""
         if not session_id or not text:
             return
-        from jaeger_ai.features.webui.service.session_unify import (
+        from jaeger_ai.core.gateway.webapp.service.session_unify import (
             infer_session_profile,
             is_system_nudge,
             title_from_text,
@@ -460,7 +460,7 @@ class SessionStore:
         created_at = min(row[2] for row in clean)
         last_active = max(row[2] for row in clean)
         stamped = normalize_session_origin(origin)
-        from jaeger_ai.features.webui.service.session_unify import infer_session_profile
+        from jaeger_ai.core.gateway.webapp.service.session_unify import infer_session_profile
 
         stamped_profile = infer_session_profile(session_id, profile, origin=stamped)
         with self._lock, self._conn:
@@ -576,7 +576,7 @@ class SessionStore:
             "FROM sessions s ORDER BY s.last_active DESC, s.rowid DESC "
             "LIMIT ?", (limit,))
         rows = []
-        from jaeger_ai.features.webui.service.session_unify import (
+        from jaeger_ai.core.gateway.webapp.service.session_unify import (
             infer_session_profile,
             profile_badge_for_session,
             title_from_text,
@@ -605,7 +605,7 @@ class SessionStore:
         profile: str | None = None,
     ) -> dict[str, Any]:
         """Idempotently create one transcript unless its id is tombstoned."""
-        from jaeger_ai.features.webui.service.session_unify import infer_session_profile
+        from jaeger_ai.core.gateway.webapp.service.session_unify import infer_session_profile
 
         session_id = canonical_session_id(session_id)
         now = time.time()

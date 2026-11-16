@@ -68,7 +68,7 @@ REQUIRED_PROFILES = {
 }
 PROFILE_COOKIE_IDS = ("default", "jaeger", "openclaw", "roundtable")
 
-# Key UI tab endpoints owned by jaeger_ai/features/webui.
+# Key UI tab endpoints served by the Gateway web app (jaeger_ai/core/gateway/webapp).
 TAB_ENDPOINTS = (
     ("sessions", "/api/sessions"),
     ("models", "/api/models"),
@@ -386,7 +386,7 @@ def check_profiles_and_sessions(matrix: Matrix, chat_url: str) -> dict[str, str]
     # Apply canonical display-name expectations (API may return raw id).
     try:
         sys.path.insert(0, str(REPO_ROOT))
-        from jaeger_ai.features.webui.service.profile_layout import PROFILE_DISPLAY_NAMES
+        from jaeger_ai.core.gateway.webapp.service.profile_layout import PROFILE_DISPLAY_NAMES
 
         expected_labels = dict(PROFILE_DISPLAY_NAMES)
     except Exception:

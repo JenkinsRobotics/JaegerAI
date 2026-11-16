@@ -282,7 +282,7 @@ def run_doctor(layout: Any = None, *, deep: bool = False,
 def _webui_unification_checks() -> list[Any]:
     """Verify the single WebUI URL and host Hermes Agent API topology."""
     from jaeger_ai.core.runtime.preflight import Check
-    from jaeger_ai.features.webui.service.service import WebUIService
+    from jaeger_ai.core.gateway.webapp.service.service import WebUIService
 
     checks: list[Any] = []
     svc = WebUIService()

@@ -122,7 +122,7 @@ def abandon_owned_run(
             os.close(directory)
         ownership.release(run_id)
         try:
-            from jaeger_ai.features.webui.service.session_unify import close_reconciled_webui_session
+            from jaeger_ai.core.gateway.webapp.service.session_unify import close_reconciled_webui_session
             close_reconciled_webui_session(str(saved.get("session_id") or ""))
         except Exception:
             pass
