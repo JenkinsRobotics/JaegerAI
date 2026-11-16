@@ -768,6 +768,10 @@ def main(argv: list[str] | None = None) -> int:
     p_up = sub.add_parser("up", help="Start all or specified services")
     p_up.add_argument("services", nargs="*", help="Service IDs to start")
     p_up.add_argument("--json", action="store_true", help="Output JSON")
+    # Boot (launchd RunAtLoad) starts every service cold: the Gateway restores
+    # the resident owner and MCP waits for the bridge, which takes longer than
+    # an interactive restart. Returns as soon as all services are ready.
+    p_up.add_argument("--wait", type=float, default=120.0, help="Seconds to wait for readiness")
 
     p_down = sub.add_parser("down", help="Stop all services and kill stragglers")
     p_down.add_argument("--json", action="store_true", help="Output JSON")
@@ -798,7 +802,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.action == "up":
         target = [SERVICE_BY_ID[s] for s in args.services if s in SERVICE_BY_ID] or None
-        res = stack_up(target)
+        res = stack_up(target, wait_timeout=args.wait)
         if getattr(args, "json", False):
             print(json.dumps(res, indent=2))
         else:
