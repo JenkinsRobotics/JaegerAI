@@ -6392,6 +6392,13 @@ class JaegerGatewayApp:
             "naming the skill and what changed."
         )
         rid = f"skill-review-{request_id}"[:120]
+        try:  # private turns are never skill material, and a cloud lane would refuse them anyway
+            from jaeger_ai.core.models.request_policy import classify as _classify
+            if _classify(review)[0] == "private":
+                logger.info("skill review %s skipped: private content", rid)
+                return
+        except Exception:  # noqa: BLE001
+            pass
 
         def run() -> None:
             time.sleep(float(os.environ.get("JAEGER_SKILL_NUDGE_DELAY_S") or 20))
