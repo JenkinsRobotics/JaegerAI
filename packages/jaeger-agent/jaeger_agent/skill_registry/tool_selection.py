@@ -49,18 +49,36 @@ def set_groups(groups: set[str]) -> None:
     else:
         _fallback_groups.set(frozenset(groups))
 
-def tool_permitted(name: str) -> bool:
-    # Relevance and schema loading never override trust or a host grant.
+DISCOVERY_TOOLS = frozenset({"list_tools", "describe_tool", "load_tools", "tool_search"})
+
+
+def tool_denial_reason(name: str) -> str | None:
+    """Why ``name`` may not run in this context, or None when it may.
+
+    Relevance and schema loading never override trust or a host grant.
+    Discovery tools only describe/load what the restriction already allows
+    (every loaded tool is re-checked here), so a task-narrowed agent keeps
+    them; otherwise a narrowed turn could see a tool's name but neither load
+    nor call it (parity P5/P7)."""
     from .toolset_scoping import is_untrusted_content, UNTRUSTED_SAFE
     from jaeger_agent.tool_executor import active_tool_allowlist
     if is_untrusted_content() and name not in UNTRUSTED_SAFE:
-        return False
+        return "untrusted-content turn"
     allowed = active_tool_allowlist()
     if allowed is not None and name not in allowed:
-        return False
+        return "not in the host tool grant"
     state = current_selection()
-    return state is None or ((state.restricted is None or name in state.restricted)
-                             and (state.grant is None or name in state.grant))
+    if state is None:
+        return None
+    if state.restricted is not None and name not in state.restricted and name not in DISCOVERY_TOOLS:
+        return "not in this agent's toolsets"
+    if state.grant is not None and name not in state.grant:
+        return "not in the agent's construction grant"
+    return None
+
+
+def tool_permitted(name: str) -> bool:
+    return tool_denial_reason(name) is None
 
 
 def budget_visible_tools(tools, selection, guard, system_prompt: str, query: str):

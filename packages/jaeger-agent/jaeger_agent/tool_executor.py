@@ -187,7 +187,11 @@ class DirectToolExecutor:
         if cancelled is not None and cancelled.is_set():
             return cancelled_tool_result()
         if not tool_permitted(tool.name):
-            return {"ok": False, "error": "Tool is outside this request scope", "error_type": "permission_denied", "retryable": False}
+            from jaeger_agent.skill_registry.tool_selection import tool_denial_reason
+            why = tool_denial_reason(tool.name) or "scope"
+            import logging as _logging
+            _logging.getLogger("jaeger.tool_scope").warning("tool %s denied: %s", tool.name, why)
+            return {"ok": False, "error": f"Tool is outside this request scope ({why})", "error_type": "permission_denied", "retryable": False}
         # ToolDef.dispatch owns coercion + validation. Exceptions deliberately
         # cross this replaceable boundary: JaegerAgent._execute_prepared turns
         # them into structured model feedback and can still distinguish a bad
