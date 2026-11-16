@@ -28,8 +28,8 @@ _BUNDLED: tuple[ChannelCatalogEntry, ...] = (
         id="discord",
         label="Discord",
         aliases=("discord",),
-        status="live",
-        source="jaeger_ai/plugins/discord",
+        status="planned",
+        source="archived in-process bridge (Desktop/Jaeger-removed-features-2026-11-16/in-process-channel-bridges); candidate to port into the relay",
         order=10,
     ),
     ChannelCatalogEntry(
@@ -37,7 +37,7 @@ _BUNDLED: tuple[ChannelCatalogEntry, ...] = (
         label="Telegram",
         aliases=("telegram", "tg"),
         status="live",
-        source="jaeger_ai/plugins/telegram",
+        source="jaeger_ai/features/channels/relay/telegram.py",
         order=20,
     ),
     ChannelCatalogEntry(
@@ -45,7 +45,7 @@ _BUNDLED: tuple[ChannelCatalogEntry, ...] = (
         label="iMessage",
         aliases=("imessage", "imsg", "messages"),
         status="live",
-        source="jaeger_ai/plugins/imessage",
+        source="jaeger_ai/features/channels/relay/imessage.py",
         order=30,
     ),
     ChannelCatalogEntry(

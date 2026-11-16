@@ -85,21 +85,13 @@ def _parse_chat_ids(raw: str) -> set[int]:
     return out
 
 
-# channel → spec for the in-process bridges we can start on demand. ``allow_kw``
-# is the bridge constructor's allowlist kwarg (telegram chats vs discord users).
-_BRIDGE_SPECS = {
-    "telegram": {"mod": ".telegram", "cls": "TelegramBridge", "token": "TELEGRAM_BOT_TOKEN",
-                 "allow": "TELEGRAM_ALLOWED_CHAT_IDS", "allow_kw": "allowed_chats", "ints": True,
-                 "admin": "TELEGRAM_ADMIN_IDS"},
-    "discord":  {"mod": ".discord", "cls": "DiscordBridge", "token": "DISCORD_BOT_TOKEN",
-                 "allow": "DISCORD_ALLOWED_USER_IDS", "allow_kw": "allowed_users", "ints": True,
-                 "admin": "DISCORD_ADMIN_IDS"},
-    # iMessage has NO bot token — it drives the local Messages app (macOS +
-    # Full Disk Access). Its allowlist is string handles (phone / Apple ID).
-    "imessage": {"mod": ".imessage", "cls": "IMessageBridge", "token": None,
-                 "allow": "IMESSAGE_ALLOWED_HANDLES", "allow_kw": "allowed_handles", "ints": False,
-                 "admin": "IMESSAGE_ADMIN_IDS"},
-}
+# Phone channels live in ONE place: the standalone channels relay
+# (``jaeger_ai.features.channels.relay``, launchd ``jaeger-channels``), which
+# runs Telegram + iMessage for the owner only. The old in-process bridges
+# (plugins/telegram|imessage|discord) were archived to
+# ~/Desktop/Jaeger-removed-features-2026-11-16/in-process-channel-bridges/.
+_RELAY_CHANNELS = {"telegram", "imessage"}
+_BRIDGE_SPECS: dict[str, dict] = {}
 
 
 def _parse_handles(raw: str) -> set[str]:
@@ -117,48 +109,19 @@ def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None,
     ``llm_lock`` is passed through but in-process callers pass ``None`` — the
     turn already serializes on ``_pipeline['llm_lock']`` inside ``_run_turn``,
     and that lock is non-reentrant, so a second acquire here would deadlock."""
-    import importlib
-
     channel = (name or "").strip().lower()
     if get_bridge(channel) is not None:
         return {"started": True, "channel": channel, "already_running": True}
-    spec = _BRIDGE_SPECS.get(channel)
-    if spec is None:
-        return {"started": False, "channel": channel,
-                "error": f"no in-process bridge for {channel!r}; known: {sorted(_BRIDGE_SPECS)}"}
-    token = plugin_credential(layout, spec["token"]) if spec["token"] else ""
-    if spec["token"] and not token:
-        return {"started": False, "channel": channel,
-                "error": f"no {spec['token']} in the instance credential store or env — "
-                         f"ask the user for the value and set_credential it first, then "
-                         f"retry (do not invent a token)"}
-    raw_allow = plugin_credential(layout, spec["allow"]) if spec["allow"] else ""
-    allowed = _parse_chat_ids(raw_allow) if spec["ints"] else _parse_handles(raw_allow)
-    from ._messaging import parse_admin_ids
-    admin_ids = parse_admin_ids(plugin_credential(layout, spec["admin"]))
-    try:
-        # The person index is the richer source of truth: anyone with
-        # access=admin whose handles include this channel is the owner here.
-        from jaeger_ai.core import people
-        admin_ids |= people.admins_for_channel(layout, channel)
-    except Exception:  # noqa: BLE001 — person index is optional
-        pass
-    bridge = None
-    try:
-        mod = importlib.import_module(spec["mod"], __package__)
-        kwargs = {"llm_lock": llm_lock, "bus": bus, spec["allow_kw"]: allowed,
-                  "admin_ids": admin_ids}
-        if spec["token"]:
-            kwargs["token"] = token
-        bridge = getattr(mod, spec["cls"])(handler, **kwargs)
-        bridge.start()
-    except Exception as exc:  # noqa: BLE001 — surface; a bad bridge never crashes the agent
-        thread = getattr(bridge, "_thread", None)
-        uncertain = bool(thread and thread.is_alive())
-        if uncertain:
-            register_bridge(channel, bridge)
-        return {"execution_unknown": uncertain, "started": False, "channel": channel, "error": f"{type(exc).__name__}: {exc}"}
-    return {"started": True, "channel": channel}
+    if channel in _RELAY_CHANNELS:
+        return {"started": False, "channel": channel, "relay": True,
+                "error": (f"{channel} runs in the channels relay service, not in this process. "
+                          "Setup: put JAEGER_TELEGRAM_BOT_TOKEN in ~/.jaeger/secrets.env (Telegram) "
+                          "or add your own handle in Settings > Channels (iMessage); the relay "
+                          "(launchd com.jenkinsrobotics.jaeger-channels) delivers send_message "
+                          "to the owner's chat.")}
+    return {"started": False, "channel": channel,
+            "error": (f"no bridge for {channel!r}. Discord's old in-process bridge is archived "
+                      "on the Desktop (candidate to port back into the relay).")}
 
 
 __all__ = [

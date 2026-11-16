@@ -234,6 +234,23 @@ def c_one_launcher():
     return not extra, f"extra launchers: {extra}" if extra else "JaegerAI.app only"
 
 
+LIVE_LABELS = {"gateway", "webui", "bridge", "mcp-http", "voice", "channels", "droid", "logrotate"}
+
+
+def c_no_stale_plists():
+    d = HOME / ".jaeger/launchd"
+    extra = sorted(p.name for p in d.glob("*.plist")
+                   if p.name.removeprefix("com.jenkinsrobotics.jaeger-").removesuffix(".plist") not in LIVE_LABELS)
+    return not extra, f"unused plists: {extra}" if extra else "only live service plists"
+
+
+def c_no_second_checkout():
+    src = HOME / ".jaeger/source"
+    deploy = REPO / "scripts/deploy-live-mac-studio.sh"
+    left = [str(p) for p in (src, deploy) if p.exists()]
+    return not left, f"still present: {left}" if left else "services run from ~/GitHub/JaegerAI only"
+
+
 def c_removed_index():
     if not REMOVED.exists():
         return True, "nothing removed yet"
@@ -263,9 +280,11 @@ CHECKS = [
     ("G14", "Phone push signed up", c_push_device, False),
     ("G15", "OpenTelemetry in runtime", c_otel, False),
     ("G16", "Cut list cleared", c_cut_list, False),
-    ("G17", "One phone relay", c_one_phone_relay, False),
-    ("G18", "One Mac launcher", c_one_launcher, False),
+    ("G17", "One phone relay", c_one_phone_relay, True),
+    ("G18", "One Mac launcher", c_one_launcher, True),
     ("G19", "Removed features archived with README + INDEX", c_removed_index, True),
+    ("G20", "No unused launchd plists", c_no_stale_plists, True),
+    ("G21", "No second deploy checkout", c_no_second_checkout, True),
 ]
 
 
