@@ -279,6 +279,22 @@ def c_blocking_hooks():
     return ok, "pre_tool_call veto (shell hooks, exit 2 blocks) + in-process pre_tool hooks wrap every tool call" if ok else "hook executor not in the default chain"
 
 
+def c_bridge_no_producers():
+    src = (REPO / "jaeger_ai/interfaces/bridge.py").read_text()
+    ok = 'JAEGER_BRIDGE_LOCAL_PRODUCERS", "").strip() == "1"' in src
+    holder = ""
+    lock = HOME / ".jaeger/instances/jaeger/run/background_producers.lock"
+    try:
+        out = subprocess.run(["lsof", "-t", str(lock)], capture_output=True, text=True, timeout=5).stdout.split()
+        if out:
+            cmd = subprocess.run(["ps", "-o", "command=", "-p", out[0]], capture_output=True, text=True, timeout=5).stdout
+            holder = "gateway" if "core.gateway.server" in cmd else cmd.strip()[:60]
+    except Exception:
+        pass
+    ok = ok and holder in ("gateway", "")
+    return ok, f"producer lease held by: {holder or 'nobody'}; bridge opt-in only"
+
+
 def c_removed_index():
     if not REMOVED.exists():
         return True, "nothing removed yet"
@@ -315,6 +331,7 @@ CHECKS = [
     ("G21", "No second deploy checkout", c_no_second_checkout, True),
     ("G22", "Cut list: backlog + ARES/Muse bridge parts", c_cut_blocked, False),
     ("G23", "Blocking pre-tool hooks in the default tool chain", c_blocking_hooks, True),
+    ("G24", "Schedules/heartbeat/board run only in the Gateway (bridge never takes the lease)", c_bridge_no_producers, True),
 ]
 
 
