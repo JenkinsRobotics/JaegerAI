@@ -12,6 +12,7 @@
 //   reminders [--list NAME] [--include-completed]
 //   contacts --query NAME [--limit N]
 //   status
+//   grant      (one-time: shows the Calendars, Reminders and Contacts prompts)
 
 import Foundation
 import EventKit
@@ -67,6 +68,14 @@ func reminderAccess() -> Bool {
 }
 
 switch command {
+case "grant":
+    // One-time setup: ask for all three in the foreground so the owner sees each prompt.
+    let cal = eventAccess()
+    let rem = reminderAccess()
+    var con = false
+    CNContactStore().requestAccess(for: .contacts) { g, _ in con = g; sema.signal() }
+    _ = sema.wait(timeout: .now() + 120)
+    finish(["ok": cal && rem && con, "calendar": cal, "reminders": rem, "contacts": con])
 case "status":
     finish(["ok": true,
             "calendar": EKEventStore.authorizationStatus(for: .event).rawValue,
