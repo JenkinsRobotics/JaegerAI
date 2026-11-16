@@ -7,6 +7,7 @@ import { PageHeader } from '../components/PageHeader'
 import { Badge, SubTabs } from '../unified/ui'
 import { ResourcesCard } from '../machine/ResourcesCard'
 import { HostCapabilitiesCard } from '../machine/HostCapabilitiesCard'
+import { MacActionsCard } from '../machine/MacActionsCard'
 import { LogsPanel } from '../machine/LogsPanel'
 import { AgentAppsPanel } from '../machine/AgentAppsPanel'
 
@@ -115,7 +116,7 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
           { id: 'policy', title: 'Safety' }, ...(source ? [{ id: 'legacy', title: 'Diagnostics' }] : [])]} />
 
       <div className="machine-control-content">
-        {activeSubTab === 'overview' && <><HostCapabilitiesCard /><ResourcesCard /></>}
+        {activeSubTab === 'overview' && <><MacActionsCard /><HostCapabilitiesCard /><ResourcesCard /></>}
         {activeSubTab === 'logs' && <LogsPanel />}
         {activeSubTab === 'apps' && <AgentAppsPanel />}
         {activeSubTab === 'overview' && (
