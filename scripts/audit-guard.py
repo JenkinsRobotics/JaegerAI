@@ -213,15 +213,24 @@ def c_otel():
 
 
 CUT = [
-    "jaeger_ai/features/finance", "jaeger_ai/features/backlog", "jaeger_ai/features/agent_bridge",
+    "jaeger_ai/features/finance",
     "packages/jaeger-agent/jaeger_agent/delegates/openclaw", "jaeger_ai/plugins/voice_loop.py",
     "jaeger_ai/features/youtube_studio",
 ]
+# Blocked on Matthew: these back the MCP :8792 tools other agents (Grok Bot,
+# ARES, Muse) use to reach Jaeger, and MCP 8792 is off limits without his OK.
+CUT_BLOCKED = ["jaeger_ai/features/backlog", "jaeger_ai/features/agent_bridge/muse_file_bridge.py",
+               "jaeger_ai/features/agent_bridge/ares_worker.py"]
 
 
 def c_cut_list():
     left = [p for p in CUT if (REPO / p).exists()]
     return not left, f"still present: {left}" if left else "cut list cleared"
+
+
+def c_cut_blocked():
+    left = [p for p in CUT_BLOCKED if (REPO / p).exists()]
+    return not left, f"waiting on Matthew (MCP 8792 surface): {left}" if left else "cleared"
 
 
 def c_one_phone_relay():
@@ -279,12 +288,13 @@ CHECKS = [
     ("G13", "Telegram token configured", c_telegram_ready, False),
     ("G14", "Phone push signed up", c_push_device, False),
     ("G15", "OpenTelemetry in runtime", c_otel, False),
-    ("G16", "Cut list cleared", c_cut_list, False),
+    ("G16", "Cut list cleared (finance, youtube_studio, openclaw delegate, voice_loop)", c_cut_list, True),
     ("G17", "One phone relay", c_one_phone_relay, True),
     ("G18", "One Mac launcher", c_one_launcher, True),
     ("G19", "Removed features archived with README + INDEX", c_removed_index, True),
     ("G20", "No unused launchd plists", c_no_stale_plists, True),
     ("G21", "No second deploy checkout", c_no_second_checkout, True),
+    ("G22", "Cut list: backlog + ARES/Muse bridge parts", c_cut_blocked, False),
 ]
 
 
