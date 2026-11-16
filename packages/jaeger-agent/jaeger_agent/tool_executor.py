@@ -192,7 +192,12 @@ class DirectToolExecutor:
         # cross this replaceable boundary: JaegerAgent._execute_prepared turns
         # them into structured model feedback and can still distinguish a bad
         # argument from a permission denial or an indeterminate side effect.
-        return tool.dispatch(dict(arguments))
+        from jaeger_agent.telemetry import mark, tool_span
+        with tool_span(tool.name) as current:
+            result = tool.dispatch(dict(arguments))
+            if isinstance(result, dict) and result.get("ok") is False:
+                mark(current, **{"error.type": str(result.get("error_type") or "tool_error")})
+            return result
 
 
 class HookedToolExecutor:

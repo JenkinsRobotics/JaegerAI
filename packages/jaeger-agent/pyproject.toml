@@ -32,6 +32,8 @@ dependencies = [
 # genuinely optional — you only pay for the wire you use.
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
+# Local OpenTelemetry GenAI spans (jaeger_agent.telemetry); OTLP export is opt-in.
+otel = ["opentelemetry-api>=1.30", "opentelemetry-sdk>=1.30"]
 # The `openai` package is an HTTP client for a WIRE FORMAT, not a cloud
 # account: LM Studio, Ollama, llama.cpp's server and vLLM all speak it.
 openai = ["openai>=1.0"]
