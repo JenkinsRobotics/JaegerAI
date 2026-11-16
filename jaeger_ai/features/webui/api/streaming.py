@@ -10201,10 +10201,7 @@ def _run_agent_streaming(
                 _agent_kwargs['acp_args'] = _rt.get('args')
             if 'credential_pool' in _agent_params:
                 _agent_kwargs['credential_pool'] = _rt.get('credential_pool')
-            # Pin Honcho memory sessions to the stable WebUI session ID.
-            # Without this, 'per-session' Honcho strategy creates a new Honcho
-            # session on every streaming request because HonchoSessionManager is
-            # re-instantiated fresh each turn (#855).
+            # Pin the agent's gateway session key to the stable WebUI session ID.
             if 'gateway_session_key' in _agent_params:
                 _agent_kwargs['gateway_session_key'] = session_id
 

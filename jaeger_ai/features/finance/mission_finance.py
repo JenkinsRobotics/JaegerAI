@@ -43,7 +43,7 @@ def create_financial_audit_mission(store: Any = None) -> dict[str, Any]:
             {
                 "title": "Knowledge & Shared Memory Sync",
                 "steps": [
-                    "Persist executive briefing into Honcho shared memory",
+                    "Save the executive briefing to Jaeger memory",
                     "Surface actionable alerts to desktop notification or chat transcript",
                 ],
             },
