@@ -25,6 +25,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var activityBadge: ActivityBadgeState = .off
     private let offIcon = StatusItemController.loadIcon("jaeger_icon_off_22")
     private let droidMenu = DroidMenuController()
+    private let macMenu = MacControlMenuController()
 
     init(app: JaegerShellApplication) {
         self.app = app
@@ -115,6 +116,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         _ = add("Stop Jaeger stack…", #selector(stopStack(_:)))
         menu.addItem(.separator())
         droidMenu.install(in: menu)
+        menu.addItem(.separator())
+        macMenu.install(in: menu)
         menu.addItem(.separator())
         loginItem.target = self; loginItem.action = #selector(toggleLoginItem(_:)); menu.addItem(loginItem)
         _ = add("Reload", #selector(reload(_:)))
