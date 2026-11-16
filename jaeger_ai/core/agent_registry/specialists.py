@@ -81,7 +81,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "display_name": "Everyday",
         "specialty": "everyday",
         "summary": "Daily-driver tasks: calendar, mail, reminders, host helpers.",
-        "allowed_tools": ("get_events", "create_event", "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "move_mail", "sweep_mail", "send_email", "lookup_contact", "todo", "notify", "list_schedules", "schedule_prompt", "cancel_schedule", "get_time", "calculate", "get_weather", "web_search", "web_extract", "update_plan", "agent_notes",
+        "allowed_tools": ("get_events", "create_event", "list_reminders", "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "move_mail", "sweep_mail", "send_email", "lookup_contact", "todo", "notify", "list_schedules", "schedule_prompt", "cancel_schedule", "get_time", "calculate", "get_weather", "web_search", "web_extract", "update_plan", "agent_notes",
                           # Mac apps: Reminders/Notes run through their skills (remindctl, memo) in
                           # the terminal; lock/display/app control through system_control.
                           "mac_status", "system_control", "terminal", "read_file", "search_files", "list_skills", "use_skill", "skill",

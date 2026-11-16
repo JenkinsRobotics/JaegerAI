@@ -179,7 +179,7 @@ from .diagnostics import self_check
 # module registers on import, same pattern as host.py/vision.py above.
 from .shortcuts import list_shortcuts, run_shortcut
 from .spotlight import spotlight_search
-from .calendar import create_event, get_events
+from .calendar import create_event, get_events, list_reminders
 from .contacts import lookup_contact
 from .email import (
     batch_move,
@@ -265,7 +265,7 @@ __all__ = [
     # mac-native tool suite (0.9.3)
     "list_shortcuts", "run_shortcut",
     "spotlight_search",
-    "get_events", "create_event",
+    "get_events", "create_event", "list_reminders",
     "lookup_contact",
     "send_email", "list_mailboxes", "list_mail", "read_mail",
     "plan_mail_triage", "move_mail",
