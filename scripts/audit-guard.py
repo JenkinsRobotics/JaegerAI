@@ -110,7 +110,7 @@ def c_voice_health():
     return code == 200 and isinstance(d, dict) and d.get("ok") is True, f"HTTP {code}"
 
 
-SERVICE_JOBS = ["gateway", "webui", "bridge", "mcp-http", "voice", "channels", "droid"]
+SERVICE_JOBS = ["gateway", "bridge", "mcp-http", "voice", "channels", "droid"]
 
 
 def c_launchd_running():
@@ -169,7 +169,9 @@ def c_one_heartbeat():
 
 def c_no_hermes_webui():
     exists = (REPO / "jaeger_ai/features/webui").exists()
-    return not exists, "features/webui present" if exists else "Gateway serves the UI"
+    code, d = _get("http://127.0.0.1:8790/api/health")
+    served = code == 200 and isinstance(d, dict) and d.get("served_by") == "gateway"
+    return not exists and served, ("features/webui present; " if exists else "") + f":8790 served_by={(d or {}).get('served_by') if isinstance(d, dict) else None}"
 
 
 def c_no_stale_tasks():
@@ -280,7 +282,7 @@ def c_one_launcher():
     return not extra, f"extra launchers: {extra}" if extra else "JaegerAI.app only"
 
 
-LIVE_LABELS = {"gateway", "webui", "bridge", "mcp-http", "voice", "channels", "droid", "logrotate"}
+LIVE_LABELS = {"gateway", "bridge", "mcp-http", "voice", "channels", "droid", "logrotate"}
 
 
 def c_no_stale_plists():
