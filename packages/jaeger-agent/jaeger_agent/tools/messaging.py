@@ -104,6 +104,8 @@ def send_message(channel: str, recipient: str, text: str,
     except Exception as exc:  # noqa: BLE001
         return {"sent": False, "error": f"messaging plugin not importable: {exc}"}
     bridge = get_bridge(channel_clean)
+    if bridge is None and channel_clean in {"telegram", "imessage"}:
+        return _relay_send(channel_clean, recipient_clean, text_clean, correlation)
     if bridge is None:
         return {
             "sent": False,
@@ -140,6 +142,36 @@ def send_message(channel: str, recipient: str, text: str,
     if getattr(_receipt_checker, "preserves_correlation", True) is not False:
         return {**receipt, **correlation} if correlation else receipt
     return receipt
+
+
+def _relay_send(channel: str, recipient: str, text: str, correlation: dict[str, Any]) -> dict:
+    """Queue for the channels relay, which only ever messages the owner's own
+    chat (paired Telegram chat / iMessage ``send_to``). Anyone else is refused
+    here rather than silently redirected to the owner."""
+    try:
+        from jaeger_ai.features.channels.relay import config as relay_config
+        from jaeger_ai.features.channels.relay.outbox import enqueue
+    except Exception as exc:  # noqa: BLE001
+        return {"sent": False, "effect": "not_started", "error": f"channels relay not importable: {exc}"}
+    cfg = relay_config.load_config() if hasattr(relay_config, "load_config") else {}
+    owner_ids = {"owner", "me", "matthew", "self"}
+    tg = (cfg.get("telegram") or {}).get("allowed_chat_id")
+    if tg:
+        owner_ids.add(str(tg))
+    im = cfg.get("imessage") or {}
+    owner_ids |= {str(h).lower() for h in (im.get("self_handles") or [])}
+    if im.get("send_to"):
+        owner_ids.add(str(im["send_to"]).lower())
+    if recipient.lower() not in owner_ids:
+        return {"sent": False, "effect": "not_started",
+                "error": ("The phone relay only messages the owner (recipient 'owner'). "
+                          "Messages to anyone else must be drafted for the owner to send.")}
+    queued = enqueue(text, kind="notification", channels=[channel], meta={"via": "send_message", **correlation})
+    if not queued.get("queued"):
+        return {"sent": False, "effect": "not_started", "error": queued.get("error") or "not queued"}
+    return {"sent": False, "queued": True, "delivery_verified": False, "outbox_id": queued.get("id"),
+            "channel": channel, "note": "Queued for the channels relay; it delivers to the owner's chat once and records the outcome.",
+            **correlation}
 
 
 @register_tool_from_function
