@@ -219,17 +219,20 @@ class Relay:
     def run(self) -> None:
         log("relay starting")
         threads = []
-        if self.telegram.configured:
+        # Telegram and iMessage are optional: each turns on only when its
+        # token/setting is present and enabled. Web push to the Jaeger web app
+        # is the default phone reach (core/gateway/push_routes.py).
+        if self.telegram.configured and self.cfg["telegram"].get("enabled", True):
             threads.append(threading.Thread(target=self._inbound_loop, args=(self.telegram, self.telegram.poll),
                                             daemon=True, name="telegram"))
         else:
-            log("telegram: no bot token yet (JAEGER_TELEGRAM_BOT_TOKEN in ~/.jaeger/secrets.env)")
-        if self.imessage.configured:
+            log("telegram: off (optional; add JAEGER_TELEGRAM_BOT_TOKEN to ~/.jaeger/secrets.env to turn on)")
+        if self.imessage.configured and self.cfg["imessage"].get("enabled", True):
             threads.append(threading.Thread(target=self._inbound_loop,
                                             args=(self.imessage, lambda: self.imessage.poll(self.prefix)),
                                             daemon=True, name="imessage"))
         else:
-            log("imessage: self-chat not configured")
+            log("imessage: off (optional; set imessage.self_handles and enabled=true in ~/.jaeger/channels/config.json)")
         for t in threads:
             t.start()
         last_approvals = 0.0

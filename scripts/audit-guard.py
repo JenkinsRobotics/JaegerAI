@@ -206,10 +206,15 @@ def c_mac_control_tools():
 
 
 def c_telegram_ready():
+    """Telegram/iMessage are optional (Matthew uses web push): wiring present, off unless configured."""
+    relay = REPO / "jaeger_ai/features/channels/relay/service.py"
+    src = relay.read_text("utf-8") if relay.exists() else ""
+    gated = 'self.cfg["telegram"].get("enabled", True)' in src and 'self.cfg["imessage"].get("enabled", True)' in src
     env = JAEGER / "secrets.env"
     has = env.exists() and any(l.split("=", 1)[0].strip() == "JAEGER_TELEGRAM_BOT_TOKEN" and l.split("=", 1)[1].strip()
                                for l in env.read_text().splitlines() if "=" in l and not l.lstrip().startswith("#"))
-    return has, "token present" if has else "no JAEGER_TELEGRAM_BOT_TOKEN in ~/.jaeger/secrets.env"
+    return gated, ("optional channels wired and gated; Telegram " + ("on (token present)" if has else "off (no token)")
+                   if gated else "relay does not gate optional channels on their settings")
 
 
 def c_push_device():
@@ -243,8 +248,9 @@ CUT = [
     "packages/jaeger-agent/jaeger_agent/delegates/openclaw", "jaeger_ai/plugins/voice_loop.py",
     "jaeger_ai/features/youtube_studio",
 ]
-# Blocked on Matthew: these back the MCP :8792 tools other agents (Grok Bot,
-# ARES, Muse) use to reach Jaeger, and MCP 8792 is off limits without his OK.
+# C2/C3: approved by Matthew 2026-11-16 1:45 PM PST ("yes do whatever cuts u
+# need"). Archived to the Desktop folder backlog-and-ares-muse-bridge/; the
+# backlog routes and jaeger.backlog_* MCP tools must not come back.
 CUT_BLOCKED = ["jaeger_ai/features/backlog", "jaeger_ai/features/agent_bridge/muse_file_bridge.py",
                "jaeger_ai/features/agent_bridge/ares_worker.py"]
 
@@ -256,7 +262,12 @@ def c_cut_list():
 
 def c_cut_blocked():
     left = [p for p in CUT_BLOCKED if (REPO / p).exists()]
-    return not left, f"waiting on Matthew (MCP 8792 surface): {left}" if left else "cleared"
+    wired = [f for f in ("jaeger_ai/features/agent_bridge/mcp.py", "jaeger_ai/core/gateway/server.py",
+                         "jaeger_ai/core/gateway/caller_auth.py")
+             if "/v1/backlog" in (REPO / f).read_text("utf-8") or "features.backlog" in (REPO / f).read_text("utf-8")]
+    if left or wired:
+        return False, f"still present: {left} wired: {wired}"
+    return True, "archived (approved by Matthew 2026-11-16 1:45 PM PST); no backlog routes or MCP tools left"
 
 
 def c_one_phone_relay():
@@ -334,7 +345,7 @@ CHECKS = [
     ("G10", "No stale failed/waiting tasks", c_no_stale_tasks, True),
     ("G11", "Turn success above floor", c_turn_success, False),
     ("G12", "Mac control actions", c_mac_control_tools, True),
-    ("G13", "Telegram token configured", c_telegram_ready, False),
+    ("G13", "Optional Telegram/iMessage wired, off unless configured", c_telegram_ready, True),
     ("G14", "Phone push signed up", c_push_device, False),
     ("G15", "OpenTelemetry GenAI spans live", c_otel, True),
     ("G16", "Cut list cleared (finance, youtube_studio, openclaw delegate, voice_loop)", c_cut_list, True),
@@ -343,7 +354,7 @@ CHECKS = [
     ("G19", "Removed features archived with README + INDEX", c_removed_index, True),
     ("G20", "No unused launchd plists", c_no_stale_plists, True),
     ("G21", "No second deploy checkout", c_no_second_checkout, True),
-    ("G22", "Cut list: backlog + ARES/Muse bridge parts", c_cut_blocked, False),
+    ("G22", "Cut list: backlog + ARES/Muse bridge parts", c_cut_blocked, True),
     ("G23", "Blocking pre-tool hooks in the default tool chain", c_blocking_hooks, True),
     ("G24", "Schedules/heartbeat/board run only in the Gateway (bridge never takes the lease)", c_bridge_no_producers, True),
 ]
