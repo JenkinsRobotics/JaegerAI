@@ -2,6 +2,7 @@
  * Tasks (unified UI): header with search, status and agent filters and a Board/List switch;
  * the board/list and the task inspector drawer (logs/steps, artifacts, approve/edit/cancel) come
  * from tasks/TasksBoard, so the gateway's proposal safety (receipts, reconciliation) is unchanged.
+ * A status strip (gateway, Tailscale, Focus, research jobs, approvals) sits under the header.
  * Deep links: /tasks?filter=needs, /tasks?task=<id>, /tasks?view=list.
  */
 import { useCallback, useMemo, useState } from "react";
@@ -10,6 +11,7 @@ import type { Agent, Task } from "../api/types";
 import { label } from "../agents/agentsLogic";
 import { TasksBoard } from "../tasks/TasksBoard";
 import { Segmented, PageHead } from "./ui";
+import { TasksStatusStrip } from "./TasksStatusStrip";
 
 export const TASK_FILTERS = {
   all: () => true,
@@ -50,6 +52,7 @@ export function TasksWorkspace({ source, agents, params, onNavigate }: { source:
           <button type="button" className="jg-u-btn" onClick={() => onNavigate("/work/tasks/gallery")}>Gallery</button>
           {source.taskActions && source.agentHome && <button type="button" className="jg-u-btn jg-u-btn--primary" aria-pressed={composer} onClick={() => setComposer((v) => !v)}>{composer ? "Close" : "New task"}</button>}
         </>} />
+      <TasksStatusStrip source={source} onNavigate={onNavigate} onNeedsYou={() => setStatus("needs")} />
       <TasksBoard source={source} agents={agents} view={view} filter={filter} initialTaskId={params.get("task")} composer={composer} bare onCount={onCount} />
     </div>
   );
