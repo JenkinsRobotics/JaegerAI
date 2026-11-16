@@ -5,6 +5,7 @@
 // The menu probes the loopback WebUI and gateway only when it opens (and once after a normal launch,
 // never in --verify-launch). "Start/Stop Jaeger stack…" go through StackController after a confirm sheet
 // (dev mode: own child processes; production: `<launcher> stack up|down --json`). Launch at Login is opt-in through SMAppService.mainApp and never changed automatically.
+// A Droid section in this same menu talks to the headless Droid host over its unix socket; the host no longer has its own status item.
 
 import AppKit
 import JaegerShellCore
@@ -23,6 +24,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var lastRunning = true
     private var activityBadge: ActivityBadgeState = .off
     private let offIcon = StatusItemController.loadIcon("jaeger_icon_off_22")
+    private let droidMenu = DroidMenuController()
 
     init(app: JaegerShellApplication) {
         self.app = app
@@ -112,6 +114,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         _ = add("Start Jaeger stack…", #selector(startStack(_:)))
         _ = add("Stop Jaeger stack…", #selector(stopStack(_:)))
         menu.addItem(.separator())
+        droidMenu.install(in: menu)
+        menu.addItem(.separator())
         loginItem.target = self; loginItem.action = #selector(toggleLoginItem(_:)); menu.addItem(loginItem)
         _ = add("Reload", #selector(reload(_:)))
         _ = add("Open in Browser", #selector(openInBrowser(_:)))
@@ -136,6 +140,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         probe(webUIItem, "Main screen", app.start.origin.string + "/")
         probe(gatewayItem, "Gateway", ShellEnvironment.gateway().origin.string + "/health")
+        droidMenu.refresh()
     }
 
     private func probe(_ item: NSMenuItem, _ name: String, _ urlString: String) {

@@ -8,9 +8,10 @@ utterance is a normal Gateway turn on the home chat (`agent-native:jaeger`),
 with the same memory, tools, Autonomy reviewer and approvals.
 
 ```text
-Stream Deck WAKE DROID ─► runner (curl) ─► ~/.jaeger/run/droid/control.sock
-                                              │
-Jaeger Droid.app (menu bar, holds mic/camera permission)
+Stream Deck WAKE DROID ─► runner (curl) ─┐
+Jaeger menu bar (Droid section) ─────────┼─► ~/.jaeger/run/droid/control.sock
+                                         │
+Jaeger Droid.app (headless; holds mic/camera permission)
   └─ python -m jaeger_ai.features.droid.service   (voice venv)
        ├─ AVAudioEngine + Apple voice processing (echo cancel) ─ mic / speakers
        ├─ WebRTC client of the realtime voice service :8794
@@ -20,9 +21,12 @@ Jaeger Droid.app (menu bar, holds mic/camera permission)
 
 ## Behaviour
 
-* **Wake** (deck key, menu bar, `POST /wake`): rising chime, the speaker is
-  routed to `droid.json` `speaker` (default *Mac Studio Speakers*; the previous
-  default output is restored on sleep), then a spoken greeting.
+* **Wake** (deck key, Jaeger menu bar Droid section, `POST /wake`): rising chime,
+  then a spoken greeting. Speech plays on `droid.json` `speaker` (default *Mac
+  Studio Speakers*) by binding the audio engine to that device, so a leftover
+  virtual output such as Jump Desktop Audio can stay the system default. If
+  that speaker is missing or the engine cannot start on it, the droid falls
+  back to another real output and the menu status explains the switch.
 * **Talk**: Smart Turn decides when you're done; replies are spoken sentence by
   sentence as they stream. Talking over the droid stops it (echo cancellation
   comes from the shared voice-processing engine). Long answers are capped
@@ -64,7 +68,7 @@ never fight over the mic.
   `bin/droid-display` creates a 1920x1080 virtual display only when no display
   at all is online, so computer use still has a screen with no monitor.
 * **Live view**: Machine › Droid in the WebUI (`/machine?section=droid`, also
-  the menu bar's *Open Droid View*) shows the screen, the camera, the running
+  the Jaeger menu's *Open Droid View*) shows the screen, the camera, the running
   transcript and Wake / Mute / Look around / Stop.
 * **Stream Deck**: WAKE DROID (toggle), LOOK (look around), STOP (stop
   talking), MUTE (microphone). LOOK and STOP replace the old VIDEO CHAT and
@@ -81,7 +85,7 @@ never fight over the mic.
 | `vision.py` | camera capture, presence, local vision model, gimbal head |
 | `native/droid-ptz.m` | UVC pan/tilt/zoom for the Insta360 Link gimbal (IOKit) |
 | `native/droid-display.m` | virtual display when the Mac is truly headless |
-| `native/DroidHost.swift` | menu-bar host app; permissions; keeps the service alive |
+| `native/DroidHost.swift` | headless host app; permissions; keeps the service alive |
 | `scripts/install-droid.py` | build/sign the host, LaunchAgent at login, deck keys |
 
 ## Install / update

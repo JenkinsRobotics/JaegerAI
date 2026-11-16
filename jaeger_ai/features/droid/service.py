@@ -127,6 +127,7 @@ class Droid:
         self.status = {"state": "off", "awake": False, "muted": False, "engine": self.cfg["engine"],
                        "heard": "", "said": "", "latency_ms": None, "error": None,
                        "speaker": self.cfg["speaker"], "microphone": self.cfg["microphone"],
+                       "audio_note": None,
                        "voice_processing": None, "pending_approval": None, "since": time.time(),
                        "camera": "off", "faces": 0, "present": False, "action": None, "mode": "off",
                        "presence_blocked": None, "quiet_until": 0, "slept_until": 0}
@@ -176,11 +177,9 @@ class Droid:
             self.mic_open = not present
             try:
                 await asyncio.to_thread(_stop_old_conversation)
-                self._route_speaker()
                 self.loop = asyncio.get_running_loop()
                 self.track = MicTrack()
-                self.audio = DuplexAudio(self._mic, listen=ears)
-                await asyncio.to_thread(self.audio.start)
+                await asyncio.to_thread(self._start_audio, ears)
                 self.set(voice_processing=self.audio.voice_processing, ears=ears)
                 if not present:
                     self.audio.chime("wake")
@@ -349,13 +348,52 @@ class Droid:
         self.pending_approval = None
         self._restore_speaker()
 
+    def _start_audio(self, ears: bool) -> None:
+        """Open the duplex engine on a real speaker, falling back if the preferred one fails.
+
+        The engine is bound to that device so leftover virtual outputs (for example
+        Jump Desktop Audio) can stay the system default without blocking wake.
+        """
+        preferred = self.cfg["speaker"]
+        device, name, note = coreaudio.pick_output(preferred)
+        if not device:
+            current = coreaudio.device_name(coreaudio.default_device(True)) or "unknown"
+            raise RuntimeError(f"No real speaker is available (default output is {current})")
+        candidates = []
+        seen = set()
+        for row in [{"id": device, "name": name, "note": note}, *coreaudio.real_outputs()]:
+            if row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            candidates.append(row)
+        errors: list[str] = []
+        for row in candidates:
+            audio = DuplexAudio(self._mic, listen=ears)
+            try:
+                audio.start(row["id"])
+                self.audio = audio
+                if row["id"] != device:
+                    fallback = f"Using {row['name']} because audio would not start on {name}"
+                else:
+                    fallback = note or None
+                self.set(speaker=row["name"], audio_note=fallback)
+                return
+            except Exception as exc:
+                try:
+                    audio.stop()
+                except Exception:
+                    pass
+                errors.append(f"{row['name']}: {exc}")
+        current = coreaudio.device_name(coreaudio.default_device(True)) or "unknown"
+        raise RuntimeError(
+            "Could not start audio on any real speaker "
+            f"(default output is {current}): " + "; ".join(errors)
+        )
+
     def _route_speaker(self):
-        wanted = coreaudio.find(self.cfg["speaker"])
-        current = coreaudio.default_device(True)
-        if wanted and wanted != current:
-            self.previous_output = current
-            coreaudio.set_default_device(wanted)
-        self.set(speaker=coreaudio.device_name(wanted or current))
+        # Kept for older callers; wake now binds the engine via _start_audio.
+        device, name, note = coreaudio.pick_output(self.cfg["speaker"])
+        self.set(speaker=name or self.cfg["speaker"], audio_note=note or None)
 
     def _restore_speaker(self):
         if self.previous_output:

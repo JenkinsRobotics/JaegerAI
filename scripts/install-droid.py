@@ -1,13 +1,14 @@
 """Install or update Droid mode on this Mac.
 
-Builds the Jaeger Droid menu-bar host (only when its Swift source changed, so
-macOS keeps its microphone and camera permissions), registers it to start at
-login, builds the small native helpers (droid-ptz: the camera gimbal over UVC;
-droid-display: a virtual display when no monitor is attached), restarts the
-Python droid service so it runs the current code, and with ``--install-deck``
-points the Stream Deck at Droid mode: WAKE DROID, LOOK, STOP and MUTE keys
-(LOOK/STOP replace the old VIDEO CHAT/STOP CHAT keys, whose applets are moved
-out, never deleted).
+Builds the Jaeger Droid host (only when its Swift source changed, so macOS
+keeps its microphone and camera permissions). The host runs headless and no
+longer shows a menu-bar icon; Droid controls live in the Jaeger menu. Also
+registers the host to start at login, builds the small native helpers
+(droid-ptz: the camera gimbal over UVC; droid-display: a virtual display when
+no monitor is attached), restarts the Python droid service so it runs the
+current code, and with ``--install-deck`` points the Stream Deck at Droid
+mode: WAKE DROID, LOOK, STOP and MUTE keys (LOOK/STOP replace the old VIDEO
+CHAT/STOP CHAT keys, whose applets are moved out, never deleted).
 """
 from __future__ import annotations
 
