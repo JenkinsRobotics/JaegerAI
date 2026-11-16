@@ -14,6 +14,7 @@ Calendar.app's own rejection surfaces rather than a silent wrong date.
 
 from __future__ import annotations
 
+from . import native_pim
 import platform
 import shutil
 import subprocess
@@ -75,6 +76,23 @@ def get_events(
     """
     if platform.system() != "Darwin":
         return {"listed": False, **_not_macos_error()}
+    try:
+        if start and end:
+            _rs, _re = _parse_day_or_iso(start), _parse_day_or_iso(end)
+        else:
+            _rs = _parse_day_or_iso(day) if day else _parse_day_or_iso("today")
+            _re = _rs + timedelta(days=1)
+    except ValueError as exc:
+        return {"listed": False, "error": f"could not parse day/start/end: {exc}"}
+    t_native = time.monotonic()
+    native = native_pim.run("events", start=_rs.isoformat(), end=_re.isoformat())
+    if native is not None:
+        if native.get("ok"):
+            return {"listed": True, "source": "eventkit", "range_start": native.get("range_start"),
+                    "range_end": native.get("range_end"), "count": native.get("count", 0),
+                    "events": native.get("events", []), "elapsed_s": round(time.monotonic() - t_native, 2)}
+        if "not granted" in str(native.get("error") or ""):
+            return {"listed": False, "error": native["error"]}
     if shutil.which("osascript") is None:
         return {"listed": False, "error": "osascript not on PATH (macOS-only utility)"}
 
@@ -148,6 +166,18 @@ def create_event(
     title_clean = (title or "").strip()
     if not title_clean:
         return {"created": False, "error": "empty title"}
+    if platform.system() == "Darwin":
+        try:
+            _s, _e = _parse_day_or_iso(start), _parse_day_or_iso(end)
+            native = native_pim.run("create-event", title=title_clean, start=_s.isoformat(),
+                                    end=_e.isoformat(), notes=notes)
+        except ValueError:
+            native = None
+        if native is not None and native.get("ok"):
+            return {"created": True, "source": "eventkit", "title": title_clean, "start": native.get("start"),
+                    "end": native.get("end"), "calendar": native.get("calendar")}
+        if native is not None and "not granted" in str(native.get("error") or ""):
+            return {"created": False, "error": native["error"]}
     if platform.system() != "Darwin":
         return {"created": False, **_not_macos_error()}
     if shutil.which("osascript") is None:
@@ -217,4 +247,23 @@ def _t_create_event(title: str, start: str, end: str, notes: str | None = None) 
     return create_event(title=title, start=start, end=end, notes=notes)
 
 
-__all__ = ["get_events", "create_event"]
+@register_tool_from_function(name="list_reminders", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="calendar", operation="list_reminders",
+               summary="read Reminders")
+def _t_list_reminders(list_name: str | None = None, include_completed: bool = False) -> dict:
+    """List Apple Reminders (fast, native EventKit): "what's on my
+    reminders", "what's in my Groceries list". `list_name` narrows to one
+    list; open reminders only unless `include_completed`. Returns {lists,
+    count, reminders: [{title, list, due, completed}]}."""
+    return list_reminders(list_name=list_name, include_completed=include_completed)
+
+
+def list_reminders(list_name: str | None = None, include_completed: bool = False) -> dict:
+    """Native EventKit reminders read (see the list_reminders tool)."""
+    native = native_pim.run("reminders", list=list_name, include_completed=include_completed)
+    if native is None:
+        return {"listed": False, "error": "Jaeger PIM helper is not installed (jaeger_ai/interfaces/macos-pim/build.sh)"}
+    return {"listed": bool(native.get("ok")), **native}
+
+
+__all__ = ["get_events", "create_event", "list_reminders"]

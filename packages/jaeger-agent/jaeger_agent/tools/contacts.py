@@ -36,6 +36,19 @@ def lookup_contact(name: str) -> dict[str, Any]:
     if platform.system() != "Darwin":
         return {"found": False,
                  "error": f"Contacts.app is only available on macOS (got {platform.system()})"}
+    from . import native_pim
+    native = native_pim.run("contacts", query=name_clean, limit=10)
+    if native is not None:
+        if native.get("ok"):
+            matches = [{"name": c.get("name"), "emails": c.get("emails", []), "phones": c.get("phones", []),
+                        "organization": c.get("organization") or None} for c in native.get("contacts", [])]
+            if not matches:
+                return {"found": False, "name": name_clean, "source": "contacts-framework",
+                        "error": f"no contact matching {name_clean!r} in Contacts"}
+            return {"found": True, "name": name_clean, "source": "contacts-framework",
+                    "count": len(matches), "matches": matches}
+        if "not granted" in str(native.get("error") or ""):
+            return {"found": False, "error": native["error"]}
     if shutil.which("osascript") is None:
         return {"found": False, "error": "osascript not on PATH (macOS-only utility)"}
 

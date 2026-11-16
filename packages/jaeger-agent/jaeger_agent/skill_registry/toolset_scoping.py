@@ -295,7 +295,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     # calendar) so the id knows it can reach for them.
     "shortcuts": frozenset({"list_shortcuts", "run_shortcut"}),
     "spotlight": frozenset({"spotlight_search"}),
-    "calendar": frozenset({"get_events", "create_event"}),
+    "calendar": frozenset({"get_events", "create_event", "list_reminders"}),
     "contacts": frozenset({"lookup_contact"}),
     "clipboard": frozenset({"clipboard_read", "clipboard_write"}),
     "notifications": frozenset({"notify"}),
