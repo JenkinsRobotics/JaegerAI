@@ -417,6 +417,7 @@ def main():
     app.router.add_post("/offer", offer)
     app.router.add_post("/ice", ice)
     app.router.add_get("/status", status)
+    app.router.add_get("/health", status)  # standard probe path; same payload as /status
     app.on_startup.append(_warm)
     web.run_app(app, host=HOST, port=PORT, access_log=None)
 
