@@ -568,126 +568,27 @@ def _jaeger_gateway_turn(run, session_id: str) -> dict | None:
 
 
 def jaeger_turn(run, workspace=None):
-    """Run a turn on Jaeger's own instance.
-
-    Bound to the ``jaeger`` instance explicitly, NOT to whatever
-    ``~/.jaeger/active_instance`` currently points at. That pointer follows the
-    delegate a person last selected in a UI — switching to the "Everyday"
-    delegate rewrites it — and a bare unpinned client followed it. Roundtable
-    then sent its Jaeger seat to ``instances/everyday/run/bridge.sock``, which
-    has no listener, so the member failed with no error recorded and the whole
-    debate aborted with "a member outcome is unknown".
-
-    Which delegate a person is looking at and which instance Roundtable's
-    Jaeger seat talks to are different questions. Only the second one belongs
-    here, and it has exactly one answer.
-    """
-    native_session = getattr(run, 'native_session', run.session)
+    """Run a framework/Roundtable turn on Jaeger's own instance: through the
+    Gateway, always (one engine, audit D1). The old AF_UNIX bridge hop and the
+    in-process EntityRuntime fallback are archived on the Desktop
+    (in-process-turn-runners/)."""
+    native_session = str(getattr(run, 'native_session', run.session))
     run.execution_unknown = False
-    from jaeger_ai.interfaces.bridge_client import BridgeClient
-    is_mocked_bridge = getattr(BridgeClient, "__module__", "") != "jaeger_ai.interfaces.bridge_client"
-    if not is_mocked_bridge and str(native_session).startswith("roundtable-"):
-        gateway_result = _jaeger_gateway_turn(run, native_session)
-        if gateway_result is not None:
-            run.execution_unknown = bool(gateway_result.get("execution_unknown"))
-            run.cancel_confirmed = bool(gateway_result.get("cancelled"))
-            if gateway_result.get("error") and not run.cancel_confirmed:
-                raise RuntimeError(gateway_result["error"])
-            return gateway_result.get("text") or ""
-
-    from jaeger_ai.interfaces.bridge_client import BridgeClientError, jaeger_bridge
-    native_session = getattr(run, 'native_session', run.session)
     run.dispatch(session_id=native_session, run_id=run.id)
-    try:
-        bridge = jaeger_bridge()
-        if workspace:
-            workspace = host_workspace(workspace)
-        accepted = threading.Event()
-
-        def cancel():
-            if accepted.is_set():
-                bridge.control("cancel", turn_id=run.id)
-
-        run.cancel_native = cancel
-
-        def event(frame):
-            kind = frame.get("type")
-            if kind in {"queued", "state"}:
-                accepted.set()
-                if kind == 'queued' or frame.get('busy') is True:
-                    run.emit('native.state', state='queued' if kind == 'queued' else 'running')
-                if run.cancelled.is_set():
-                    cancel()
-            if kind == "delta":
-                raw_text = frame.get("text", "")
-                tool_info = parse_tool_line(raw_text)
-                if tool_info:
-                    done = tool_info.get("phase") in {"done", "error"}
-                    run.emit("tool.completed" if done else "tool.started",
-                             tool=tool_info.get("name"),
-                             args=tool_info.get("args", {}),
-                             preview=raw_text,
-                             status="error" if tool_info.get("phase") == "error" else "completed" if done else "running")
-                cleaned = clean_transcript_text(raw_text)
-                if cleaned:
-                    run.emit("message.delta", delta=cleaned)
-            elif kind == "reasoning":
-                run.emit("reasoning.available", text=clean_transcript_text(frame.get("text", "")))
-            elif kind == "tool":
-                done = frame.get("phase") in {"done", "error"}
-                run.emit("tool.completed" if done else "tool.started", tool=frame.get("name"),
-                         args=frame.get("args", {}), preview=frame.get("detail", ""),
-                         status="error" if frame.get("phase") == "error" else "completed" if done else "running")
-
-        def approval(frame):
-            if frame.get("kind") != "approval":
-                run.emit("reasoning.available", text="Native clarification needs a reply in Jaeger's native session.")
-                return "deny"
-            return run.request_approval(frame.get("prompt", "Tool approval required"),
-                                        choices=tuple(frame.get("options") or ["once", "deny"]))
-
-        overrides = {key: getattr(run, key) for key in ("model", "provider") if getattr(run, key, None)}
-        result = bridge.turn(run.message, native_session, event, approval, turn_id=run.id, workspace=workspace, **overrides)
-        run.execution_unknown = result.get("execution_unknown", False) is not False
-        if run.execution_unknown:
-            raise RuntimeError(result.get("error") or "Native terminal receipt is uncertain; reconcile before retrying")
-        run.cancel_confirmed = bool(result.get("cancelled"))
-        if result.get("error") and not run.cancel_confirmed:
-            err_msg = str(result["error"])
-            if not (is_benign_stderr(err_msg) and result.get("text")):
-                raise RuntimeError(result["error"])
-        raw_out = result.get("text") or ""
-        return clean_transcript_text(raw_out)
-    except (BridgeClientError, ConnectionError, OSError) as exc:
-        # Fallback to direct in-process ReAct execution when external bridge socket is offline
-        try:
-            from jaeger_ai.core.entity.runtime import EntityRuntime
-            rt = EntityRuntime.get_singleton()
-            run.emit("native.state", state="running")
-            out = rt.run_subordinate_react(
-                run.message,
-                session_key=str(native_session),
-                native_run_id=run.id,
-            )
-            cleaned = clean_transcript_text(out["text"])
-            run.emit("message.delta", delta=cleaned)
-            return cleaned
-        except Exception as inner_exc:
-            raise RuntimeError(f"Native turn failed (bridge offline: {exc}, in-process: {inner_exc})") from inner_exc
+    result = _jaeger_gateway_turn(run, native_session)
+    if result is None:
+        run.execution_unknown = False
+        raise RuntimeError("The Jaeger Gateway did not accept this turn (is it running on :33418?)")
+    run.execution_unknown = bool(result.get("execution_unknown"))
+    run.cancel_confirmed = bool(result.get("cancelled"))
+    if result.get("error") and not run.cancel_confirmed:
+        raise RuntimeError(result["error"])
+    return result.get("text") or ""
 
 
 def _in_process_jaeger_turn(run, native_session: str) -> str:
-    from jaeger_ai.core.entity.runtime import EntityRuntime
-    rt = EntityRuntime.get_singleton()
-    run.emit("native.state", state="running")
-    out = rt.run_subordinate_react(
-        run.message,
-        session_key=str(native_session),
-        native_run_id=run.id,
-    )
-    cleaned = clean_transcript_text(out["text"])
-    run.emit("message.delta", delta=cleaned)
-    return cleaned
+    """Archived 2026-11-16 (audit D1): routed to the Gateway."""
+    return jaeger_turn(run)
 
 
 def host_workspace(workspace):

@@ -3883,6 +3883,9 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
         ctx.booted.set()
     elif gateway_execution_enabled():
         # No local agent, no instance lock: the Gateway owns execution.
+        # (The local boot path, and its producer-lease note, never runs here.)
+        print("[bridge] gateway-backed: turns, schedules, heartbeat and board work "
+              "run in the Gateway (one engine)", file=sys.stderr, flush=True)
         _attach_gateway(proto, ctx)
     else:
         _emit(proto, protocol.agent_state_frame("booting"))

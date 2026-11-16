@@ -3834,153 +3834,28 @@ def _run_actionable_turn(
     return output
 
 
-def _run_subordinate_react(
-    client: Any,
-    user_text: str,
-    *,
-    session_key: str,
-    allow_persona: bool = False,
-    request: str | None = None,
-    content: Any = None,
-    system_prompt_addon: str = "",
-) -> dict[str, Any]:
-    """Subordinate ReAct cognitive engine invocation.
-
-    Subordinate ReAct is an explicit tool-using execution loop; allow_persona
-    defaults to False so the Mode-C id/persona lane does not intercept the turn
-    and suppress tool execution. ``request`` is the operator's own text when
-    ``user_text`` has been enriched with background (see
-    :func:`_run_actionable_turn`). ``content``/``system_prompt_addon`` carry
-    multimodal media and persona instructions through to the loop."""
-    options: dict[str, Any] = {}
-    if content is not None or system_prompt_addon:
-        options = {"content": content, "system_prompt_addon": system_prompt_addon}
-    actionable = _run_actionable_turn(
-        client, user_text, session_key=session_key,
-        allow_persona=allow_persona, request=request, **options,
-    )
-    return actionable if actionable is not None else _run_turn_via_jaeger_agent(
-        client, user_text, session_key=session_key,
-        allow_persona=allow_persona, request=request, **options,
-    )
+def _run_subordinate_react(client: Any, user_text: str, *, session_key: str, **_legacy: Any) -> dict[str, Any]:
+    """One engine: the turn runs in the Gateway."""
+    # Archived 2026-11-16 (audit D1): the in-process runner lives in
+    # ~/Desktop/Jaeger-removed-features-2026-11-16/in-process-turn-runners/.
+    from jaeger_ai.core.gateway.turn_client import run_gateway_turn
+    return run_gateway_turn(user_text, session_key=session_key, source="cli", tier="agent")
 
 
-def _run_direct_model_runner(
-    client: Any,
-    t: str,
-    *,
-    session_key: str,
-    allow_persona: bool = True,
-    content: Any = None,
-) -> str:
-    """True direct response: zero tool schema on the wire, zero dispatch."""
-    from jaeger_agent.loop.runtime_bridge import build_jaeger_agent, drive_one_turn
-    from jaeger_agent.tool_executor import tool_allowlist
-
-    prompt = (
-        "Answer in plain language only. Do not call tools. "
-        "Do not emit tool-call XML or JSON. If you lack a fact, say so.\n\n"
-        f"{t}"
-    )
-    with tool_allowlist([]):
-        agent = build_jaeger_agent(client, tools=[], skip_final_tools=set())
-        agent.max_iterations = 2
-        result = drive_one_turn(agent, prompt, **({"content": content} if content is not None else {}))
-    text = str((result or {}).get("answer") or (result or {}).get("text") or "")
-    # If the model still emitted a tool-shaped blob, retry once as prose.
-    if "unknown tool" in text.lower() or ("<" in text and "tool" in text.lower()):
-        retry = (
-            "Your previous reply tried to use a tool. There are no tools. "
-            "Answer the user in one short paragraph of plain text.\n\n"
-            f"{t}"
-        )
-        with tool_allowlist([]):
-            agent = build_jaeger_agent(client, tools=[], skip_final_tools=set())
-            result = drive_one_turn(agent, retry, **({"content": content} if content is not None else {}))
-        text = str((result or {}).get("answer") or (result or {}).get("text") or text)
-    return text
+def _run_direct_model_runner(client: Any, user_text: str, *, session_key: str = "default", **_legacy: Any) -> dict[str, Any]:
+    """One engine: a model-only turn is a Chat-mode Gateway turn."""
+    # Archived 2026-11-16 (audit D1): the in-process runner lives in
+    # ~/Desktop/Jaeger-removed-features-2026-11-16/in-process-turn-runners/.
+    from jaeger_ai.core.gateway.turn_client import run_gateway_turn
+    return run_gateway_turn(user_text, session_key=session_key, source="cli", tier="chat")
 
 
-def _run_turn(
-    client: Any,
-    user_text: str,
-    *,
-    session_key: str,
-    allow_persona: bool = True,
-    request_id: str | None = None,
-    is_subordinate: bool = False,
-    content: Any = None,
-    system_prompt_addon: str = "",
-) -> dict[str, Any]:
-    """The in-process agent turn. ISOLATED: production turns are admitted by the Gateway.
-
-    This is the legacy local executor; it runs only when ``JAEGER_LEGACY_PATHS`` is
-    set (see ``jaeger_ai/contract/legacy_paths.py``). Executes through the UPAA EntityRuntime:
-    EVENT -> EVENT FABRIC -> PERSIST -> REDUCTION -> SALIENCE ->
-    EXECUTIVE STRATEGY -> COGNITION ROUTER -> AUTHORITY & VERIFICATION ->
-    LEARNING -> RESPONSE.
-
-    JaegerAgent is subordinate as one cognition engine used by the runtime
-    for ReAct-style execution."""
-    from jaeger_ai.contract.legacy_paths import require_legacy_path
-    require_legacy_path("In-process agent turn (_run_turn)")
-    if is_subordinate:
-        return _run_subordinate_react(
-            client, user_text, session_key=session_key, allow_persona=False,
-            content=content, system_prompt_addon=system_prompt_addon,
-        )
-
-    try:
-        from jaeger_ai.core.entity.runtime import EntityRuntime
-        from jaeger_ai.core.entity.model_capabilities import ensure_role_client
-        runtime = EntityRuntime.get_singleton()
-        client = ensure_role_client(client, "react", runtime.state_root)
-        context = {
-            # ``t`` arrives wrapped in recalled background; intent is judged
-            # on what the operator typed, which only this closure still has.
-            "react_runner": lambda t, session_key=session_key, _c=content, _a=system_prompt_addon: _run_subordinate_react(
-                client, t, session_key=session_key, allow_persona=False,
-                request=user_text, content=_c, system_prompt_addon=_a,
-            ),
-            "model_runner": lambda t, _c=content: _run_direct_model_runner(
-                client, t, session_key=session_key, allow_persona=allow_persona,
-                content=_c,
-            ),
-        }
-        return runtime.execute_turn(
-            user_text,
-            session_id=session_key,
-            source="main._run_turn",
-            request_id=request_id,
-            context=context,
-        )
-    except Exception as exc:
-        import logging
-        logging.getLogger("jaeger.main").error("EntityRuntime sovereign execution failed: %s", exc)
-        from jaeger_ai.core.runtime.autonomous_runner import is_actionable_request
-        from jaeger_agent.tool_executor import tool_allowlist
-
-        # If actionable / mutating request, fail-closed into safe halt, never full-power bypass
-        if is_actionable_request(user_text):
-            return {
-                "text": "",
-                "error": f"DegradedRuntimeError: Sovereign EntityRuntime failed ({exc}). Mutating operations refused in degraded mode.",
-                "tool_activity": [],
-                "report": {},
-                "skipped_final": False,
-                "strategy": "degraded_safe_halt",
-                "degraded_mode": True,
-            }
-
-        # Non-mutating conversational query: allow read-only direct reply with zero tools
-        with tool_allowlist([]):
-            res = _run_subordinate_react(
-                client, user_text, session_key=session_key, allow_persona=allow_persona,
-                content=content, system_prompt_addon=system_prompt_addon,
-            )
-            res["degraded_mode"] = True
-            res["degraded_warning"] = f"EntityRuntime unavailable: {exc}"
-            return res
+def _run_turn(client: Any, user_text: str, *, session_key: str, **_legacy: Any) -> dict[str, Any]:
+    """One engine: every turn is admitted and run by the Gateway."""
+    # Archived 2026-11-16 (audit D1): the in-process runner lives in
+    # ~/Desktop/Jaeger-removed-features-2026-11-16/in-process-turn-runners/.
+    from jaeger_ai.core.gateway.turn_client import run_gateway_turn
+    return run_gateway_turn(user_text, session_key=session_key, source="cli")
 
 
 def _gateway_base() -> str:
@@ -4088,70 +3963,21 @@ def _forward_oneshot_to_gateway(
 
 
 def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:
-    """Run a turn and print the answer + tool activity to stdout.
-    Thin output adapter over :func:`_run_turn` — used by the one-shot
-    CLI, the cron runner, and the daemon. Returns the final answer text
-    ("" on error) so callers like the Deep Think daemon can VERIFY the
-    outcome instead of trusting that returning == succeeding."""
-    session = session_key or _DEFAULT_SESSION_KEY
-    try:
-        from jaeger_ai.core.models.router import apply_sensitivity_routing
-        from jaeger_ai.core.models.router import select_client
-        model, provider, _decision = apply_sensitivity_routing(
-            user_text,
-            config=_pipeline.get("config"),
-            default_client=client,
-        )
-        if _decision.classification == "private" or model:
-            client = select_client(
-                client, _pipeline.get("config"), _pipeline.get("layout"),
-                model, provider,
-            )
-    except Exception as exc:
-        raise RuntimeError("Model privacy routing failed; no request was dispatched") from exc
-    from jaeger_agent.core.outputs import (
-        DYNAMIC_OUTPUT_PROMPT, decide_output, multimodal_output_scope,
-    )
-
-    # The CLI uses the same grounded conversation path as the desktop.
-    # Its output adapter remains text-only (including scheduled CLI jobs).
-    with multimodal_output_scope():
-        out = _run_turn(client, user_text,
-                        session_key=session_key or _DEFAULT_SESSION_KEY,
-                        system_prompt_addon=DYNAMIC_OUTPUT_PROMPT)
-    out["text"] = decide_output(mode="text", input_modality="text",
-                                reply=out.get("text") or "").display_text
-    if out["error"]:
-        print(f"Jaeger agent failed: {out['error']}")
-        if _pipeline.get("show_latency"):
-            print_latency(out["report"])
-        return ""
-    if _pipeline.get("show_tool_activity", True):
-        for line in out["tool_activity"]:
-            print(line)
-    if out["text"]:
-        print(out["text"])
-    if _pipeline.get("show_latency"):
-        print_latency(out["report"])
-        if out["skipped_final"]:
-            print("  (final-LLM skipped — tool result returned directly)")
-    return out["text"] or ""
+    """One engine: run ``user_text`` as a Gateway turn and return its text."""
+    # Archived 2026-11-16 (audit D1): the in-process runner lives in
+    # ~/Desktop/Jaeger-removed-features-2026-11-16/in-process-turn-runners/.
+    from jaeger_ai.core.gateway.turn_client import run_gateway_turn
+    out = run_gateway_turn(user_text, session_key=session_key or "default", source="cli")
+    return out.get("text") or (f"[error] {out.get('error')}" if out.get("error") else "")
 
 
 
-def run_worker_turn(
-    client: Any,
-    user_text: str,
-    session_key: str | None = None,
-) -> str:
-    """Persona-off turn for standing work (heartbeat, idle board, cron
-    execution). Same tools and permissions as a live turn; no character
-    lane. Returns the answer text ("" on error)."""
-    out = _run_turn(
-        client, user_text,
-        session_key=session_key or "worker",
-        allow_persona=False,
-    )
+def run_worker_turn(client: Any, prompt: str, session_key: str = "worker") -> str:
+    """One engine: background/webhook prompts are Gateway turns."""
+    # Archived 2026-11-16 (audit D1): the in-process runner lives in
+    # ~/Desktop/Jaeger-removed-features-2026-11-16/in-process-turn-runners/.
+    from jaeger_ai.core.gateway.turn_client import run_gateway_turn
+    out = run_gateway_turn(prompt, session_key=session_key, source="worker")
     return out.get("text") or ""
 
 
@@ -4410,175 +4236,12 @@ def apply_live_model() -> bool:
 _session_model_clients: dict[str, tuple[Any, Any]] = {}
 
 
-def run_for_voice(
-    client: Any,
-    user_text: str,
-    session_key: str | None = None,
-    *,
-    display_text: str | None = None,
-    model: str | None = None,
-    provider: str | None = None,
-    local_only: bool = False,
-    request_id: str | None = None,
-    is_subordinate: bool = False,
-    content: Any = None,
-    system_prompt_addon: str = "",
-    input_modality: str = "text",
-    output_mode: str | None = None,
-) -> dict[str, Any]:
-    """Run a turn and return a structured dict instead of printing.
-
-    ISOLATED: an in-process turn is not the production path. Production turns are
-    admitted by the Gateway; this runs only when ``JAEGER_LEGACY_PATHS`` is set.
-
-    Thin output adapter over :func:`_run_turn` — used by the TUI voice
-    path and the messaging bridges (which pass channel-specific
-    session_keys like "telegram:12345" so each chat keeps its context).
-
-    The brain is transport-agnostic — a spoken turn is the same agent
-    turn as a typed one; the dict just carries the text + tool activity
-    for the voice consumer to speak."""
-    from jaeger_ai.contract.legacy_paths import require_legacy_path
-    require_legacy_path("In-process agent turn (run_for_voice)")
-    session = session_key or "voice"
-    from jaeger_ai.core.models.router import select_client
-    # The standalone voice daemon owns a local client and promises that no
-    # transcript leaves the machine. Other transports retain dynamic routing.
-    if local_only:
-        model = provider = None
-    else:
-        # Sensitivity gate: private → local gemma; public → selected lane.
-        # Runs before any cloud-bound model selection.
-        try:
-            from jaeger_ai.core.models.router import apply_sensitivity_routing
-            s_model, s_provider, _decision = apply_sensitivity_routing(
-                user_text,
-                config=_pipeline.get("config"),
-                model=model,
-                provider=provider,
-                default_client=client,
-            )
-            if _decision.classification == "private" or model:
-                model = s_model
-                provider = s_provider
-        except Exception as exc:
-            raise RuntimeError("Model privacy routing failed; no request was dispatched") from exc
-    signature = (id(client), model or None, provider or None)
-    cached = _session_model_clients.get(session)
-    if cached is None or cached[0] != signature:
-        selected = select_client(client, _pipeline.get("config"), _pipeline.get("layout"), model, provider)
-        if cached is not None or selected is not client:
-            prior = list(getattr(_jaeger_agents_by_session.get(session), "messages", None) or [])
-            evict_session(session)
-            if prior:
-                _carried_session_messages[session] = prior
-        _session_model_clients[session] = (signature, selected)
-    client = _session_model_clients[session][1]
-    if session == 'dispatcher' and session not in _jaeger_agents_by_session:
-        resume_session_from_store(client, session, _pipeline.get('layout'))
-    from jaeger_agent.core.outputs import (
-        DYNAMIC_OUTPUT_PROMPT, decide_output, multimodal_output_active,
-        multimodal_output_scope,
-    )
-
-    engine_owned = multimodal_output_active()
-    if not engine_owned and output_mode is not None:
-        if output_mode not in {"dynamic", "speech", "text", "mirror"}:
-            raise ValueError("invalid conversational output mode")
-        if input_modality not in {"text", "speech"}:
-            raise ValueError("input_modality must be text or speech")
-        # Every desktop/TUI turn uses the engine's output policy and scoped
-        # tool catalogue. Preserve the original user/media content in history.
-        addon = system_prompt_addon
-        turn_text = user_text
-        turn_content = content
-        if output_mode == "dynamic":
-            addon = f"{addon}\n{DYNAMIC_OUTPUT_PROMPT}"
-            turn_text = f"[input: {input_modality}]\n{user_text}"
-            if isinstance(content, str):
-                turn_content = f"[input: {input_modality}]\n{content}"
-            elif isinstance(content, list):
-                # Keep image blocks and the caller's prompt verbatim; add the
-                # transport hint in its own text block.
-                turn_content = [{"type": "text", "text": f"[input: {input_modality}]"}, *content]
-        with multimodal_output_scope():
-            out = _run_turn(
-                client, turn_text, session_key=session, content=turn_content,
-                system_prompt_addon=addon,
-                request_id=request_id, is_subordinate=is_subordinate,
-            )
-        decision = decide_output(mode=output_mode, input_modality=input_modality,
-                                 reply=out.get("text") or "")
-        out = {**out, "text": decision.display_text or decision.speech_text,
-               "speech_text": decision.speech_text,
-               "output_channels": decision.channels}
-    elif content is None and not system_prompt_addon:
-        out = _run_turn(
-            client, user_text, session_key=session,
-            request_id=request_id, is_subordinate=is_subordinate,
-        )
-    else:
-        out = _run_turn(
-            client,
-            user_text,
-            session_key=session,
-            content=content,
-            system_prompt_addon=system_prompt_addon,
-            request_id=request_id, is_subordinate=is_subordinate,
-        )
-    # Persist the turn so conversations survive app close + are listable.
-    # ``preview`` (first user line, set by SessionStore.record) already
-    # serves as the History list's title fallback — see
-    # the terminal history projection — so
-    # there's no separate "first-turn set_title" call here; a distinct
-    # OPERATOR-editable title is a future rename affordance, not this one.
-    try:
-        from jaeger_ai.core.sessions import get_store
-        store = get_store()
-        if store is not None:
-            store.record(session, "user", display_text if display_text is not None else user_text)
-            if out.get("text"):
-                metadata = {"tool_calls": list(out.get("tool_activity") or [])}
-                if out.get("reasoning"):
-                    metadata["reasoning"] = str(out["reasoning"])
-                store.record(
-                    session,
-                    "assistant",
-                    out["text"],
-                    metadata=metadata,
-                )
-            try:
-                from jaeger_ai.core.runtime.modes import serving_brain
-                brain = serving_brain()
-                if getattr(client, "model_name", None):
-                    brain = {**brain, "model": client.model_name,
-                             "provider": getattr(client, "provider", brain.get("provider"))}
-                if brain.get("model"):
-                    store.stamp_brain(
-                        session,
-                        model=str(brain.get("model") or ""),
-                        provider=str(brain.get("provider") or ""),
-                    )
-            except Exception:  # noqa: BLE001
-                pass
-            cfg = _pipeline.get("config")
-            keep = int(getattr(getattr(cfg, "display", None),
-                               "session_history_keep", 50) or 0)
-            store.prune(keep)
-    except Exception:  # noqa: BLE001 — persistence never breaks a turn
-        pass
-    return {
-        "text": out.get("text", ""),
-        "tool_activity": out.get("tool_activity", []),
-        "spoke_via_tool": out.get("spoke_via_tool", False),
-        "elapsed_s": out.get("elapsed_s", 0.0),
-        "skipped_final": out.get("skipped_final", False),
-        "error": out.get("error"),
-        "halt_reason": out.get("halt_reason"),
-        **({"speech_text": out.get("speech_text", ""),
-            "output_channels": out.get("output_channels", ())}
-           if output_mode is not None and not engine_owned else {}),
-    }
+def run_for_voice(client: Any, user_text: str, *, session_key: str | None = None, **_legacy: Any) -> dict[str, Any]:
+    """One engine: voice/plugin/TUI turns run in the Gateway like any other."""
+    # Archived 2026-11-16 (audit D1): the in-process runner lives in
+    # ~/Desktop/Jaeger-removed-features-2026-11-16/in-process-turn-runners/.
+    from jaeger_ai.core.gateway.turn_client import run_gateway_turn
+    return run_gateway_turn(user_text, session_key=session_key or "voice", source="voice")
 
 
 
