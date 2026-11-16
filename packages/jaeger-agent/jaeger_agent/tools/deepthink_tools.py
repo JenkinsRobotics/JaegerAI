@@ -46,7 +46,10 @@ def _t_propose_deep_think_task(description: str) -> dict:
 
 @register_tool_from_function(name='queue_background_task')
 def queue_background_task(description: str, artifact_paths: list[str] | None = None) -> dict:
-    """Run a user-requested background task through the Gateway after this turn ends.
+    """USE THIS when the owner says "in the background", "report back", "let me know
+    when it's done", or the work is long: it hands the job to a Gateway worker agent
+    that posts the result to this chat (and the phone) when it finishes.
+    Run a user-requested background task through the Gateway after this turn ends.
     Include required output file paths when known, for outcome verification. The
     owner preserves workspace, model and authorization; results return to this chat.
     Do not queue the current task again from a background worker.

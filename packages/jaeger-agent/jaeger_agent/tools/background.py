@@ -90,7 +90,11 @@ def pending_background() -> dict[str, Any]:
 
 @register_tool_from_function(name="start_background")
 def _t_start_background(code: str, name: str = "") -> dict:
-    """Launch Python code as a background process that OUTLIVES this
+    """Low-level: launch raw Python code as a detached OS process (a
+    watcher, a server, a long render script). NOT for "do this in the
+    background and report back": for that use queue_background_task,
+    which runs a full agent task and posts its result to this chat.
+    Launch Python code as a background process that OUTLIVES this
     turn. Use this — not run_python / run_in_venv (which are capped
     and synchronous) — for work that takes minutes or longer: a long
     render, a bot that stays connected, a watcher. Runs against the
