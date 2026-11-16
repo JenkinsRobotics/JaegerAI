@@ -246,6 +246,8 @@ GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
         ({"GET", "PATCH"}, r"^/v1/notifications$"),
         ({"GET"}, r"^/v1/push/(?:queue|subscriptions|vapid-public-key)$"),
         ({"GET"}, r"^/v1/live/tasks$"),
+        ({"GET"}, r"^/v1/mac/status$"),
+        ({"POST"}, r"^/v1/mac/action$"),
         ({"POST"}, r"^/v1/push/(?:subscriptions|test|job-events|presence)$"),
         ({"DELETE"}, r"^/v1/push/subscriptions/[A-Za-z0-9_-]+$"),
     )

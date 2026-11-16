@@ -1854,6 +1854,8 @@ class JaegerGatewayApp:
         register_push(self)
         from .live_tasks import register as register_live_tasks
         register_live_tasks(self)  # running tasks + step for the Mac menu, step-by-step phone push
+        from .mac_actions import register as register_mac_actions
+        register_mac_actions(self)  # lock / display off / open app / status from the phone web app
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_post("/v1/approvals/{id}/decision", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
