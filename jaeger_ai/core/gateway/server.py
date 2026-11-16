@@ -5183,9 +5183,11 @@ class JaegerGatewayApp:
                 return False
             target = suggest_specialist(text)
             record = self._registry().get_agent(target) if target else None
-            if record is None or (_is_team_agent(record) and self._collaboration_mode() != "team"):
-                # One mind / auto: team specialists are Jaeger's inner helpers,
-                # so triage never moves a chat to one of them as another voice.
+            if record is None or self._collaboration_mode() != "team":
+                # One mind: every specialist (team or internal) is Jaeger's
+                # inner helper, reached by call_agent. Moving the chat swapped
+                # the owner onto a narrow tool grant on a keyword hit
+                # ("approval", "schedule") and refused plain work (P17).
                 self.store.update_metadata(sid, {"route_checked": True})
                 return False
             self.store.update_metadata(sid, {
