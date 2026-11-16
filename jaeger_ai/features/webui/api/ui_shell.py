@@ -151,7 +151,9 @@ def _root_file(root: Path, path: str) -> Path | None:
 # dot-free sub-path such as /settings/voice, is a client-side route: answer with index.html so
 # deep links and reloads work. Anything with a file extension is never treated as a page.
 UI_PAGES = frozenset({"home", "chat", "agents", "work", "characters", "tasks", "machine", "sharepoint", "settings", "workspace",
-                      "studio", "models", "compare", "research", "documents", "knowledge", "integrations", "calendar"})
+                      "studio", "models", "compare", "research", "documents", "knowledge", "integrations", "calendar",
+                      # Rail pages added after the six primaries (router.ts PAGES): reloads must not 404.
+                      "library", "automations", "feed"})
 
 
 def is_page_route(path: str) -> bool:

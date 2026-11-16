@@ -322,6 +322,13 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 30  # seconds — kills idle/incomplete connections to prevent thread exhaustion
 
+    def send_response(self, code, message=None):
+        # Remember that this request already has a status line, so the dispatcher's
+        # "not found" fallback can never write a second response onto the same
+        # keep-alive connection (the next request would read it as its own reply).
+        self._jg_responded = True
+        super().send_response(code, message)
+
     def setup(self):
         """Set socket options for each accepted connection."""
         super().setup()
@@ -400,6 +407,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         self._req_t0 = time.time(); reset_trusted_auth_request_state(self)
+        self._jg_responded = False
         cookie_profile = get_profile_cookie(self)
         if cookie_profile:
             set_request_profile(cookie_profile)
@@ -410,7 +418,7 @@ class Handler(BaseHTTPRequestHandler):
             if not check_auth(self, parsed): return
             if not _route_kept(self, parsed): return
             result = handle_get(self, parsed)
-            if result is False:
+            if result is False and not getattr(self, '_jg_responded', False):
                 return j(self, {'error': 'not found'}, status=404)
         except _CLIENT_DISCONNECT_ERRORS:
             # Expected disconnect path; do not convert it into a misleading server 500.
@@ -428,6 +436,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_write(self, route_func) -> None:
         self._req_t0 = time.time(); reset_trusted_auth_request_state(self)
+        self._jg_responded = False
         try:
             from api.helpers import reset_request_body_consumed
             reset_request_body_consumed(self)
@@ -446,7 +455,7 @@ class Handler(BaseHTTPRequestHandler):
             if not _is_csp_report_post and not check_auth(self, parsed): return
             if not _route_kept(self, parsed): return
             result = route_func(self, parsed)
-            if result is False:
+            if result is False and not getattr(self, '_jg_responded', False):
                 return j(self, {'error': 'not found'}, status=404)
         except _CLIENT_DISCONNECT_ERRORS:
             # Expected disconnect path; do not convert it into a misleading server 500.

@@ -252,8 +252,10 @@ def _json_response_body(payload, *, pretty: bool = True) -> bytes:
     return _json.dumps(payload, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
 
 
-def j(handler, payload, status: int=200, extra_headers: dict=None, *, pretty: bool = True) -> None:
-    """Send a JSON response.
+def j(handler, payload, status: int=200, extra_headers: dict=None, *, pretty: bool = True) -> bool:
+    """Send a JSON response. Returns True (handled), so ``return j(...)`` from a
+    ``route() -> bool`` overlay never falls through to a second 404 response on
+    the same keep-alive connection (that desynced later requests).
 
     *extra_headers*: optional dict of additional headers to include
     (e.g., {'Set-Cookie': '...'}).  Headers are sent before end_headers().
@@ -278,6 +280,7 @@ def j(handler, payload, status: int=200, extra_headers: dict=None, *, pretty: bo
         for k, v in extra_headers.items():
             handler.send_header(k, v)
     _safe_write(handler, body)
+    return True
 
 
 def t(
@@ -299,6 +302,7 @@ def t(
             handler.send_header(k, v)
     flush_pending_auth_cookies(handler)
     _safe_write(handler, body)
+    return True
 
 
 MAX_BODY_BYTES = 20 * 1024 * 1024  # 20MB limit for non-upload POST bodies

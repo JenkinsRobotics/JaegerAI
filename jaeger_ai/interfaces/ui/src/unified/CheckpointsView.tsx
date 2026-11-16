@@ -26,14 +26,14 @@ export function CheckpointsView({ source, params }: { source: JaegerSource; para
     if (!sessionId) return;
     const controller = new AbortController(); setError(""); setCheckpoints([]); setSelected("");
     getJson<{ checkpoints: Checkpoint[] }>(query("/api/checkpoints/list", { session_id: sessionId }), controller.signal)
-      .then(data => { if (!controller.signal.aborted) setCheckpoints(data.checkpoints); }, e => { if (!controller.signal.aborted) setError((e as Error).message); });
+      .then(data => { if (!controller.signal.aborted) setCheckpoints(Array.isArray(data?.checkpoints) ? data.checkpoints : []); }, e => { if (!controller.signal.aborted) { const m = (e as Error).message; setError(/not found|404/i.test(m) ? "This session's workspace no longer exists (temporary folders are cleared on restart)." : m); } });
     return () => controller.abort();
   }, [sessionId, revision]);
   useEffect(() => {
     if (!sessionId || !selected) return;
     const controller = new AbortController(); setDiff(""); setChanged(0);
     getJson<{ diff: string; total_changes: number }>(query("/api/checkpoints/diff", { session_id: sessionId, checkpoint: selected }), controller.signal)
-      .then(data => { if (!controller.signal.aborted) { setDiff(data.diff || "No changes from the current workspace."); setChanged(data.total_changes); } }, e => { if (!controller.signal.aborted) setDiff((e as Error).message); });
+      .then(data => { if (!controller.signal.aborted) { setDiff(data?.diff || "No changes from the current workspace."); setChanged(Number(data?.total_changes) || 0); } }, e => { if (!controller.signal.aborted) setDiff((e as Error).message); });
     return () => controller.abort();
   }, [sessionId, selected]);
   return <div className="jg-u-page jg-workspace-browser">
@@ -41,7 +41,7 @@ export function CheckpointsView({ source, params }: { source: JaegerSource; para
     <label className="jg-workspace-browser__session">Session <select aria-label="Checkpoint session" value={sessionId} onChange={e => setSessionId(e.target.value)}><option value="">Choose a session</option>{sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title || s.session_id}</option>)}</select></label>
     {!sessionId && <Empty title="No session selected">Choose a session with a workspace.</Empty>}
     {error && <p role="alert" className="jg-u-error">{error}</p>}
-    {sessionId && !error && <div className="jg-workspace-browser__grid"><section className="jg-u-card" aria-label="Checkpoint list"><h3>Saved checkpoints</h3>{checkpoints.length === 0 && <p>No checkpoints found for this workspace.</p>}<ul>{checkpoints.map(item => <li key={item.id}><button type="button" onClick={() => setSelected(item.id)}>{item.message || "Checkpoint"} · {item.date_display || item.date} · {item.files_changed} changed files</button></li>)}</ul></section>
+    {sessionId && !error && <div className="jg-workspace-browser__grid"><section className="jg-u-card" aria-label="Checkpoint list"><h3>Saved checkpoints</h3>{checkpoints.length === 0 && !error && <p>No checkpoints found for this workspace.</p>}<ul>{checkpoints.map(item => <li key={item.id}><button type="button" onClick={() => setSelected(item.id)}>{item.message || "Checkpoint"} · {item.date_display || item.date} · {item.files_changed} changed files</button></li>)}</ul></section>
     <section className="jg-u-card" aria-label="Checkpoint diff"><h3>Diff {selected && `· ${changed} changed files`}</h3>{selected ? <pre>{diff || "Loading diff…"}</pre> : <p>Select a checkpoint to compare it with the current workspace.</p>}<button type="button" disabled title="Restore is unavailable until overwrite and undo safeguards are in place.">Restore</button><p>Restore is unavailable until overwrite and undo safeguards are in place.</p></section></div>}
   </div>;
 }
