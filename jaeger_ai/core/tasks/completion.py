@@ -1,8 +1,9 @@
 """The one authoritative task-state transition.
 
 Workers return evidence. They do not mark a task completed_verified.
-A bare "success" is not evidence. Legacy ``completed`` stays a worker
-status and cannot be written through this function.
+A bare "success" is not evidence. ``completed`` means "answered, nothing
+the owner can check" (a reply, not an artifact): the turn is done when the
+agent finishes, as in Codex and Claude Code. It never counts as verified.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from jaeger_ai.core.tasks.models import DurableTask, TaskState
 
 AUTHORITATIVE = frozenset({
     TaskState.COMPLETED_VERIFIED,
+    TaskState.COMPLETED,
     TaskState.NEEDS_OWNER,
     TaskState.BLOCKED,
     TaskState.FAILED,
