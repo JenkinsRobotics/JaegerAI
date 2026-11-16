@@ -7,7 +7,8 @@
  *  - fallbackHome: today's gateway (43438 dev): most recent chat for the agent, else create; pages are
  *    cut client-side from the one session load; no summaries or posts;
  *  - mockHome: contractHome over an in-memory wire fake + mock stream (dev mock / screenshots). */
-import type { JaegerSource } from "../api/source";
+import type { JaegerSource, RequestSnapshot } from "../api/source";
+import { settleUnanswered } from "./requestOutcome";
 import type { GatewayEvent, SessionMessage, SessionRow } from "../api/types";
 import type { ChatSession, ChatTurn } from "./host";
 import { messagesToTurns } from "./webHost";
@@ -204,7 +205,9 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: 
     if (!Array.isArray(wire.messages) || wire.messages.some(message => message.session_id !== sessionId)) throw new Error("History response belongs to a different conversation; nothing was merged");
     const next = wire.next_before == null ? undefined : String(wire.next_before);
     if (before && next && (next === before || (/^\d+$/.test(before) && /^\d+$/.test(next) && Number(next) >= Number(before)))) throw new Error("History cursor did not advance; current messages are preserved");
-    return { ...fromWirePage(sessionId, wire, name), agentId: agentOf.get(sessionId) };
+    const built = fromWirePage(sessionId, wire, name);
+    await settleUnanswered(built.turns, (rid) => getJson(`/v1/sessions/${encodeURIComponent(sessionId)}/requests/${encodeURIComponent(rid)}`) as Promise<RequestSnapshot>);
+    return { ...built, agentId: agentOf.get(sessionId) };
   };
   const rows = async (agentId: string) => rowsOf(await getJson(HOME_ROUTES.sessions(agentId)));
   return {
@@ -310,8 +313,8 @@ export function fallbackHome(source: JaegerSource, opts: HomeOptions = {}): Home
   const homeIds = new Map<string, string>();
   const load = (sessionId: string, fresh: boolean) => {
     if (!fresh && loaded?.id === sessionId) return loaded.work;
-    const work = source.session(sessionId).then((d) => ({
-      session: { id: sessionId, title: d.title ?? "Untitled", agentId: d.agent_id ?? undefined, turns: messagesToTurns(d.messages, name) },
+    const work = source.session(sessionId).then(async (d) => ({
+      session: { id: sessionId, title: d.title ?? "Untitled", agentId: d.agent_id ?? undefined, turns: await settleUnanswered(messagesToTurns(d.messages, name), source.requestStatus ? (rid) => source.requestStatus!(sessionId, rid) : undefined) },
       lastEventId: d.last_event_id,
     }));
     loaded = {id:sessionId,work};

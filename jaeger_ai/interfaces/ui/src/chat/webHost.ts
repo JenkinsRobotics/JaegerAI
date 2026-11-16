@@ -2,7 +2,7 @@ import { toolSelection } from "./toolSelection";
 import {mapEvent} from "./eventMap";
 import { modelContext } from "./modelContext";
 import { readIntent, saveIntent, settleIntent, type SendIntent } from "./sendJournal";
-import { requestOutcome } from "./requestOutcome";
+import { requestOutcome, settleUnanswered } from "./requestOutcome";
 /* WebHost: ChatHost for the browser. Data comes from a JaegerSource (live =
  * same-origin /v1 and /api fetches; mock = dev-only sample data). Failures
  * surface to the caller; there is no silent fallback. */
@@ -426,7 +426,9 @@ export class WebHost implements ChatHost {
       if (rich) return structuredClone(rich);
       const detail = await this.source.session(id);
       if (typeof detail.last_event_id === "number") this.advance(id, detail.last_event_id);
-      return { id, title: detail.title ?? "Untitled", agentId: detail.agent_id ?? undefined, turns: messagesToTurns(detail.messages, this.agentName) };
+      const turns = messagesToTurns(detail.messages, this.agentName);
+      await settleUnanswered(turns, this.source.requestStatus ? (rid) => this.source.requestStatus!(id, rid) : undefined);
+      return { id, title: detail.title ?? "Untitled", agentId: detail.agent_id ?? undefined, turns };
     },
     save: async (session: ChatSession) => { localStorage.setItem(KEY(session.id), JSON.stringify(session)); },
     delete: async (id: string) => { localStorage.removeItem(KEY(id)); },
