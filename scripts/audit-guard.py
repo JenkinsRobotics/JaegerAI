@@ -132,19 +132,25 @@ def c_single_turn_path():
 
 
 def c_one_scheduler():
-    hits = _grep(r"_register_legacy_cron|class CronScheduler|def run_cron_tick", "jaeger_ai", "packages/jaeger-agent/jaeger_agent")
-    return not hits, ", ".join(hits[:4]) or "UnifiedScheduler only"
+    # The only runner is the Gateway background producer; nobody else starts a CronRunner.
+    hits = [h for h in _grep(r"CronRunner\(", "jaeger_ai", "packages/jaeger-agent/jaeger_agent")
+            if not h.startswith(("jaeger_ai/core/runtime/background_producers.py", "packages/jaeger-agent/jaeger_agent/background/cron_runner.py"))]
+    extra = [p for p in ("packages/jaeger-agent/jaeger_agent/background/cron.py",) if (REPO / p).exists()]
+    return not hits and not extra, (", ".join(hits + extra) or "Gateway background producer only")
 
 
 def c_one_heartbeat():
-    hits = [p for p in ("jaeger_ai/features/droid/life.py",) if (REPO / p).exists()]
+    # One agent heartbeat (core/runtime/heartbeat.py via background_producers). The droid
+    # life loop is the body's reflex loop and must never start agent turns itself.
+    life = (REPO / "jaeger_ai/features/droid/life.py")
+    life_turns = life.exists() and bool(re.search(r"submit_turn|/turns", life.read_text()))
     try:
-        with _db() as db:
-            n = db.execute("select count(*) from durable_tasks where goal like '%morning-heartbeat%' and state not in ('cancelled','archived')").fetchone()[0]
+        db = sqlite3.connect(str(JAEGER / "instances/jaeger/memory/state.db"), timeout=5)
+        n = db.execute("select count(*) from schedules where status='active' and (schedule_id like '%heartbeat%' or prompt like 'Heartbeat%')").fetchone()[0]
+        db.close()
     except Exception as e:  # noqa: BLE001
-        n = f"db error {e}"
-    ok = not hits and n == 0
-    return ok, f"extra loops: {hits or 'none'}; morning-heartbeat schedules active: {n}"
+        return False, f"state.db error {e}"
+    return n == 0 and not life_turns, f"heartbeat schedules active: {n}; droid life starts turns: {life_turns}"
 
 
 def c_no_hermes_webui():
@@ -247,10 +253,10 @@ CHECKS = [
     ("G04", "Every Jaeger service launchd job is running", c_launchd_running, True),
     ("G05", "Boot stack-up job waits long enough (no exit 1 at boot)", c_stack_boot_wait, True),
     ("G06", "One turn path (gateway owner loop)", c_single_turn_path, False),
-    ("G07", "One scheduler", c_one_scheduler, False),
-    ("G08", "One heartbeat", c_one_heartbeat, False),
+    ("G07", "One scheduler", c_one_scheduler, True),
+    ("G08", "One heartbeat", c_one_heartbeat, True),
     ("G09", "No Hermes WebUI copy", c_no_hermes_webui, False),
-    ("G10", "No stale failed/waiting tasks", c_no_stale_tasks, False),
+    ("G10", "No stale failed/waiting tasks", c_no_stale_tasks, True),
     ("G11", "Turn success above floor", c_turn_success, False),
     ("G12", "Mac control actions", c_mac_control_tools, True),
     ("G13", "Telegram token configured", c_telegram_ready, False),
