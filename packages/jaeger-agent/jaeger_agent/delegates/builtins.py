@@ -9,7 +9,6 @@ from .cursor import create_runtime as create_cursor
 from .gemini import create_runtime as create_gemini
 from .grok import create_runtime as create_grok
 from .ollama import create_runtime as create_ollama
-from .openclaw import create_runtime as create_openclaw
 from .opencode import create_runtime as create_opencode
 from .registry import DelegateRegistry, get_delegate_registry
 
@@ -25,7 +24,6 @@ def register_builtin_delegates(
         create_gemini,
         create_grok,
         create_ollama,
-        create_openclaw,
         create_opencode,
     ):
         target.register(factory(), replace=True)

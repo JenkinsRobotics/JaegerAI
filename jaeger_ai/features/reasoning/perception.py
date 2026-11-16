@@ -193,22 +193,6 @@ class SensorStream:
         )
 
     async def _perceive_finance(self) -> FinanceState:
-        try:
-            from jaeger_ai.features.finance.monarch_service import MonarchMoneyService
-            svc = MonarchMoneyService()
-            if not svc.is_configured():
-                return FinanceState(configured=False)
-
-            cached_report = Path(os.path.expanduser("~/.jaeger/reports/finance/latest.json"))
-            if cached_report.exists():
-                import json
-                data = json.loads(cached_report.read_text(encoding="utf-8"))
-                return FinanceState(
-                    configured=True,
-                    unreviewed_count=data.get("unreviewed_count", 0),
-                    anomalies_detected=data.get("anomalies_count", 0) > 0,
-                    net_worth_cached=data.get("net_worth"),
-                )
-            return FinanceState(configured=True)
-        except Exception:
-            return FinanceState(configured=False)
+        # Finance (Monarch) was cut 2026-11-16 and archived on the Desktop
+        # (Jaeger-removed-features-2026-11-16/finance); candidate to port back.
+        return FinanceState(configured=False)
