@@ -519,20 +519,26 @@ def stack_status(services: list[ServiceDef] | None = None) -> list[dict[str, Any
     return [inspect_service(s, head_commit=head) for s in target]
 
 
-def sync_plists(commit_sha: str | None = None) -> list[Path]:
-    """Write plists for all services to ~/.jaeger/launchd/."""
+def sync_plists(commit_sha: str | None = None, services: list[ServiceDef] | None = None) -> list[Path]:
+    """Write plists to ~/.jaeger/launchd/ for the services being started plus
+    any that already have one. Optional/unmanaged services (A2A, Ollama) no
+    longer get a plist just because the stack came up (P21: the login-time
+    `stack up` was recreating unused plists after every boot)."""
     head = commit_sha or _current_git_commit()
     ldir = _launchd_dir()
     ldir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
+    wanted = {s.id for s in services} if services is not None else None
     for s in STACK_SERVICES:
+        if wanted is not None and s.id not in wanted and not plist_path_for(s).exists():
+            continue
         p_path = plist_path_for(s)
         p_path.write_text(build_plist(s, commit_sha=head), encoding="utf-8")
         paths.append(p_path)
     return paths
 
 
-def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.0) -> dict[str, Any]:
+def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 60.0) -> dict[str, Any]:
     """Bring the stack up: migrate legacy plists, bootstrap into launchd, wait for health."""
     target = CORE_SERVICES if services is None else services
     domain = get_user_domain()
@@ -542,7 +548,7 @@ def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.
     migrate_legacy_launchagents()
 
     # Step 3: Write plists to ~/.jaeger/launchd/
-    sync_plists()
+    sync_plists(services=target)
 
     # Step 4: Bootstrap each service — except ones already serving outside
     # launchd: a second copy would only fight over the port.
