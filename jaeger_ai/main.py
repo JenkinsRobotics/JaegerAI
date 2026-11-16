@@ -5458,7 +5458,7 @@ def parse_args() -> argparse.Namespace:
                          "main LLM lock so it never decodes concurrently."))
     p.add_argument("--voice", action="store_true",
                    help=("Launch the voice loop daemon instead of CLI chat. "
-                         "All flags after --voice are forwarded to voice_loop "
+                         "All flags after --voice are forwarded to jaeger voice "
                          "(--stt-mode, --barge-in, --no-aec, --require-wake-word, "
                          "--no-chimes, --fast-model, --accurate-model). "
                          "See `jaeger --voice --help` for the "
@@ -5963,17 +5963,14 @@ def _main_dispatch() -> int:
                 return 2
             del sys.argv[_ii:_ii + 2]
         return run_daemon(instance_name=_inst, poll_seconds=_poll)
-    # If --voice is present, peel it off and delegate to the voice_loop
+    # If --voice is present, peel it off and attach voice to the Gateway
     # daemon. Voice_loop has its own argparse for STT mode, barge-in, AEC,
     # wake-word, chimes, model names, etc. — every flag the user types
     # after --voice flows through unchanged.
     if "--voice" in sys.argv[1:]:
         sys.argv.remove("--voice")
-        from .contract.legacy_paths import legacy_paths_enabled as _legacy_on
-        if _legacy_on():
-            from .plugins.voice_loop import main as voice_main
-            return voice_main()
-        # Canonical voice attaches to the resident Gateway (``jaeger voice``).
+        # Voice attaches to the resident Gateway (``jaeger voice``); the old
+        # in-process voice_loop daemon was archived 2026-11-16.
         from .features.voice.__main__ import main as voice_main
         return voice_main(sys.argv[1:])
     # --tui launches the rich TUI. Peel it off and delegate to the TUI
@@ -6125,15 +6122,11 @@ def _main_dispatch() -> int:
         except Exception:  # noqa: BLE001 — config could be partial / missing
             pass
         if _voice_dispatch:
-            from .contract.legacy_paths import legacy_paths_enabled as _legacy_on
-            if _legacy_on():
-                from .plugins.voice_loop import main as voice_main
-            else:
-                # Canonical voice attaches to the resident Gateway.
-                from .features.voice.__main__ import main as _gateway_voice
+            # Voice attaches to the resident Gateway (voice_loop archived 2026-11-16).
+            from .features.voice.__main__ import main as _gateway_voice
 
-                def voice_main() -> int:  # noqa: E306 — adapt the argv-reading entry
-                    return _gateway_voice(sys.argv[1:])
+            def voice_main() -> int:  # noqa: E306 — adapt the argv-reading entry
+                return _gateway_voice(sys.argv[1:])
             # voice_loop's argparse honours --instance NAME the same way
             # the TUI's does. Pre-build argv so the launched process
             # targets the right operator-state dir.
