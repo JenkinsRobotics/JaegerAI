@@ -209,7 +209,19 @@ def c_push_device():
 
 def c_otel():
     hits = _grep(r"^\s*(from|import) opentelemetry", "jaeger_ai/core", "packages/jaeger-agent/jaeger_agent")
-    return bool(hits), f"{len(hits)} OTel references in runtime"
+    spans = HOME / ".jaeger/logs/otel-spans.jsonl"
+    live = 0
+    if spans.exists():
+        import time as _t
+        cutoff = (_t.time() - 86400) * 1e9
+        for line in spans.read_text(errors="ignore").splitlines()[-2000:]:
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if rec.get("name", "").startswith("invoke_agent") and (rec.get("start_ns") or 0) > cutoff:
+                live += 1
+    return bool(hits) and live > 0, f"{len(hits)} OTel imports; {live} invoke_agent spans in 24h ({spans})"
 
 
 CUT = [
@@ -287,7 +299,7 @@ CHECKS = [
     ("G12", "Mac control actions", c_mac_control_tools, True),
     ("G13", "Telegram token configured", c_telegram_ready, False),
     ("G14", "Phone push signed up", c_push_device, False),
-    ("G15", "OpenTelemetry in runtime", c_otel, False),
+    ("G15", "OpenTelemetry GenAI spans live", c_otel, True),
     ("G16", "Cut list cleared (finance, youtube_studio, openclaw delegate, voice_loop)", c_cut_list, True),
     ("G17", "One phone relay", c_one_phone_relay, True),
     ("G18", "One Mac launcher", c_one_launcher, True),

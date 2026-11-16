@@ -6477,7 +6477,10 @@ class JaegerGatewayApp:
         actor = (execution or {}).get("caller")
         try:
             from jaeger_ai.core.runtime.cron_turns import cron_turn_scope
-            with caller_identity(actor if isinstance(actor, str) and actor.strip() else None), \
+            from jaeger_agent.telemetry import agent_span
+            _opts = (execution or {}).get("options") or {}
+            with agent_span("jaeger", session_id, request_id, str(_opts.get("interaction_tier") or (execution or {}).get("interaction_tier") or "")), \
+                    caller_identity(actor if isinstance(actor, str) and actor.strip() else None), \
                     goal_scope(self, session_id, request_id, execution), channel_reply_scope(self, session_id, request_id), \
                     cron_turn_scope((execution or {}).get("options") or {}, session_id=session_id):
                 await self._execute_turn_inner(
