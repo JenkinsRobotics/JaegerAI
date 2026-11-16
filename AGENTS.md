@@ -136,9 +136,13 @@ the session store, so a test run cannot touch the operator's live database.
 Until the operator changes this policy, ordinary product changes land directly
 on `master`; do not create a feature branch for them. A requested live change
 is incomplete after commit or push. After focused verification, push the exact
-commit to `origin/master` and run `./scripts/deploy-live-mac-studio.sh`. Report
-completion only after that command confirms the Mac Studio services run the
-same commit and the source, installed, and public UI hashes match.
+commit to `origin/master` and deploy in place on the Mac Studio: every launchd
+job runs from `~/GitHub/JaegerAI`, so `git pull` there, restart the changed
+service with `launchctl kickstart -k gui/501/com.jenkinsrobotics.jaeger-<service>`
+(never MCP 8792 unless asked), and rebuild the UI with
+`python3 jaeger_ai/interfaces/ui/scripts/build-external.py`. Report completion
+only after a live check (`/health`, a chat on 8790) on the deployed commit. The
+old SSH deploy into `~/.jaeger/source` is archived on the Desktop.
 
 
 ---
