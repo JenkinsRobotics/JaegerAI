@@ -1,0 +1,107 @@
+/* Agents › Team pixel office. Art colours are custom properties mixed from the
+ * Jaeger theme (pane / fg / accent / status tokens), read by the canvas at runtime,
+ * so the office follows light and dark. */
+.jg-office {
+  --jg-office-wall: color-mix(in srgb, var(--jg-color-pane) 78%, #5b6b82);
+  --jg-office-wall-trim: color-mix(in srgb, var(--jg-color-pane) 55%, #3f4a5c);
+  --jg-office-floor-a: color-mix(in srgb, var(--jg-color-pane) 74%, #b08a5f);
+  --jg-office-floor-b: color-mix(in srgb, var(--jg-color-pane) 66%, #9c7650);
+  --jg-office-rug: color-mix(in srgb, var(--jg-color-pane) 70%, var(--jg-color-accent));
+  --jg-office-desk-top: color-mix(in srgb, var(--jg-color-pane) 30%, #c79b66);
+  --jg-office-desk-front: color-mix(in srgb, var(--jg-color-pane) 22%, #94683f);
+  --jg-office-desk-edge: color-mix(in srgb, var(--jg-color-pane) 15%, #6d4a2b);
+  --jg-office-chair: color-mix(in srgb, var(--jg-color-pane) 25%, #2f3742);
+  --jg-office-monitor: #2a2f38;
+  --jg-office-screen-off: #161a20;
+  --jg-office-screen-on: color-mix(in srgb, var(--jg-color-accent) 70%, #0b1424);
+  --jg-office-screen-code: #cfe3ff;
+  --jg-office-screen-warn: color-mix(in srgb, var(--jg-status-approval, #f5c518) 80%, #2a2000);
+  --jg-office-screen-err: color-mix(in srgb, var(--jg-status-error, #e5484d) 85%, #200000);
+  --jg-office-glow: color-mix(in srgb, var(--jg-color-accent) 45%, transparent);
+  --jg-office-glow-warn: color-mix(in srgb, var(--jg-status-approval, #f5c518) 45%, transparent);
+  --jg-office-glow-err: color-mix(in srgb, var(--jg-status-error, #e5484d) 50%, transparent);
+  --jg-office-outline: #1b1e24;
+  --jg-office-sky-day: #9fd3f5;
+  --jg-office-sky-night: #1d2547;
+  --jg-office-frame: color-mix(in srgb, var(--jg-color-pane) 40%, #e9edf2);
+  --jg-office-plant: #4f9d4a;
+  --jg-office-plant-dark: #32713a;
+  --jg-office-pot: #b2603d;
+  --jg-office-mug: #f2f2f2;
+  --jg-office-steam: color-mix(in srgb, var(--jg-color-fg) 35%, transparent);
+  --jg-office-warn: var(--jg-status-approval, #f5c518);
+  --jg-office-err: var(--jg-status-error, #e5484d);
+  --jg-office-dim: #05070c;
+  --jg-office-paper: #f7f4ea;
+  --jg-office-accent: var(--jg-color-accent);
+  --jg-office-shadow: #000000;
+  display: flex; height: 100%; min-height: 0; background: var(--jg-color-pane); color: var(--jg-color-text);
+}
+.jg-office__main { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 16px 20px 20px; gap: 10px; overflow: hidden; }
+.jg-office__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.jg-office__title { display: flex; align-items: baseline; gap: 12px; }
+.jg-office__title h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.jg-office__live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--jg-color-text-secondary); }
+.jg-office__live i { width: 7px; height: 7px; border-radius: 50%; background: var(--jg-color-text-tertiary); }
+.jg-office__live.is-live i { background: var(--system-green, var(--jg-color-accent)); }
+.jg-office__live.is-down i { background: var(--jg-status-error); }
+.jg-office__tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.jg-office__toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--jg-color-text-secondary); cursor: pointer; }
+.jg-office__zoom { display: inline-flex; border: 1px solid var(--jg-color-border); border-radius: 999px; overflow: hidden; }
+.jg-office__zoom button { min-width: 36px; height: 30px; padding: 0 10px; border: 0; background: transparent; color: var(--jg-color-text); font: inherit; font-size: 13px; cursor: pointer; }
+.jg-office__zoom button + button { border-left: 1px solid var(--jg-color-border); }
+.jg-office__zoom button:hover:not(:disabled) { background: var(--jg-color-hover); }
+.jg-office__zoom button:disabled { color: var(--jg-color-text-tertiary); cursor: default; }
+.jg-office__legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--jg-color-text-secondary); }
+.jg-office__legend li { display: inline-flex; align-items: center; gap: 6px; }
+.jg-office__legend b { font-weight: 600; color: var(--jg-color-text); font-variant-numeric: tabular-nums; }
+.jg-office__legend i, .jg-office__steps i { width: 8px; height: 8px; border-radius: 2px; background: var(--jg-color-text-tertiary); }
+.is-working > i, .jg-office__pill.is-working { --mood: var(--jg-status-working); }
+.is-handoff > i, .jg-office__pill.is-handoff { --mood: var(--jg-avatar-purple, var(--jg-color-accent)); }
+.is-approval > i, .jg-office__pill.is-approval { --mood: var(--jg-status-approval); }
+.is-error > i, .jg-office__pill.is-error { --mood: var(--jg-status-error); }
+.is-idle > i, .jg-office__pill.is-idle, .is-queued > i, .jg-office__pill.is-queued { --mood: var(--jg-color-text-tertiary); }
+.is-offline > i, .jg-office__pill.is-offline { --mood: var(--jg-color-text-quaternary); }
+.jg-office__legend li > i { background: var(--mood); }
+.jg-office__banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--jg-status-error) 12%, var(--jg-color-pane)); font-size: 13px; }
+.jg-office__banner button { border: 1px solid var(--jg-color-border); border-radius: 999px; background: transparent; color: var(--jg-color-text); font: inherit; padding: 2px 10px; cursor: pointer; }
+.jg-office__frame { flex: 1; min-height: 0; overflow: auto; border-radius: 14px; border: 1px solid var(--jg-color-border); background: var(--jg-color-inset); touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+.jg-office__empty { padding: 48px 16px; text-align: center; color: var(--jg-color-text-secondary); font-size: 14px; }
+.jg-office__world { position: relative; margin: 8px auto; }
+.jg-office__canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+.jg-office__desk { position: absolute; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.jg-office__desk:hover, .jg-office__desk:focus-visible { outline: 2px solid color-mix(in srgb, var(--jg-color-accent) 55%, transparent); outline-offset: -2px; }
+.jg-office__desk.is-selected { outline: 2px solid var(--jg-color-accent); outline-offset: -2px; }
+.jg-office__tag { position: absolute; left: 50%; transform: translateX(-50%); max-width: 96%; padding: 1px 6px; border-radius: 4px; background: var(--jg-color-elevated); box-shadow: 0 0 0 1px var(--jg-color-border); color: var(--jg-color-text); font-size: 11px; line-height: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.jg-office__desk.is-offline .jg-office__tag { color: var(--jg-color-text-tertiary); }
+.jg-office__bubble { position: absolute; left: 0; top: 0; padding: 3px 7px; border-radius: 6px; background: var(--jg-color-elevated); box-shadow: 0 0 0 1px var(--jg-color-border), 0 2px 6px var(--jg-color-shadow, transparent); color: var(--jg-color-text); font-size: 11px; line-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; will-change: transform; }
+.jg-office__bubble.is-approval { box-shadow: 0 0 0 1.5px var(--jg-status-approval); }
+.jg-office__bubble.is-error { box-shadow: 0 0 0 1.5px var(--jg-status-error); }
+.jg-office__bubble.is-handoff { box-shadow: 0 0 0 1.5px var(--jg-avatar-purple, var(--jg-color-accent)); }
+.jg-office__panel { width: 340px; flex: none; display: flex; flex-direction: column; gap: 14px; padding: 16px; border-left: 1px solid var(--jg-color-border); background: var(--jg-color-elevated); overflow: auto; }
+.jg-office__panel header { display: flex; align-items: flex-start; gap: 10px; }
+.jg-office__panel header > div { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.jg-office__panel h3 { width: 100%; margin: 0; font-size: 16px; font-weight: 600; }
+.jg-office__panel h4 { margin: 0 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--jg-color-text-tertiary); }
+.jg-office__panel section p { margin: 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.jg-office__pill { display: inline-flex; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--jg-color-text); background: color-mix(in srgb, var(--mood, var(--jg-color-text-tertiary)) 22%, var(--jg-color-elevated)); }
+.jg-office__runner { font-size: 11px; color: var(--jg-color-text-tertiary); }
+.jg-office__close { width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: var(--jg-color-text-secondary); font-size: 20px; line-height: 1; cursor: pointer; }
+.jg-office__close:hover { background: var(--jg-color-hover); }
+.jg-office__task small { display: block; margin-top: 4px; font-size: 12px; color: var(--jg-color-text-tertiary); }
+.jg-office__muted { color: var(--jg-color-text-secondary); }
+.jg-office__steps, .jg-office__activity { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.jg-office__steps li, .jg-office__activity li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.jg-office__steps li span, .jg-office__activity li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-office__steps small, .jg-office__activity small { flex: none; font-size: 11px; color: var(--jg-color-text-tertiary); font-variant-numeric: tabular-nums; }
+.jg-office__steps li.is-running i, .jg-office__steps li.is-waiting i { background: var(--jg-status-working); }
+.jg-office__steps li.is-succeeded i { background: var(--system-green, var(--jg-color-accent)); }
+.jg-office__steps li.is-failed i, .jg-office__steps li.is-denied i { background: var(--jg-status-error); }
+.jg-office__panel footer { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+@media (max-width: 760px) {
+  .jg-office__main { padding: 12px 10px 12px; }
+  .jg-office.has-panel .jg-office__main { padding-bottom: 46vh; }
+  .jg-office__panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; width: auto; max-height: 44vh; border-left: 0; border-top: 1px solid var(--jg-color-border); border-radius: 16px 16px 0 0; box-shadow: 0 -6px 20px var(--jg-color-shadow, transparent); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .jg-office__legend { gap: 4px 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .jg-office__bubble { will-change: auto; } }

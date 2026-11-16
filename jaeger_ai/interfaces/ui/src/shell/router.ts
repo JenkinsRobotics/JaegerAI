@@ -17,7 +17,7 @@ export const PAGES: readonly PageId[] = [...PRIMARY_PAGES, "library", "automatio
 
 /** Sub-tabs of merged pages, in display order; the first is the default. */
 export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: string }[]>> = {
-  agents: [{ id: "roster", title: "Agents" }, { id: "characters", title: "Characters" }, { id: "knowledge", title: "Memory & Skills" }],
+  agents: [{ id: "roster", title: "Agents" }, { id: "team", title: "Team" }, { id: "characters", title: "Characters" }, { id: "knowledge", title: "Memory & Skills" }],
   // One Tasks view (2026-11-15): Pipeline, Backlog and Production were retired; their old links land on Tasks.
   work: [{ id: "tasks", title: "Tasks" }, { id: "process", title: "Process" }, { id: "calendar", title: "Calendar" }, { id: "youtube", title: "YouTube" }],
   research: [{ id: "runs", title: "Research" }, { id: "documents", title: "Documents" }, { id: "workspace", title: "Workspace" }],
@@ -61,7 +61,7 @@ export function canonicalPath(pathname: string, search = ""): string | null {
   const moved: Record<string, string> = {
     "/home/widgets": "/settings/widgets", "/home/overview": "/work", "/home": "/work",
     "/models/library": "/settings/models/library", "/models/compare": "/settings/models/compare", "/models/usage": "/settings/models/usage", "/models": "/settings/models/library",
-    "/agents/team": "/agents/roster", "/agents/hermes": "/settings", "/settings/integrations/hermes": "/settings", "/agents/openclaw": "/settings/integrations", "/settings/integrations/openclaw": "/settings/integrations",
+    "/agents/hermes": "/settings", "/settings/integrations/hermes": "/settings", "/agents/openclaw": "/settings/integrations", "/settings/integrations/openclaw": "/settings/integrations",
     "/work/pipeline": "/work", "/work/backlog": "/work", "/work/production": "/work",
     "/work/workspace": "/research/workspace", "/work/checkpoints": "/settings/checkpoints",
     "/research/youtube": "/work/youtube", "/research/knowledge": "/agents/knowledge", "/research/sharepoint": "/settings/integrations/sharepoint",

@@ -22,7 +22,7 @@ export interface OrchestrationState {
 const POLL_MS = 15000;
 const REFRESH_ON = new Set(["agent.handoff", "agent.handoff.finished", "task.created", "task.updated", "agent.created", "agent.updated"]);
 
-export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffMs?: number; callerId?: string } = {}): OrchestrationState & { live: ReturnType<typeof agentsLive> } {
+export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffMs?: number; callerId?: string; /** Also re-read the snapshot on this interval while streaming (statuses that no event announces, e.g. a chat turn). */ refreshMs?: number } = {}): OrchestrationState & { live: ReturnType<typeof agentsLive> } {
   const [snapshot, setSnapshot] = useState<OrchestrationSnapshot>();
   const [rows, setRows] = useState<ActivityRow[]>([]);
   const [status, setStatus] = useState<OrchestrationState["status"]>("loading");
@@ -103,8 +103,9 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
       if (alive) startPolling();
     })();
 
-    return () => { alive = false; ctl.abort(); clearInterval(pollTimer); clearTimeout(refreshTimer); };
-  }, [adapter, load, nonce, opts.backoffMs]);
+    const refreshTimer2 = opts.refreshMs ? setInterval(() => { if (alive && !document.hidden) load().catch(() => undefined); }, opts.refreshMs) : undefined;
+    return () => { alive = false; ctl.abort(); clearInterval(pollTimer); clearTimeout(refreshTimer); clearInterval(refreshTimer2); };
+  }, [adapter, load, nonce, opts.backoffMs, opts.refreshMs]);
 
   const loadOlder = useCallback(async () => {
     if (!adapter.gaps.activity || nextBefore == null) return;

@@ -50,6 +50,7 @@ const UsagePage = lazy(() => import('../unified/UsagePage').then((m) => ({ defau
 const DocumentsPage = lazy(() => import('../unified/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
 const KnowledgePage = lazy(() => import('../unified/KnowledgePage').then((m) => ({ default: m.KnowledgePage })))
 const CalendarPage = lazy(() => import('../unified/CalendarPage').then((m) => ({ default: m.CalendarPage })))
+const PixelOffice = lazy(() => import('../team/office/PixelOffice').then((m) => ({ default: m.PixelOffice })))
 const ProcessView = lazy(() => import('../process/ProcessView').then((m) => ({ default: m.ProcessView })))
 const TaskBanner = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.TaskBanner })))
 const PageFallback = () => <div className="jg-u-page"><SkeletonRows n={6} /></div>
@@ -114,6 +115,7 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
   const render = (id: WindowId) => {
     switch (id) {
       case 'agents': return tabbed('agents', (t) => t === 'knowledge' ? <KnowledgePage source={source} agents={store.agents} />
+        : t === 'team' ? <PixelOffice source={source} onNavigate={go} params={paramsOf('agents')} />
         : t === 'characters'
         ? <CharactersPage characterId={active === 'agents' && route.sub === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
         : active === 'agents' && route.rest === 'activity' ? <AgentsActivityPage source={source} onNavigate={go} />
