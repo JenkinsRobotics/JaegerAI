@@ -8,7 +8,7 @@ from pathlib import Path
 def _in_staged_store(provenance: str) -> bool:
     # Generated images are copied into the session staged-upload dir, same as
     # user uploads. Workspace-only roots would 409 the inline preview.
-    return provenance in {"upload_staged", "image_generate"}
+    return provenance in {"upload_staged", "image_generate", "agent_shared"}
 
 
 def resolve(row: dict, *, staged_root: Path, workspace: str) -> Path:
