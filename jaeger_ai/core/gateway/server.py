@@ -5858,6 +5858,21 @@ class JaegerGatewayApp:
                     )
                 except Exception:
                     logger.warning("Generated image could not be attached to the session", exc_info=True)
+            if ok and attachment is None and str(name or "") == "share_file":
+                # share_file registered the attachment; surface it as the same
+                # persisted chat part a generated image uses (parity P14).
+                shared = result
+                if isinstance(shared, str):
+                    try:
+                        shared = json.loads(shared)
+                    except ValueError:
+                        shared = None
+                if isinstance(shared, dict) and shared.get("ok") and shared.get("attachment_id"):
+                    attachment = {"attachment_id": str(shared["attachment_id"]), "name": shared.get("name"),
+                                  "mime": shared.get("mime"), "size": shared.get("size_bytes"),
+                                  "sha256": shared.get("sha256")}
+                    if not output_text:
+                        output_text = f"Shared {shared.get('name') or 'file'}"
             if attachment and not output_text:
                 output_text = f"Generated {attachment.get('name') or 'image'}"
             plan_payload = None
