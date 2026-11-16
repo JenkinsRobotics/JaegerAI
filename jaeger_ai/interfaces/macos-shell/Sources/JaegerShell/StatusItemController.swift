@@ -26,6 +26,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let offIcon = StatusItemController.loadIcon("jaeger_icon_off_22")
     private let droidMenu = DroidMenuController()
     private let macMenu = MacControlMenuController()
+    // Live task progress (LiveTaskMonitor): ring on the icon + running-task menu section.
+    private(set) var liveMonitor: LiveTaskMonitor?
+    private var liveBusy = false
+    private var liveForeground = false
+    private var liveCount = 0
+    private var liveFrame = 0
+    private var liveTimer: Timer?
+    private var liveMenuItems: [NSMenuItem] = []
 
     init(app: JaegerShellApplication) {
         self.app = app
@@ -40,6 +48,51 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         buildMenu()
+    }
+
+    /// Start the live task feed (normal launch only; never in --verify-launch).
+    func startLiveTasks() {
+        guard liveMonitor == nil else { return }
+        let monitor = LiveTaskMonitor(status: self)
+        monitor.onChange = { [weak self] in self?.refreshLiveMenu() }
+        liveMonitor = monitor
+        monitor.start()
+        refreshLiveMenu()
+    }
+
+    func setLiveProgress(_ busy: Bool, foreground: Bool, count: Int) {
+        liveForeground = foreground
+        liveCount = count
+        guard busy != liveBusy else { if busy { renderStatusIcon() }; return }
+        liveBusy = busy
+        liveTimer?.invalidate(); liveTimer = nil
+        if busy {
+            liveTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.liveFrame = (self.liveFrame + 1) % 24
+                self.renderStatusIcon()
+            }
+        }
+        shellLog("[shell][live-tasks] menu bar \(busy ? "busy (\(count) running)" : "idle")")
+        renderStatusIcon()
+    }
+
+    private func refreshLiveMenu() {
+        guard let monitor = liveMonitor else { return }
+        for item in liveMenuItems { menu.removeItem(item) }
+        liveMenuItems = monitor.menuItems(target: self, action: #selector(openLiveTask(_:)))
+        var index = 2  // after "Show / Hide Jaeger" and its separator
+        for item in liveMenuItems { menu.insertItem(item, at: index); index += 1 }
+        let sep = NSMenuItem.separator()
+        menu.insertItem(sep, at: index)
+        liveMenuItems.append(sep)
+    }
+
+    @objc private func openLiveTask(_ sender: NSMenuItem) {
+        let sid = sender.representedObject as? String ?? ""
+        app.notificationNavigation.receive(NotificationDestination.validSession(sid) ? .conversation(sid) : .inbox)
+        app.showWindow()
+        app.bridge?.send(["type": "notification.open"])
     }
 
     /// PNGs ship at 44×44 (22pt @2x); sized to 18×18 like the old app.
@@ -76,7 +129,25 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let paused = app.pauseState.paused
         let base = ((lastRunning && !paused) ? runningIcon : offIcon)
             ?? NSImage(systemSymbolName: "circle.hexagongrid", accessibilityDescription: "Jaeger")
-        if let base, activityBadge == .present || activityBadge == .unknown {
+        if let base, liveBusy {
+            let frame = liveFrame
+            let accent = liveForeground ? NSColor.controlAccentColor : NSColor.secondaryLabelColor
+            statusItem.button?.image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+                base.draw(in: rect.insetBy(dx: 3, dy: 3), from: .zero, operation: .sourceOver, fraction: 0.9)
+                let center = NSPoint(x: rect.midX, y: rect.midY)
+                let track = NSBezierPath()
+                track.appendArc(withCenter: center, radius: 8, startAngle: 0, endAngle: 360)
+                track.lineWidth = 1.5
+                NSColor.tertiaryLabelColor.setStroke(); track.stroke()
+                let start = CGFloat(90 - frame * 15)
+                let arc = NSBezierPath()
+                arc.appendArc(withCenter: center, radius: 8, startAngle: start, endAngle: start - 110, clockwise: true)
+                arc.lineWidth = 2
+                arc.lineCapStyle = .round
+                accent.setStroke(); arc.stroke()
+                return true
+            }
+        } else if let base, activityBadge == .present || activityBadge == .unknown {
             let state = activityBadge
             statusItem.button?.image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
                 base.draw(in: rect)
@@ -88,7 +159,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         } else { statusItem.button?.image = base }
         let suffix = activityBadge == .present ? " — unread retained activity" : activityBadge == .unknown ? " — unread activity unknown" : ""
         let pausedNote = paused ? " — paused" : ""
-        statusItem.button?.toolTip = "Jaeger" + pausedNote + (lastRunning ? "" : " — WebUI not running") + suffix
+        let liveNote = liveBusy ? " — \(liveCount) task\(liveCount == 1 ? "" : "s") running" : ""
+        statusItem.button?.toolTip = "Jaeger" + pausedNote + liveNote + (lastRunning ? "" : " — WebUI not running") + suffix
         statusItem.button?.setAccessibilityLabel("Jaeger" + pausedNote + suffix)
     }
 
@@ -161,7 +233,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func debugSnapshot() -> [String: Any] {
         let image = statusItem.button?.image
         let icon = image == nil ? "none" : (image === runningIcon ? "running" : (image === offIcon ? "off" : "fallback"))
-        return ["present": isPresent, "icon": icon, "paused": app.pauseState.paused, "titles": menu.items.filter { !$0.isSeparatorItem }.map(\.title)]
+        return ["present": isPresent, "icon": liveBusy ? "progress" : icon, "live_running": liveCount, "paused": app.pauseState.paused, "titles": menu.items.filter { !$0.isSeparatorItem }.map(\.title)]
     }
 
     @objc private func toggle(_ sender: Any?) { app.toggleWindow() }
