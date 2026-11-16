@@ -1852,6 +1852,8 @@ class JaegerGatewayApp:
         from .team_routes import register as register_team
         register_team(self)  # roster, rooms, live agent lanes (team runtime)
         register_push(self)
+        from .live_tasks import register as register_live_tasks
+        register_live_tasks(self)  # running tasks + step for the Mac menu, step-by-step phone push
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_post("/v1/approvals/{id}/decision", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
