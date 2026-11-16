@@ -2356,7 +2356,7 @@ class JaegerGatewayApp:
             "version": JAEGER_VERSION,
             "commit": git_commit,
             "model": active_model,
-            "architecture": "openclaw-parity",
+            "architecture": "single-engine",
             "persistence_spine": True,
             "agents_api": "/v1/agents",
             "fundamentals_fee_gated": False,
