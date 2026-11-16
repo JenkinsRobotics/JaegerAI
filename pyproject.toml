@@ -106,8 +106,6 @@ jaeger_ai = [
     "plugins/**/*.yaml", "plugins/**/*.json", "plugins/**/*.md",
     "features/personality/**/*.yaml", "features/personality/**/*.md",
     "features/personality/**/*.png", "features/personality/**/*.jpg", "features/personality/**/*.jpeg",
-    "features/webui/static/**/*", "features/webui/HERMES_WEBUI_LICENSE",
-    "features/webui/requirements.txt",
     "assets/**/*", "docs/**/*.md", "contract/**/*.json",
     "interfaces/macos-shell/Package.swift", "interfaces/macos-shell/Sources/**/*.swift",
     "interfaces/macos-shell/Resources/**/*", "interfaces/macos-shell/Scripts/*.sh",
