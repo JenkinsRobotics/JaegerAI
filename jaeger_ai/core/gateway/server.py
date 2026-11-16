@@ -6682,7 +6682,10 @@ class JaegerGatewayApp:
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._model_chat(
                         prompt,
-                        model=model, provider=lane_provider, local_only=local_only,
+                        # Pass the real selection, not the "configured" display placeholder:
+                        # with a CLI default provider that placeholder became the backend id
+                        # ("unknown CLI backend 'configured'") and every Chat-mode turn failed.
+                        model=lane_model, provider=lane_provider, local_only=local_only,
                         system_prompt=lane_system, controls=lane_controls,
                         history=(voice_history(self._history_before_admitted_user(current, admitted_request))
                                  if voice_brain else self._history_before_admitted_user(current, admitted_request)),
