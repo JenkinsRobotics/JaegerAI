@@ -866,6 +866,15 @@ class GatewaySessionStore:
                 "UPDATE sessions SET status='execution_unknown', updated_at=? WHERE status IN ('running', 'cancelling')",
                 (now,),
             )
+            # Owner-invisible maintenance passes (skill/memory review) interrupted
+            # by a restart are cancelled, not "unknown": nobody waits on them and
+            # the next qualifying turn queues a fresh review (G11 / P21).
+            conn.execute(
+                "UPDATE client_requests SET status='cancelled', updated_at=? "
+                "WHERE status IN ('admitted', 'running', 'cancelling', 'awaiting_approval') "
+                "AND (request_id LIKE 'skill-review-%' OR request_id LIKE 'memory-review-%')",
+                (now,),
+            )
             conn.execute(
                 "UPDATE client_requests SET status='execution_unknown', updated_at=? "
                 "WHERE status IN ('admitted', 'running', 'cancelling', 'awaiting_approval')",
