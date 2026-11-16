@@ -36,3 +36,18 @@ Existing admin/read routes now expose revisioned per-channel inbox-bot binding a
 Incoming provider conversation/message IDs are required, signature-adapted before exactly one callback. Data is deduplicated in existing background_deliveries and appended with explicit channel attribution to the same bot home, never admitted as model/tool work. Global Stop/live-owner checks still apply. Automatic replies are not enabled by connecting. Stop gates active incoming handlers, waits for thread exit before removing matching bridge/adapter, and unsubscribes approval callbacks. Telegram now signals its parked bootstrap and shuts down polling/application on that same loop; iMessage restart clears its stop event; Discord captures its actual loop on ready.
 
 Compatibility: additive schema_meta binding/resource pointers and existing delivery receipts; no new database/schema. New channel_message transcript kind requires current shared UI, which renders it as incoming data. Older UI may mislabel unknown message kinds; do not activate this new path with old UI. Rollback preserves transcripts/metadata/journals and must not replay unresolved operations or provider messages. External SDK/provider delivery and OS permissions remain unqualified; no external activation occurred during implementation.
+
+## Optional channels: Telegram and iMessage (off by default)
+
+Phone reach for Jaeger is **web push to the Jaeger web app** (install it to the
+iPhone Home Screen, then turn on notifications in Settings). Replies and Mac
+actions happen in the web app on the phone. Telegram and iMessage are optional
+extras for operators who want them; each stays off until configured.
+
+| Channel | Turns on when | How to turn on |
+| --- | --- | --- |
+| Telegram | `JAEGER_TELEGRAM_BOT_TOKEN` is in `~/.jaeger/secrets.env` and `telegram.enabled` is not false | Create a bot with @BotFather (`/newbot`), put the token in `~/.jaeger/secrets.env` (never in chat), restart `com.jenkinsrobotics.jaeger-channels`, then pair your one private chat with the pairing code |
+| iMessage | `imessage.self_handles` is set and `imessage.enabled` is true in `~/.jaeger/channels/config.json` | Add your own phone/email handles to `self_handles`, set `send_to` to one of them, set `enabled: true`, restart the channels job. It only reads your 1:1 self-chat and only replies to `send_to` |
+
+With neither configured the relay logs `telegram: off (optional …)` and
+`imessage: off (optional …)` and does nothing else on those channels.
