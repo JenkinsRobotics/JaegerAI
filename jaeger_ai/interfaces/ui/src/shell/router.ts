@@ -33,7 +33,7 @@ export const LEGACY_PATHS: Record<string, string> = {
   sharepoint: "/settings/integrations/sharepoint",
   compare: "/settings/models/compare",
   integrations: "/settings/integrations",
-  workspace: "/settings/widgets",
+  workspace: "/research/workspace",
 };
 
 export interface Route {
@@ -59,7 +59,7 @@ export function canonicalPath(pathname: string, search = ""): string | null {
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
   if (parts[0] === "settings" && parts[1] && LEGACY_SETTINGS[parts[1]]) return `/settings/${LEGACY_SETTINGS[parts[1]]}${search}`;
   const moved: Record<string, string> = {
-    "/home/widgets": "/settings/widgets", "/home/overview": "/work", "/home": "/work",
+    "/home/widgets": "/settings", "/home/overview": "/work", "/home": "/work",
     "/models/library": "/settings/models/library", "/models/compare": "/settings/models/compare", "/models/usage": "/settings/models/usage", "/models": "/settings/models/library",
     "/agents/hermes": "/settings", "/settings/integrations/hermes": "/settings", "/agents/openclaw": "/settings/integrations", "/settings/integrations/openclaw": "/settings/integrations",
     "/work/pipeline": "/work", "/work/backlog": "/work", "/work/production": "/work",

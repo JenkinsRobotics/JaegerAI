@@ -43,8 +43,8 @@ export function applyAppearance(mode: Appearance) {
 
 export type Tab = PanelId;
 const ICON: Record<PanelId, IconName> = {
-  checkpoints: "history", widgets: "settings-gear", appearance: "symbol-color", general: "settings-gear", voice: "mic", notifications: "comment", agents: "account", memory: "history",
-  integrations: "link", models: "server", automations: "rocket", machine: "terminal", privacy: "eye-closed", limits: "pass", about: "info",
+  checkpoints: "history", appearance: "symbol-color", general: "settings-gear", voice: "mic", notifications: "comment", agents: "account", memory: "history",
+  integrations: "link", models: "server", automations: "rocket", machine: "terminal", privacy: "eye-closed", about: "info",
 };
 /** Kept for callers that list the groups (Home index etc.). */
 export const SETTINGS_GROUPS = GROUPS.map((g) => ({ id: g.id, label: g.label, tabs: g.panels }));
@@ -68,7 +68,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 }
 const Anchor = ({ id, children }: { id: string; children: ReactNode }) => <div id={`set-${id}`} className="jg-set-anchor">{children}</div>;
 
-export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, resetPanel, open, onClose, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, financePanel, integrationsPanel, modelsContent, integrationsExtras, checkpointsPanel, widgetsPanel }: {
+export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, resetPanel, open, onClose, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, integrationsPanel, modelsContent, integrationsExtras, checkpointsPanel }: {
   /** Render as a page (the /settings route) instead of a modal sheet. */ inline?: boolean; tab?: Tab; segment?: string; onTab?: (tab: Tab | "") => void; resetPanel?: ReactNode;
   integrationsPanel?: ReactNode; modelsContent?: ReactNode; integrationsExtras?: ReactNode; checkpointsPanel?: ReactNode; widgetsPanel?: ReactNode;
   financePanel?:ReactNode;computerPanel?:ReactNode;clipboardPanel?:ReactNode;updatesPanel?:ReactNode;requestedTab?:{tab:Tab;sequence:number}; open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode; memoryPanel?:ReactNode;
@@ -97,9 +97,9 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
   const { cls, short } = useSizeClass(root);
   const compact = cls === "compact";
   useExclusivePopup(open && !inline, onClose);
-  const available = (id: Tab) => (id !== "checkpoints" || !!checkpointsPanel) && (id !== "widgets" || !!widgetsPanel) && (id !== "limits" || !!financePanel) && (id !== "memory" || !!(memoryPanel || skillsPanel || libraryPanel)) && (id !== "notifications" || !!notificationsPanel)
+  const available = (id: Tab) => (id !== "checkpoints" || !!checkpointsPanel) && (id !== "memory" || !!(memoryPanel || skillsPanel || libraryPanel)) && (id !== "notifications" || !!notificationsPanel)
     && (id !== "automations" || !!(automationsPanel || workflowsPanel || channelsPanel)) && (id !== "integrations" || !!(integrationsPanel || toolsPanel));
-  const results = useMemo(() => searchSettings(q, available), [q, financePanel, memoryPanel, skillsPanel, libraryPanel, notificationsPanel, automationsPanel, workflowsPanel, channelsPanel, integrationsPanel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const results = useMemo(() => searchSettings(q, available), [q, memoryPanel, skillsPanel, libraryPanel, notificationsPanel, automationsPanel, workflowsPanel, channelsPanel, integrationsPanel]); // eslint-disable-line react-hooks/exhaustive-deps
   // ⌘F or / focuses search; Esc clears it.
   useEffect(() => {
     if (!open && !inline) return;
@@ -184,14 +184,12 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
           {tab === "models" && <>{header("Models & Providers", "Sign-in and status for the apps and local models Jaeger runs. No API keys.")}<Anchor id="cli"><ProvidersPanel /></Anchor><span id="set-ollama" />{modelsContent}</>}
           {tab === "integrations" && <>{integ ?? toolsPanel}{integrationsExtras}</>}
           {tab === "checkpoints" && checkpointsPanel}
-          {tab === "widgets" && widgetsPanel}
           {tab === "memory" && <>{header("Memory & skills")}
             {memoryPanel && <Section title="Memory" anchor="memory">{memoryPanel}</Section>}
             {skillsPanel && <Section title="Skills" anchor="skills">{skillsPanel}</Section>}
             {libraryPanel && <Section title="Library" anchor="library">{libraryPanel}</Section>}</>}
           {tab === "notifications" && <>{header("Notifications")}<Anchor id="notifications">{notificationsPanel}</Anchor></>}
           {tab === "automations" && <AutomationsTabs header={header("Automations", "Schedules, webhooks, workflows and channels.")} initial={seg} panels={{ automations: automationsPanel, workflows: workflowsPanel, channels: channelsPanel }} />}
-          {tab === "limits" && <>{header("Spending limits", "What agents may spend, and when they must ask.")}<Anchor id="limits">{financePanel}</Anchor></>}
           {tab === "privacy" && <>{header("Privacy & data", "What leaves this device.")}
             <Section title="Files" anchor="uploads">
               <Row label="Send file contents with messages" hint="Off sends only file names.">
