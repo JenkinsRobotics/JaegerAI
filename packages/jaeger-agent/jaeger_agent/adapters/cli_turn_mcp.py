@@ -463,6 +463,11 @@ class _ExecuteHolder:
         self.context: contextvars.Context | None = None
         self.tools: dict[str, ToolDef] = {}
         self.lock = threading.Lock()
+        # Turns currently driving this server. A second concurrent turn must
+        # not overwrite execute/context/tools (it hijacked the first turn's
+        # grant and catalog: "Tool is outside this request scope", "Tool
+        # 'get_events' not listed"), so it gets a dedicated server instead.
+        self.active = 0
 
     def __call__(self, tool: ToolDef, args: dict[str, Any]) -> Any:
         fn = self.execute
@@ -651,6 +656,17 @@ def acquire_cli_mcp(backend_id: str, tools: list[ToolDef], execute: ExecuteTool)
             server._holder = holder  # type: ignore[attr-defined]
             server.start(tools, holder)
             _POOL[backend_id] = server
+        elif getattr(getattr(server, "_holder", None), "active", 0) > 0:
+            # Pooled server is mid-turn: give this turn its own server,
+            # stopped by release_cli_mcp when the turn ends.
+            server = TurnToolMcp()
+            holder = _ExecuteHolder()
+            holder.execute = execute
+            holder.context = turn_ctx
+            holder.tools = {t.name: t for t in tools}
+            server._holder = holder  # type: ignore[attr-defined]
+            server._dedicated = True  # type: ignore[attr-defined]
+            server.start(tools, holder)
         else:
             holder = getattr(server, "_holder", None)
             if holder is None:
@@ -662,7 +678,26 @@ def acquire_cli_mcp(backend_id: str, tools: list[ToolDef], execute: ExecuteTool)
             # Warmup used to start this server with zero tools; later turns
             # only refreshed the holder, so Grok's tools/list stayed empty.
             server.sync_tools(tools, holder)
+        holder = getattr(server, "_holder", None)
+        if holder is not None:
+            holder.active += 1
         return server
+
+
+def release_cli_mcp(server: TurnToolMcp | None) -> None:
+    """End this turn's claim on ``server``; stop it if it was dedicated."""
+    if server is None:
+        return
+    with _POOL_LOCK:
+        holder = getattr(server, "_holder", None)
+        if holder is not None and holder.active > 0:
+            holder.active -= 1
+        dedicated = bool(getattr(server, "_dedicated", False))
+    if dedicated:
+        try:
+            server.stop()
+        except Exception:  # noqa: BLE001 — a stuck loopback server must not fail the turn
+            logger.warning("dedicated turn MCP did not stop cleanly", exc_info=True)
 
 
 def grok_leader_argv() -> list[str]:

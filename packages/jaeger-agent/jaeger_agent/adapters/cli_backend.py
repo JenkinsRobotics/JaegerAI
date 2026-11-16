@@ -921,6 +921,9 @@ class CliBackendAdapter(ProviderAdapter):
                 )
             finally:
                 cleanup_config()
+                if mcp is not None:
+                    from .cli_turn_mcp import release_cli_mcp
+                    release_cli_mcp(mcp)
 
         def _abandon() -> None:
             self._kill()
