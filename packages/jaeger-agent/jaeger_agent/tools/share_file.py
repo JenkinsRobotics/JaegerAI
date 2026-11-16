@@ -2,16 +2,14 @@
 
 Grok Bot-style delivery: the file shows up in the conversation as an
 attachment chip with a Download button (and in the chat's Files panel), not
-just as a path. Files outside the instance workspace are copied into
-``<workspace>/outbox/`` first so the Gateway's workspace-bound file access can
-serve verified bytes. Secrets are never shared: the credentials folder and
+just as a path. The bytes are snapshotted into the session's staged store so the
+download serves exactly what was shared. Secrets are never shared: the credentials folder and
 secrets.env are refused.
 """
 from __future__ import annotations
 
 import hashlib
 import mimetypes
-import shutil
 from pathlib import Path
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
@@ -40,27 +38,26 @@ def share_file(path: str, note: str = "") -> dict:
     size = src.stat().st_size
     if size > _MAX_BYTES:
         return {"ok": False, "error": f"File is {size} bytes; the chat download limit is {_MAX_BYTES}."}
-    target = src
-    if not src.is_relative_to(ws):
-        outbox = ws / "outbox"
-        outbox.mkdir(parents=True, exist_ok=True)
-        target = outbox / src.name
-        if target.exists() and target.resolve() != src:
-            target = outbox / f"{src.stem}-{hashlib.sha256(str(src).encode()).hexdigest()[:6]}{src.suffix}"
-        shutil.copy2(src, target)
-    data = target.read_bytes()
-    digest = hashlib.sha256(data).hexdigest()
     gateway = ctx["owner"].gateway
     sid = str(ctx["session_id"])
-    mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    data = src.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    # Immutable snapshot in the session's staged store (same as uploads and
+    # generated images), so the download always serves the bytes shared now.
+    staged = Path(gateway._staged_upload_dir(sid))
+    staged.mkdir(parents=True, exist_ok=True)
+    target = staged / f"shared-{digest[:12]}-{src.name}"
+    if not target.exists():
+        target.write_bytes(data)
+    mime = mimetypes.guess_type(src.name)[0] or "application/octet-stream"
     row = gateway.store.add_attachment(sid, {
-        "original_filename": target.name, "safe_path": str(target), "mime_type": mime,
+        "original_filename": src.name, "safe_path": str(target), "mime_type": mime,
         "size_bytes": len(data), "sha256": digest,
-        "provenance": "agent_output", "metadata": {"note": note[:200], "source_path": str(src)},
+        "provenance": "agent_shared", "metadata": {"note": note[:200], "source_path": str(src)},
     })
     return {
-        "ok": True, "attachment_id": row["attachment_id"], "name": target.name, "size_bytes": len(data),
-        "mime": mime, "sha256": digest, "path": str(target),
+        "ok": True, "attachment_id": row["attachment_id"], "name": src.name, "size_bytes": len(data),
+        "mime": mime, "sha256": digest, "path": str(src),
         "download": "Shown in this chat as a file card with a Download button (also in the chat's Files panel).",
         "next": "Tell the owner the file is attached in the chat with a Download button; give the path too.",
     }
