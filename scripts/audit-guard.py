@@ -127,8 +127,22 @@ def c_stack_boot_wait():
 
 
 def c_single_turn_path():
-    legacy = _grep(r"^\s*def (_run_turn|run_for_voice|dispatcher_turn|jaeger_turn)\(", "jaeger_ai")
-    return not legacy, ", ".join(legacy) or "only the gateway owner loop runs turns"
+    import ast
+    targets = {
+        "jaeger_ai/main.py": {"_run_turn", "run_for_voice", "run_command", "run_worker_turn",
+                              "_run_subordinate_react", "_run_direct_model_runner"},
+        "jaeger_ai/core/frameworks/native_runs.py": {"jaeger_turn", "_in_process_jaeger_turn"},
+    }
+    bad = []
+    for rel, names in targets.items():
+        src = (REPO / rel).read_text()
+        for node in ast.parse(src).body:
+            if isinstance(node, ast.FunctionDef) and node.name in names:
+                body = ast.get_source_segment(src, node) or ""
+                gateway = "run_gateway_turn" in body or "_jaeger_gateway_turn" in body or "return jaeger_turn(" in body
+                if not gateway or (node.end_lineno - node.lineno) > 25:
+                    bad.append(f"{rel}:{node.name}")
+    return not bad, ("in-process runners left: " + ", ".join(bad)) if bad else "every entry point submits to the Gateway (turn_client)"
 
 
 def c_one_scheduler():
@@ -313,7 +327,7 @@ CHECKS = [
     ("G03", "Gateway /health is green", c_gateway_health, True),
     ("G04", "Every Jaeger service launchd job is running", c_launchd_running, True),
     ("G05", "Boot stack-up job waits long enough (no exit 1 at boot)", c_stack_boot_wait, True),
-    ("G06", "One turn path (gateway owner loop)", c_single_turn_path, False),
+    ("G06", "One turn path (gateway owner loop)", c_single_turn_path, True),
     ("G07", "One scheduler", c_one_scheduler, True),
     ("G08", "One heartbeat", c_one_heartbeat, True),
     ("G09", "No Hermes WebUI copy", c_no_hermes_webui, False),
