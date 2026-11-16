@@ -13,21 +13,17 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from jaeger_ai.core.runtime.webui_bind import webui_bind_host
 from urllib.parse import unquote
 
 DEFAULT_WEBUI_PORT = WEBUI_PORT
 REPO_ROOT = Path(__file__).resolve().parents[4]
-WEBUI_SCRIPT = REPO_ROOT / "scripts" / "run-jaeger-webui.sh"
 
 from .profile_layout import ensure_agent_state_schema
 
@@ -417,103 +413,28 @@ class WebUIService:
         }
 
     def _start_webui(self) -> dict[str, Any]:
+        """The web app is part of the Gateway process (R11): starting it means
+        making sure the Gateway is up. Never kill whatever holds the port; that
+        listener is the Gateway."""
         assert self.layout is not None
         current = self._webui_status()
         if current.get("running"):
-            return {"ok": True, "already_running": True, "pid": current.get("pid")}
-        # An orphaned WebUI can hold :8790 after a lost pid file. Reclaim it so
-        # profile-link / bind fixes actually take effect.
-        if _http_ok(self.urls().web_ui, timeout=1.0).get("ok"):
-            try:
-                import signal as _signal
-                proc = subprocess.run(
-                    ["lsof", "-nP", f"-iTCP:{self.webui_port}", "-sTCP:LISTEN", "-t"],
-                    capture_output=True, text=True, timeout=5, check=False,
-                )
-                for raw in (proc.stdout or "").split():
-                    try:
-                        opid = int(raw)
-                    except ValueError:
-                        continue
-                    try:
-                        os.kill(opid, _signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
-                deadline = time.monotonic() + 5
-                while time.monotonic() < deadline and _http_ok(self.urls().web_ui, timeout=0.5).get("ok"):
-                    time.sleep(0.2)
-            except Exception:
-                pass
-        if not WEBUI_SCRIPT.is_file():
-            return {"ok": False, "error": f"WebUI launcher is missing: {WEBUI_SCRIPT}"}
-        from jaeger_ai.core.runtime.profile_paths import webui_agent_home
-
-        agent_home = webui_agent_home()
-        _ensure_agent_home(agent_home)
-        log_path = _webui_log_path(self.layout)
-        pid_path = _webui_pid_path(self.layout)
-        env = os.environ.copy()
-        # Only an explicit URL is forwarded; without one the WebUI discovers
-        # the Gateway itself (contract.ports).
-        if env.get("JAEGER_GATEWAY_URL"):
-            env["JAEGER_GATEWAY_URL"] = env["JAEGER_GATEWAY_URL"].rstrip("/")
-        env["JAEGER_WEBUI_PORT"] = str(self.webui_port)
-        env["JAEGER_WEBUI_HOST"] = webui_bind_host(env)
-        # hermes-agent is not part of the Jaeger stack. Do not inject
-        # HERMES_WEBUI_AGENT_DIR even if a leftover checkout exists.
-        env["JAEGER_WEBUI_AGENT_STATE"] = str(agent_home)
-        # Popen retains the descriptor after this method returns; explicit
-        # lifecycle management is clearer than a context manager here.
-        log_f = open(log_path, "a", encoding="utf-8")  # noqa: SIM115
-        try:
-            proc = subprocess.Popen(
-                [str(WEBUI_SCRIPT)],
-                stdout=log_f,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                env=env,
-                start_new_session=True,
-            )
-        except Exception as exc:  # noqa: BLE001
-            log_f.close()
-            return {"ok": False, "error": str(exc)}
-        pid_path.write_text(str(proc.pid), encoding="utf-8")
-        deadline = time.monotonic() + 10
+            return {"ok": True, "already_running": True, "pid": current.get("pid"), "served_by": "gateway"}
+        from jaeger_ai.core.runtime.stack import SERVICE_BY_ID
+        label = SERVICE_BY_ID["gateway"].label
+        subprocess.run(["launchctl", "kickstart", f"gui/{os.getuid()}/{label}"],
+                       capture_output=True, text=True, timeout=20, check=False)
+        deadline = time.monotonic() + 60
         health: dict[str, Any] = {"ok": False}
         while time.monotonic() < deadline:
-            if proc.poll() is not None:
-                log_f.close()
-                return {"ok": False, "error": f"WebUI exited early (code {proc.returncode})", "log": str(log_path)}
             health = _http_ok(self.urls().web_ui)
             if health.get("ok"):
-                break
-            time.sleep(0.25)
-        log_f.close()
-        if not health.get("ok"):
-            try:
-                os.kill(proc.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            pid_path.unlink(missing_ok=True)
-            return {"ok": False, "error": "WebUI did not become healthy within 10 seconds", "pid": proc.pid, "log": str(log_path)}
-        return {"ok": True, "pid": proc.pid, "log": str(log_path), "health": health}
+                return {"ok": True, "served_by": "gateway", "health": health}
+            time.sleep(0.5)
+        return {"ok": False, "error": "The Gateway did not bring the web app up within 60 seconds", "served_by": "gateway"}
 
     def _stop_webui(self) -> dict[str, Any]:
-        if self.layout is None:
-            return {"ok": True, "skipped": True}
-        pid_path = _webui_pid_path(self.layout)
-        status = self._webui_status()
-        pid = status.get("pid")
-        if not pid:
-            return {"ok": True, "already_stopped": True}
-        if _pid_alive(pid):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and _pid_alive(pid):
-                time.sleep(0.1)
-        pid_path.unlink(missing_ok=True)
-        stopped = not _pid_alive(pid)
-        return {"ok": stopped, "pid": pid, "stopped": stopped}
+        """The web app lives in the Gateway; it cannot be stopped on its own.
+        Use `jaeger stack down gateway` to stop both."""
+        return {"ok": True, "skipped": True, "served_by": "gateway",
+                "detail": "The web UI is served by the Gateway; stop the Gateway to stop it."}
