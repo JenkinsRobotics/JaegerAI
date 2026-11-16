@@ -262,7 +262,12 @@ def classify(text: str) -> tuple[str, str]:
     """Classify user text as 'public' or 'private' and return the classification & reason."""
     body = text or ""
     lowered = body.lower()
-    if re.search(r"\b(?:do not|don't|never) (?:reveal|share|send|upload)\b", lowered):
+    # "Draft it, do NOT send" is a drafting instruction, not a privacy request
+    # (it blocked every draft-only turn, parity P16); "send" only counts when
+    # it says where the content must not go.
+    if re.search(r"\b(?:do not|don't|never) (?:reveal|share|upload)\b", lowered) or re.search(
+            r"\b(?:do not|don't|never) send (?:this |it |that |them )?(?:to|with|off to) (?:the )?"
+            r"(?:cloud|internet|server|servers|anyone|anybody|any one|third part)", lowered):
         return "private", "keyword:explicit_privacy_request"
     keywords, patterns = _load_rules()
     for kw in keywords:
