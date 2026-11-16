@@ -44,7 +44,6 @@ from jaeger_agent.prompts import assemble as prompt_module
 from jaeger_agent.util import tool_interrupt
 from jaeger_agent import tools as jaeger_tools
 from jaeger_agent.core import workspace as _context
-from jaeger_agent.background.cron_runner import CronRunner
 from jaeger_ai.core.instance.instance import (
     CoreVersionMismatch,
     InstanceLayout,
@@ -5428,7 +5427,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--doctor-fix", "--fix", dest="doctor_fix", action="store_true",
                    help="With --doctor: automatically repair/install missing components without prompting.")
     p.add_argument("--no-warmup", action="store_true", help="Skip llama-cpp warmup.")
-    p.add_argument("--no-cron", action="store_true", help="Don't start the cron runner.")
+    p.add_argument("--no-cron", action="store_true", help="Ignored: the Gateway owns schedules.")
     p.add_argument("--set-credential", metavar="NAME",
                    help="Store a credential under this name (value read from stdin), then exit.")
     p.add_argument("--list-credentials", action="store_true",
@@ -6284,28 +6283,13 @@ def _main_dispatch() -> int:
             prewarm(client)
             warm_plugins(config)
 
-        # Cron runner: same llm_lock the chat loop uses, so a scheduled
-        # prompt firing mid-conversation serializes cleanly.
+        # One scheduler: the Gateway's background producer owns schedules
+        # (jaeger_ai/core/runtime/background_producers.py, single-owner lock).
+        # The CLI no longer starts its own CronRunner; log rotation runs from
+        # the com.jenkinsrobotics.jaeger-logrotate launchd job.
         llm_lock = threading.Lock()
         _pipeline["llm_lock"] = llm_lock
-        cron_runner: CronRunner | None = None
-        if not args.no_cron:
-            def _cron_callback(prompt: str, session_key: str | None = None) -> None:
-                run_command(client, prompt, session_key=session_key)
-
-            def _daily_housekeeping() -> None:
-                try:
-                    rep = log_rotation.rotate_now(layout, config.retention)
-                    if rep["rotated"] or rep["pruned_by_age"] or rep["pruned_by_size"]:
-                        print(f"[jaeger-cron] housekeeping: {rep}", flush=True)
-                except Exception as exc:
-                    print(f"[jaeger-cron] housekeeping skipped: {exc}", flush=True)
-
-            cron_runner = CronRunner(
-                _cron_callback, llm_lock=llm_lock,
-                housekeeping=_daily_housekeeping,
-            )
-            cron_runner.start()
+        cron_runner = None
 
         prompt = " ".join(args.prompt).strip()
         # Interactive chat assumes the user wants the conversation to remember

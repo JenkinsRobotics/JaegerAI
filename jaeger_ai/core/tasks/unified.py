@@ -1,8 +1,15 @@
-"""Unified Scheduler — bridges legacy CronRunner and DurableTaskManager.
+"""Unified Scheduler — API over the one schedule store and DurableTaskManager.
+
+One scheduler (2026-11-16): schedules live in the instance schedule store
+(``jaeger_agent.memory``) and are fired only by the Gateway's background
+producer (``core/runtime/background_producers.py``), which holds the
+single-owner lock and claims each due run atomically. This class never
+starts a runner of its own and no longer writes a phantom queued durable
+task per schedule.
 
 This is the single entry point for all scheduling in JaegerAI:
 
-- **Cron-style scheduling** (from legacy `CronRunner`) — periodic prompts
+- **Cron-style scheduling** — periodic prompts (fired by the Gateway)
 - **Durable tasks** (from `GatewayTaskOwner`) — one-shot or long-running work
 - **Kanban board** (from legacy `Board`) — task management
 
@@ -26,7 +33,7 @@ Usage:
     ```
 
 The unified scheduler automatically:
-- Routes cron jobs to the legacy `CronRunner` (backward compatible)
+- Writes schedules to the one store the Gateway fires from
 - Stores all tasks in the new `SqliteDurableTaskStore`
 - Provides a single API for both systems
 - Handles migration from legacy schedules on first use
@@ -84,7 +91,7 @@ class UnifiedScheduler:
     """Single scheduler combining cron, durable tasks, and kanban board.
 
     This is the recommended interface for all scheduling in JaegerAI.
-    It wraps both the legacy CronRunner and the new DurableTaskManager,
+    It wraps the one schedule store and the DurableTaskManager,
     providing a unified API while maintaining backward compatibility.
     """
 
@@ -117,7 +124,7 @@ class UnifiedScheduler:
         self._load_cards()
 
     # ─────────────────────────────────────────────────────────────
-    # Cron-style scheduling (wraps legacy CronRunner)
+    # Cron-style scheduling (the one schedule store)
     # ─────────────────────────────────────────────────────────────
 
     def schedule_cron(
@@ -130,8 +137,7 @@ class UnifiedScheduler:
     ) -> DurableTask:
         """Schedule a recurring cron job.
 
-        This creates a durable task AND registers it with the legacy
-        CronRunner for backward compatibility.
+        Writes the schedule to the one store; the Gateway fires it.
 
         Args:
             cron_expr: Cron expression (e.g., "0 9 * * *") or interval ("300s", "@hourly")
@@ -159,11 +165,7 @@ class UnifiedScheduler:
             },
         )
         task.next_execution = self._next_cron_time(cron_expr)
-        self.store.save_task(task)
-
-        # Register with legacy CronRunner if enabled
-        if self._enable_legacy_cron:
-            self._register_legacy_cron(task_name, cron_expr, prompt)
+        self._add_schedule(task_name, cron_expr, prompt)
 
         logger.info(f"Scheduled cron job '{task_name}': {cron_expr}")
         return task
@@ -177,24 +179,13 @@ class UnifiedScheduler:
         Returns:
             True if cancelled, False if not found
         """
-        task_id = f"cron:{name}"
-        task = self.store.get_task(task_id)
-        if task is None or task.state == TaskState.CANCELLED:
+        if not self._cancel_schedule(name):
             return False
-
-        # Cancel in durable store
-        task.state = TaskState.CANCELLED
-        task.cancellation = "user requested"
-        self.store.save_task(task)
-
-        # Cancel in legacy system
-        if self._enable_legacy_cron:
-            self._unregister_legacy_cron(name)
 
         logger.info(f"Cancelled cron job '{name}'")
         return True
 
-    def list_cron(self, owning_agent: str | None = None) -> list[DurableTask]:
+    def list_cron(self, owning_agent: str | None = None) -> list[dict[str, Any]]:
         """List all scheduled cron jobs.
 
         Args:
@@ -203,11 +194,13 @@ class UnifiedScheduler:
         Returns:
             List of scheduled tasks
         """
-        tasks = self.store.list_tasks(kind=TaskKind.SCHEDULED_JOB)
-        if owning_agent:
-            tasks = [t for t in tasks if t.owning_agent == owning_agent]
-        # Only return active (non-terminal) tasks
-        return [t for t in tasks if not t.is_terminal]
+        # Read the one schedule store (owning_agent is kept for API compatibility).
+        try:
+            from jaeger_agent.memory import memory as mem
+            return list(mem.list_schedules())
+        except Exception as exc:
+            logger.warning(f"Failed to list schedules: {exc}")
+            return []
 
     # ─────────────────────────────────────────────────────────────
     # Durable task submission (from GatewayTaskOwner)
@@ -389,11 +382,8 @@ class UnifiedScheduler:
 
     def start(self) -> None:
         """Start the scheduler (begins cron polling)."""
-        if self._enable_legacy_cron and self._cron_callback and self._cron_runner is None:
-            from jaeger_agent.background.cron_runner import CronRunner
-            self._cron_runner = CronRunner(self._cron_callback, llm_lock=None)
-            self._cron_runner.start()
-            logger.info("Unified scheduler started (legacy cron enabled)")
+        # The Gateway's background producer is the only runner; nothing to start.
+        return None
 
     def shutdown(self) -> None:
         """Shut down the scheduler."""
@@ -430,21 +420,22 @@ class UnifiedScheduler:
                 pass
             return None
 
-    def _register_legacy_cron(self, name: str, cron_expr: str, prompt: str) -> None:
-        """Register a cron job with the legacy system."""
+    def _add_schedule(self, name: str, cron_expr: str, prompt: str) -> None:
+        """Write the schedule to the one store the Gateway fires from."""
         try:
             from jaeger_agent.memory import memory as mem
             mem.add_schedule(cron_expr=cron_expr, prompt=prompt, name=name)
         except Exception as exc:
-            logger.warning(f"Failed to register legacy cron '{name}': {exc}")
+            logger.warning(f"Failed to add schedule '{name}': {exc}")
 
-    def _unregister_legacy_cron(self, name: str) -> None:
-        """Unregister a cron job from the legacy system."""
+    def _cancel_schedule(self, name: str) -> bool:
+        """Cancel a schedule in the one store."""
         try:
             from jaeger_agent.memory import memory as mem
-            mem.cancel_schedule(name)
+            return bool(mem.cancel_schedule(name))
         except Exception as exc:
-            logger.warning(f"Failed to unregister legacy cron '{name}': {exc}")
+            logger.warning(f"Failed to cancel schedule '{name}': {exc}")
+            return False
 
     def _load_cards(self) -> None:
         """Load cards from SQLite."""
