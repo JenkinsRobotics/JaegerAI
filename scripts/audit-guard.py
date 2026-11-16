@@ -272,6 +272,13 @@ def c_no_second_checkout():
     return not left, f"still present: {left}" if left else "services run from ~/GitHub/JaegerAI only"
 
 
+def c_blocking_hooks():
+    loop = (REPO / "packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py").read_text()
+    hooks = (REPO / "packages/jaeger-agent/jaeger_agent/tool_executor.py").read_text()
+    ok = "return HookedToolExecutor(" in loop and "blocked_by_hook" in hooks and "pre_tool_call" in hooks
+    return ok, "pre_tool_call veto (shell hooks, exit 2 blocks) + in-process pre_tool hooks wrap every tool call" if ok else "hook executor not in the default chain"
+
+
 def c_removed_index():
     if not REMOVED.exists():
         return True, "nothing removed yet"
@@ -307,6 +314,7 @@ CHECKS = [
     ("G20", "No unused launchd plists", c_no_stale_plists, True),
     ("G21", "No second deploy checkout", c_no_second_checkout, True),
     ("G22", "Cut list: backlog + ARES/Muse bridge parts", c_cut_blocked, False),
+    ("G23", "Blocking pre-tool hooks in the default tool chain", c_blocking_hooks, True),
 ]
 
 
