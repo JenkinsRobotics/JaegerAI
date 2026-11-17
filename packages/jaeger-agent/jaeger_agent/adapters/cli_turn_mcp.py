@@ -705,6 +705,10 @@ def release_cli_mcp(server: TurnToolMcp | None) -> None:
             server.stop()
         except Exception:  # noqa: BLE001 — a stuck loopback server must not fail the turn
             logger.warning("dedicated turn MCP did not stop cleanly", exc_info=True)
+        own = getattr(server, "config_folder", None)
+        if own:
+            import shutil
+            shutil.rmtree(own, ignore_errors=True)
 
 
 def grok_leader_argv() -> list[str]:
@@ -739,6 +743,15 @@ def attach_cli_mcp(
         logger.warning("CLI native MCP unavailable (%s); using text tool protocol", type(exc).__name__)
         return argv, {}, None, True
 
+    if folder and getattr(server, "_dedicated", False):
+        # A second, concurrent turn gets its own server. Its config must not
+        # overwrite the shared folder's: the first turn's Grok (one leader
+        # process) would reconnect to this server and lose its tools when
+        # this turn ends ("MCP handshake could not send the request", R13).
+        port = (server.url or "").rsplit(":", 1)[-1].split("/")[0] or "x"
+        folder = os.path.join(folder, f"turn-{port}")
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        server.config_folder = folder  # type: ignore[attr-defined]
     child = list(argv)
     extra_env: dict[str, str] = {}
     autonomy = current_autonomy()

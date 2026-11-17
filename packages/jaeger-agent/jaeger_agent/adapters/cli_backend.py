@@ -952,6 +952,17 @@ class CliBackendAdapter(ProviderAdapter):
                 execute if callable(execute) else None,
                 work_cwd=work_cwd,
             )
+            own = getattr(mcp, "config_folder", None) if mcp is not None else None
+            if own:
+                # Concurrent turn on its own MCP server: its config and prompt
+                # live in a private folder (see attach_cli_mcp).
+                if spawn_cwd == folder:
+                    spawn_cwd = own
+                if prompt_file and prompt_file in child_argv:
+                    moved = os.path.join(own, "prompt.txt")
+                    child_argv[child_argv.index(prompt_file)] = moved
+                    prompt_file = moved
+                folder = own
             if text_fallback and tools:
                 live_prompt = flatten_messages(
                     getattr(self, "_pending_messages", []) or [],
