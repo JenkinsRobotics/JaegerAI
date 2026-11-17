@@ -1087,8 +1087,14 @@ class CliBackendAdapter(ProviderAdapter):
             if on_delta is None:
                 # Nothing to observe without a stream: keep a plain wall clock.
                 hard = min(hard, _CLI_NONSTREAM_TIMEOUT_S)
+        # The configured ``timeout_s`` is a per-request (HTTP-style) budget;
+        # a streaming CLI turn runs many tool calls, so silence governs it and
+        # only the hard cap bounds it. Keep the configured value as a cap for
+        # cron and non-streaming turns. Local variable: never shrink the
+        # adapter's setting for the next turn.
+        turn_limit = self.timeout_s or hard
         if hard > 0:
-            self.timeout_s = min(self.timeout_s or hard, hard)
+            turn_limit = hard if idle is not None else min(turn_limit, hard)
         popen_kwargs: dict[str, Any] = {
             "args": argv,
             "stdin": subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
@@ -1105,11 +1111,11 @@ class CliBackendAdapter(ProviderAdapter):
         self._proc = subprocess.Popen(**popen_kwargs)
         try:
             if on_delta is not None:
-                stdout, stderr = collect_stream(self._proc, stdin_bytes, self.timeout_s, on_delta, on_reasoning, on_progress,
+                stdout, stderr = collect_stream(self._proc, stdin_bytes, turn_limit, on_delta, on_reasoning, on_progress,
                                                 idle_timeout=idle)
             else:
                 stdout, stderr = self._proc.communicate(
-                    input=stdin_bytes, timeout=self.timeout_s,
+                    input=stdin_bytes, timeout=turn_limit,
                 )
         except subprocess.TimeoutExpired:
             self._kill()
