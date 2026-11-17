@@ -1,4 +1,4 @@
-"""Canonical Jaeger CLI update review channels; unrelated to vendored WebUI tracks."""
+"""Canonical Jaeger CLI update review channels."""
 UPDATE_CHANNELS = ('stable', 'latest')
 DEFAULT_UPDATE_CHANNEL = 'stable'
 

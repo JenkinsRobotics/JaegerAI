@@ -300,8 +300,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
     names = () if args.no_containers else _container_names()
     failures = []
 
-    # Hermes Agent and its native API run on the Mac, so WebUI lifecycle
-    # never starts a Hermes WebUI container.
+    # The WebUI runs inside the Gateway, so WebUI lifecycle starts no container.
     if names:
         cli = _get_container_cli()
         if cli is None:

@@ -235,7 +235,7 @@ def write_default_config(path: Path | None = None, *, force: bool = False) -> Pa
 #   root         = working directory for the project
 #   build_cmd    = how to build/test it (surfaced to robotics_build)
 #   tool_bundle  = cap on tools agents may use on this project
-#                  (see jaeger_ai/contract/tool_bundles.py)
+#                  (see jaeger_agent/schemas/tool_bundles.py)
 # [[operator.projects]]
 # name = "Robot Arm v2"
 # root = "~/projects/robot-arm"

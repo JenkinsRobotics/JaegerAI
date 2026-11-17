@@ -1701,8 +1701,6 @@ class JaegerGatewayApp:
         # were archived 2026-11-16 (C7): no callers. oss_stack/docs.py stays (companion embeds).
         from jaeger_ai.features.browser.routes import register as register_browser
         self.browser_runtime = register_browser(self)
-        from jaeger_ai.features.engines.catalog import register as register_engine_catalog
-        register_engine_catalog(self)
         from jaeger_ai.features.ui_layout.routes import register as register_ui_layout
         register_ui_layout(self)
         from jaeger_ai.features.ui_layout.logo import register as register_ui_logo
@@ -5454,9 +5452,8 @@ class JaegerGatewayApp:
         Does not invent a parallel agent runtime — reuses hermes adapters.
 
         Shared MCP chat session: literal ``dispatcher`` — same key Mac Chat /
-        WebUI / Hermes adapter bind via DispatcherStore (see
-        core.frameworks/jaeger.py rewrite to session_id='dispatcher',
-        features/webui/service/session_unify.py, features/dispatcher/store.py
+        WebUI bind via DispatcherStore (see core/frameworks/jaeger.py,
+        core/gateway/webapp/service/session_unify.py, features/dispatcher/store.py
         DISPATCHER). Gateway /v1/sessions UUID stays separate for SSE/store;
         only the MCP chat session_id is shared so one self / one transcript.
         Specialist child runs pass an isolated ``mcp_session``.
@@ -9300,12 +9297,8 @@ def main(argv: list[str] | None = None) -> int:
     state and SSE multi-client broadcast, with the native app, WebUI and
     CLI attaching as decoupled clients.
 
-    It had no route for a whole release. ``jaeger gateway`` goes to
-    ``features.gateway``, which manages the *external* Agentgateway on
-    :8811/:8812 — a different process entirely — while
-    ``jaeger_ai/features/webui/api/jaeger_agents.py`` and
-    ``scripts/run-jaeger-webui.sh`` both pointed clients at the Gateway with
-    nothing listening. Adding the route is what makes those clients real.
+    The same process also serves the WebUI on :8790
+    (``jaeger_ai/core/gateway/webapp``).
 
     Binds loopback by default; publish to a tailnet rather than widening
     the bind.

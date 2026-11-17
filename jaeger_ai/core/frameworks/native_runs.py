@@ -11,22 +11,16 @@ from pathlib import Path
 import threading
 import time
 import uuid
-from urllib.parse import parse_qs, urlsplit
 
 from .resilience import failure_category, timeout_setting
 from .run_ownership import Ownership
-from .ingress import BodyReadTimeout, ProfileIngress
-from .adapter_protocol import clean_transcript_text, is_benign_stderr, parse_tool_line
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 
 
 def _profile_config_path(profile):
-    """Resolve a Hermes WebUI profile config, including archived profiles.
-
-    OpenClaw/Roundtable may be moved under ~/.hermes/profiles/.archive/ so they
-    stay out of the WebUI picker while adapters can still authenticate.
-    """
+    """Resolve a profile's config under the shared profile tree, including
+    profiles parked under ``profiles/.archive/``."""
     from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
 
     root = hermes_profile_root() / "profiles"
@@ -351,118 +345,6 @@ class Runs:
                 return {k: v for k, v in saved.items() if k != 'events'}
             finally:
                 os.close(lease)
-
-
-class RunsHTTP(ProfileIngress):
-    """Mixin for existing profile servers; preserves legacy completion clients."""
-    def create_native_run(self, body):
-        return self.native_runs().start(str(body.get('session_id') or self.headers.get('X-Hermes-Session-Id') or ''),
-            body.get('input') or body.get('message'), body.get('workspace'),
-            model=body.get('model'), provider=body.get('provider') or body.get('model_provider'))
-
-    def native_capabilities(self):
-        return {"streaming": True, "features": {
-            "approval_events": True, "run_approval_response": True,
-            "approval_identity_v1": True, "tool_events": True,
-            "cancellation": True, "event_replay": True}}
-
-    def native_route(self, method):
-        parsed = urlsplit(self.path)
-        if parsed.path == "/v1/capabilities":
-            self.native_json(200, self.native_capabilities())
-            return True
-        if not parsed.path.startswith("/v1/runs"):
-            return False
-        if not self.profile_authorized():
-            return True
-        try:
-            runs = self.native_runs()
-            parts = parsed.path.strip("/").split("/")
-            if parts[:2] != ["v1", "runs"]:
-                raise KeyError("Route not found")
-            if method == "POST":
-                body = self.read_json_body()
-                if parts == ["v1", "runs"]:
-                    result = self.create_native_run(body)
-                    self.native_json(200, result)
-                    return True
-            if len(parts) not in (3, 4):
-                raise KeyError("Route not found")
-            run = runs.get(parts[2])
-            if method == 'POST' and len(parts) == 4 and parts[3] == 'reconcile':
-                self.native_json(200, runs.reconcile(parts[2]))
-            elif method == "GET" and len(parts) == 3:
-                self.native_json(200, run.snapshot() if isinstance(run, Run) else {k:v for k,v in run.items() if k != "events"})
-            elif method == "GET" and len(parts) == 4 and parts[3] == "events":
-                cursor = parse_qs(parsed.query).get("after_seq", [self.headers.get("Last-Event-ID", "0")])[0]
-                after = max(0, int(cursor.rsplit(":", 1)[-1]))
-                self.native_events(run, after)
-            elif method == "POST" and len(parts) == 4 and isinstance(run, Run):
-                if parts[3] in {"cancel", "stop"}:
-                    accepted = run.cancel()
-                    deadline = time.monotonic() + 2.0
-                    with run.condition:
-                        while run.worker_active and time.monotonic() < deadline:
-                            run.condition.wait(max(0.001, deadline - time.monotonic()))
-                    self.native_json(200, {"ok": accepted, **run.snapshot()})
-                    return True
-                elif parts[3] == "approval":
-                    run.approve(str(body.get("approval_id") or ""), str(body.get("choice") or ""))
-                    accepted = True
-                else:
-                    raise KeyError("Route not found")
-                self.native_json(200, {"ok": accepted, "status": "accepted" if accepted else "not-active"})
-            else:
-                raise KeyError("Route not found")
-        except (KeyError, ValueError, RuntimeError) as exc:
-            self.close_connection = True
-            self.native_json(404 if isinstance(exc, KeyError) else 409 if isinstance(exc, RuntimeError) else 400, {"error": str(exc)})
-        except BodyReadTimeout as exc:
-            self.close_connection = True
-            self.native_json(408, {'error': str(exc), 'error_category': 'request_body_timeout'})
-        except OSError as exc:
-            self.native_json(502, {"error": str(exc), "error_category": failure_category(exc)})
-        return True
-
-    def native_json(self, status, body):
-        payload = json.dumps(body).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def native_events(self, run, after):
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.close_connection = True
-        try:
-            while True:
-                if isinstance(run, Run):
-                    with run.condition:
-                        rows = list(run.events[after:])
-                        terminal = run.status in TERMINAL
-                else:
-                    rows, terminal = run["events"][after:], True
-                for row in rows:
-                    self.wfile.write(f"id: {row['run_id']}:{row['seq']}\ndata: {json.dumps(row)}\n\n".encode())
-                    after = row["seq"]
-                if terminal:
-                    self.wfile.write(b"data: [DONE]\n\n")
-                else:
-                    self.wfile.write(b": heartbeat\n\n")
-                self.wfile.flush()
-                if terminal:
-                    break
-                with run.condition:
-                    if len(run.events) == after and run.status not in TERMINAL:
-                        run.condition.wait(1)
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass  # Observer disconnect is not permission to retry the work.
 
 
 def jaeger_reconcile(native):

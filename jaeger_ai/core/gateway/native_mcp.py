@@ -1,9 +1,7 @@
 """Gateway transport to Jaeger's native MCP HTTP server.
 
 The Gateway's live native-chat, readiness-probe and cancel paths reach the
-Jaeger agent through this minimal MCP JSON-RPC client. It used to live inside
-the legacy Hermes-WebUI REST adapter (``core/frameworks/jaeger.py``); it is
-owned by the Gateway now, and that adapter imports it from here.
+Jaeger agent through this minimal MCP JSON-RPC client.
 """
 
 from __future__ import annotations

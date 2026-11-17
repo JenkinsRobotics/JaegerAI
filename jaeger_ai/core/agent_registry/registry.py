@@ -23,7 +23,6 @@ from typing import Any
 from jaeger_ai.contract.ports import GATEWAY_PORT
 
 from jaeger_ai.core.agent_registry.types import (
-    BUILTIN_THIRD_PARTY,
     AgentKind,
     AgentRecord,
     AgentRole,
@@ -149,29 +148,6 @@ class AgentRegistry:
             return None
         return text or None
 
-    def _builtin_third_party(self) -> list[AgentRecord]:
-        active_id = self._data.get("active_id")
-        out: list[AgentRecord] = []
-        for item in BUILTIN_THIRD_PARTY:
-            agent_id = str(item["id"])
-            out.append(
-                AgentRecord(
-                    id=agent_id,
-                    name=str(item["name"]),
-                    kind=AgentKind.THIRD_PARTY,
-                    display_name=str(item["display_name"]),
-                    source="adapter",
-                    role=AgentRole.SPECIALIST,
-                    active=(active_id == agent_id),
-                    adapter=str(item.get("adapter") or item["name"]),
-                    profile_id=(str(item["profile_id"]) if item.get("profile_id") else None),
-                    endpoint=(str(item["endpoint"]) if item.get("endpoint") else None),
-                    port=(int(item["port"]) if item.get("port") is not None else None),
-                    metadata={"builtin": True},
-                )
-            )
-        return out
-
     def _registered(self) -> list[AgentRecord]:
         active_id = self._data.get("active_id")
         out: list[AgentRecord] = []
@@ -192,7 +168,7 @@ class AgentRegistry:
         kind: AgentKind | str | None = None,
         role: AgentRole | str | None = None,
     ) -> list[AgentRecord]:
-        """Return merged catalog: discovered native + builtin/registered third-party."""
+        """Return merged catalog: discovered native + registered third-party."""
         # Product shape: lead + standing specialists always present (idempotent).
         try:
             from jaeger_ai.core.agent_registry.specialists import ensure_standing_specialists
@@ -209,8 +185,6 @@ class AgentRegistry:
 
         by_id: dict[str, AgentRecord] = {}
         for record in self._discover_native():
-            by_id[record.id] = record
-        for record in self._builtin_third_party():
             by_id[record.id] = record
         for record in self._registered():
             # Registry overlays discovery (custom display names, endpoints).

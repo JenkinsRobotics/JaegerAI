@@ -5,7 +5,6 @@ import json
 import logging
 import re
 import threading
-import time
 from typing import Any
 
 from jaeger_ai.core.gateway.session_titles import (
@@ -114,7 +113,6 @@ def _ensure_current_topic(store: Any, session_id: str, session: dict[str, Any]) 
 
 
 def _shift_decision(prompt: str) -> tuple[bool, str, str]:
-    from jaeger_ai.core.gateway.session_titles import _ollama_cloud_title, _grok_title, sanitize_topic_title as _san
 
     try:
         from jaeger_ai.core.gateway import session_titles as titles

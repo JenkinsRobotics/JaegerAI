@@ -227,7 +227,7 @@ _started: dict = {}
 
 
 def _env_defaults() -> None:
-    """What scripts/run-jaeger-webui.sh used to export for the old service."""
+    """Default WebUI state paths and labels, set once before the server binds."""
     from jaeger_ai.core.instance.instance import operator_state_root
     state = operator_state_root()
     os.environ.setdefault("JAEGER_WEBUI_AGENT_STATE", str(state / "webui-agent"))

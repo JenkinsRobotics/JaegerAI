@@ -1,4 +1,4 @@
-/* Typed port of jaeger_ai/features/webui/static/jaeger_agents_panel.js
+/* Typed port of the retired WebUI agents panel (jaeger_agents_panel.js)
  * (roster filtering, labels, sort order, home ids). */
 import type { Agent, AgentSummary } from "../api/types";
 

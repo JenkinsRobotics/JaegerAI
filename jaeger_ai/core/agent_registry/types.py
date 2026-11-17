@@ -80,41 +80,9 @@ def default_role_for(
         }:
             return AgentRole.SPECIALIST
         return AgentRole.RUNTIME
-    # Standing third-party adapter faces (Hermes/OpenClaw/Roundtable/…) → specialist.
+    # Registered third-party agents → specialist.
     _ = adapter  # reserved for future adapter-specific overrides
     return AgentRole.SPECIALIST
-
-
-# Stable ids for built-in third-party faces (Hermes WebUI profile adapters).
-BUILTIN_THIRD_PARTY: tuple[dict[str, Any], ...] = (
-    {
-        "id": "tp:hermes",
-        "name": "hermes",
-        "display_name": "Hermes Agent",
-        "adapter": "hermes",
-        "profile_id": "default",
-        "endpoint": None,
-        "port": None,
-    },
-    {
-        "id": "tp:openclaw",
-        "name": "openclaw",
-        "display_name": "OpenClaw",
-        "adapter": "openclaw",
-        "profile_id": "openclaw",
-        "endpoint": "http://127.0.0.1:8644",
-        "port": 8644,
-    },
-    {
-        "id": "tp:roundtable",
-        "name": "roundtable",
-        "display_name": "Roundtable",
-        "adapter": "roundtable",
-        "profile_id": "roundtable",
-        "endpoint": "http://127.0.0.1:8643",
-        "port": 8643,
-    },
-)
 
 
 _RUNNER = re.compile(r"^(native|delegate:[A-Za-z0-9_.:-]{1,80})$")

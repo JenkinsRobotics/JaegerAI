@@ -2,7 +2,7 @@ import{useEffect,useState}from'react';
 import type{JaegerSource,UpdatePlan}from'../api/source';
 import{nativeBridge}from'../platform/native';
 const CHANNEL='jaeger.ui.update-review-channel.v1';
-/** A real read-only installer plan. Never calls the vendored WebUI self-updater. */
+/** A real read-only installer plan. It never runs an updater. */
 export function UpdatePlanPanel({source}:{source:JaegerSource}){
  const [channel,setChannel]=useState<'stable'|'latest'>(()=>{try{return localStorage.getItem(CHANNEL)==='latest'?'latest':'stable';}catch{return'stable';}});
  const [result,setResult]=useState<{channel:string;plan:UpdatePlan}>(),[error,setError]=useState<string>(),[attempt,setAttempt]=useState(0);

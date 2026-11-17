@@ -19,7 +19,6 @@ from jaeger_ai.core.agent_registry.specialists import (
     specialist_ids,
 )
 from jaeger_ai.core.agent_registry.types import (
-    BUILTIN_THIRD_PARTY,
     AgentKind,
     AgentRecord,
     AgentRole,
@@ -34,7 +33,6 @@ __all__ = [
     "AgentRecord",
     "AgentRole",
     "AgentRegistry",
-    "BUILTIN_THIRD_PARTY",
     "HandoffRecord",
     "HandoffStub",
     "JaegerNativeAgent",

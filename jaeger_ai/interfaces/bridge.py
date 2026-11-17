@@ -3995,7 +3995,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 if isinstance(parsed, dict):
                     inbound.put((parsed, owner_out))
         finally:
-            # Socket attach (Hermes WebUI / other clients) is the live control
+            # Socket attach (the Gateway WebUI / other clients) is the live control
             # plane. Stdin EOF from launchd/nohup must not kill that agent.
             ctx.booted.wait(timeout=120)
             deadline = time.monotonic() + 5.0

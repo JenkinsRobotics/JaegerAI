@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { mockAdapter } from "./mockOrchestration";
+import { mockAdapter } from "../test/fixtures/mockOrchestration";
 import { OrchestrationPanes } from "./OrchestrationPanes";
 import { CheckBadge } from "./CheckBadge";
 

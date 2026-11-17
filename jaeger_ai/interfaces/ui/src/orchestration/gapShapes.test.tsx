@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Handoff } from "../api/types";
 import { gatewayActivity, resetActivityProbe } from "./adapter";
 import { activityItemRow, artifactsFor, checkFor, eventRow, parseEvidence, statusTone } from "./feed";
-import { mockAdapter, mockFrames, mockSnapshotData } from "./mockOrchestration";
+import { mockAdapter, mockFrames, mockSnapshotData } from "../test/fixtures/mockOrchestration";
 import { OutputLinkView } from "./OutputLinkView";
 import { useOrchestration } from "./useOrchestration";
 

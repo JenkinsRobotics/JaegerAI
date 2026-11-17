@@ -25,11 +25,8 @@ PROFILE_DISPLAY_NAMES: dict[str, str] = {f.profile: f.display_name for f in FRAM
 def profile_display_name(profile_id: str | None) -> str:
     """The friendly label for any spelling of a framework name.
 
-    Accepts a profile ("default"), a runtime ("hermes") or an agent id
-    ("tp:hermes") — the contract resolves all three. Before it did, passing a
-    runtime fell through to the title-case fallback below and returned
-    "Hermes" instead of "Hermes Agent", which is why callers grew their own
-    alias maps to work around it.
+    Accepts a profile, a runtime or an agent id ("native:jaeger"); the
+    contract resolves all three.
 
     The fallback stays for ids that are genuinely not frameworks, such as an
     operator-created profile.
@@ -76,7 +73,7 @@ def library_model() -> dict[str, Any]:
 def ensure_agent_state_schema(agent_home: Path) -> dict[str, Any]:
     """Guarantee ``state.db`` exists with a ``source`` column.
 
-    ``jaeger_ai/features/webui/api/agent_sessions.py`` returns an empty list when
+    the retired ``agent_sessions`` WebUI route returns an empty list when
     the column is missing, which is the empty-sidebar failure on :8790.
     This does not import live Hermes history — that is the Phase 1 catalog
     import.

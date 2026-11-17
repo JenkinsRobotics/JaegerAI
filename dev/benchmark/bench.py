@@ -285,10 +285,6 @@ def _run_single(args: argparse.Namespace) -> int:
         from jaeger_ai.core.bench import run_bench, summarise
 
         corpus = None
-        if args.corpus == "B":
-            from jaeger_ai.core.bench.cases_b import CASES_B
-            corpus = CASES_B
-            print(f"=== Corpus B ({len(corpus)} cases) ===", flush=True)
 
         def _on_row(idx, total, case_id, passed, elapsed_s):
             mark = "✓" if passed else "✗"
@@ -437,8 +433,6 @@ def _run_sweep(args: argparse.Namespace) -> int:
                 str(pathlib.Path(__file__).resolve()),
                 "--target-model", mp,
             ]
-            if args.corpus != "A":
-                child += ["--corpus", args.corpus]
             if args.category:
                 child += ["--category", args.category]
             if args.quick:
@@ -469,10 +463,6 @@ def main() -> int:
                    help="Comma-separated categories/tags to run. Empty = "
                         "full corpus. See the module docstring for the list.")
     p.add_argument("--ids", default="", help="Comma-separated case ids.")
-    p.add_argument("--corpus", choices=["A", "B"], default="A",
-                   help="Which corpus: A = the original cases (default); B = "
-                        "the parallel same-category/new-prompt set (cases_b) — "
-                        "tests generalization, catches prompt-memorization.")
     p.add_argument("--limit", type=int, default=0,
                    help="Cap number of cases (after filtering). 0 = none.")
     p.add_argument("--quick", action="store_true",
