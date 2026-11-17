@@ -44,8 +44,8 @@ WEBUI_PORT: Final = 8790
 # ── external protocol surfaces ───────────────────────────────────────────
 
 MCP_GATEWAY_PORT: Final = 8811
-"""Agentgateway's MCP surface — the third-party binary, not the Jaeger
-Gateway above. See ``jaeger_ai/features/agentgateway/``."""
+"""Former Agentgateway MCP port (third-party binary, archived 2026-11-16, C7).
+Kept so old configs still resolve; nothing in Jaeger listens here now."""
 
 MCP_GATEWAY_URL: Final = os.environ.get(
     "JAEGERS_MCP_URL", f"http://{LOOPBACK}:{MCP_GATEWAY_PORT}/mcp"

@@ -57,7 +57,6 @@ to none of them.
 | Path | What it actually is |
 | :--- | :--- |
 | `jaeger_ai/core/gateway/` | **The Jaeger Gateway.** Owns chat sessions and live events on port 33418. Started by `jaeger gateway daemon`. |
-| `jaeger_ai/features/agentgateway/` | Installs and runs the third-party `agentgateway` binary (MCP 8811, A2A 8812). Started by `jaeger gateway start`. |
 | `jaeger_ai/interfaces/messaging/` | Discord, Slack and Telegram chat adapters. |
 
 The first two are one CLI word apart and were both called "gateway" until the
@@ -101,7 +100,6 @@ JaegerAI/
 │   │   ├── webui/              # 🌐 Web UI adapter, profiles, session unification
 │   │   ├── dispatcher/         # 📋 Task Kanban board and worker routing
 │   │   ├── roundtable/         # 🏛️ Multi-agent debate (Jaeger, Hermes, OpenClaw)
-│   │   ├── agentgateway/       # 🔌 The third-party agentgateway binary (8811/8812)
 │   │   ├── host_capabilities/  # 🛠️ Files, shell, apps, camera, memory — permission-gated
 │   │   ├── personality/        # 🎭 The persona used on every turn (YAML characters)
 │   │   ├── skill_tree/         # 🌳 XP progression over the agent's skills

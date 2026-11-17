@@ -172,10 +172,7 @@ APPROVE_ROUTES = frozenset({("POST", "/v1/approvals/{id}"), ("POST", "/v1/approv
 IDE_ROUTES = frozenset({("POST", "/v1/sessions/{id}/ide/{ide_request_id}")})
 STOP_ROUTES = frozenset({("POST", "/v1/stop")})
 #: Shared web search (local SearXNG) and safe page fetch: the ``search`` grant.
-SEARCH_ROUTES = frozenset({("POST", "/v1/search"), ("POST", "/v1/fetch"),
-                           # OSS stack (features.oss_stack): model router, shared MCP tools, Documents RAG
-                           ("POST", "/v1/models/route"), ("POST", "/v1/models/generate"),
-                           ("POST", "/v1/tools/list"), ("POST", "/v1/tools/call"), ("POST", "/v1/docs/search")})
+SEARCH_ROUTES = frozenset({("POST", "/v1/search"), ("POST", "/v1/fetch")})
 #: Lead → specialist handoff (``call_agent``): owners and jaegerd, never outside callers.
 #: Inner helpers use ``delegate`` (and its ``call_agent`` alias) on the same grant.
 DELEGATE_ROUTES = frozenset({("POST", "/v1/agents/{id}/handoff"), ("POST", "/v1/sessions/{id}/transfer")})

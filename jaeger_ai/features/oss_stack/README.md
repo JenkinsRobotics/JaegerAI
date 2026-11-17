@@ -1,10 +1,7 @@
-# oss_stack
+# oss_stack (docs.py only)
 
-Phase-1 OSS stack: model router, shared MCP tool servers and Documents RAG.
-
-- `router.py`, `routes.py`: model routing and its Gateway routes.
-- `mcp_pool.py`: shared MCP tool servers.
-- `docs.py`, `docs_indexer.py`: Documents RAG (the `jaeger-docs-indexer` service, Qdrant).
-- `browser_proxy.py`: loopback forward proxy for the shared browser with DNS-pinned public destinations.
-
-Touchpoints: Gateway, Research › Documents, the docs-indexer LaunchAgent.
+`docs.py` has the local embedding helper (`embed`, through the Mac's Ollama) that
+`features/personality/companion.py` uses. The rest of the stack was archived on
+2026-11-16 (C7) to `~/Desktop/Jaeger-removed-features-2026-11-16/oss-stack-routes/`
+because nothing called it: the model router, the shared MCP tool pool, the browser proxy,
+the Documents indexer, and the `/v1/models/*`, `/v1/tools/*` and `/v1/docs/search` routes.

@@ -33,9 +33,9 @@ TERMINAL = frozenset({
 
 
 def default_db_path() -> Path:
-    from jaeger_ai.features.agentgateway.constants import jaeger_home
+    from jaeger_ai.core.instance.instance import operator_state_root
 
-    return jaeger_home() / "a2a" / "tasks.sqlite3"
+    return operator_state_root() / "a2a" / "tasks.sqlite3"
 
 
 class LedgerTaskStore(TaskStore):
