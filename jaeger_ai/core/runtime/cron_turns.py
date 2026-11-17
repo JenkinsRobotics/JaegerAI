@@ -20,7 +20,7 @@ CRON_MAX_STEPS = 1
 # Distinct from the interactive CLI hard cap (120s). A check-in should
 # finish in under a minute and a half; operators can raise this with
 # JAEGER_CRON_TURN_TIMEOUT_S.
-_DEFAULT_CRON_TURN_TIMEOUT_S = 90.0
+_DEFAULT_CRON_TURN_TIMEOUT_S = 180.0  # 90s cut a read-only 8-tool heartbeat (G11)
 _PREAMBLE_MARK = "[Heartbeat checklist]"
 
 _cron_turn: ContextVar[bool] = ContextVar("jaeger_cron_turn", default=False)
