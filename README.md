@@ -324,42 +324,37 @@ The wizard guides you through: **character** → **model** → **permissions** �
 
 ### Jaeger WebUI
 
-Jaeger's first-party browser interface lives at
-`jaeger_ai/features/webui`. Its browser source descends from Hermes WebUI and
-retains the upstream MIT license, while Jaeger owns the runtime, sessions,
-tools, approvals, memory, models, heartbeat, and scheduled work. Start the
-loopback adapter and browser server with one command:
+The browser interface is served by the Gateway itself on port `8790`. The
+frontend is `jaeger_ai/interfaces/ui` (React + TypeScript, shared with the Mac
+app); the server side is `jaeger_ai/core/gateway/webapp`, folded into the
+Gateway in R11. There is no separate WebUI process to run: when the Gateway is
+up, `http://127.0.0.1:8790` is up.
 
 ```bash
-./jaeger webui start --instance <agent-name>
+./jaeger webui status            # ports and health
+./jaeger webui url               # the browser URL
 ```
-
-The launcher configures the WebUI to use the loopback adapter. Jaeger
-WebUI serves the browser on port `8790`, while Jaeger remains the runtime owner for
-sessions, streamed chat and reasoning, model selection, tools, approvals,
-heartbeat, and scheduled jobs through its versioned bridge. The public WebUI
-launch path runs `jaeger_ai/features/webui/server.py` directly: it does not discover,
-run, or import Hermes Agent and stores no state under `~/.hermes`.
-Third-party attribution is recorded in
-`jaeger_ai/features/webui/adapter/THIRD_PARTY_NOTICES.md`.
 
 Port map (defaults chosen to avoid clashes):
 
 | Surface | Default | Notes |
 | --- | ---: | --- |
-| Jaeger WebUI | **8790** | `./scripts/run-jaeger-webui.sh` |
+| Jaeger Gateway | **33418** | Sessions, live events, approvals (loopback only) |
+| Jaeger WebUI | **8790** | Served by the Gateway |
+| Jaeger voice | **8794** | Local speech service (`scripts/run-jaeger-voice.sh`) |
 | Instance webhooks | **8793** | |
 | Jaeger MCP HTTP | **8792** | Native framework endpoint: `http://127.0.0.1:8792/mcp` |
 | Jaeger A2A | **8796** | Native AgentCard and JSON-RPC endpoint |
 
-`jaeger webui status` shows toggle state, container/adapter health, and URLs.
+`./scripts/verify-stack-smoke.py` checks the Gateway, WebUI, MCP and voice
+services in one go (`--live` adds a real chat turn).
 
-Codex, Claude Code, and native Hermes Agent profiles connect directly to
+Codex, Claude Code and other MCP clients connect directly to
 `127.0.0.1:8792/mcp` (MCP) and `127.0.0.1:8796` (A2A). The external
 Agentgateway proxy (8811/8812) was archived on 2026-11-16.
 
-Remote access stays disabled by default. Start the WebUI on loopback and
-publish only Jaeger WebUI through Tailscale Serve with:
+Remote access stays disabled by default. Publish only the WebUI through
+Tailscale Serve with:
 
 ```bash
 ./jaeger webui start --instance <agent-name> --tailscale
@@ -379,9 +374,8 @@ settings are present: `JAEGER_OIDC_ISSUER`, `JAEGER_OIDC_CLIENT_ID`,
 `JAEGER_OIDC_ALLOW_CLAIM`, and `JAEGER_OIDC_ALLOW_VALUES`. Set
 `JAEGER_PUBLIC_BASE_URL` to the external HTTPS URL. Passkeys are instance
 scoped, use WebAuthn origin/RP validation, and are bootstrapped from an already
-authenticated session. The authentication implementation lives in
-`features/webui/api/auth_oidc.py`, `features/webui/api/passkeys.py`, and
-`features/remote_access`.
+authenticated session. The access policy lives in `features/remote_access`
+and the sign-in gate in `core/gateway/webapp/jaeger_signin.py`.
 
 ### External agent delegates
 
@@ -404,27 +398,10 @@ as the active brain with `/model use cli claude` — Jaeger keeps tools,
 memory, and permissions. `delegate_task` is still the worker path: go
 do this whole job in that agent. Do not confuse the two.
 
-### Importing ARES history
-
-`jaeger_ai/features/history_import/ares` imports past ARES sessions read-only,
-so old conversations stay searchable. ARES itself is retired.
-
 ### Running the WebUI in development
 
-For the standard native development layout, start the browser process with:
-
-```bash
-./scripts/run-jaeger-webui.sh
-```
-
-The optional `jaeger_ai/assets/jaeger_webui_branding.js` extension replaces
-the browser favicon and Apple touch icon with Jaeger's existing Mac app icon.
-Enable it through Jaeger WebUI's supported extension variables:
-
-```bash
-export HERMES_WEBUI_EXTENSION_DIR="$PWD/jaeger_ai/assets"
-export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
-```
+Build the frontend with `npm run build` in `jaeger_ai/interfaces/ui`; the
+Gateway serves the built bundle on `8790`. `npm test` runs the UI test suite.
 
 ## Architecture
 

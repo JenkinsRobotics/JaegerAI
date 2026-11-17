@@ -79,13 +79,10 @@ path, as material for the autonomy lane.
 
 ## What the WebUI shows
 
-The WebUI is a client of the Gateway like the IDE: its sidebar is a mirror of the Gateway's
-conversations (`features/webui/api/gateway_mirror.py`), and chat goes through `/v1/sessions`.
-Only the tabs that work with Jaeger are shown: **Chat, Spaces, Settings**. The rest read the
-legacy Hermes systems and show empty or wrong data, so they are hidden, not deleted
-(`HIDDEN_WEBUI_TABS` in `contract/legacy_paths.py`, enforced by the server and applied at page
-load). Only the `jaeger` profile is offered. `JAEGER_LEGACY_PATHS=1` shows everything again.
-Imported Claude Code / Codex history is off by default (a Settings toggle).
+The WebUI is the shared React frontend (`jaeger_ai/interfaces/ui`), served by the Gateway
+on :8790 from `core/gateway/webapp`. Like the IDE and the Mac app it is a client of the
+Gateway: its sidebar mirrors the Gateway's conversations (`core/gateway/webapp/jaeger_sessions.py`)
+and chat goes through `/v1/sessions`.
 
 ## Flags that change the path
 
