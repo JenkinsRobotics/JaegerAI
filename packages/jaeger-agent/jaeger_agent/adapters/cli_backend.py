@@ -20,6 +20,7 @@ import json
 import logging
 import re
 import os
+from pathlib import Path
 import signal
 import subprocess
 import threading
@@ -123,7 +124,24 @@ def _grok_system_prompt_override(tools: list[ToolDef]) -> str:
         + rest
         + " Do not use built-in file, editor, X search, or web tools. "
         "The CLI cache directory is not the workspace."
+        + _where_things_are()
     )
+
+
+def _where_things_are() -> str:
+    """Known locations, so a request about Jaeger's own code or a home
+    folder does not start with a minutes-long glob/find across ``~`` (R13:
+    the lead spent 3.5 of 4 minutes locating the JaegerAI repo)."""
+    root = os.environ.get("JAEGER_INSTALL_ROOT") or ""
+    if not root:
+        try:
+            from jaeger_ai.core.instance.instance import install_root
+            root = str(install_root())
+        except Exception:  # noqa: BLE001
+            root = ""
+    where = f" Your own source code (the JaegerAI repo) is at {root}." if root else ""
+    return (where + f" The owner's home folder is {Path.home()}. Search a specific "
+            "folder; never glob or find across the whole home folder.")
 
 
 def flatten_messages(
