@@ -554,7 +554,7 @@ def parse_cli_usage_limit(text: str) -> str | None:
         return None
     # Codex-style: "resets ... Monday, Nov 16, 2026, 8:03 PM" or similar.
     match = re.search(
-        r"(?:until|resets?(?:\s+on)?|reset at|after)\s+"
+        r"(?:until|resets?(?:\s+on)?|reset at|try again (?:at|on|after)|after)\s+"
         r"((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?"
         r"((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}"
         r"(?:,?\s*\d{4})?(?:,?\s+[0-9]{1,2}:[0-9]{2}\s*(?:AM|PM))?)",
@@ -562,12 +562,70 @@ def parse_cli_usage_limit(text: str) -> str | None:
         re.I,
     )
     if match:
-        when = " ".join(part for part in match.groups() if part).strip(" ,")
+        when = " ".join(" ".join(part.split()) for part in match.groups() if part).strip(" ,")
         if when:
-            if "PT" not in when.upper() and "PACIFIC" not in when.upper():
-                when = f"{when} PT"
             return f"limit reached until {when}"
-    return "limit reached until Nov 16, 2026, 8:03 PM PT"
+    return "usage limit reached"
+
+
+# Runtime state for subscription usage limits: the last limit a CLI reported,
+# so the picker can show it without calling the paid API. Written when a CLI
+# turn fails on a limit; read by discover_subscription_clis.
+_LIMIT_FORMATS = ("%b %d, %Y, %I:%M %p", "%b %d %Y %I:%M %p", "%b %d, %Y %I:%M %p",
+                  "%B %d, %Y, %I:%M %p", "%b %d, %I:%M %p", "%b %d %I:%M %p")
+_LIMIT_DEFAULT_TTL_S = 5 * 3600
+
+
+def _limits_path() -> Path:
+    from jaeger_ai.core.instance.instance import operator_state_root
+    return operator_state_root() / "state" / "cli_usage_limits.json"
+
+
+def _limit_until_epoch(message: str) -> float | None:
+    """Epoch for the reset time in a "limit reached until …" message (local time)."""
+    import re
+    from datetime import datetime
+    text = re.sub(r"^limit reached until\s+", "", message or "", flags=re.I)
+    text = re.sub(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+", "", text.strip(), flags=re.I)
+    text = re.sub(r"\s+(PT|PST|PDT|Pacific( Time)?)$", "", text, flags=re.I).strip(" ,")
+    for fmt in _LIMIT_FORMATS:
+        try:
+            when = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        if "%Y" not in fmt:
+            when = when.replace(year=datetime.now().year)
+        return when.timestamp()
+    return None
+
+
+def record_cli_usage_limit(backend_id: str, message: str) -> None:
+    """Remember a usage limit a CLI just reported (best effort)."""
+    try:
+        path = _limits_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = json.loads(path.read_text()) if path.exists() else {}
+        until = _limit_until_epoch(message)
+        data[backend_id] = {"message": message, "recorded_at": time.time(),
+                            "until": until if until is not None else time.time() + _LIMIT_DEFAULT_TTL_S}
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.replace(path)
+    except Exception:  # noqa: BLE001 — never fail a turn on bookkeeping
+        pass
+
+
+def cli_usage_limit(backend_id: str) -> str | None:
+    """The active usage-limit message for ``backend_id``, or None once it resets."""
+    try:
+        data = json.loads(_limits_path().read_text())
+    except Exception:  # noqa: BLE001
+        return None
+    row = data.get(backend_id) or {}
+    until = row.get("until")
+    if not row.get("message") or (until is not None and time.time() >= float(until)):
+        return None
+    return str(row["message"])
 
 
 _GEMINI_PROBE_CACHE: tuple[float, float, dict[str, Any]] | None = None
@@ -798,12 +856,7 @@ def discover_subscription_clis() -> list[dict[str, Any]]:
             # A live CLI error is parsed when one is recorded on the process.
             cached = (os.environ.get("JAEGER_CHATGPT_LIMIT_UNTIL") or "").strip()
             if not cached:
-                from datetime import datetime
-                from zoneinfo import ZoneInfo
-                pacific = ZoneInfo("America/Los_Angeles")
-                known_until = datetime(2026, 11, 16, 20, 3, tzinfo=pacific)
-                if datetime.now(pacific) < known_until:
-                    cached = "Nov 16, 2026, 8:03 PM PT"
+                cached = cli_usage_limit("codex") or ""
             if cached:
                 reason = ("limit reached until " + cached) if not cached.lower().startswith("limit reached") else cached
                 reachable = False

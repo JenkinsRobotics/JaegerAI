@@ -104,7 +104,8 @@ def _grok_system_prompt_override(tools: list[ToolDef]) -> str:
     rest = (
         f" This session also has {extra} more Jaeger MCP tools; find them "
         "with search_tool or list_tools, then call them as jaeger__<name> "
-        "via use_tool."
+        "via use_tool. Connector tools named mcp__<server>__<tool> elsewhere "
+        "are jaeger__<server>_<tool> here (for example jaeger__github_list_commits)."
         if extra > 0 else ""
     )
     list_hint = (
@@ -1166,6 +1167,11 @@ class CliBackendAdapter(ProviderAdapter):
             except Exception:  # noqa: BLE001
                 limit = None
             if limit:
+                try:
+                    from jaeger_ai.core.models.discovery import record_cli_usage_limit
+                    record_cli_usage_limit(self.spec_id, limit)
+                except Exception:  # noqa: BLE001
+                    pass
                 from jaeger_ai.core.models.request_policy import ModelPolicyError
                 raise ModelPolicyError(limit)
             if self.spec_id == "gemini" and (
