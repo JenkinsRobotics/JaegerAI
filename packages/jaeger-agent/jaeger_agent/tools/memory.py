@@ -21,7 +21,7 @@ from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 # K/V memory
 # ---------------------------------------------------------------------------
 def remember(key: str, value: str, category: str = "", subject: str = "",
-             tags: str = "", note: str = "") -> dict[str, Any]:
+             tags: str = "", note: str = "", restated: bool = False) -> dict[str, Any]:
     """Store a fact in the instance's persistent SQL memory (+ its history).
 
     Call proactively when the user shares a preference, identity fact,
@@ -35,6 +35,17 @@ def remember(key: str, value: str, category: str = "", subject: str = "",
     cat = (category or "").strip().lower() or None
     subj = (subject or "").strip() or None
     from jaeger_agent.memory.fact_policy import UnsafeMemoryFact
+
+    if not restated:
+        try:
+            when = mem.forgotten_at(key, subj)
+        except Exception:  # noqa: BLE001 — a missing history table never blocks a save
+            when = None
+        if when:
+            return {"ok": False, "remembered": False, "error_type": "forgotten_by_owner",
+                    "error": (f"The owner told Jaeger to forget '{key}' ({when[:10]}). Do not restore it "
+                              "from old chats or logs. Save it again only if they state it in this "
+                              "message, with restated=true.")}
 
     try:
         mem.remember(key, value, category=cat, subject=subj, tags=tags, note=note)
@@ -53,14 +64,41 @@ def recall(key: str, subject: str = "") -> dict[str, Any]:
     subj = (subject or "").strip() or None
     value = mem.recall(key, subject=subj)
     if value is None:
+        when = _forgotten(key, subj)
+        if when:
+            return {"found": False, "key": key, "forgotten_by_owner": True,
+                    "message": (f"The owner had this forgotten on {when[:10]}. Tell them it was "
+                                "forgotten at their request. Do not look it up in old chats, "
+                                "session logs or files.")}
         return {"found": False, "key": key}
     return {"found": True, "key": key, "value": value, "subject": subj or "user"}
+
+
+def _forgotten(key: str, subject: str | None) -> str | None:
+    """Forgotten-at for the key as asked or in its snake_case form."""
+    for candidate in dict.fromkeys([key, key.strip().lower().replace(" ", "_").replace("-", "_")]):
+        try:
+            when = mem.forgotten_at(candidate, subject)
+        except Exception:  # noqa: BLE001
+            return None
+        if when:
+            try:  # stored in UTC; report the owner's local date
+                from datetime import datetime
+                return datetime.fromisoformat(when).astimezone().date().isoformat()
+            except ValueError:
+                return when
+    return None
 
 
 def recall_history(key: str, subject: str = "") -> dict[str, Any]:
     """The timeline of a fact — every value it has held, with when/who/note.
     Use for "how has X changed" / "what did I say about X over time"."""
     subj = (subject or "").strip() or None
+    when = _forgotten(key, subj)
+    if when:
+        return {"key": key, "subject": subj or "user", "count": 0, "history": [],
+                "forgotten_by_owner": True,
+                "message": f"Forgotten at the owner's request on {when[:10]}; past values are not shown."}
     entries = mem.recall_history(key, subject=subj)
     return {"key": key, "subject": subj or "user",
             "count": len(entries), "history": entries}
@@ -170,7 +208,8 @@ def memory(action: str, key: str = "", value: str = "",
 # ---------------------------------------------------------------------------
 @register_tool_from_function(name="remember")
 def _t_remember(key: str, value: str, category: str = "",
-                subject: str = "", tags: str = "", note: str = "") -> dict:
+                subject: str = "", tags: str = "", note: str = "",
+                restated: bool = False) -> dict:
     """MANDATORY when the user states a preference, identity fact,
     plan, or anything they might recall later. Call this proactively
     — do not just acknowledge "OK, I'll remember" in text. Pick a
@@ -182,9 +221,11 @@ def _t_remember(key: str, value: str, category: str = "",
     add context. Examples: remember("favorite_color","blue",category="preferences",
     note="mentioned in passing"); remember("phone","555-0142",subject="sara",
     category="contacts"). Re-remembering a key keeps the full history. For YOUR
-    OWN name use set_name, not this."""
+    OWN name use set_name, not this. A fact the owner told you to forget
+    stays forgotten: never rebuild it from old chats or logs; pass
+    restated=true only when they state it again in the current message."""
     return remember(key=key, value=value, category=category,
-                    subject=subject, tags=tags, note=note)
+                    subject=subject, tags=tags, note=note, restated=restated)
 
 
 @register_tool_from_function(name="recall", side_effect="read")
@@ -196,7 +237,9 @@ def _t_recall(key: str, subject: str = "") -> dict:
     favorite X"). Call BEFORE answering — the persisted store is the
     source of truth. `subject` scopes whose fact (omit for the operator,
     or "alice" for someone else). Fuzzy match supported. For how a fact
-    CHANGED over time, use `memory(action="history", …)`."""
+    CHANGED over time, use `memory(action="history", …)`. If nothing is
+    saved, say you don't have it saved; do not dig it out of old chats,
+    session logs or ~/.grok files (it may have been forgotten on purpose)."""
     return recall(key=key, subject=subject)
 
 
