@@ -5,8 +5,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from jaeger_ai.features.webui.service import profile_layout
-from jaeger_ai.features.webui.service.profile_layout import ensure_agent_state_schema
+from jaeger_ai.core.gateway.webapp.service import profile_layout
+from jaeger_ai.core.gateway.webapp.service.profile_layout import ensure_agent_state_schema
 
 
 def test_ensure_agent_state_schema_adds_missing_source_column(tmp_path: Path) -> None:
@@ -37,7 +37,7 @@ def test_ensure_agent_state_schema_creates_db_when_missing(tmp_path: Path) -> No
 
 
 def test_profile_display_name_helper() -> None:
-    from jaeger_ai.features.webui.service.profile_layout import profile_display_name
+    from jaeger_ai.core.gateway.webapp.service.profile_layout import profile_display_name
 
     assert profile_display_name(None) == "Jaeger AI"
     assert profile_display_name("jaeger") == "Jaeger AI"

@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/dashboard_store.py"
+ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp/dashboard_store.py"
 
 
 def _load():

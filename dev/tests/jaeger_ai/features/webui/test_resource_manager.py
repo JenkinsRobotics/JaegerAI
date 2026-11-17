@@ -7,7 +7,7 @@ import pathlib
 
 import pytest
 
-API = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api"
+API = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp"
 OK = {"mem_free_gb": 20.0, "mem_pressure": 1, "cpu_load": 0.2, "gpu_util": 5, "disk_free_gb": 200, "thermal": "nominal",
       "on_battery": False, "battery_pct": 100, "idle_s": 999, "ollama_loaded": []}
 

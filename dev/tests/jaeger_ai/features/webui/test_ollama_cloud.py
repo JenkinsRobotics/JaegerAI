@@ -1,5 +1,5 @@
 import pytest
-from jaeger_ai.features.webui.api import ollama_cloud as cloud
+from jaeger_ai.core.gateway.webapp import ollama_cloud as cloud
 
 
 @pytest.fixture(autouse=True)

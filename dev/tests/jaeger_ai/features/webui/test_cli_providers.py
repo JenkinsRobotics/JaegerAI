@@ -8,7 +8,7 @@ import pathlib
 
 import pytest
 
-ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/cli_providers.py"
+ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp/cli_providers.py"
 
 
 @pytest.fixture()

@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def test_capabilities_cached(monkeypatch):
-    path = Path(__file__).resolve().parents[5] / 'jaeger_ai/features/webui/api/host_capabilities.py'
+    path = Path(__file__).resolve().parents[5] / 'jaeger_ai/core/gateway/webapp/host_capabilities.py'
     spec = importlib.util.spec_from_file_location('host_capabilities_test', path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -29,7 +29,7 @@ def test_capabilities_cached(monkeypatch):
 def test_health_endpoint_uses_snapshot(monkeypatch):
     import sys
     from types import SimpleNamespace
-    path = Path(__file__).resolve().parents[5] / 'jaeger_ai/features/webui/api/widgets_api.py'
+    path = Path(__file__).resolve().parents[5] / 'jaeger_ai/core/gateway/webapp/widgets_api.py'
     spec = importlib.util.spec_from_file_location('widgets_api_test', path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

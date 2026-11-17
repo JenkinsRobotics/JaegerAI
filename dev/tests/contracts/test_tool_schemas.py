@@ -31,16 +31,6 @@ def discover_tools() -> dict[str, Any]:
         tools = registry.list_tools()
     except ImportError:
         pass
-    try:
-        from jaeger_ai.features.host_capabilities import server
-        # Add host capability tools
-        for name in dir(server):
-            if not name.startswith("_"):
-                obj = getattr(server, name)
-                if callable(obj) and hasattr(obj, "__name__"):
-                    tools[name] = obj
-    except ImportError:
-        pass
     return tools
 
 

@@ -1,18 +1,26 @@
-"""First-run WebUI routes forward to the owner-authenticated Gateway proxy."""
-import ast
-from pathlib import Path
+"""First-run WebUI routes forward to the owner-authenticated Gateway
+(core/gateway/webapp/server.py) instead of being answered locally."""
+from __future__ import annotations
 
-ROUTES = Path(__file__).resolve().parents[5] / 'jaeger_ai/features/webui/api/routes.py'
+from types import SimpleNamespace
+
+from jaeger_ai.core.gateway.webapp import server
 
 
-def test_first_run_proxy_routes_are_explicit():
-    tree = ast.parse(ROUTES.read_text())
-    get = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == 'handle_get')
-    post = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == 'handle_post')
-    get_text = ast.unparse(get)
-    post_text = ast.unparse(post)
-    assert "parsed.path == '/v1/first-run'" in get_text
-    assert "_proxy_jaeger_gateway(handler, 'GET', '/v1/first-run')" in get_text
-    assert "'/v1/first-run/setup'" in post_text
-    assert "'/v1/first-run/skip'" in post_text
-    assert "_proxy_jaeger_gateway(handler, 'POST', parsed.path" in post_text
+def _parsed(path):
+    return SimpleNamespace(path=path, query="")
+
+
+def test_first_run_get_is_proxied(monkeypatch):
+    calls = []
+    monkeypatch.setattr(server, "_gateway_proxy", lambda h, m, p, body=None: calls.append((m, p)) or True)
+    assert server.handle_get(SimpleNamespace(headers={}), _parsed("/v1/first-run"))
+    assert calls == [("GET", "/v1/first-run")]
+
+
+def test_first_run_setup_and_skip_posts_are_proxied():
+    import ast
+    import inspect
+    text = ast.unparse(ast.parse(inspect.getsource(server.handle_write)))
+    assert "('/v1/first-run/setup', '/v1/first-run/skip')" in text
+    assert "_gateway_proxy(h, 'POST', path, raw())" in text

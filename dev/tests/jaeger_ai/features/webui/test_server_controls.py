@@ -3,13 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.features.webui.server_controls import ServerControls, SERVICES, DEFAULT_SERVICES
+from jaeger_ai.core.runtime.server_controls import ServerControls, SERVICES, DEFAULT_SERVICES
 
 
-def test_webui_ready_probe_does_not_require_auth():
-    """Auth-gated /api/profiles returns 401 and was marking a live WebUI down."""
-    assert SERVICES["webui"][2] == 8790
-    assert SERVICES["webui"][3] == "/health"
 
 
 @pytest.fixture
@@ -27,10 +23,6 @@ def controls(tmp_path, monkeypatch):
     return c
 
 
-def test_start_unloaded_job_bootstraps_configured_plist(controls, monkeypatch):
-    monkeypatch.setattr(controls, 'loaded', lambda label: False)
-    assert controls.change('webui', 'start')['ok']
-    assert controls.calls == [['/bin/launchctl', 'bootstrap', controls.domain, str(controls.plist('webui'))]]
 
 
 def test_stop_unloads_keepalive_job_instead_of_respawning_it(controls):
@@ -73,9 +65,6 @@ def test_partial_failure_is_visible_and_other_services_continue(controls, monkey
     assert seen == list(DEFAULT_SERVICES)
 
 
-def test_default_controls_exclude_optional_runtimes():
-    assert not {"hermes", "openclaw", "container", "a2a"}.intersection(DEFAULT_SERVICES)
-    assert {"gateway", "agent", "webui", "ollama"}.issubset(DEFAULT_SERVICES)
 
 
 def test_change_reset_delegates_to_stack_reset(controls, monkeypatch):

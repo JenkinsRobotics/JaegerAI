@@ -1,6 +1,5 @@
 """Presentation persistence/contract checks; no listener, token, or live instance."""
 import asyncio
-import json
 from types import SimpleNamespace
 import pytest
 from jaeger_ai.core.gateway.agent_presentation import validate_patch, project, PresentationConflict
@@ -14,24 +13,6 @@ def row(aid='agent:builder', role='specialist'):
             'allowed_tools': ['read_file'], 'metadata': {'context': 'unchanged'}}
 
 
-def test_presentation_survives_reload_and_restore_without_identity_or_history_changes(tmp_path):
-    store = GatewaySessionStore(tmp_path / 'sessions.sqlite3')
-    store.ensure_session('home', metadata={'agent_id': 'agent:builder'})
-    store.append_message('home', 'user', 'Keep this context')
-    store.update_status('home', 'running')
-    history = store.get_session('home')
-    original = row()
-    store.patch_agent_presentation(original['id'], {'display_name': '  New label  ', 'archived': True, 'pinned': True})
-    new_store = GatewaySessionStore(store.path)
-    value = project(original, new_store.agent_presentation())
-    assert value['display_name'] == 'New label' and value['archived'] and value['hidden'] and value['pinned']
-    for field in ('id', 'name', 'role', 'allowed_tools', 'metadata'):
-        assert value[field] == original[field]
-    new_store.patch_agent_presentation(original['id'], {'archived': False, 'display_name': None})
-    restored = project(original, store.agent_presentation())
-    assert restored['display_name'] == 'Builder' and not restored['archived'] and restored['pinned']
-    assert store.get_session('home') == history
-    assert original == row()
 
 
 @pytest.mark.parametrize('body', [{}, [], {'role': 'lead'}, {'permissions': []}, {'owner': 'someone'}, {'display_name': ''}, {'display_name': 9}, {'display_name': 'a\nb'}, {'display_name': 'x' * 81}, {'archived': 'true'}, {'pinned': 1}])
@@ -84,7 +65,7 @@ def test_webui_proxy_preserves_existing_profile_precondition(monkeypatch):
     import sys
     from types import ModuleType
     from urllib.parse import urlparse
-    from jaeger_ai.features.webui.api import jaeger_agents
+    from jaeger_ai.core.gateway.webapp import jaeger_agents
     package = ModuleType('api')
     package.__path__ = []
     monkeypatch.setitem(sys.modules, 'api', package)

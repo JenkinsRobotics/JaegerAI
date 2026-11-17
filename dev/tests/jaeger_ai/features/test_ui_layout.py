@@ -43,6 +43,6 @@ def test_routes_round_trip(tmp_path):
 
 
 def test_webui_passthrough_allows_layout():
-    from jaeger_ai.features.webui.api.jaeger_sessions import GATEWAY_PASSTHROUGH
+    from jaeger_ai.core.gateway.webapp.jaeger_sessions import GATEWAY_PASSTHROUGH
     assert any("GET" in m and rx.match("/v1/ui/layout") for m, rx in GATEWAY_PASSTHROUGH)
     assert any("POST" in m and rx.match("/v1/ui/layout") for m, rx in GATEWAY_PASSTHROUGH)

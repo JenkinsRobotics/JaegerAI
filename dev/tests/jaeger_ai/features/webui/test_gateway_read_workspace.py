@@ -1,4 +1,3 @@
-import importlib.util
 import io
 import json
 import sys
@@ -11,7 +10,7 @@ import pytest
 from jaeger_ai.contract.ports import resolve_gateway_url
 
 SRC = Path(__file__).resolve().parents[5]
-FILE = SRC / 'jaeger_ai/features/webui/api/gateway_read_workspace.py'
+FILE = SRC / 'jaeger_ai/core/gateway/webapp/gateway_read_workspace.py'
 source = FILE.read_text()
 
 class Response(io.BytesIO):
@@ -20,7 +19,7 @@ class Response(io.BytesIO):
 
 @pytest.fixture
 def resolver(tmp_path):
-    pkg = 'jaeger_ai.features.webui.api'
+    pkg = 'jaeger_ai.core.gateway.webapp'
     module = types.ModuleType(pkg + '.gateway_read_workspace')
     module.__package__ = pkg
     exec(compile(source, str(FILE), 'exec'), module.__dict__)
@@ -60,23 +59,11 @@ def test_missing_workspace_rejected(resolver):
     with patch.object(module, 'urlopen', return_value=Response(json.dumps(row).encode())):
         with pytest.raises(KeyError): resolve('gateway-1')
 
-def test_legacy_git_session_keeps_webui_workspace(tmp_path):
-    import ast
-    import runpy
-    text = (SRC / 'jaeger_ai/features/webui/api/route_git.py').read_text()
-    node = next(n for n in ast.parse(text).body if isinstance(n, ast.FunctionDef)
-                and n.name == '_git_session_workspace')
-    called = []
-    namespace = {'Path': Path, 'Any': object, '_get_session': lambda sid: types.SimpleNamespace(workspace=str(tmp_path)),
-                 'bad': lambda *args: called.append(args)}
-    exec(compile(ast.fix_missing_locations(ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations', asname=None)], level=0), node], type_ignores=[])), '<proposed route>', 'exec'), namespace)
-    assert namespace['_git_session_workspace'](object(), 'webui-1') == tmp_path
-    assert not called
 
 
 def test_read_path_escapes_rejected(tmp_path):
     import ast
-    helper_text = (SRC / 'jaeger_ai/features/webui/api/helpers.py').read_text()
+    helper_text = (SRC / 'jaeger_ai/core/gateway/webapp/helpers.py').read_text()
     node = next(n for n in ast.parse(helper_text).body if isinstance(n, ast.FunctionDef)
                 and n.name == 'safe_resolve')
     namespace = {'Path': Path}

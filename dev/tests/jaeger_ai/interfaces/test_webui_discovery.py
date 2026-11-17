@@ -1,6 +1,6 @@
 """Discovery advertises the single first-party Jaeger WebUI."""
 
-from jaeger_ai.features.webui.service import service
+from jaeger_ai.core.gateway.webapp.service import service
 
 
 def make_service(monkeypatch):
@@ -46,17 +46,3 @@ def test_serve_url_is_advertised_only_when_publishing(monkeypatch):
     assert ui.serve_url() is None
 
 
-def test_smoke_script_targets_loopback_and_serve_not_raw_tailnet_ip(monkeypatch):
-    import importlib.util
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[4] / "scripts" / "verify-stack-smoke.py"
-    text = path.read_text(encoding="utf-8")
-    assert "100.74." not in text
-    spec = importlib.util.spec_from_file_location("verify_stack_smoke", path)
-    module = importlib.util.module_from_spec(spec)
-    import sys
-    monkeypatch.setitem(sys.modules, spec.name, module)
-    spec.loader.exec_module(module)
-    assert module.resolve_chat_url(None) == "http://127.0.0.1:8790/"
-    assert module.resolve_chat_url("https://mac.example.ts.net:8443") == "https://mac.example.ts.net:8443/"

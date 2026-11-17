@@ -1,40 +1,28 @@
 {
   "schema_version": 1,
-  "scope": "jaeger_ai/features/webui/api/routes.py named HTTP dispatchers",
+  "scope": "jaeger_ai/core/gateway/webapp/server.py named HTTP dispatchers (WebUI folded into the Gateway)",
   "evidence": "Python AST only",
-  "route_count": 71,
+  "route_count": 12,
   "method_counts": {
     "DELETE": 0,
-    "GET": 31,
+    "GET": 12,
     "PATCH": 0,
-    "POST": 39,
-    "PUT": 1
+    "POST": 0,
+    "PUT": 0
   },
-  "route_fingerprint_sha256": "ff4a3f04612428370f4bd0e6617ff8a47348124ac7dd272284d53827106886d3",
+  "route_fingerprint_sha256": "9be56849e79171c02f3d6437ad5395dd15df08952c62c7e7b500ac89e6921d58",
   "required_routes": [
     [
       "GET",
       "reference",
-      "/health",
+      "/v1/dashboard",
       "handle_get"
     ],
     [
       "GET",
       "reference",
-      "/api/auth/status",
+      "/v1/first-run",
       "handle_get"
-    ],
-    [
-      "GET",
-      "reference",
-      "/api/models",
-      "handle_get"
-    ],
-    [
-      "POST",
-      "reference",
-      "/api/auth/login",
-      "handle_post"
     ]
   ],
   "unverified": [

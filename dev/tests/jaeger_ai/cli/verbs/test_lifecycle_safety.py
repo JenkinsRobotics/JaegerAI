@@ -1,4 +1,5 @@
-"""Operator lifecycle regressions; all process and deployment effects are isolated."""
+"""Operator lifecycle regressions (jaeger start/stop/restart); every process
+and launchd effect is stubbed, so nothing real is stopped or started."""
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -8,10 +9,7 @@ from jaeger_ai.cli.verbs import lifecycle_verbs as lifecycle
 
 
 @pytest.fixture(autouse=True)
-def isolate_gateway(monkeypatch):
-    import jaeger_ai.features.agentgateway.service as gateway
-    monkeypatch.setattr(gateway, 'start', lambda: {'ok': True})
-    monkeypatch.setattr(gateway, 'stop', lambda: {'ok': True})
+def isolate_readiness_probe(monkeypatch):
     # Unit cases exercise lifecycle decisions, not the real loopback readiness
     # probe. Runtime readiness has its own integration coverage.
     monkeypatch.setattr(lifecycle, '_wait_runtime_ready', lambda **_: True)
@@ -44,7 +42,6 @@ def test_stop_failure_is_reported_and_restart_does_not_start(monkeypatch, capsys
 
 @pytest.mark.parametrize("warmup_polls", [0, 20])
 def test_start_preserves_loaded_services_and_running_containers(monkeypatch, tmp_path, warmup_polls):
-    import jaeger_ai.features.agentgateway.service as gateway
     agents = tmp_path / 'Library/LaunchAgents'
     agents.mkdir(parents=True)
     for label, _, _ in lifecycle.SERVICES_ORDERED:
@@ -65,7 +62,6 @@ def test_start_preserves_loaded_services_and_running_containers(monkeypatch, tmp
         return polls > warmup_polls
     monkeypatch.setattr(lifecycle, '_service_port_open', ready)
     monkeypatch.setattr(lifecycle.time, 'sleep', lambda _: None)
-    monkeypatch.setattr(gateway, 'start', lambda: {'ok': True, 'already_running': True})
     calls = []
     monkeypatch.setattr(lifecycle.subprocess, 'run', lambda cmd, **kw: calls.append(cmd) or CompletedProcess(cmd, 0, '', ''))
     assert lifecycle._cmd_start_argv(['--no-app']) == 0
@@ -75,7 +71,6 @@ def test_start_preserves_loaded_services_and_running_containers(monkeypatch, tmp
 
 
 def test_loaded_unhealthy_service_is_not_killed_by_start(monkeypatch, tmp_path):
-    import jaeger_ai.features.agentgateway.service as gateway
     monkeypatch.setattr(Path, 'home', classmethod(lambda cls: tmp_path))
     monkeypatch.setattr(lifecycle, '_get_launchd_jobs', lambda: {
         label: {'pid': 10, 'status': 0} for label, _, _ in lifecycle.SERVICES_ORDERED
@@ -84,7 +79,6 @@ def test_loaded_unhealthy_service_is_not_killed_by_start(monkeypatch, tmp_path):
     monkeypatch.setattr(lifecycle, '_is_port_open', lambda *a, **kw: False)
     monkeypatch.setattr(lifecycle, '_service_port_open', lambda *a, **kw: False)
     monkeypatch.setattr(lifecycle.time, 'sleep', lambda _: None)
-    monkeypatch.setattr(gateway, 'start', lambda: {'ok': True})
     calls = []
     monkeypatch.setattr(lifecycle.subprocess, 'run', lambda cmd, **kw: calls.append(cmd) or CompletedProcess(cmd, 0, '', ''))
     assert lifecycle._cmd_start_argv(['--no-app', '--no-containers']) == 1

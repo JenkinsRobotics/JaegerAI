@@ -8,7 +8,7 @@ import pathlib
 
 import pytest
 
-ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/unified_api.py"
+ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp/unified_api.py"
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")
 
 
@@ -159,7 +159,7 @@ def test_attaching_to_a_new_task_starts_it_at_intake(api):
 
 
 def test_consolidated_tabs_and_retired_paths_are_spa_routes():
-    from jaeger_ai.features.webui.api.ui_shell import is_page_route
+    from jaeger_ai.core.gateway.webapp.ui_shell import is_page_route
     for p in ("/work", "/work/production", "/research/knowledge", "/models/compare", "/home/widgets", "/settings/integrations",
               "/characters", "/tasks/gallery", "/compare", "/workspace", "/integrations"):
         assert is_page_route(p), p

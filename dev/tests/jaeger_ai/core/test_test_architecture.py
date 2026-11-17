@@ -50,7 +50,7 @@ NOT_PRODUCTION_PATH = (
 
 SECURITY_PATHS = (
     "dev/tests/jaeger_ai/core/test_skills_guard.py",
-    "dev/tests/jaeger_ai/interfaces/test_legacy_adapters_security.py",
+    "dev/tests/jaeger_ai/core/test_webapp_signin.py",
     "packages/jaeger-agent/tests/security/",
 )
 

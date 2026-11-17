@@ -5,12 +5,11 @@ import importlib.util
 import json
 import pathlib
 import struct
-import sys
 import types
 
 import pytest
 
-ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/avatar_api.py"
+ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp/avatar_api.py"
 
 
 def png(w: int, h: int, pad: int = 0) -> bytes:
@@ -167,5 +166,5 @@ def test_router(av):
 
 
 def test_gateway_agent_proxy_leaves_avatar_paths_to_webui():
-    src = (pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/jaeger_agents.py").read_text()
+    src = (pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp/jaeger_agents.py").read_text()
     assert 'r"^/v1/agents/[^/]+/avatar(/.*)?$"' in src and "return False" in src.split("def route", 1)[1][:600]

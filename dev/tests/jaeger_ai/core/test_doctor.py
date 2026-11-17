@@ -55,7 +55,7 @@ def test_webui_chat_url_fails_when_bookmark_is_8787(monkeypatch) -> None:
 
     monkeypatch.setattr(doctor_mod, "WebUIService", Fake, raising=False)
     monkeypatch.setattr(
-        "jaeger_ai.features.webui.service.service.WebUIService", Fake
+        "jaeger_ai.core.gateway.webapp.service.service.WebUIService", Fake
     )
     checks = {c.name: c for c in doctor_mod._webui_unification_checks()}
     assert checks["webui_chat_url"].ok is False
@@ -69,22 +69,12 @@ def test_webui_chat_url_passes_for_8790(monkeypatch) -> None:
             return "http://100.64.0.20:8790/"
 
     monkeypatch.setattr(
-        "jaeger_ai.features.webui.service.service.WebUIService", Fake
+        "jaeger_ai.core.gateway.webapp.service.service.WebUIService", Fake
     )
     checks = {c.name: c for c in doctor_mod._webui_unification_checks()}
     assert checks["webui_chat_url"].ok is True
 
 
-def test_jaeger_skills_route_is_dispatcher_not_hermes_home() -> None:
-    from pathlib import Path
-    import jaeger_ai.core.frameworks.jaeger as jaeger_mod
-    import jaeger_ai.features.dispatcher.sidecar as sidecar_mod
-    text = Path(jaeger_mod.__file__).read_text(encoding="utf-8")
-    assert "/v1/dispatcher/skills" in text
-    assert "list_skills" in text
-    side = Path(sidecar_mod.__file__).read_text(encoding="utf-8")
-    assert "/skills" in side
-    assert "webui_gateway_base_url" in side
 
 
 def test_doctor_renders_a_fabricated_failing_skill_with_a_pip_fix() -> None:

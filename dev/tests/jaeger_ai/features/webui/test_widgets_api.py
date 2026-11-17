@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 import pytest
 
-API = Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/widgets_api.py"
+API = Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp/widgets_api.py"
 
 
 @pytest.fixture

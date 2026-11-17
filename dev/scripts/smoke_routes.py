@@ -57,7 +57,7 @@ def gateway_routes() -> set[str]:
 def webui_routes() -> set[str]:
     out = set()
     for name in WEBUI_FILES:
-        p = ROOT / "jaeger_ai/features/webui/api" / name
+        p = ROOT / "jaeger_ai/core/gateway/webapp" / name
         if p.exists():
             out.update(m.group(1).rstrip("/.") for m in LIT.finditer(p.read_text()))
     return {r for r in out if r.count("/") >= 2 and not re.search(r"\{(qs|query|suffix)\}", r)}

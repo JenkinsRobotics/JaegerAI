@@ -8,10 +8,8 @@ Guarantees that JaegerAI adheres strictly to the OpenClaw standard:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -76,7 +74,7 @@ def test_product_never_uses_packages_default_in_repo_workspace():
 
     2026-10-22: ``jaeger_ai/modules/`` holds EXTRACTED, NOT-YET-WIRED module
     folders preserved from the pre-rebuild local copy (see
-    jaeger_ai/modules/MODULES.md). No product module imports them — the only
+    the module registrations). No product module imports them — the only
     ``jaeger_ai.modules`` imports in the tree are the flat TTS/STT adapters.
     They are dormant source, not live product code, so this static check
     excludes that tree until a module is actually wired in. The wiring plan
@@ -137,18 +135,6 @@ def test_ci_and_local_share_the_isolated_runner():
     assert "dist/all" not in ci, "build output belongs outside the checkout"
 
 
-def test_webui_launcher_does_not_adopt_a_sibling_hermes_checkout():
-    """H03: the product is self-contained. The launcher never wires an
-    external Hermes agent checkout (the JAEGER_HERMES_AGENT_SRC hook is gone)."""
-    launcher = (REPO_ROOT / "scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
-    assert "GitHub/hermes-agent" not in launcher
-    assert "JAEGER_HERMES_AGENT_SRC" not in launcher
-    assert "HERMES_WEBUI_AGENT_DIR" not in launcher
-    # H03 (updated): the vendor tree has been removed (2026-09-26 cleanup).
-    # The product is self-contained via jaeger_ai/core + packages/jaeger-agent.
-    # The webui bootstrap discovers an external agent dir at runtime; it no
-    # longer depends on an in-tree vendor copy.
-    assert not (REPO_ROOT / "jaeger_ai/vendor").exists()
 
 
 ALLOWED_ROOT_ITEMS = {

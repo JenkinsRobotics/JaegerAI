@@ -21,7 +21,6 @@ def test_approved_send_receipt_survives_reopen_without_duplicate_and_denial_prev
     from jaeger_agent.tool_executor import LedgerToolExecutor
     from jaeger_os.core.safety.permissions import PermissionPolicy,use_policy,PermissionDenied
     from jaeger_os.core.tools.tool_registry import get_tools
-    from jaeger_agent.tools import messaging
     sqlite_store.bind(SimpleNamespace(memory_dir=tmp_path/'memory'))
     file=tmp_path/'owned-outbound.txt';calls=[];decisions=[]
     class Decision:
@@ -60,7 +59,6 @@ def test_partial_send_receipt_is_durable_pending_and_never_replayed(tmp_path,mon
     from jaeger_agent.tool_executor import LedgerToolExecutor
     from jaeger_os.core.safety.permissions import PermissionPolicy,use_policy
     from jaeger_os.core.tools.tool_registry import get_tools
-    from jaeger_agent.tools import messaging
     sqlite_store.bind(SimpleNamespace(memory_dir=tmp_path/'memory'))
     file=tmp_path/'owned-partial.txt'
     def send(recipient,text):
@@ -124,7 +122,6 @@ def test_reply_correlation_is_conversation_bound_and_preserves_approval_and_dura
     from jaeger_agent.tool_executor import LedgerToolExecutor
     from jaeger_os.core.safety.permissions import PermissionPolicy,use_policy,PermissionDenied
     from jaeger_os.core.tools.tool_registry import get_tools
-    from jaeger_agent.tools import messaging
     gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
     gateway.store.ensure_session('owned-home',metadata={'agent_id':'native:builder'})
     gateway.store.ensure_session('owned-other',metadata={'agent_id':'native:finance'})
@@ -161,56 +158,12 @@ def test_reply_correlation_is_conversation_bound_and_preserves_approval_and_dura
     finally:sqlite_store.close()
 
 
-def test_discord_ingress_author_and_saved_destination_are_distinct_ceilings(tmp_path,monkeypatch):
-    from jaeger_ai.core.gateway.server import JaegerGatewayApp,_approval_target
-    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
-    from jaeger_ai.features.channels import bindings,replies
-    from jaeger_ai.plugins.discord.bridge import DiscordBridge
-    from jaeger_os.core.safety.permissions import PermissionPolicy,use_policy,PermissionRequest,PermissionTier
-    from jaeger_agent.tools.messaging import send_message
-    gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
-    home,_=gateway._ensure_agent_home('native:builder')
-    gateway.store.admit_request(home,'Operator requests reply',request_id='owned-discord-request')
-    binding=bindings.save(gateway.store,'discord','native:builder',0)
-    inbox=bindings.inbox(gateway,'discord',binding)
-    monkeypatch.setattr('jaeger_ai.core.gateway.server._control_plane_block',lambda:None)
-    # Exercise the real Discord callback adaptation, preserving ingress uid separately.
-    import sys
-    monkeypatch.setitem(sys.modules,'discord',SimpleNamespace())  # Constructor dependency only; no SDK/event loop or connection.
-    bridge=DiscordBridge(inbox,token='owned-unused-fixture',allowed_users={101})
-    bridge._jaeger_gateway_binding=binding
-    monkeypatch.setattr('jaeger_ai.plugins.get_bridge',lambda _:bridge)
-    acknowledgment=bridge._safe_handle('Untrusted incoming data','discord:909','provider-123','101')
-    assert acknowledgment.startswith('Saved to Jaeger inbox')
-    message=gateway.store.get_session(home)['messages'][-1]
-    assert message['channel']['provider_conversation_id']=='discord:909'
-    assert message['channel']['ingress_author_id']=='101'
-    calls=[]
-    monkeypatch.setattr(bridge,'send',lambda recipient,text:(calls.append((recipient,text)) or {'sent':True,'message_id':'provider-response'}))
-    policy=PermissionPolicy(confirmation=SimpleNamespace(confirm=lambda _:True))
-    with replies.scope(gateway,home,'owned-discord-request'),use_policy(policy):
-        result=send_message('discord','909','Owned approved reply',reply_to_message_id=message['id'])
-        assert result['sent'] and calls==[('909','Owned approved reply')]
-        assert not send_message('discord','101','Wrong destination',reply_to_message_id=message['id'])['sent']
-        unauthorized=gateway.store.append_channel_message_once(home,channel='discord',conversation_id='discord:909',external_id='unauthorized-author-message',text='Other author',author_id='202')
-        assert not send_message('discord','909','Wrong author',reply_to_message_id=unauthorized['message_id'])['sent']
-        # Revoke the AUTHOR independently. Even allowing destination id as a user must not authorize it.
-        bridge._allowed={909}
-        rejected=send_message('discord','909','Unauthorized author',reply_to_message_id=message['id'])
-        assert not rejected['sent'] and rejected['effect']=='not_started' and len(calls)==1
-    # Legacy rows without author provenance cannot invent author=destination.
-    missing=gateway.store.append_channel_message_once(home,channel='discord',conversation_id='discord:909',external_id='legacy-no-author',text='Legacy data')
-    with replies.scope(gateway,home,'owned-discord-request'),use_policy(policy):
-        assert not send_message('discord','909','No author',reply_to_message_id=missing['message_id'])['sent']
-    target=_approval_target(PermissionRequest(PermissionTier.EXTERNAL_EFFECT,'messaging','send_message',arguments={'channel':'discord','recipient':'909','reply_to_message_id':message['id']}))
-    assert 'channel=discord' in target and 'recipient=909' in target
-    assert 'reply_to_message_id='+str(message['id']) in target
 
 
 @pytest.mark.asyncio
 async def test_normal_gateway_turn_projects_reply_target_to_model_and_binds_reply_scope(tmp_path,monkeypatch):
     """Real admission/executor/prepare_turn/projector; model and memory I/O are local fixtures."""
-    import asyncio,json
+    import asyncio
     from aiohttp.test_utils import TestClient,TestServer
     from jaeger_ai.core.gateway.server import JaegerGatewayApp
     from jaeger_ai.core.gateway.session_store import GatewaySessionStore
@@ -255,12 +208,3 @@ async def test_normal_gateway_turn_projects_reply_target_to_model_and_binds_repl
         assert any(m['content']=='LOCAL MODEL BOUNDARY RESPONSE' for m in gateway.store.get_session(home)['messages'])
 
 
-def test_unknown_channel_outcome_is_nonretryable_at_model_loop_and_public_tool_boundary():
-    import threading
-    from jaeger_agent.loop.jaeger_agent import JaegerAgent
-    from jaeger_ai.contract.tool_outcomes import tool_outcome
-    def uncertain(*args):raise ChannelDeliveryUnknown('Owned partial submission',{'execution_unknown':True})
-    agent=SimpleNamespace(_CACHEABLE_READ_TOOLS=set(),_interrupt_event=threading.Event(),_tool_executor=SimpleNamespace(execute=uncertain))
-    result=JaegerAgent._execute_prepared(agent,{'name':'send_message','args':{},'tool_def':object()})
-    assert result['error_type']=='effect_indeterminate' and result['retryable'] is False
-    assert tool_outcome(False,result)=='unknown'

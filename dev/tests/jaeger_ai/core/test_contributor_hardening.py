@@ -14,8 +14,6 @@ REQUIRED = (
     "docs/PRODUCT.md",
     "docs/STACK.md",
     "docs/TRUST.md",
-    "docs/REBUILD.md",
-    "docs/CLEANUP.md",
     "docs/architecture/THREAT_MODEL.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/ISSUE_TEMPLATE/bug.yml",
@@ -57,7 +55,7 @@ def test_extension_guide_forbids_core_edits_for_skills():
 
 def test_product_definition_is_indexed_and_supersedes_stale_plans():
     """2026-10-22: docs/CONTINUE_FROM_HERE.md was superseded by docs/PRODUCT.md
-    and moved to the Desktop (see docs/CLEANUP.md). The indexed entry point is
+    and moved to the Desktop. The indexed entry point is
     now the product definition; stale plans stay out of the tree."""
     product = Path("docs/PRODUCT.md").read_text(encoding="utf-8")
     docs_index = Path("docs/README.md").read_text(encoding="utf-8")

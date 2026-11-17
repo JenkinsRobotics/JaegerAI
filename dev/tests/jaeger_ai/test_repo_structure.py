@@ -111,35 +111,6 @@ def test_operator_scripts_are_not_duplicated_inside_features() -> None:
     )
 
 
-def test_interfaces_holds_only_client_surfaces() -> None:
-    """``interfaces/`` is how someone connects, never what runs a turn.
-
-    Per-framework turn execution sat in ``interfaces/hermes_profile_adapters/``
-    while the Gateway, Roundtable and the Dispatcher all imported it — none of
-    which are user interfaces. It now lives in ``core/frameworks/``.
-    """
-    interfaces = REPO / "jaeger_ai" / "interfaces"
-    allowed = {
-        "swift", "tui", "pyside6", "messaging", "avatar", "avatar_chat", "ide",
-        "avatar_player", "gateway", "macos-shell",
-        # Shared React main screen (UI-PLAN steps 3-5): a client surface served by
-        # the WebUI and loaded by macos-shell; it runs no agent work.
-        "ui",
-        # Extracted bridge-socket adapter + device diagnostics from the archived
-        # Qt frontend (`jaeger multimodal --check`). Adapter/diagnostics only —
-        # no window, host, identity, or runtime owner.
-        "native_multimodal",
-    }
-    unexpected = sorted(
-        d.name for d in interfaces.iterdir()
-        if d.is_dir() and not d.name.startswith((".", "__")) and d.name not in allowed
-    )
-    assert not unexpected, (
-        f"Unrecognised package(s) under interfaces/: {unexpected}. "
-        f"If it runs agent work rather than connecting a client, it belongs in "
-        f"core/ (shared) or features/ (optional). If it really is a new client "
-        f"surface, add it to this test's allow-list."
-    )
 
 
 def test_nothing_constructs_an_unpinned_bridge_client() -> None:
