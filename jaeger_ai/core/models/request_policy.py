@@ -74,6 +74,56 @@ def require_egress(route: ModelRoute, payload: Any, *, local_only: bool = False)
             "or remove the private content. This payload was not sent to the cloud.")
 
 
+WITHHELD_NOTE = ("[Withheld: this tool output looks local-only (credential, ID or other private "
+                 "content), so it was not sent to the cloud model. Say so briefly and continue "
+                 "without it; for this content the owner can switch to an on-device model.]")
+
+
+def _is_tool_message(message: Any) -> bool:
+    if not isinstance(message, dict):
+        return False
+    if message.get("role") in {"tool", "function"}:
+        return True
+    content = message.get("content")
+    return isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type") in {"tool_result", "function_call_output"}
+        for part in content)
+
+
+def withhold_private_tool_results(messages: Any) -> tuple[Any, int]:
+    """Replace tool outputs that classify as private with a short note.
+
+    A private tool output used to fail the whole turn at the next model call
+    (``require_egress``), after the work was done. Withholding just that output
+    keeps the boundary (nothing private leaves) and lets the turn finish."""
+    if not isinstance(messages, list):
+        return messages, 0
+    out, withheld = [], 0
+    for message in messages:
+        if _is_tool_message(message) and classify(payload_text(message.get("content")))[0] == "private":
+            replaced = dict(message)
+            content = message.get("content")
+            if isinstance(content, list):
+                replaced["content"] = [
+                    {**part, "content": WITHHELD_NOTE} if isinstance(part, dict)
+                    and part.get("type") in {"tool_result", "function_call_output"} else part
+                    for part in content]
+            else:
+                replaced["content"] = WITHHELD_NOTE
+            out.append(replaced)
+            withheld += 1
+        else:
+            out.append(message)
+    return out, withheld
+
+
+def withhold_private_result(result: Any) -> Any:
+    """Same rule for one tool result returned straight to a cloud CLI model."""
+    if classify(payload_text(result))[0] == "private":
+        return {"ok": False, "withheld": True, "error_type": "local_only", "message": WITHHELD_NOTE}
+    return result
+
+
 def select_request_client(config, layout, *, model=None, provider=None, default_client=None, controls=None):
     """Preserve the admitted provider/model pair, including CLI and local lanes."""
     from .external_model import ExternalModelClient
@@ -198,6 +248,8 @@ class GovernedAdapter:
         # CLI adapters flatten tool schemas into prose. Classify the actual
         # conversation and system context before that conversion, so a tool's
         # description of private keys is not mistaken for supplied private data.
+        if not self.route.local and not self.local_only:
+            messages, _ = withhold_private_tool_results(messages)
         policy_text = payload_text({"messages": messages, "system": system})
         require_egress(self.route, policy_text, local_only=self.local_only)
         formatted = self.adapter.format_messages(messages, tools, system)

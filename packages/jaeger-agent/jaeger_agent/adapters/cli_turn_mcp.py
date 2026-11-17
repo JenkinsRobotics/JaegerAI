@@ -481,9 +481,14 @@ class _ExecuteHolder:
         # without the same wrap here, get_project_root() falls back to the
         # instance workspace and use_policy approvals never reach the card.
         ctx = self.context
-        if ctx is not None:
-            return ctx.run(fn, live, args)
-        return fn(live, args)
+        result = ctx.run(fn, live, args) if ctx is not None else fn(live, args)
+        # CLI backends are cloud models: a private tool output is withheld here
+        # instead of reaching the model (and failing the turn's next step).
+        try:
+            from jaeger_ai.core.models.request_policy import withhold_private_result
+            return withhold_private_result(result)
+        except ImportError:
+            return result
 
 
 def stable_cli_workdir(backend_id: str) -> str:
