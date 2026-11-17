@@ -814,3 +814,21 @@ __all__ = [
     "run_autonomous",
     "run_worker_goal",
 ]
+
+
+def missing_deliverable_paths(text: str) -> list[str]:
+    """Missing paths the request asks Jaeger to produce, not ones it only reads.
+
+    "Summarize what scripts/audit-guard.py does" names an input that lives in a
+    repo outside the workspace; treating it as a missing deliverable made the
+    lead write a receipt file and spend minutes re-verifying (R13 demo, 240s).
+    A deliverable is a path after to/into/as/at or right after save/create/
+    write/export/generate (optionally "a file called").
+    """
+    out = []
+    for name in missing_named_paths(text):
+        pat = (r"(?:\b(?:to|into|as|at|save|saved|create|write|export|generate|produce)\s+"
+               r"(?:(?:a|the|new)\s+)?(?:file\s+)?(?:called\s+|named\s+)?[`'\"]?)" + re.escape(name))
+        if re.search(pat, text or "", re.I):
+            out.append(name)
+    return out
