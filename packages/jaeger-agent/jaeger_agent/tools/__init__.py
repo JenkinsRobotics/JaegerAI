@@ -116,6 +116,7 @@ from .connectors import list_connectors, add_connector
 
 # Audio input — one-shot mic capture + whisper transcription
 from .listen import listen
+from .meetings import meeting_prep, meeting_record, meeting_summary, meeting_transcribe
 
 # Dependency install + venv execution (Phase 1/2 of Deep Think)
 from .packages import install_package, list_venv_packages, run_in_venv
@@ -242,6 +243,8 @@ __all__ = [
     "list_connectors", "add_connector",
     # audio input
     "listen",
+    # meetings (local record/transcribe/summary; no bot joins the call)
+    "meeting_prep", "meeting_record", "meeting_transcribe", "meeting_summary",
     # dependency install + venv execution
     "install_package", "list_venv_packages", "run_in_venv",
     # model management
