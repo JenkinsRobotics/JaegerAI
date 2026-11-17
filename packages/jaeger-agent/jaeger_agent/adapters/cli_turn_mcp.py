@@ -162,7 +162,13 @@ def merge_cli_mcp_tools(*groups: list[ToolDef] | None) -> list[ToolDef]:
 def _handler_for(tool: ToolDef, execute: ExecuteTool, lock: threading.Lock):
     """Build a FastMCP-callable whose signature matches the tool schema."""
 
+    schema_only = not getattr(getattr(tool, "args_model", None), "model_fields", None)
+
     def handler(**kwargs: Any) -> Any:
+        if schema_only:
+            # Optional schema params default to None here; an MCP server
+            # rejects an explicit null where the field was simply omitted.
+            kwargs = {k: v for k, v in kwargs.items() if v is not None}
         with lock:
             result = execute(tool, dict(kwargs))
         if isinstance(result, (dict, list)):
@@ -190,6 +196,21 @@ def _handler_for(tool: ToolDef, execute: ExecuteTool, lock: threading.Lock):
                 default=default,
                 annotation=annotation,
             ))
+        if not params:
+            # Schema-only tools (MCP connectors) have no pydantic fields; an
+            # empty signature made FastMCP drop every argument ("required
+            # properties owner and repo" on github_list_commits). Build the
+            # parameters from the JSON schema instead.
+            schema = tool.to_anthropic_schema().get("input_schema") or {}
+            required = set(schema.get("required") or ())
+            for prop in (schema.get("properties") or {}):
+                if not str(prop).isidentifier():
+                    continue
+                params.append(inspect.Parameter(
+                    prop, inspect.Parameter.KEYWORD_ONLY,
+                    default=inspect.Parameter.empty if prop in required else None,
+                    annotation=Any,
+                ))
         handler.__signature__ = inspect.Signature(params)
     except Exception:  # noqa: BLE001 — fall back to free-form kwargs
         handler.__signature__ = inspect.Signature([
