@@ -8119,30 +8119,6 @@ class JaegerGatewayApp:
              "mode": "one_mind"},
             status=410,
         )
-        # Unreachable: previous setter kept below only as a reference.
-        from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
-        from jaeger_ai.core.runtime.collaboration import MODES, snapshot
-
-        try:
-            body = await request.json()
-        except Exception:
-            return web.json_response({"error": "Body must be JSON"}, status=400)
-        mode = str((body or {}).get("mode") or "").strip().lower().replace("-", "_").replace(" ", "_") \
-            if isinstance(body, dict) else ""
-        if mode not in MODES:
-            return web.json_response({"error": f"mode must be one of {list(MODES)}"}, status=400)
-        path = self._config_path()
-        if path is None or not Path(path).is_file():
-            return web.json_response({"error": "No instance config to save to"}, status=409)
-        previous = self._collaboration_mode()
-        config = load_yaml(Path(path), Config)
-        config.automation.collaboration_mode = mode
-        dump_yaml(Path(path), config)
-        saved = self._collaboration_mode()
-        if saved != mode:
-            return web.json_response({"error": "Collaboration mode was not saved"}, status=500)
-        self.event_bus.publish("*", "collaboration.mode.changed", {"mode": mode, "previous": previous})
-        return web.json_response(snapshot(mode))
 
     def _migrate_retired_interaction_tier(self) -> None:
         """Rewrite a saved 'jaeger' run mode to Agent (resident mode was removed)."""
