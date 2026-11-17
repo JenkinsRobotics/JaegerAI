@@ -284,6 +284,10 @@ export interface JaegerSource {
   taskArtifacts?:TaskArtifacts;
   managedSkills?:ManagedSkills;
   skillDetail?(name: string, category: string): Promise<SkillDetail>;
+  memoryFacts?: {
+    list(query?: string): Promise<{ facts: SavedFact[]; count: number; store?: string; error?: string }>;
+    forget(key: string, subject: string): Promise<{ ok: boolean; forgot?: boolean; error?: string }>;
+  };
   ownerProfile?: {
     get(): Promise<OwnerProfile>;
     save(profile: string): Promise<{ ok: boolean; changed?: boolean; error?: string }>;
@@ -440,3 +444,5 @@ export interface TemplateCatalogControls {read(id:string):Promise<TemplateCatalo
 export type SkillRevision = { skill: string; version: string; origin: string; summary: string; delta: string; ts: string };
 export type OwnerProfile = { profile: string; chars: number; limit: number; sections: string[]; changes: { ts: number; origin: string; summary: string; chars: number; previous: string | null }[] };
 export type MemoryUpkeep = { enabled: boolean; hour: number; next_run: string | null; review_every_turns: number; runs: { kind: string; at: number; messages: number; status: string; halt_reason?: string | null; error?: string | null; reply?: string }[] };
+
+export type SavedFact = { subject: string; key: string; value: string; category: string | null; source: string; updated_at: string; masked?: boolean };

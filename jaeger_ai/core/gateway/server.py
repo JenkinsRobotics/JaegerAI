@@ -1910,6 +1910,8 @@ class JaegerGatewayApp:
         register_skill_history(self)
         from .profile_routes import register as register_profile_routes
         register_profile_routes(self)
+        from .memory_facts_routes import register as register_memory_facts_routes
+        register_memory_facts_routes(self)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)

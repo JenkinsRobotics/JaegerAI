@@ -541,6 +541,8 @@ def route(handler, parsed, method: str) -> bool:
 
     if path=='/v1/runtime/skills/managed' and method=='GET':return _proxy(handler,method,path)
     if path in {'/v1/memory/profile','/v1/memory/upkeep'} and method=='GET':return _proxy(handler,method,path)
+    if path=='/v1/memory/facts' and method=='GET':return _proxy(handler,method,path+query)
+    if path=='/v1/memory/facts/forget' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
     if path=='/v1/memory/profile' and method=='PUT':return _proxy(handler,method,path,_body_bytes(handler))
     if path=='/v1/memory/profile/revert' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
     if path=='/v1/memory/upkeep' and method=='PATCH':return _proxy(handler,method,path,_body_bytes(handler))
