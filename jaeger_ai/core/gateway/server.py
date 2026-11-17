@@ -6246,7 +6246,7 @@ class JaegerGatewayApp:
                 elif turn_owned and not result.get("error") and not stop_requested():
                     # One bounded correction, as a durable task gets: a completion with no
                     # file receipt is not something the owner can verify.
-                    from jaeger_ai.core.runtime.autonomous_runner import missing_named_paths
+                    from jaeger_ai.core.runtime.autonomous_runner import missing_deliverable_paths
                     from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT, has_file_receipt
                     # Only when the worker claimed completion without a file receipt, or
                     # the request names files that still do not exist. An answer-only
@@ -6254,7 +6254,7 @@ class JaegerGatewayApp:
                     # to invent an artifact.
                     completion = last_completion()
                     if not has_file_receipt(completion) and (
-                            completion is not None or missing_named_paths(objective or prompt)):
+                            completion is not None or missing_deliverable_paths(objective or prompt)):
                         fix = step(
                             "Owner verification requires correction: your completion carried no receipt for a "
                             "file the owner can check. Finish the work if it is not done, then " + EVIDENCE_CONTRACT)
