@@ -237,6 +237,13 @@ class HookedToolExecutor:
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
         args = dict(arguments)
         from jaeger_agent import shell_hooks
+        try:
+            from jaeger_agent.tools.deepthink_tools import handoff_refusal
+            refused = handoff_refusal(getattr(tool, "name", ""))
+        except Exception:  # noqa: BLE001
+            refused = None
+        if refused is not None:
+            return refused
 
         # An authenticated bridge goal uses the same authority/executor stack,
         # with an additional host-bound resource ceiling (never model flags).

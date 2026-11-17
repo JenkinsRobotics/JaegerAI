@@ -885,12 +885,16 @@ class CliBackendAdapter(ProviderAdapter):
             on_delta = None
             visible_stream = None
 
+        handoff: dict[str, bool] = {"done": False}
+
         def _run() -> dict[str, Any]:
             from .cli_turn_mcp import MCP_BACKENDS, attach_cli_mcp
 
             from .cli_turn_mcp import merge_cli_mcp_tools
             tools = merge_cli_mcp_tools(list(getattr(self, "_pending_tools", []) or []))
             execute = kwargs.get("execute_tool")
+            if callable(execute):
+                execute = self._watch_handoff(execute, handoff)
             use_workdir = (
                 (self.spec_id == "grok" and "--single" in argv)
                 or (self.spec_id in MCP_BACKENDS and tools and callable(execute))
@@ -958,13 +962,19 @@ class CliBackendAdapter(ProviderAdapter):
             # link or overlay, then always remove it after the process exits.
             cleanup_config = stage_session_cli_config(self.spec_id, work_cwd, folder)
             try:
-                return self._spawn(
-                    child_argv, spawn_stdin, spec,
-                    on_delta=on_delta, on_reasoning=on_reasoning,
-                    on_progress=progress.touch,
-                    cwd=spawn_cwd,
-                    extra_env=extra_env,
-                )
+                try:
+                    return self._spawn(
+                        child_argv, spawn_stdin, spec,
+                        on_delta=on_delta, on_reasoning=on_reasoning,
+                        on_progress=progress.touch,
+                        cwd=spawn_cwd,
+                        extra_env=extra_env,
+                    )
+                except Exception:
+                    if handoff["done"]:
+                        logger.info("CLI turn closed after background hand-off")
+                        return {"stdout": "", "stderr": "", "returncode": 0, "handed_off": True}
+                    raise
             finally:
                 cleanup_config()
                 if mcp is not None:
@@ -1163,7 +1173,37 @@ class CliBackendAdapter(ProviderAdapter):
                 env["PATH"] = gemini_bin + os.pathsep + env.get("PATH", "")
         return env
 
+    HANDOFF_REPLY = "It's running in the background; I'll post the result here when it finishes."
+
+    def _watch_handoff(self, execute: Any, handoff: dict[str, bool]) -> Any:
+        """End the CLI turn once ``queue_background_task`` succeeds: the worker
+        owns the job, so the lead stops instead of re-checking or redoing it
+        (parity P2, Grok Bot-style hand-off)."""
+        def watched(tool: Any, args: dict[str, Any]) -> Any:
+            result = execute(tool, args)
+            name = getattr(tool, "name", None) or str(tool)
+            if name == "queue_background_task" and "Queued once" in str(result) and not handoff["done"]:
+                handoff["done"] = True
+                if self._proc is not None and self._proc.poll() is None:
+                    proc = self._proc
+
+                    def _stop() -> None:
+                        # SIGTERM makes the Grok client finish the leader's turn first
+                        # (it kept calling tools for ~40 s); end it outright.
+                        try:
+                            if os.name != "nt" and proc.pid:
+                                os.killpg(proc.pid, signal.SIGKILL)
+                            else:
+                                proc.kill()
+                        except (OSError, ProcessLookupError):
+                            pass
+                    threading.Timer(0.3, _stop).start()
+            return result
+        return watched
+
     def parse_response(self, raw: Any) -> Message:
+        if isinstance(raw, dict) and raw.get("handed_off"):
+            return Message(role="assistant", content=self.HANDOFF_REPLY)
         if isinstance(raw, str):
             text = parse_cli_text(raw)
         elif isinstance(raw, dict) and "stdout" not in raw and raw.get("role") == "assistant":

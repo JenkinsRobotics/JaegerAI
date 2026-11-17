@@ -1066,6 +1066,9 @@ class JaegerAgent:
                 if halt:
                     self.last_halt_reason = halt
                     return self._budget_halt_or_stop(halt)
+                handed = self._close_after_handoff()
+                if handed is not None:
+                    return handed
                 early = self._finalize_after_first_tools_if_set()
                 if early is not None:
                     return early
@@ -1130,6 +1133,9 @@ class JaegerAgent:
 
             if self.last_halt_reason:
                 return self._budget_halt_or_stop(self.last_halt_reason)
+            handed = self._close_after_handoff()
+            if handed is not None:
+                return handed
             early = self._finalize_after_first_tools_if_set()
             if early is not None:
                 return early
@@ -1517,6 +1523,26 @@ class JaegerAgent:
         if (tail is not None and expected is not None
                 and tail.get("content") == expected):
             self._pop_message()
+
+    _HANDOFF_REPLY = "It's running in the background; I'll post the result here when it finishes."
+
+    def _close_after_handoff(self) -> str | None:
+        """The turn queued its job with ``queue_background_task``: the worker owns
+        it now, so end here with one line instead of more model steps that
+        re-check or redo the work (parity P2, Grok Bot-style hand-off)."""
+        try:
+            from jaeger_agent.tools.deepthink_tools import handed_off_this_request
+            if not handed_off_this_request():
+                return None
+        except Exception:  # noqa: BLE001
+            return None
+        self._close_dangling_tool_calls("handed off to a background worker")
+        text = self._HANDOFF_REPLY
+        summary = {"role": "assistant", "content": text}
+        self._append_message(summary)
+        self.callbacks.on_step(self.last_iteration_count + 1, summary)
+        self.last_halt_reason = None
+        return text
 
     def _finalize_after_first_tools_if_set(self) -> str | None:
         """Heartbeat / cron check-ins: close after the first read, no second pass."""
