@@ -48,7 +48,7 @@ def _route(argv: list[str], py: str) -> list[str]:
         # "reset" into the instance-creation wizard as a positional name.
         return [py, "-m", "jaeger_ai.cli.onboarding_cmd", *rest]
     if cmd in ("setup", "onboard", "onboarding"):
-        # OpenClaw-parity terminal-first onboarding/setup wizard:
+        # Terminal-first onboarding/setup wizard:
         # `jaeger setup` or `jaeger onboard` runs the interactive terminal wizard.
         # Pass `--gui` or `gui` to launch the windowed setup app.
         if rest[:1] == ["gui"] or "--gui" in rest:

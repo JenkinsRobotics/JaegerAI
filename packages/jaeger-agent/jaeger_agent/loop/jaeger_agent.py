@@ -859,7 +859,7 @@ class JaegerAgent:
             tool_calls = assistant_msg.get("tool_calls") or []
             final_text = assistant_msg.get("content") or ""
             if not tool_calls and final_text:
-                # OpenClaw-grade plain-text tool-call recovery:
+                # Plain-text tool-call recovery:
                 # Local or open models (Ollama, DeepSeek, Qwen) often emit tool
                 # calls as plain text (<tool_call>, <function=...>, [call: ...],
                 # or markdown JSON). If no structured tool_calls were emitted,

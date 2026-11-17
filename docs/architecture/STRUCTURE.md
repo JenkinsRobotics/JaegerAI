@@ -16,11 +16,10 @@
 | **Edit retained WebUI backend/proxy** | [`jaeger_ai/features/webui/`](../../jaeger_ai/features/webui/) | Required authenticated proxy, backend APIs and login |
 | **Edit the Web UI's look & branding** | [`jaeger_ai/assets/`](../../jaeger_ai/assets/) | `jaeger_webui_branding.js` — **the only copy**; see below |
 | **Edit the Task Dispatcher & Kanban board** | [`jaeger_ai/features/dispatcher/`](../../jaeger_ai/features/dispatcher/) | `store.py`, `router.py`, `sidecar.py` (board UI: `jaeger_ai/assets/jaeger_dispatcher.js`) |
-| **Edit Roundtable (multi-agent debate & consensus)** | [`jaeger_ai/features/roundtable/`](../../jaeger_ai/features/roundtable/) | `policy.py` (rules), `service.py` (engine), `roundtable.py` (streaming) |
 | **Add or edit Agent Tools (FastMCP tools)** | [`jaeger_ai/features/host_capabilities/`](../../jaeger_ai/features/host_capabilities/) | `server.py`, `grants.py`, `*_tools.py` |
 | **Change the agent's persona / tone** | [`jaeger_ai/features/personality/`](../../jaeger_ai/features/personality/) | `characters/<name>/` (editable YAML — no code needed) |
 | **Add/rename a framework, or change a port** | [`jaeger_ai/contract/`](../../jaeger_ai/contract/) | `frameworks.py`, `ports.py` — the single copy; everything else imports it |
-| **Change how a framework runs a turn** | [`jaeger_ai/core/frameworks/`](../../jaeger_ai/core/frameworks/) | `jaeger.py`, `hermes_native.py`, `openclaw_native.py` |
+| **Change how a framework runs a turn** | [`jaeger_ai/core/frameworks/`](../../jaeger_ai/core/frameworks/) | `jaeger.py`, `native_runs.py`, `delegate.py` |
 | **Edit Shared Memory (Honcho)** | [`jaeger_ai/features/shared_memory/`](../../jaeger_ai/features/shared_memory/) | `honcho_client.py` |
 | **Change CLI commands (`jaeger start`, `stop`, `bench`)** | [`jaeger_ai/cli/verbs/`](../../jaeger_ai/cli/verbs/) | `lifecycle_verbs.py`, `dispatch.py` (CLI arg router) |
 | **Run diagnostic / verification scripts** | [`scripts/`](../../scripts/) | `run-host-capability-server.py`, `verify-*.py` |
@@ -43,14 +42,14 @@ editing a file anywhere else will not change what the browser loads.
 
 **1b. A fact two layers share lives in `jaeger_ai/contract/`.**
 Framework names and service ports are defined there once and imported. If you
-find yourself typing `"openclaw"` or a port number into a second file, that is the
+find yourself typing a framework name or a port number into a second file, that is the
 signal — import it instead. `dev/tests/jaeger_ai/contract/` fails if a copy
 reappears.
 
 **2. Code used by several features lives under `jaeger_ai/core/`.**
-`core/frameworks/` runs a turn against Jaeger, Hermes, OpenClaw or Roundtable.
-The Web UI, Roundtable, the Dispatcher and the Gateway all call it, so it belongs
-to none of them.
+`core/frameworks/` runs a turn against Jaeger or an external framework (Hermes,
+Claude Code, Codex, Grok). The Web UI and the Gateway both call it, so it
+belongs to neither.
 
 ## ⚠️ Three things named "gateway" — which is which
 
@@ -92,14 +91,13 @@ JaegerAI/
 │   ├── contract/               # 📜 Facts two layers must agree on — imported, never copied
 │   ├── core/                   # Shared engine — used by more than one feature
 │   │   ├── gateway/            # 🚪 THE Jaeger Gateway: sessions + live events, port 33418
-│   │   ├── frameworks/         # 🔀 Runs a turn against Jaeger / Hermes / OpenClaw / Roundtable
+│   │   ├── frameworks/         # 🔀 Runs a turn against Jaeger or an external framework
 │   │   ├── models/             # Model resolution and catalogs
 │   │   ├── instance/           # Per-instance config, first boot, personas
 │   │   └── runtime/            # Autonomous loop and tool-call repair
 │   ├── features/               # 🌟 One folder per feature — each has a README.md
 │   │   ├── webui/              # 🌐 Web UI adapter, profiles, session unification
 │   │   ├── dispatcher/         # 📋 Task Kanban board and worker routing
-│   │   ├── roundtable/         # 🏛️ Multi-agent debate (Jaeger, Hermes, OpenClaw)
 │   │   ├── host_capabilities/  # 🛠️ Files, shell, apps, camera, memory — permission-gated
 │   │   ├── personality/        # 🎭 The persona used on every turn (YAML characters)
 │   │   ├── skill_tree/         # 🌳 XP progression over the agent's skills
