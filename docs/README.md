@@ -17,8 +17,6 @@ Operator instructions live in the root [README](../README.md); contributor workf
 | [TRUST.md](TRUST.md) | CURRENT REFERENCE | On-device trust boundaries |
 | [EXTENSION_GUIDE.md](EXTENSION_GUIDE.md) | CURRENT AUTHORITATIVE | Public capability / provider contracts |
 | [getting-started.md](getting-started.md) | CURRENT REFERENCE | First-run path |
-| [CLEANUP.md](CLEANUP.md) | RECORD | 2026-10-22 cleanup ledger |
-| [REBUILD.md](REBUILD.md) | RECORD | 2026-10-22 rebuild notes |
 | [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) | CURRENT AUTHORITATIVE | Topology and ownership |
 | [architecture/MAIN_LOOP.md](architecture/MAIN_LOOP.md) | CURRENT AUTHORITATIVE | One Gateway turn path |
 | [architecture/STRUCTURE.md](architecture/STRUCTURE.md) | CURRENT REFERENCE | Directory map |
@@ -36,9 +34,9 @@ Removed examples: `AGENT_*_PLAN*.md`, `MASTER_IMPLEMENTATION_PLAN.md`,
 
 Component docs stay with their code: [JaegerAgent](../packages/jaeger-agent/README.md),
 [JaegerOS](../packages/jaeger-os/README.md),
-[WebUI](../jaeger_ai/features/webui/README.md),
 [IDE client](../jaeger_ai/interfaces/ide/README.md),
-and [jaeger_ai/modules/MODULES.md](../jaeger_ai/modules/MODULES.md).
+and the repo map in [architecture/STRUCTURE.md](architecture/STRUCTURE.md).
+The subagent result contract is [subagent-contract.md](subagent-contract.md).
 
 On 2026-11-11 every remaining document that no code, build, install step or
 test relies on (release records, ADRs, migration notes, integration catalogs,

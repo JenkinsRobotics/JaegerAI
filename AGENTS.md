@@ -66,7 +66,7 @@ The repository source tree must remain pristine, deterministic, and free of runt
 * **Gateway Architecture:**
   * The Jaeger Gateway (`jaeger_ai.core.gateway.server`) runs as an isolated daemon on `127.0.0.1:33418` (loopback only; `JAEGER_GATEWAY_HOST` is the explicit opt-out), launched by **`jaeger gateway daemon`**. The port is one constant, `GATEWAY_PORT` in `jaeger_ai/contract/ports.py` (`JAEGER_GATEWAY_PORT` overrides it). The old port `:8810` is retired (2026-10-17): nothing listens there and no client falls back to it. It owns persistent SQLite session state and broadcasts SSE multi-client events.
   * **`jaeger gateway` and `jaeger gateway daemon` both run the Jaeger Gateway.** The external Agentgateway (MCP `:8811`, A2A `:8812`) was archived on 2026-11-16 (C7). MCP is on `:8792`, A2A is the a2a service.
-  * Current Mac client: `jaeger_ai/interfaces/macos-shell`; shared frontend: `jaeger_ai/interfaces/ui`. `apps/macos` and `apps/web` alias those canonical paths. `features/webui` remains a required authenticated backend/proxy. The old SwiftUI/Qt desktop frontends are archived outside the repo; no automatic fallback is permitted.
+  * Current Mac client: `jaeger_ai/interfaces/macos-shell`; shared frontend: `jaeger_ai/interfaces/ui`. `apps/macos` and `apps/web` alias those canonical paths. The WebUI server side is `jaeger_ai/core/gateway/webapp`, served by the Gateway on `:8790`. The old SwiftUI/Qt desktop frontends are archived outside the repo; no automatic fallback is permitted.
   * Session state resolves through `operator_state_root()`: `JAEGER_STATE_DIR` → `JAEGER_HOME` → `~/.jaeger`, landing at `<state root>/gateway_sessions.sqlite3`. Anything opening that database directly must use the same resolver — reading `JAEGER_HOME` alone means a sandboxed run silently opens the operator's live store and collides with the daemon's ownership lease.
 * **Tool Call Resilience:**
   * All model-generated tool calls must pass through `jaeger_ai.core.runtime.tool_repair` to automatically recover from malformed JSON, markdown fences, Python literals, or single quotes without failing the user's turn.
@@ -83,7 +83,9 @@ exercised; none are aspirational.
 | Process | Bind | Launch | Owns |
 |---|---|---|---|
 | Jaeger Gateway | `127.0.0.1:33418` | `jaeger gateway daemon` | sessions, SSE, approvals |
-| Jaeger WebUI | `:8790` | `./scripts/run-jaeger-webui.sh` | browser UI |
+| Jaeger WebUI | `:8790` | served by the Gateway | browser UI |
+| MCP HTTP | `127.0.0.1:8792` | launchd `jaeger-mcp-http` | tool surface for MCP clients |
+| Voice | `127.0.0.1:8794` | `scripts/run-jaeger-voice.sh` (launchd) | local speech |
 | MCP server | stdio / `--http` | `jaeger mcp` | tool surface |
 | A2A server | loopback `:8796` | `jaeger a2a` | agent-to-agent JSON-RPC |
 
@@ -100,7 +102,7 @@ exercised; none are aspirational.
 |---|---|---|
 | `jaeger_ai/interfaces/macos-shell` (= `apps/macos`) | AppKit + WKWebView native host | shared UI → Gateway |
 | `jaeger_ai/interfaces/ui` (= `apps/web`) | React + TypeScript shared frontend | Gateway / authenticated WebUI proxy |
-| `jaeger_ai/features/webui` | retained Python backend/proxy and login | server-side proxy → `:33418` |
+| `jaeger_ai/core/gateway/webapp` | WebUI server side and sign-in, inside the Gateway | in-process |
 | `jaeger_ai/interfaces/ide` | VS Code extension sidebar | REST+SSE `:33418`, native daemon lifecycle |
 | `jaeger_ai/interfaces/tui` | `prompt_toolkit` | AF_UNIX bridge |
 
@@ -114,7 +116,7 @@ shell is Swift/AppKit; preserve its existing bundle identity and permission boun
 | `jaeger gateway daemon` (`:33418`) | Agentgateway (`:8811`, `:8812`, archived 2026-11-16) | `daemon` owns Jaeger sessions & SSE; there is no external proxy. |
 | `packages/jaeger-agent/` | `jaeger_ai/vendor/` | `jaeger-agent` is live uv workspace; `vendor/` is deleted and forbidden. |
 | `jaeger_ai/interfaces/macos-shell` | `apps/macos` | Canonical native shell; old SwiftUI target is not an automatic fallback. |
-| `jaeger_ai/interfaces/ui` | `apps/web` | Canonical shared frontend; retain `features/webui` backend dependencies. |
+| `jaeger_ai/interfaces/ui` | `apps/web` | Canonical shared frontend, served by the Gateway on `:8790`. |
 | `~/.jaeger/` (`operator_state_root`) | `<repo>/.jaeger_*`, root shims | Zero in-repo state; databases belong strictly in operator home. |
 | `./scripts/verify.sh` | Manual ad-hoc test invocations | Single-command deterministic test pipeline before turn completion. |
 
@@ -122,7 +124,8 @@ shell is Swift/AppKit; preserve its existing bundle identity and permission boun
 
 ```bash
 jaeger gateway daemon                       # :33418 — start first
-./scripts/run-jaeger-webui.sh               # :8790
+                                            # :8790 WebUI comes up with the Gateway
+./scripts/verify-stack-smoke.py             # Gateway, WebUI, MCP and voice health
 bash jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh # external dev bundle; does not install/start services
 ./scripts/verify.sh                         # deterministic test & hygiene verification pipeline
 ```

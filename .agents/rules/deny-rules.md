@@ -8,7 +8,7 @@
 ## 2. Git Staging & Index Safety
 * **NEVER run blanket staging commands:**
   * `git add .`, `git add -A`, or `git commit -a` are strictly forbidden.
-  * Always stage explicit, targeted paths (e.g. `git add jaeger_ai/features/webui/api/oauth.py`).
+  * Always stage explicit, targeted paths (e.g. `git add jaeger_ai/core/gateway/webapp/jaeger_signin.py`).
   * Blanket staging risks accidentally committing untracked build caches, temporary scratch files, or sensitive configuration files.
 
 ## 3. Zero In-Repo State & No Compat Shims

@@ -108,7 +108,7 @@ jaeger gateway daemon  # Runs on 127.0.0.1:33418
 
 ### 3. Start the WebUI (optional remote companion)
 ```bash
-./scripts/run-jaeger-webui.sh  # Runs on 127.0.0.1:8790
+# The WebUI is served by the Gateway on 127.0.0.1:8790
 ```
 
 ### 4. Set Up the Extension

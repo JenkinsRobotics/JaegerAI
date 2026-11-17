@@ -30,11 +30,10 @@ an incremental Markdown-to-DOM parser built for token-by-token output.
 - Repository: https://github.com/thetarnav/streaming-markdown
 - License: MIT (full text below)
 
-The library is not copied into this source tree. `package_extension.py`
-copies the SAME file JaegerAI's WebUI already vendors at
-`jaeger_ai/features/webui/static/vendor/smd.min.js` (self-hosted from the
-pinned npm release, no CDN) into the staged extension at packaging time, so
-there is exactly one copy of the file in the repository. If that file is
+The library is not checked into this source tree. When a local copy of the
+pinned npm release is placed at `jaeger_ai/interfaces/ide/media/vendor/smd.min.js`,
+`package_extension.py` verifies its hash and copies it into the staged
+extension at packaging time (self-hosted, no CDN). If that file is
 missing or fails to load, the panel falls back to plain, safely-escaped text
 with fenced code blocks — Markdown rendering is an enhancement, never a
 requirement for correctness or safety.

@@ -1,136 +1,166 @@
-# 🗺️ JaegerAI Architecture & Directory Guide
+# JaegerAI repo map
 
-> **A Plain-English Guide for Developers and Non-Coders**  
-> This document explains how `JaegerAI` is organized, where each feature lives, and how to find and edit code easily.
+What lives where, as of 2026-11-17. If a folder is not listed here, it is not
+part of the product. Code that was cut is on the Desktop under
+`Jaeger-removed-features-2026-11-16/` (each folder has a README and a row in
+`INDEX.md`), not in this repo.
 
-> **Module status (2026-10-22, see docs/PRODUCT.md):** Not every folder below is in the current product. The 7 logical modules to work toward — identity-memory, authority-verification (renamed 2026-11-05 from "proposer-checker": authority is the tiered policy kernel, verification is engineering), event-heartbeat, senses-companion, tools-jenkins, sim-body, clients-thin — each run and test alone before they bolt to the main runtime. `features/` currently has 33 folders, including IDE, roundtable, finance, and other non-stack features that are parked, not loaded by default, in the next cleanup step. `features/personality/` is not the product: the companion is one identity (persona packs). No folder was moved in the 2026-10-22 docs alignment; originals are on the Desktop in `JaegerAI-checkpoint-2026-10-22/`, not in this repo.
+## The running stack
 
----
+| Service | Port | Code | Started by |
+| :--- | :--- | :--- | :--- |
+| Gateway | `127.0.0.1:33418` | `jaeger_ai/core/gateway/` | launchd `com.jenkinsrobotics.jaeger-gateway` |
+| WebUI | `:8790` | `jaeger_ai/core/gateway/webapp/` + `jaeger_ai/interfaces/ui/` | the Gateway (same process) |
+| MCP HTTP | `127.0.0.1:8792` | `jaeger_ai/interfaces/mcp_server.py` | launchd `com.jenkinsrobotics.jaeger-mcp-http` |
+| Voice | `127.0.0.1:8794` | `jaeger_ai/core/voice/`, `packages/jaeger-kokoro-tts`, `packages/jaeger-whisper-stt` | `scripts/run-jaeger-voice.sh` (launchd) |
+| Droid | — | `jaeger_ai/features/droid/` | launchd `com.jenkinsrobotics.jaeger-droid` |
+| Mac app | — | `jaeger_ai/interfaces/macos-shell/` | the user; it loads the same frontend |
 
-## 🧭 "Where Do I Find...?" Quick Lookup
+Port numbers have one home: `jaeger_ai/contract/ports.py`.
+`scripts/verify-stack-smoke.py` checks all four ports; `scripts/verify-chat.py`
+runs one real chat turn.
 
-| I want to... | Where do I look? | Key files |
-| :--- | :--- | :--- |
-| **Edit the current Mac host** | [`jaeger_ai/interfaces/macos-shell/`](../../jaeger_ai/interfaces/macos-shell/) | AppKit/WKWebView host; builds outside source |
-| **Edit the current shared frontend** | [`jaeger_ai/interfaces/ui/`](../../jaeger_ai/interfaces/ui/) | React/TypeScript; shared Mac/browser surface |
-| **Edit retained WebUI backend/proxy** | [`jaeger_ai/features/webui/`](../../jaeger_ai/features/webui/) | Required authenticated proxy, backend APIs and login |
-| **Edit the Web UI's look & branding** | [`jaeger_ai/assets/`](../../jaeger_ai/assets/) | `jaeger_webui_branding.js` — **the only copy**; see below |
-| **Edit the Task Dispatcher & Kanban board** | [`jaeger_ai/features/dispatcher/`](../../jaeger_ai/features/dispatcher/) | `store.py`, `router.py`, `sidecar.py` (board UI: `jaeger_ai/assets/jaeger_dispatcher.js`) |
-| **Add or edit Agent Tools (FastMCP tools)** | [`jaeger_ai/features/host_capabilities/`](../../jaeger_ai/features/host_capabilities/) | `server.py`, `grants.py`, `*_tools.py` |
-| **Change the agent's persona / tone** | [`jaeger_ai/features/personality/`](../../jaeger_ai/features/personality/) | `characters/<name>/` (editable YAML — no code needed) |
-| **Add/rename a framework, or change a port** | [`jaeger_ai/contract/`](../../jaeger_ai/contract/) | `frameworks.py`, `ports.py` — the single copy; everything else imports it |
-| **Change how a framework runs a turn** | [`jaeger_ai/core/frameworks/`](../../jaeger_ai/core/frameworks/) | `jaeger.py`, `native_runs.py`, `delegate.py` |
-| **Edit Shared Memory (Honcho)** | [`jaeger_ai/features/shared_memory/`](../../jaeger_ai/features/shared_memory/) | `honcho_client.py` |
-| **Change CLI commands (`jaeger start`, `stop`, `bench`)** | [`jaeger_ai/cli/verbs/`](../../jaeger_ai/cli/verbs/) | `lifecycle_verbs.py`, `dispatch.py` (CLI arg router) |
-| **Run diagnostic / verification scripts** | [`scripts/`](../../scripts/) | `run-host-capability-server.py`, `verify-*.py` |
+## Quick lookup
 
----
-
-## 📌 Two rules that explain every exception
-
-Most folders under `jaeger_ai/features/` are exactly one feature: open the
-folder, read its `README.md`, and that is the whole thing. Two kinds of file
-deliberately sit elsewhere, and knowing which is which saves an afternoon.
-
-**1. Browser extension scripts live in `jaeger_ai/assets/`, not in a feature.**
-The Web UI loads one directory as its extension folder
-(`HERMES_WEBUI_EXTENSION_DIR`). Three features ship scripts into that single
-mount, so the mount owns the directory rather than any one feature.
-`jaeger_webui_branding.js`, `jaeger_dispatcher.js` and
-`jaeger_gateway_console.js` are all there, and **those are the only copies** —
-editing a file anywhere else will not change what the browser loads.
-
-**1b. A fact two layers share lives in `jaeger_ai/contract/`.**
-Framework names and service ports are defined there once and imported. If you
-find yourself typing a framework name or a port number into a second file, that is the
-signal — import it instead. `dev/tests/jaeger_ai/contract/` fails if a copy
-reappears.
-
-**2. Code used by several features lives under `jaeger_ai/core/`.**
-`core/frameworks/` runs a turn against Jaeger or an external framework (Hermes,
-Claude Code, Codex, Grok). The Web UI and the Gateway both call it, so it
-belongs to neither.
-
-## ⚠️ Three things named "gateway" — which is which
-
-| Path | What it actually is |
+| I want to... | Look in |
 | :--- | :--- |
-| `jaeger_ai/core/gateway/` | **The Jaeger Gateway.** Owns chat sessions and live events on port 33418. Started by `jaeger gateway daemon`. |
-| `jaeger_ai/interfaces/messaging/` | Discord, Slack and Telegram chat adapters. |
+| Change how a chat turn runs | `packages/jaeger-agent/jaeger_agent/` (loop, tools, memory), entered through `jaeger_ai/core/frameworks/jaeger.py` |
+| Add or change a Gateway HTTP route | `jaeger_ai/core/gateway/server.py` and the `*_routes.py` beside it |
+| Change a WebUI `/api/*` route or sign-in | `jaeger_ai/core/gateway/webapp/` (`jaeger_sessions.py`, `jaeger_signin.py`, `workspace_api.py`) |
+| Edit the browser and Mac frontend | `jaeger_ai/interfaces/ui/src/` (React + TypeScript) |
+| Edit the Mac host app | `jaeger_ai/interfaces/macos-shell/` (AppKit + WKWebView) |
+| Add or change a skill | `packages/jaeger-agent/jaeger_agent/skills/` (`catalog.yaml` lists what ships) |
+| Computer-control tools | the `computer_use_v1` and `macos_computer_v1` skills in that folder |
+| Change MCP tools exposed to Codex / Claude Code | `jaeger_ai/interfaces/mcp_server.py`, `jaeger_ai/core/mcp/` |
+| Change approvals and safety policy | `jaeger_ai/core/authority/`, `jaeger_ai/core/safety/` |
+| Change memory | `jaeger_ai/core/memory/`, `packages/jaeger-agent/jaeger_agent/memory/` |
+| Change the agent list (`/v1/agents`) | `jaeger_ai/core/agent_registry/` |
+| Change Telegram / iMessage / Discord relays | `jaeger_ai/features/channels/` |
+| Change a CLI command | `jaeger_ai/cli/verbs/` (router: `dispatch.py`) |
+| Change shared names, ports, schemas | `jaeger_ai/contract/` (single copy; everything imports it) |
+| Change the persona | `jaeger_ai/features/personality/` |
 
-The first two are one CLI word apart and were both called "gateway" until the
-second was renamed. If something about sessions is broken, you want the first.
+## Top level
 
-## 🧪 Where the tests are
-
-| Location | Holds |
-| :--- | :--- |
-| `dev/tests/` | Almost everything. Mirrors the `jaeger_ai/` layout. |
-| `<module>/tests/` | Contract tests kept beside the module they check — only under `nodes/` and `plugins/`, where each module carries its own `module.yaml` contract. |
-| `packages/<name>/tests/` | Each standalone package tests itself. |
-
-When adding a test, put it in `dev/tests/` unless you are testing a `module.yaml`
-contract.
-
----
-
-## 🏛️ Top-Level Directory Layout
-
-```text
-JaegerAI/
-├── apps/                       # 📱 Client aliases — SYMLINKS to the real dirs below
-│   ├── macos/                  # → jaeger_ai/interfaces/macos-shell
-│   └── web/                    # → jaeger_ai/interfaces/ui
-├── packages/                   # 📦 Standalone Python packages, each testing itself
-│   ├── jaeger-agent/           # The agent loop and model adapters
-│   ├── jaeger-os/              # OS abstractions, permissions, daemon logic
-│   ├── jaeger-kokoro-tts/      # Text to speech
-│   └── jaeger-whisper-stt/     # Speech to text
-├── jaeger_ai/                  # 🧠 The main application
-│   ├── assets/                 # 🎨 Icons + the browser extension scripts (see rule 1 above)
-│   ├── contract/               # 📜 Facts two layers must agree on — imported, never copied
-│   ├── core/                   # Shared engine — used by more than one feature
-│   │   ├── gateway/            # 🚪 THE Jaeger Gateway: sessions + live events, port 33418
-│   │   ├── frameworks/         # 🔀 Runs a turn against Jaeger or an external framework
-│   │   ├── models/             # Model resolution and catalogs
-│   │   ├── instance/           # Per-instance config, first boot, personas
-│   │   └── runtime/            # Autonomous loop and tool-call repair
-│   ├── features/               # 🌟 One folder per feature — each has a README.md
-│   │   ├── webui/              # 🌐 Web UI adapter, profiles, session unification
-│   │   ├── dispatcher/         # 📋 Task Kanban board and worker routing
-│   │   ├── host_capabilities/  # 🛠️ Files, shell, apps, camera, memory — permission-gated
-│   │   ├── personality/        # 🎭 The persona used on every turn (YAML characters)
-│   │   ├── skill_tree/         # 🌳 XP progression over the agent's skills
-│   │   ├── reasoning/          # 💭 Experimental between-turns cognition (off by default)
-│   │   ├── timeline/           # 🎬 Multi-track scheduling for avatar performances
-│   │   └── …                   # 26 in total — open any one and read its README
-│   ├── cli/                    # 💻 Command-line verbs (`start`, `stop`, `webui`, …)
-│   ├── interfaces/             # 🔌 Client surfaces ONLY — how a human or peer connects
-│   │   ├── macos-shell/        # Canonical native Mac host
-│   │   ├── ui/                 # Shared app frontend
-│   │   ├── ide/                # VS Code / IDE extension webview & server client
-│   │   ├── tui/                # Terminal UI
-│   │   ├── native_multimodal/  # Reused socket adapter/device diagnostics
-│   │   ├── avatar/             # Avatar window surfaces
-│   │   └── bridge.py           # The NDJSON socket the native clients speak
-│   ├── nodes/                  # 🧩 Manifest-driven modules (each with module.yaml)
-│   └── plugins/                # 🧩 Messaging + integration plugins
-├── scripts/                    # 🔧 Operator entry points and verify-* diagnostics
-├── dev/                        # 🧪 dev/tests/ (the test suite) and developer docs
-└── docs/                       # 📖 User and system documentation
+```
+.agents/        editor-agent rules
+.github/        CI workflows, PR and issue templates
+apps/           symlinks: macos -> jaeger_ai/interfaces/macos-shell, web -> jaeger_ai/interfaces/ui
+clients/python/ thin Python client for the Gateway
+dev/            tests, evals, benchmarks, dev scripts (never imported by the product)
+docs/           product, stack, trust and architecture docs (index: docs/README.md)
+jaeger          CLI launcher (./jaeger <verb>)
+jaeger_ai/      the product
+packages/       separately installable packages (agent, browser, OS, TTS, STT)
+scripts/        install, verify and launch scripts
 ```
 
-> **`features/` vs `core/` vs `interfaces/`** — a feature is something you could
-> switch off; `core/` is shared by several features; `interfaces/` is only ever
-> *how someone connects* (a window, a terminal, a socket), never business logic.
+Root files: `README.md`, `AGENTS.md` (rules for coding agents), `CLAUDE.md`,
+`CONTRIBUTING.md`, `SECURITY.md`, `DESIGN.md`, `CHANGELOG.md`,
+`THIRD_PARTY_NOTICES.md`, `pyproject.toml`.
 
----
+## jaeger_ai/
 
-## 💡 How Modular Features Work
+```
+main.py           process entry
+module_roots.py   where modules are discovered
+cli/              the jaeger CLI; verbs/ holds one file per verb group
+contract/         shared names, ports, schemas, trace and update contracts
+core/             the runtime (below)
+features/         optional capabilities, one folder each, each with a README
+interfaces/       the ways in: UI, Mac app, MCP, A2A, IDE, TUI, bridge
+plugins/          channel/plugin loader, Home Assistant, AI generation, MCP plugins
+modules/          module shims for the bundled packages plus build-check
+nodes/            animation and media nodes
+assets/           icons, design system, connect-apps assets
+migrations/       state migrations, run in order by the runner
+docs/             in-package docs
+```
 
-Every feature in `jaeger_ai/features/` is designed to be **self-contained**:
-1. **Its own code**: All scripts, endpoints, and logic live inside that feature's directory.
-2. **Its own docs**: Contains a beginner-friendly `README.md` explaining what the feature does, how it works, and which files to edit.
-3. **Its own tests/verification**: Contains verification scripts or unit test references.
+### core/
 
-Non-coders and developers can safely work inside a feature folder without worrying about breaking unrelated parts of the system.
+```
+gateway/          the Gateway server (server.py) and its route modules
+gateway/webapp/   WebUI server side, folded into the Gateway (aliased as `api`)
+frameworks/       turn entry (jaeger.py), native runs, delegation, discovery
+agent_registry/   the agents shown in /v1/agents
+authority/        tiered approval policy
+safety/           safety checks around tools and actions
+memory/           memory store and recall
+models/           model routing and provider clients
+runtime/          lifecycle, server controls, process supervision
+skills/           skill service used by the Gateway
+mcp/              MCP client/server plumbing
+voice/            voice pipeline
+team/, multi_agent/   team rooms and multi-agent runs
+tasks/            task tracking
+context_compiler/ prompt and context assembly
+entity/, world/, devices/, capabilities/   embodiment and device model
+instance/, settings/, secrets_env.py       instance layout, settings, secrets
+diagnostics/, bench/                       diagnostics and benchmarks
+```
+
+### features/
+
+`agent_bridge`, `app_control`, `browser`, `channels`, `cli_backends`,
+`cost_tracking`, `dispatcher`, `droid`, `ide_orchestration`,
+`knowledge_library`, `missions`, `notifications`, `obsidian`, `oss_stack`,
+`personality`, `reasoning`, `remote_access`, `session_search`, `timeline`,
+`ui_layout`, `voice`, `web_search`, `webhooks`, `workflows`.
+
+Each folder's `README.md` says what it does, how to turn it on and how to
+tell it works (enforced by `dev/tests/jaeger_ai/test_repo_structure.py`).
+
+### interfaces/
+
+```
+ui/               shared React frontend (browser on :8790 and the Mac app)
+macos-shell/      native Mac host
+macos-pim/        Mac contacts/calendar helpers
+mcp_server.py     MCP server (HTTP on :8792, or stdio)
+a2a_server.py     agent-to-agent server (optional, not started by default)
+bridge.py         in-process bridge used by clients and the Mac app
+ide/              VS Code extension client
+tui/              terminal UI
+avatar/, native_multimodal/   avatar and multimodal surfaces
+```
+
+## packages/
+
+| Package | What it is |
+| :--- | :--- |
+| `jaeger-agent` | the agent loop, tools, memory, skills (`jaeger_agent/skills/catalog.yaml`) |
+| `jaeger-browser` | browser automation |
+| `jaeger-os` | device and hardware layer |
+| `jaeger-kokoro-tts` | local text-to-speech |
+| `jaeger-whisper-stt` | local speech-to-text |
+
+## scripts/
+
+`install.sh`, `install-packages.py`, `install-droid.py`,
+`install-jaeger-channels.sh`, `install-team-skills.sh`, `setup-mac-robot.sh`
+(install); `run-jaeger-voice.sh` (voice launcher); `verify.sh`,
+`verify-chat.py`, `verify-stack-smoke.py`, `check-installed-release.py`,
+`ci-local.sh` (checks); `audit-guard.py` (pre-push guard);
+`build-standalone-macos.py`, `bundle-macos-native.py` (Mac builds);
+`migrate-webui-config.py`; `connectors/`.
+
+## dev/
+
+```
+dev/tests/        pytest suite (unit, contracts, integration, e2e, acceptance)
+dev/tests/fixtures, dev/tests/helpers   shared test data and helpers
+dev/scripts/      run_tests.sh and other dev tools
+dev/evals/, dev/benchmark/              evaluations and benchmarks
+```
+
+UI tests live next to the code in `jaeger_ai/interfaces/ui/src/**/*.test.ts(x)`;
+shared UI test data is in `jaeger_ai/interfaces/ui/src/test/fixtures/`.
+
+## Rules that explain the exceptions
+
+1. One copy of everything. Ports, framework names and schemas live in
+   `contract/`; a moved module gets its importers repointed, never a
+   re-export shim (enforced by `test_repo_structure.py`).
+2. Nothing is deleted outright. Cut code goes to the Desktop archive with a
+   README saying how to restore it.

@@ -58,7 +58,7 @@ PERSISTENT ENTITY RUNTIME   EntityRuntime (OWNER, resident=true)
 | Control plane | `jaeger_ai.core.gateway.server` | `127.0.0.1:33418` | **IMPLEMENTED** |
 | Entity execution | `jaeger_ai.core.entity.runtime.EntityRuntime` | in Gateway process | **IMPLEMENTED** |
 | Subordinate ReAct | `packages/jaeger-agent` `JaegerAgent` | injected | **IMPLEMENTED** |
-| WebUI client | `jaeger_ai.features.webui` | `127.0.0.1:8790` | **IMPLEMENTED** |
+| WebUI client | `jaeger_ai.core.gateway.webapp` (served by the Gateway) | `127.0.0.1:8790` | **IMPLEMENTED** |
 | Bridge client | `jaeger_ai.interfaces.bridge` | AF_UNIX | **IMPLEMENTED** |
 | CLI client | `jaeger` / `jaeger_ai.cli` | process | **IMPLEMENTED** |
 | Remote WebUI | Tailscale Serve `:8443` → loopback WebUI | tailnet | **IMPLEMENTED** (software). Physical iPhone **PLANNED** for Face ID/PWA/photo picker |
