@@ -110,8 +110,23 @@ def permission_argv(backend_id: str, autonomy: str) -> list[str]:
     return argv
 
 
+_UNDERSCORE_RUN = re.compile(r"__+")
+
+
 def mcp_safe_name(name: str) -> str:
-    cleaned = _SAFE_NAME.sub("_", (name or "").strip()).strip("_")
+    """Name a tool as the CLI's MCP client can register it.
+
+    Grok qualifies every tool as ``jaeger__<name>`` and rejects a name that
+    itself contains ``__`` ("invalid or ambiguous qualified name"), so
+    connector tools such as ``mcp__github__list_commits`` never registered.
+    They are exposed as ``github_list_commits``; the handler still runs the
+    original tool.
+    """
+    raw = (name or "").strip()
+    if raw.startswith("mcp__"):
+        raw = raw[len("mcp__"):]
+    cleaned = _SAFE_NAME.sub("_", raw)
+    cleaned = _UNDERSCORE_RUN.sub("_", cleaned).strip("_")
     return cleaned or "tool"
 
 
