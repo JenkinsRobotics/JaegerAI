@@ -124,6 +124,17 @@ def computer_look(app: str = "", include_screenshot: bool = False) -> dict:
     if not apps_result.get("ok"):
         errors["apps"] = str(apps_result.get("error") or "app inventory unavailable")
 
+    if not apps_result.get("ok"):
+        # The AX engine is gated on the Accessibility permission, but the app
+        # inventory only needs NSWorkspace; answer that part regardless.
+        from jaeger_agent.skills.macos_computer_v1.engines import _ax_lowlevel
+        fallback = _ax_lowlevel.running_apps_without_ax()
+        if fallback.get("ok"):
+            out["apps"] = {"ok": True, "apps": fallback["apps"]}
+            out["frontmost_app"] = fallback.get("frontmost")
+            errors.pop("apps", None)
+            apps_result = {"ok": True}
+
     # Focused window + shallow children — the cheap verification path.
     focus_result = planner.run(Action(
         kind="focused_window", args={}, target=app,

@@ -142,10 +142,17 @@ def run(
     # a generic "nothing claimed it" message when the candidate
     # list was empty).
     if last_result is None:
+        error = (f"no available engine claimed action "
+                 f"kind={action.kind!r} target={action.target!r}")
+        if unavailable:
+            # Say WHY the engines that wanted this action were skipped —
+            # usually a missing macOS permission only the user can grant.
+            error += "; " + "; ".join(f"{u['engine']}: {u['reason']}" for u in unavailable)
         return {
             "ok": False,
-            "error": (f"no available engine claimed action "
-                      f"kind={action.kind!r} target={action.target!r}"),
+            "error": error,
+            **({"needs_permission": True} if any(
+                "permission" in u["reason"].lower() for u in unavailable) else {}),
             "attempts": attempts,
             "unavailable": unavailable,
             "wall_ms": round((time.perf_counter() - started) * 1000.0, 1),
