@@ -144,6 +144,73 @@ def _handoff_body(work, turn, *, from_agent_id, require_approval, request_id,
     return body
 
 
+# ---------------------------------------------------------------------------
+# Subagent contract (R13). Every delegation tool (delegate, call_agent,
+# run_team, get_agent_result) returns these fields on top of its own, so the
+# lead always reads a result the same way:
+#   contract  "jaeger.subagent.v1"
+#   ok        True only for a completed, non-stub result
+#   status    completed | failed | timeout | pending_approval | running |
+#             stopped | cancelled | denied | unknown
+#   done      the status is final (no more work will happen)
+#   agent     who did it;  handoff_id  the durable record (get_agent_result)
+#   summary   the teammate's answer (preview if result_path is set)
+#   error     why it is not ok (None when ok)
+#   next      what the lead should do now
+# ---------------------------------------------------------------------------
+SUBAGENT_CONTRACT = "jaeger.subagent.v1"
+_FINAL = {"completed", "failed", "timeout", "stopped", "cancelled", "denied", "unknown"}
+_NEXT = {
+    "completed": "Use the summary (read result_path if set) and answer in your own voice; say who did the work.",
+    "running": "Accepted and running. End this turn; read it later with get_agent_result. Do not resubmit.",
+    "admitted": "Accepted and running. End this turn; read it later with get_agent_result. Do not resubmit.",
+    "pending_approval": "Waiting for the owner's approval; tell them, do not redo the work yourself.",
+    "timeout": "Not finished. Do not claim it is done; say it is still running or retry once with a smaller task.",
+    "stopped": "The owner stopped this turn; do not continue the work.",
+}
+
+
+def _contract(result: Any, agent: str = "") -> Any:
+    if not isinstance(result, dict) or result.get("contract") == SUBAGENT_CONTRACT:
+        return result
+    raw = str(result.get("status") or ("completed" if result.get("ok") else "failed"))
+    status = {"execution_unknown": "unknown", "admitted": "running", "rejected": "failed"}.get(raw, raw)
+    inner = result.get("result")
+    summary = (inner.get("summary") if isinstance(inner, dict) else inner) or result.get("summary") or ""
+    handoff = result.get("handoff") if isinstance(result.get("handoff"), dict) else {}
+    out = dict(result)
+    out.update(
+        contract=SUBAGENT_CONTRACT,
+        ok=bool(result.get("ok")) and status in {"completed", "running"} and not result.get("error"),
+        status=status,
+        done=status in _FINAL,
+        agent=agent or str(result.get("helper") or handoff.get("to_agent_id") or result.get("agent") or ""),
+        handoff_id=result.get("handoff_id") or handoff.get("id"),
+        summary=str(summary)[:6000],
+        error=result.get("error") or (None if status in {"completed", "running", "pending_approval"} else status),
+        next=_NEXT.get(status, "It did not succeed. Tell the owner plainly what failed; do not present it as done."),
+    )
+    if status == "running":
+        out["ok"] = True
+    return out
+
+
+def _with_contract(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        result = fn(*args, **kwargs)
+        if isinstance(result, dict) and isinstance(result.get("results"), list):
+            result = {**result, "contract": SUBAGENT_CONTRACT,
+                      "results": [_contract(r) for r in result["results"]]}
+            result["done"] = all(r.get("done") for r in result["results"])
+            return result
+        agent = str(kwargs.get("agent_id") or kwargs.get("profile") or (args[0] if args else "") or "")
+        return _contract(result, agent if fn.__name__ != "get_agent_result" else "")
+    return wrapper
+
+
 def _agent_by_name(registry: Any, name: str) -> Any:
     """Resolve ``@Display Name`` / ``Display Name`` / bare name to one agent (exact, case-insensitive)."""
     needle = name.strip().lstrip("@").strip().lower()
@@ -159,6 +226,7 @@ def _agent_by_name(registry: Any, name: str) -> Any:
 
 
 @register_tool_from_function(name="run_team", side_effect="external")
+@_with_contract
 def run_team(assignments: str, project_id: str = "", timeout_seconds: int = 1800) -> dict[str, Any]:
     """Submit bounded specialist tasks and collect each durable result."""
     try:
@@ -215,6 +283,7 @@ def run_team(assignments: str, project_id: str = "", timeout_seconds: int = 1800
 
 
 @register_tool_from_function(name="call_agent", side_effect="external")
+@_with_contract
 def call_agent(
     agent_id: str,
     task: str,
@@ -328,6 +397,7 @@ def call_agent(
 
 
 @register_tool_from_function(name="get_agent_result", side_effect="read")
+@_with_contract
 def get_agent_result(handoff_id: str) -> dict[str, Any]:
     """Read a durable specialist result once; never starts or retries work."""
     import re
@@ -412,6 +482,7 @@ def _resolve_helper(profile: str) -> Any:
 
 
 @register_tool_from_function(name="delegate", side_effect="external")
+@_with_contract
 def delegate(profile: str = "", brief: str = "", context: str = "", timeout_seconds: int = 300) -> dict[str, Any]:
     """Think with one of your inner helpers (Design & Style, Mac App, Gateway & WebUI,
     System Engineer, ...). The helper works on ``brief`` in a fresh context and
