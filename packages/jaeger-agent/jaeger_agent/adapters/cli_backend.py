@@ -58,8 +58,13 @@ _GROK_BUILTIN_TOOLS = (
 )
 
 # Wall-clock cap so a vendor-tool spin cannot hang the chat turn.
-# "took too long — Retry" is the operator-facing copy.
-_CLI_HARD_TURN_TIMEOUT_S = 120.0
+# "took too long — Retry" is the operator-facing copy. A streaming turn is cut
+# by silence instead (no output and no Jaeger tool activity for
+# _CLI_IDLE_TIMEOUT_S), so long turns that keep working finish; the 120s wall
+# clock killed working calendar/export/task turns at 124s (G11).
+_CLI_HARD_TURN_TIMEOUT_S = 600.0
+_CLI_IDLE_TIMEOUT_S = 150.0
+_CLI_NONSTREAM_TIMEOUT_S = 240.0
 
 _SAFE_ENV = frozenset({
     "COLORTERM",
@@ -1073,6 +1078,15 @@ class CliBackendAdapter(ProviderAdapter):
                 hard = float(os.environ.get("JAEGER_CLI_TURN_TIMEOUT_S") or _CLI_HARD_TURN_TIMEOUT_S)
         except (TypeError, ValueError):
             hard = _CLI_HARD_TURN_TIMEOUT_S
+        idle = None
+        if cron_hard is None or float(cron_hard) <= 0:
+            try:
+                idle = float(os.environ.get("JAEGER_CLI_IDLE_TIMEOUT_S") or _CLI_IDLE_TIMEOUT_S)
+            except (TypeError, ValueError):
+                idle = _CLI_IDLE_TIMEOUT_S
+            if on_delta is None:
+                # Nothing to observe without a stream: keep a plain wall clock.
+                hard = min(hard, _CLI_NONSTREAM_TIMEOUT_S)
         if hard > 0:
             self.timeout_s = min(self.timeout_s or hard, hard)
         popen_kwargs: dict[str, Any] = {
@@ -1091,7 +1105,8 @@ class CliBackendAdapter(ProviderAdapter):
         self._proc = subprocess.Popen(**popen_kwargs)
         try:
             if on_delta is not None:
-                stdout, stderr = collect_stream(self._proc, stdin_bytes, self.timeout_s, on_delta, on_reasoning, on_progress)
+                stdout, stderr = collect_stream(self._proc, stdin_bytes, self.timeout_s, on_delta, on_reasoning, on_progress,
+                                                idle_timeout=idle)
             else:
                 stdout, stderr = self._proc.communicate(
                     input=stdin_bytes, timeout=self.timeout_s,

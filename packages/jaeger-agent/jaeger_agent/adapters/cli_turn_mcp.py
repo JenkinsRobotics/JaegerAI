@@ -481,7 +481,9 @@ class _ExecuteHolder:
         # without the same wrap here, get_project_root() falls back to the
         # instance workspace and use_policy approvals never reach the card.
         ctx = self.context
-        result = ctx.run(fn, live, args) if ctx is not None else fn(live, args)
+        from jaeger_agent.adapters.cli_stream import tool_in_flight
+        with tool_in_flight():
+            result = ctx.run(fn, live, args) if ctx is not None else fn(live, args)
         # CLI backends are cloud models: a private tool output is withheld here
         # instead of reaching the model (and failing the turn's next step).
         try:

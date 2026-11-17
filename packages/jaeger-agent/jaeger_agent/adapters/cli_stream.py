@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import subprocess
 import threading
+import time
+from contextlib import contextmanager
 from typing import Callable
 
 
@@ -28,8 +30,34 @@ def text_delta(line: bytes) -> str:
     return stream_delta(line)
 
 
+# Tool activity seen by the Jaeger MCP executor while a CLI turn runs. A tool
+# in flight (or one that just finished) counts as progress, so a long turn
+# that keeps working is not killed by the idle limit; a silent spin still is.
+_ACTIVITY = {"last": 0.0, "inflight": 0}
+_ACTIVITY_LOCK = threading.Lock()
+
+
+def touch_activity() -> None:
+    with _ACTIVITY_LOCK:
+        _ACTIVITY["last"] = time.monotonic()
+
+
+@contextmanager
+def tool_in_flight():
+    with _ACTIVITY_LOCK:
+        _ACTIVITY["inflight"] += 1
+        _ACTIVITY["last"] = time.monotonic()
+    try:
+        yield
+    finally:
+        with _ACTIVITY_LOCK:
+            _ACTIVITY["inflight"] = max(0, _ACTIVITY["inflight"] - 1)
+            _ACTIVITY["last"] = time.monotonic()
+
+
 def collect_stream(proc: subprocess.Popen, stdin: bytes | None, timeout: float,
-                   on_delta: Callable[[str], None], on_reasoning=None, on_progress=None) -> tuple[bytes, bytes]:
+                   on_delta: Callable[[str], None], on_reasoning=None, on_progress=None,
+                   idle_timeout: float | None = None) -> tuple[bytes, bytes]:
     """Drain both pipes concurrently so a verbose CLI cannot deadlock streaming.
 
     Readers are joined before returning; final stdout remains available for the
@@ -38,10 +66,13 @@ def collect_stream(proc: subprocess.Popen, stdin: bytes | None, timeout: float,
     output = bytearray()
     errors = bytearray()
     failures: list[BaseException] = []
+    started = time.monotonic()
+    seen = [started]
     def stdout_reader() -> None:
         try:
             assert proc.stdout is not None
             while line := proc.stdout.readline(1_048_577):
+                seen[0] = time.monotonic()
                 if len(line) > 1_048_576 or len(output) + len(line) > 8_388_608:
                     raise RuntimeError("CLI response exceeded the stream output limit")
                 output.extend(line)
@@ -60,6 +91,7 @@ def collect_stream(proc: subprocess.Popen, stdin: bytes | None, timeout: float,
         assert proc.stderr is not None
         while chunk := proc.stderr.read1(8192) if hasattr(proc.stderr, "read1") else proc.stderr.read(8192):
             errors.extend(chunk)
+            seen[0] = time.monotonic()
             # CLI status/log lines are liveness too (stale detector).
             if on_progress:
                 on_progress()
@@ -73,7 +105,24 @@ def collect_stream(proc: subprocess.Popen, stdin: bytes | None, timeout: float,
         if stdin is not None and proc.stdin is not None:
             proc.stdin.write(stdin)
             proc.stdin.close()
-        proc.wait(timeout=timeout)
+        tool_seen = _ACTIVITY["last"]
+        while True:
+            try:
+                proc.wait(timeout=1.0)
+                break
+            except subprocess.TimeoutExpired:
+                now = time.monotonic()
+                # Jaeger tool work inside the CLI is liveness for the loop's
+                # stale detector too (it only sees stream lines otherwise).
+                if on_progress and (_ACTIVITY["inflight"] or _ACTIVITY["last"] > tool_seen):
+                    tool_seen = _ACTIVITY["last"]
+                    on_progress()
+                if timeout and now - started > timeout:
+                    raise
+                if idle_timeout and _ACTIVITY["inflight"] == 0:
+                    quiet = now - max(seen[0], _ACTIVITY["last"])
+                    if quiet > idle_timeout:
+                        raise subprocess.TimeoutExpired(proc.args, idle_timeout) from None
         for reader in readers:
             reader.join(timeout=2)
         if any(reader.is_alive() for reader in readers):
