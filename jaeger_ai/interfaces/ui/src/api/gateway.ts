@@ -204,6 +204,10 @@ export class GatewayClient implements JaegerSource {
     list: sessionId => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files`),
     read: (sessionId, id) => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}`),
   };
+  memoryFacts = {
+    list: (query = "") => this.json<{ facts: import('./source').SavedFact[]; count: number; store?: string; error?: string }>(`/v1/memory/facts?q=${encodeURIComponent(query)}`),
+    forget: (key: string, subject: string) => this.json<{ ok: boolean; forgot?: boolean; error?: string }>('/v1/memory/facts/forget', { key, subject }),
+  };
   ownerProfile = {
     get: () => this.json<import('./source').OwnerProfile>('/v1/memory/profile'),
     save: (profile: string) => this.json<{ ok: boolean; changed?: boolean; error?: string }>('/v1/memory/profile', { profile }, 'PUT'),
