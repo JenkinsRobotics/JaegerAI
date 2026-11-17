@@ -73,9 +73,13 @@ def is_available() -> tuple[bool, str]:
         return False, str(exc)
     import ApplicationServices as _AX
     if not _AX.AXIsProcessTrusted():
+        import os
+        import sys
+        binary = os.path.realpath(sys.executable)
         return False, ("the host process lacks Accessibility permission — "
-                       "grant it under System Settings > Privacy & Security "
-                       "> Accessibility, then restart Jaeger")
+                       "grant it to " + binary + " under System Settings > "
+                       "Privacy & Security > Accessibility (remove and re-add "
+                       "a stale entry for the same path), then restart Jaeger")
     return True, "ready"
 
 
@@ -95,6 +99,28 @@ def _copy_attr(element: Any, attr: str) -> Any:
     import ApplicationServices as _AX
     err, val = _AX.AXUIElementCopyAttributeValue(element, attr, None)
     return val if err == _AX_SUCCESS else None
+
+
+def running_apps_without_ax() -> dict[str, Any]:
+    """Running UI apps and the frontmost one from NSWorkspace.
+
+    Needs PyObjC but not the Accessibility permission, so a read-only look
+    still answers when the host process is not trusted for Accessibility."""
+    try:
+        from jaeger_agent.util import lazy_deps
+        lazy_deps.ensure("macos.background")
+        import AppKit
+        front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+    except Exception as exc:  # noqa: BLE001 — PyObjC missing or no GUI session
+        return {"ok": False, "error": str(exc)}
+    frontmost = None
+    if front is not None:
+        frontmost = {
+            "name": str(front.localizedName() or ""),
+            "bundle_id": str(front.bundleIdentifier() or ""),
+            "pid": int(front.processIdentifier()),
+        }
+    return {"ok": True, "apps": _running_apps(), "frontmost": frontmost}
 
 
 def _running_apps() -> list[dict[str, Any]]:

@@ -319,6 +319,9 @@ def test_computer_look_reports_failed_observations(monkeypatch):
         "run",
         lambda action: {"ok": False, "error": f"{action.kind} unavailable"},
     )
+    from jaeger_agent.skills.macos_computer_v1.engines import _ax_lowlevel
+    monkeypatch.setattr(_ax_lowlevel, "running_apps_without_ax",
+                        lambda: {"ok": False, "error": "no GUI session"})
 
     result = computer.computer_look(include_screenshot=True)
 
@@ -331,3 +334,42 @@ def test_computer_look_reports_failed_observations(monkeypatch):
         "focused": "focused_window unavailable",
         "screenshot": "screenshot unavailable",
     }
+
+
+def test_unavailable_engine_reason_reaches_the_caller():
+    """When the only engine for an action is skipped (e.g. no Accessibility
+    permission), the error names why instead of a bare "nothing claimed it"."""
+    from jaeger_agent.skills.macos_computer_v1 import planner
+    from jaeger_agent.skills.macos_computer_v1.engines import Action
+
+    class Blocked:
+        name = "ax"
+        priority = 1
+
+        def can_handle(self, action):
+            return 1.0
+
+        def is_available(self):
+            return False, "the host process lacks Accessibility permission"
+
+    out = planner.run(Action(kind="focused_window", args={}, target=""), engines=[Blocked()])
+    assert out["ok"] is False
+    assert "lacks Accessibility permission" in out["error"]
+    assert out["needs_permission"] is True
+
+
+def test_look_lists_apps_without_accessibility(monkeypatch):
+    """computer_look still reports running and frontmost apps when the AX
+    engine is gated, using NSWorkspace (no Accessibility needed)."""
+    from jaeger_agent.skills.macos_computer_v1 import macos_computer, planner
+    from jaeger_agent.skills.macos_computer_v1.engines import _ax_lowlevel
+
+    monkeypatch.setattr(planner, "run", lambda action, engines=None: {"ok": False, "error": "ax: no permission"})
+    monkeypatch.setattr(_ax_lowlevel, "running_apps_without_ax", lambda: {
+        "ok": True, "apps": [{"name": "Finder", "bundle_id": "com.apple.finder", "pid": 1}],
+        "frontmost": {"name": "Finder", "bundle_id": "com.apple.finder", "pid": 1}})
+    out = macos_computer.computer_look()
+    assert out["ok"] is True
+    assert out["frontmost_app"]["name"] == "Finder"
+    assert "apps" not in out.get("errors", {})
+    assert "focused" in out["errors"]
