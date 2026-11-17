@@ -700,6 +700,10 @@ class GatewayTaskOwner:
                     )
                 except CompletionError as exc:
                     authoritative_transition(current, TaskState.FAILED, error=str(exc))
+            elif 'permanently BLOCKED' in str(result.get('error') or ''):
+                # The run itself refuses replay; every retry would fail the
+                # same way within seconds (three extra failed turns per task).
+                authoritative_transition(current, TaskState.FAILED, error=str(result.get('error')))
             elif current.retry_policy.can_retry():
                 current.retry_policy.current_retries += 1
                 current.payload['attempt'] = attempt + 1
