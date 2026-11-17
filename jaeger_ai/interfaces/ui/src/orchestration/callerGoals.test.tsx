@@ -5,7 +5,7 @@ import type { Agent, Handoff } from "../api/types";
 import { agentsLive, derivedGaps, gatewayActivity, resetActivityProbe } from "./adapter";
 import { ActivityFeed } from "./ActivityFeed";
 import { activityItemRow, backfill, callerName, eventRow, namesFrom } from "./feed";
-import { mockAdapter } from "./mockOrchestration";
+import { mockAdapter } from "../test/fixtures/mockOrchestration";
 import { OrchestrationPanes } from "./OrchestrationPanes";
 
 const names = namesFrom([{ id: "native:jaeger", name: "jaeger", display_name: "Jaeger", role: "lead" }]);

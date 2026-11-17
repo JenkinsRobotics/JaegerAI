@@ -30,12 +30,12 @@ jobs:
           python - <<'PY'
           import compileall
           from pathlib import Path
-          root = Path('jaeger_ai/features/webui')
-          required = (root/'server.py', root/'api/routes.py', root/'api/ui_shell.py',
-                      root/'static/login.js', Path('jaeger_ai/interfaces/ui/index.html'))
+          root = Path('jaeger_ai/core/gateway/webapp')
+          required = (root/'server.py', root/'routes.py', root/'ui_shell.py',
+                      root/'jaeger_signin.py', Path('jaeger_ai/interfaces/ui/index.html'))
           if not all(path.is_file() for path in required):
               raise SystemExit('Integrated WebUI source is incomplete')
-          if not compileall.compile_dir(root / 'api', quiet=1):
+          if not compileall.compile_dir(root, quiet=1):
               raise SystemExit('Integrated WebUI has invalid Python syntax')
           PY
   python:

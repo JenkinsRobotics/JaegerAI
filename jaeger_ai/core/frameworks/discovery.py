@@ -41,8 +41,6 @@ KNOWN: tuple[Framework, ...] = (
               cli="gemini", apps=("Antigravity.app", "Antigravity IDE.app"), handoff="cli"),
     Framework("grok", "Grok", (".grok",), sessions=("sessions/**/*.jsonl", "sessions/**/*.json"),
               memory=("memory-v2/**/*.md",), cli="grok", apps=("Grok Bot.app",), handoff="cli"),
-    Framework("openclaw", "OpenClaw", (".openclaw",), cli="openclaw", handoff="a2a",
-              notes="already a Jaeger third-party agent (tp:openclaw)", readable=False),
     Framework("continue", "Continue", (".continue",), sessions=("sessions/*.json",), readable=False,
               notes="detected only"),
     Framework("cursor", "Cursor", (".cursor",), cli="cursor-agent", apps=("Cursor.app",), readable=False),

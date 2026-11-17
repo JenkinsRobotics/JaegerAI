@@ -66,7 +66,7 @@ run_frontend() {
   echo "[front-end:shared-ui] Checking TypeScript and shared chat components..."
   (cd jaeger_ai/interfaces/ui && npm run typecheck && npm test -- --configLoader=runner --no-cache --maxWorkers=2)
   echo "[front-end:webui] Running WebUI backend packaging and canonical UI routing tests..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/features/test_webui_packaging_contract.py dev/tests/jaeger_ai/features/webui/test_ui_shell_serving.py dev/tests/jaeger_ai/features/test_no_legacy_frontends.py -q --no-header
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/features/webui/test_ui_shell_serving.py dev/tests/jaeger_ai/features/test_no_legacy_frontends.py -q --no-header
   echo "[+] WebUI front-end asset tests passed."
   if [[ "$(uname -s)" == Darwin ]]; then
     echo "[front-end:macos] Checking the native shell..."

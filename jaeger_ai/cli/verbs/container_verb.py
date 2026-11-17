@@ -37,7 +37,7 @@ def _cmd_container_argv(argv: Sequence[str]) -> int:
             "examples:\n"
             "  jaeger container list\n"
             "  jaeger container start NAME\n"
-            "  jaeger container status hermes-webui-hermes-webui\n",
+            "  jaeger container status NAME\n",
             file=sys.stderr,
         )
         return 0 if argv else 2

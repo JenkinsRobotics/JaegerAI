@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { JaegerSource } from "../api/source";
 import { agentsLive, derivedGaps, liveAdapter } from "./adapter";
-import { mockAdapter, mockSnapshotData } from "./mockOrchestration";
+import { mockAdapter, mockSnapshotData } from "../test/fixtures/mockOrchestration";
 import { useOrchestration } from "./useOrchestration";
 
 describe("orchestration adapter", () => {

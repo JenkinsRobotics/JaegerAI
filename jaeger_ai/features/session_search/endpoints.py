@@ -5,15 +5,11 @@ and until now none of them agreed on whose conversation it was:
 
 * ``~/.jaeger/gateway_sessions.sqlite3`` — the Jaeger Gateway's own store. It
   stamped ``profile="jaeger"`` on every row by default, so a live store held
-  65 sessions all claiming to be Jaeger's, Hermes' and OpenClaw's included.
+  65 sessions all claiming to be Jaeger's, other frameworks' included.
 * ``~/.hermes/state.db`` — written by the Hermes agent itself. It records a
   ``source`` (webui / cli / api_server) but leaves ``profile_name`` NULL,
   because Hermes knows nothing about Jaeger profiles.
 * ``<HERMES_HOME>/state.db`` — the vendored WebUI's own home.
-* ``~/.ares/openclaw/agents/<agent>/sessions/*.jsonl`` — OpenClaw keeps a file
-  per conversation, not a database. It is bind-mounted out of the container, so
-  the host path is readable directly. Missing this is why OpenClaw showed zero
-  conversations while holding 121.
 * ``~/.hermes/profiles/<name>/state.db`` — one store per named profile, which
   is where that framework's **terminal** conversations land. Missing these was
   why Jaeger appeared to have no CLI history at all: its 88 terminal sessions
@@ -74,9 +70,6 @@ class Endpoint:
 
     name: str
     path: Path
-    kind: str = "sqlite"
-    """``sqlite`` for a database, ``jsonl`` for a directory of session files."""
-
     table: str = "sessions"
     id_col: str = "session_id"
     profile_col: str | None = "profile"
@@ -93,12 +86,7 @@ class Endpoint:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def exists(self) -> bool:
-        return self.path.is_dir() if self.kind == "jsonl" else self.path.is_file()
-
-
-def _openclaw_home() -> Path:
-    """Where OpenClaw keeps its home — the container's bind-mount source."""
-    return _state_root() / "openclaw"
+        return self.path.is_file()
 
 
 def _state_root() -> Path:
@@ -126,28 +114,6 @@ def endpoints() -> list[Endpoint]:
                  title_col="title", count_col="message_count",
                  time_col="started_at", default_runtime="hermes"),
         *_profile_endpoints(hermes_home),
-        *_openclaw_endpoints(),
-    ]
-
-
-def _openclaw_endpoints() -> list[Endpoint]:
-    """OpenClaw's conversations, one JSONL file each.
-
-    OpenClaw's home is the container's bind-mount source, under Jaeger's state
-    root. It lived at ``~/.ares/openclaw`` only because that is where the mount
-    was pointed when ARES was installed; nothing about it was ARES state, and
-    it moved with the rest of the install. Note it is NOT ``~/.openclaw``,
-    which is a separate empty host install — looking there is what made
-    OpenClaw appear to have no history at all.
-    """
-    base = _openclaw_home() / "agents"
-    if not base.is_dir():
-        return []
-    return [
-        Endpoint(f"openclaw:{agent.name}", agent / "sessions",
-                 kind="jsonl", default_runtime="openclaw")
-        for agent in sorted(base.iterdir())
-        if (agent / "sessions").is_dir()
     ]
 
 
@@ -180,48 +146,8 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def _read_jsonl(endpoint: Endpoint) -> Iterator[SessionRow]:
-    """One conversation per ``<uuid>.jsonl``.
-
-    The sibling ``.trajectory.jsonl`` and ``.trajectory-path.json`` files are
-    the same conversation's internal trace, not separate conversations — three
-    files per session is why a naive count reported 363 instead of 121.
-
-    The first line is a ``session`` header carrying the id and start time; the
-    remaining lines are the turn log, so the line count minus that header is a
-    usable message count. Read without loading the file: these run to hundreds
-    of kilobytes each.
-    """
-    for path in sorted(endpoint.path.glob("*.jsonl")):
-        if path.name.endswith(".trajectory.jsonl"):
-            continue
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as handle:
-                header = handle.readline()
-                lines = sum(1 for _ in handle)
-        except OSError:
-            continue
-        title = ""
-        try:
-            title = str((json.loads(header) or {}).get("cwd") or "")
-        except (json.JSONDecodeError, TypeError):
-            pass
-        yield SessionRow(
-            session_id=path.stem,
-            store=endpoint.name,
-            runtime=endpoint.default_runtime,
-            surface=None,
-            title=title[:70],
-            message_count=lines,
-            updated_at=path.stat().st_mtime,
-        )
-
-
 def _read(endpoint: Endpoint) -> Iterator[SessionRow]:
     if not endpoint.exists():
-        return
-    if endpoint.kind == "jsonl":
-        yield from _read_jsonl(endpoint)
         return
     conn = sqlite3.connect(f"file:{endpoint.path}?mode=ro", uri=True)
     try:

@@ -1,11 +1,11 @@
-/* dev mock data for the orchestration harness and tests. Never imported by
+/* Test fixture (dev mock data): mock orchestration data for the orchestration tests. Never imported by
  * the app entry; the check-no-mock marker above guards production bundles.
  * Shapes follow the Gateway bot's G1–G6 proposal (2026-10-31):
  * /workspace/jaeger-agents-tab-api-shapes.md. */
-import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, Task } from "../api/types";
-import type { GapProvider, OrchestrationAdapter } from "./adapter";
-import { derivedGaps, pageRows } from "./adapter";
-import type { ActivityItem, ActivityPage, ArtifactRef, CheckRecord } from "./types";
+import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, Task } from "../../api/types";
+import type { GapProvider, OrchestrationAdapter } from "../../orchestration/adapter";
+import { derivedGaps, pageRows } from "../../orchestration/adapter";
+import type { ActivityItem, ActivityPage, ArtifactRef, CheckRecord } from "../../orchestration/types";
 
 type GwAgent = Agent & { runner: string };                                  // G4
 type GwHandoff = Handoff & { task_id: string | null; check: CheckRecord;     // G5, G2
