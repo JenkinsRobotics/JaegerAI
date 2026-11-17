@@ -112,6 +112,7 @@ from .call_agent import call_agent, delegate, get_agent_result, run_team
 
 # Plugin awareness
 from .plugins import list_plugins, setup_plugin
+from .connectors import list_connectors, add_connector
 
 # Audio input — one-shot mic capture + whisper transcription
 from .listen import listen
@@ -237,6 +238,8 @@ __all__ = [
     "ask_user", "help_me", "CAPABILITY_SUMMARY", "call_agent", "delegate", "run_team", "get_agent_result",
     # plugins
     "list_plugins", "setup_plugin",
+    # connectors (MCP servers)
+    "list_connectors", "add_connector",
     # audio input
     "listen",
     # dependency install + venv execution
