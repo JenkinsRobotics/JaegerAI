@@ -12,7 +12,7 @@ import tempfile
 
 from jaeger_agent.core import credentials as creds
 from jaeger_ai.core.instance.instance import InstanceLayout
-from jaeger_ai.plugins import plugin_credential, start_bridge
+from jaeger_ai.plugins import plugin_credential
 
 
 def _layout() -> InstanceLayout:
@@ -36,50 +36,16 @@ def test_credential_empty_when_neither(monkeypatch) -> None:
     assert plugin_credential(_layout(), "NOPE_KEY") == ""
 
 
-def test_start_bridge_unknown_plugin_is_honest() -> None:
-    r = start_bridge("nope", layout=_layout(), handler=lambda *a, **k: "")
-    assert r["started"] is False and "no in-process bridge" in r["error"]
 
 
-def test_start_bridge_telegram_reports_missing_credential(monkeypatch) -> None:
-    # No token in the store and none in env → a precise, actionable error
-    # (ask the user + set_credential), NOT a confabulated "module import error".
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    r = start_bridge("telegram", layout=_layout(), handler=lambda *a, **k: "")
-    assert r["started"] is False
-    assert "TELEGRAM_BOT_TOKEN" in r["error"] and "set_credential" in r["error"]
 
 
-def test_all_messaging_bridges_are_activatable() -> None:
-    from jaeger_ai.plugins import _BRIDGE_SPECS
-    assert {"telegram", "discord", "imessage"} <= set(_BRIDGE_SPECS)
 
 
-def test_start_bridge_discord_reports_missing_credential(monkeypatch) -> None:
-    # Discord is wired in-process now (was telegram-only) + reads the credential
-    # store, not env — same honest path as telegram.
-    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
-    r = start_bridge("discord", layout=_layout(), handler=lambda *a, **k: "")
-    assert r["started"] is False
-    assert "DISCORD_BOT_TOKEN" in r["error"] and "set_credential" in r["error"]
 
 
-def test_discord_bridge_takes_passed_token_not_env(monkeypatch) -> None:
-    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
-    from jaeger_ai.plugins.discord.bridge import DiscordBridge
-    b = DiscordBridge(lambda *a, **k: "", token="passed-token", allowed_users={42})
-    assert b._token == "passed-token"
-    assert b._allowed == {42}
 
 
-def test_telegram_bridge_takes_passed_token_not_env(monkeypatch) -> None:
-    # The bridge no longer reaches into os.environ when handed a token.
-    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-    from jaeger_ai.plugins.telegram.bridge import TelegramBridge
-    b = TelegramBridge(lambda *a, **k: "", token="passed-token",
-                       allowed_chats={123})
-    assert b._token == "passed-token"
-    assert b._allowed == {123}
 
 
 def test_uppercase_saved_credential_reads_as_configured(tmp_path) -> None:

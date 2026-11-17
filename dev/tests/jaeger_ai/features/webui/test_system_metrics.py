@@ -4,7 +4,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 
-ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/system_metrics.py"
+ROOT = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp/system_metrics.py"
 
 
 def _load():

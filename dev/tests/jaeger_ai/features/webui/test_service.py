@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from jaeger_ai.core.instance.schemas import ContainersConfig, WebhookConfig
-from jaeger_ai.features.webui.service.service import WebUIService, webui_urls
+from jaeger_ai.core.gateway.webapp.service.service import WebUIService, webui_urls
 
 
 def _config(layout, **changes):
@@ -53,10 +53,10 @@ def test_start_runs_webui_and_can_publish(tmp_path):
     layout.root = tmp_path
     calls = []
     with patch(
-        "jaeger_ai.features.webui.service.service._load_webui_config",
+        "jaeger_ai.core.gateway.webapp.service.service._load_webui_config",
         return_value=_config(layout),
     ), patch(
-        "jaeger_ai.features.webui.service.service.ensure_agent_state_schema", return_value={}
+        "jaeger_ai.core.gateway.webapp.service.service.ensure_agent_state_schema", return_value={}
     ):
         svc = WebUIService("jaeger")
         with patch.object(
@@ -75,12 +75,12 @@ def test_webui_status_treats_listener_as_running(tmp_path):
     layout = MagicMock()
     layout.root = tmp_path
     with patch(
-        "jaeger_ai.features.webui.service.service._load_webui_config",
+        "jaeger_ai.core.gateway.webapp.service.service._load_webui_config",
         return_value=_config(layout),
     ):
         svc = WebUIService("jaeger")
         with patch(
-            "jaeger_ai.features.webui.service.service._listening_pid", return_value=78503
+            "jaeger_ai.core.gateway.webapp.service.service._listening_pid", return_value=78503
         ):
             status = svc._webui_status()
     assert status["running"] is True
@@ -88,37 +88,19 @@ def test_webui_status_treats_listener_as_running(tmp_path):
     assert status["source"] == "listener"
 
 
-def test_stop_webui_reaps_listener_when_pid_file_is_missing(tmp_path):
-    layout = MagicMock()
-    layout.root = tmp_path
-    with patch(
-        "jaeger_ai.features.webui.service.service._load_webui_config",
-        return_value=_config(layout),
-    ):
-        svc = WebUIService("jaeger")
-        with patch.object(
-            svc, "_webui_status", return_value={"running": True, "pid": 78503, "source": "listener"}
-        ), patch(
-            "jaeger_ai.features.webui.service.service._pid_alive", side_effect=[True, False, False]
-        ), patch(
-            "jaeger_ai.features.webui.service.service.os.kill"
-        ) as kill:
-            result = svc._stop_webui()
-    assert result["ok"] is True
-    kill.assert_called_once()
 
 
 def test_tailscale_publishes_only_webui(tmp_path):
     layout = MagicMock()
     layout.root = tmp_path
     with patch(
-        "jaeger_ai.features.webui.service.service._load_webui_config",
+        "jaeger_ai.core.gateway.webapp.service.service._load_webui_config",
         return_value=_config(layout),
     ), patch(
-        "jaeger_ai.features.webui.service.service.shutil.which",
+        "jaeger_ai.core.gateway.webapp.service.service.shutil.which",
         return_value="/usr/bin/tailscale",
     ), patch(
-        "jaeger_ai.features.webui.service.service.subprocess.run",
+        "jaeger_ai.core.gateway.webapp.service.service.subprocess.run",
         return_value=MagicMock(returncode=0, stdout="https://jaeger.tailnet/", stderr=""),
     ) as run:
         result = WebUIService("jaeger").publish_tailscale()

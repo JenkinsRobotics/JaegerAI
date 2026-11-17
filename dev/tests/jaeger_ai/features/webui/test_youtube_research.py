@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-API = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api"
+API = pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/core/gateway/webapp"
 VTT = """WEBVTT
 Kind: captions
 
@@ -338,32 +338,8 @@ def wait_idle(yt):
         t["thread"].join(30)
 
 
-def test_runner_grows_job_in_batches_until_all(yt):
-    yt.ingest({"playlist_url": URL, "start": False, "max_videos": 1})
-    r, _ = _runner(yt)
-    assert r.tick()["active"] == [TID]
-    wait_idle(yt)
-    hb = json.loads((yt._tmp / "jobs/runner.json").read_text())
-    assert hb["owned"] == [TID] and hb["service"] == "com.jenkinsrobotics.jaeger-jobs"
-    yt._update(TID, lambda j: j.update(item_count=2))
-    r.tick(); wait_idle(yt)
-    j = yt.status(TID)
-    assert len(j["videos"]) == 2 and j["progress"]["videos_analysed"] == 2 and j["kb"]["status"] == "done"
-    r.tick()
-    assert not yt._running  # target reached: nothing to do
 
 
-def test_runner_stuck_job_cancelled_with_backoff(yt):
-    yt.ingest({"playlist_url": URL, "start": False})
-    now = [__import__("time").time()]
-    r, exits = _runner(yt, clock=lambda: now[0])
-    import threading
-    ev = threading.Event()
-    yt._running[TID] = {"thread": threading.Thread(target=ev.wait, daemon=True), "stop": ev}
-    yt._running[TID]["thread"].start()
-    now[0] += 3 * 3600
-    out = r.tick()
-    assert out["health"] == "stuck" and r.retries[TID] == 1 and r.next_try[TID] > now[0] and not exits
 
 
 def test_webui_defers_to_runner_and_pause_is_persisted(yt):

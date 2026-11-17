@@ -214,7 +214,7 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                     # is that daemon's heartbeat, not test leakage.
                     if path == root / "oss/docs-index.json":
                         continue
-                    # The live WebUI server (features/webui/server.py, :8790)
+                    # The live WebUI server (core/gateway/webapp/server.py, :8790)
                     # serves the backlog store from this main DB file and
                     # checkpoints its WAL into it while running — same
                     # ownership pattern as gateway_sessions.sqlite3 above.
@@ -330,11 +330,9 @@ _PATH_MARKERS: list[tuple[str, tuple[str, ...]]] = [
     ("/jaeger_ai/interfaces/test_bridge_attach", ("integration",)),
     ("/jaeger_ai/interfaces/test_dispatcher", ("integration",)),
     ("/jaeger_ai/interfaces/test_hermes_profile_adapters", ("integration",)),
-    ("/jaeger_ai/interfaces/test_legacy_adapters_security", ("integration", "security")),
-    ("/jaeger_ai/interfaces/test_native_runs", ("integration",)),
+    ("/jaeger_ai/core/test_webapp_signin", ("security",)),
     ("/jaeger_ai/interfaces/test_roundtable_ingress", ("integration", "security")),
     ("/jaeger_ai/interfaces/test_roundtable_native", ("integration",)),
-    ("/jaeger_ai/nodes/test_animation_e2e", ("integration",)),
     ("/jaeger_ai/nodes/test_frame_bridge", ("integration",)),
     ("/jaeger_ai/nodes/test_vision", ("integration",)),
     # These execute real child Python processes rather than mocking the API.

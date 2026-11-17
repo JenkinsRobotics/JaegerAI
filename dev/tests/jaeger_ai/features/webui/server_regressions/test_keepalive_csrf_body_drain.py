@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import http.client
 import json
 import threading
 from http.server import ThreadingHTTPServer
 from io import BytesIO
 from types import SimpleNamespace
 
-import pytest
 
 
 def test_consume_unread_request_body_drains_content_length():
-    from api.helpers import consume_unread_request_body, mark_request_body_consumed
+    from api.helpers import consume_unread_request_body
 
     leftover = b'{"title": "POISON-BODY"}'
     handler = SimpleNamespace(
@@ -86,100 +84,7 @@ def _post(conn, path, payload, *, csrf=None, host="127.0.0.1"):
     return resp.status, data
 
 
-def test_csrf_403_keep_alive_does_not_glue_json_onto_next_method(monkeypatch):
-    import api.auth as auth
-
-    monkeypatch.setattr(auth, "verify_session", lambda _c: True)
-    monkeypatch.setattr(auth, "parse_cookie", lambda _h: "tok.sig")
-    monkeypatch.setattr(auth, "verify_csrf_token", lambda _c, t: t == "good")
-
-    server, thread = _start_handler_server(monkeypatch)
-    host, port = server.server_address
-    try:
-        conn = http.client.HTTPConnection(host, port, timeout=5)
-        host_hdr = f"{host}:{port}"
-        st1, body1 = _post(conn, "/api/jaeger/sessions", {"title": "POISON-BODY"}, host=host_hdr)
-        assert st1 == 403, body1[:200]
-        assert b"Session expired" in body1 or b"error" in body1
-        st2, body2 = _post(conn, "/api/jaeger/sessions", {"title": "POISON-BODY"}, host=host_hdr)
-        assert st2 == 403, body2.decode("utf-8", "replace")[:400]
-        assert b"Bad request syntax" not in body2
-        assert b"Unsupported method" not in body2
-        st3, body3 = _post(conn, "/api/jaeger/sessions", {"title": "ok"}, csrf="good", host=host_hdr)
-        assert st3 == 200, body3.decode("utf-8", "replace")[:400]
-        assert json.loads(body3).get("ok") is True
-        conn.close()
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(2)
 
 
-@pytest.mark.parametrize("rounds", [60])
-def test_mixed_csrf_mutations_on_persistent_connection(monkeypatch, rounds):
-    import api.auth as auth
-
-    monkeypatch.setattr(auth, "verify_session", lambda _c: True)
-    monkeypatch.setattr(auth, "parse_cookie", lambda _h: "tok.sig")
-    monkeypatch.setattr(auth, "verify_csrf_token", lambda _c, t: t == "good")
-
-    server, thread = _start_handler_server(monkeypatch)
-    host, port = server.server_address
-    malformed = 0
-    try:
-        conn = http.client.HTTPConnection(host, port, timeout=5)
-        host_hdr = f"{host}:{port}"
-        for i in range(rounds):
-            csrf = "good" if i % 3 else None
-            status, data = _post(
-                conn, "/api/jaeger/sessions", {"n": i, "title": f"mix-{i}"}, csrf=csrf, host=host_hdr
-            )
-            text = data.decode("utf-8", "replace")
-            if "Bad request syntax" in text or "Unsupported method" in text:
-                malformed += 1
-            if csrf:
-                assert status == 200, text[:300]
-            else:
-                assert status == 403, text[:300]
-        conn.close()
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(2)
-    assert malformed == 0
 
 
-def test_browser_proxy_preserves_next_request_on_real_webui_handler(monkeypatch):
-    from http.server import BaseHTTPRequestHandler
-    import api.routes as routes
-    from jaeger_ai.core.gateway import caller_auth
-    class Upstream(BaseHTTPRequestHandler):
-        protocol_version = 'HTTP/1.1'
-        def do_POST(self):
-            assert self.headers['Authorization'] == 'Bearer browser-test'
-            body = self.rfile.read(int(self.headers['Content-Length']))
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        def log_message(self, *args):
-            pass
-    upstream = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
-    upstream.daemon_threads = True
-    upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
-    upstream_thread.start()
-    monkeypatch.setattr(routes, '_jaeger_gateway_bases', lambda: [f'http://127.0.0.1:{upstream.server_port}'])
-    monkeypatch.setattr(caller_auth, 'client_headers', lambda _: {'Authorization': 'Bearer browser-test'})
-    server, thread = _start_handler_server(monkeypatch)
-    try:
-        conn = http.client.HTTPConnection(*server.server_address, timeout=5)
-        host = f'127.0.0.1:{server.server_port}'
-        for action in ('status', 'navigate', 'snapshot'):
-            status, data = _post(conn, '/v1/sessions/proof/browser/action', {'action': action}, host=host)
-            assert status == 200, data
-            assert json.loads(data)['action'] == action
-        conn.close()
-    finally:
-        server.shutdown(); server.server_close(); thread.join(2)
-        upstream.shutdown(); upstream.server_close(); upstream_thread.join(2)

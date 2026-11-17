@@ -10,14 +10,11 @@ import pytest
 from aiohttp.test_utils import AioHTTPTestCase
 
 from jaeger_ai.core.agent_registry import (
-    AgentKind,
     AgentRegistry,
-    is_native,
-    is_third_party,
 )
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
-from jaeger_ai.features.webui.service.profile_layout import library_model
+from jaeger_ai.core.gateway.webapp.service.profile_layout import library_model
 
 
 class _CallerAuthedTestCase(AioHTTPTestCase):
@@ -29,47 +26,6 @@ class _CallerAuthedTestCase(AioHTTPTestCase):
         return TestClient(server, headers=client_headers("cli"))
 
 
-def test_create_list_native_and_third_party(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
-    registry = AgentRegistry(tmp_path)
-
-    native = registry.create_agent("lilith", display_name="Lilith", make_active=True)
-    assert native.kind is AgentKind.NATIVE
-    assert native.id == "native:lilith"
-    assert (tmp_path / "instances" / "lilith" / "identity.yaml").is_file()
-    assert (tmp_path / "active_instance").read_text(encoding="utf-8").strip() == "lilith"
-
-    third = registry.register_third_party(
-        "custom-bot",
-        display_name="Custom Bot",
-        adapter="custom-bot",
-        endpoint="http://127.0.0.1:9999",
-        port=9999,
-    )
-    assert third.kind is AgentKind.THIRD_PARTY
-    assert third.id == "tp:custom-bot"
-
-    agents = registry.list_agents()
-    kinds = {a.kind for a in agents}
-    assert AgentKind.NATIVE in kinds
-    assert AgentKind.THIRD_PARTY in kinds
-    # Built-ins always present.
-    names = {a.name for a in agents}
-    assert "hermes" in names
-    assert "openclaw" in names
-    assert "roundtable" in names
-    assert "lilith" in names
-
-    native_only = registry.list_agents(kind=AgentKind.NATIVE)
-    assert all(is_native(a) for a in native_only)
-    third_only = registry.list_agents(kind="third_party")
-    assert all(is_third_party(a) for a in third_only)
-
-    catalog = registry.to_catalog()
-    assert catalog["fundamentals_fee_gated"] is False
-    assert catalog["persistence_spine"] == "jaeger_gateway"
-    assert catalog["counts"]["jaeger_native"] >= 1
-    assert catalog["counts"]["third_party"] >= 3
 
 
 def test_fundamentals_never_fee_gated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -260,65 +216,7 @@ class TestGatewayAgentsAPI(_CallerAuthedTestCase):
         assert forbidden.status == 403
         assert not self.temp_store.list_requests()
 
-    async def test_channel_status_is_read_only_and_external_scope_denied(self):
-        from jaeger_ai.core.gateway.caller_auth import client_headers
-        response = await self.client.get('/v1/channels')
-        assert response.status == 200
-        payload = await response.json()
-        assert payload['scope'] == 'current_gateway_process_only'
-        assert all(row['delivery_verified'] is False and row['connection_health'] == 'not_probed' for row in payload['channels'])
-        assert self.temp_store.list_requests() == []
-        denied = await self.client.get('/v1/channels', headers=client_headers('a2a'))
-        assert denied.status == 403
 
-    async def test_agents_catalog_create_and_activate(self):
-        resp = await self.client.request("GET", "/health")
-        assert resp.status == 200
-        health = await resp.json()
-        assert health["agents_api"] == "/v1/agents"
-        assert health["fundamentals_fee_gated"] is False
-
-        resp = await self.client.request("GET", "/v1/agents")
-        assert resp.status == 200
-        catalog = await resp.json()
-        assert catalog["fundamentals_fee_gated"] is False
-        assert len(catalog["third_party"]) >= 3
-
-        resp = await self.client.request(
-            "POST",
-            "/v1/agents",
-            json={"name": "aurora", "kind": "jaeger_native", "display_name": "Aurora"},
-        )
-        assert resp.status == 201
-        created = await resp.json()
-        assert created["id"] == "native:aurora"
-        assert created["kind"] == "jaeger_native"
-        assert created["fundamentals_gated"] is False
-
-        resp = await self.client.request("GET", "/v1/agents/native:aurora")
-        assert resp.status == 200
-        fetched = await resp.json()
-        assert fetched["name"] == "aurora"
-
-        resp = await self.client.request("POST", "/v1/agents/native:aurora/activate")
-        assert resp.status == 200
-        activated = await resp.json()
-        assert activated["active"] is True
-
-        resp = await self.client.request(
-            "POST",
-            "/v1/agents",
-            json={
-                "name": "ext",
-                "kind": "third_party",
-                "adapter": "ext",
-                "endpoint": "http://127.0.0.1:8777",
-                "port": 8777,
-            },
-        )
-        assert resp.status == 201
-        tp = await resp.json()
-        assert tp["kind"] == "third_party"
 
 
 def test_standing_specialists_seeded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -476,26 +374,6 @@ class TestGatewayHandoffAPI(_CallerAuthedTestCase):
         assert len(executed) == 1 and self.temp_store.list_requests() == []
 
 
-def test_role_defaults_and_catalog_lead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
-    # Seed a native jaeger instance so discovery marks it lead.
-    (tmp_path / "instances" / "jaeger").mkdir(parents=True)
-    (tmp_path / "instances" / "jaeger" / "identity.yaml").write_text(
-        "name: Assistant\n", encoding="utf-8"
-    )
-    (tmp_path / "instances" / "default").mkdir(parents=True)
-    registry = AgentRegistry(tmp_path)
-    agents = {a.id: a for a in registry.list_agents()}
-    assert agents["native:jaeger"].role.value == "lead"
-    assert agents["native:default"].role.value in {"runtime", "specialist"}
-    assert agents["tp:hermes"].role.value == "specialist"
-    specialists = registry.list_agents(role="specialist")
-    assert specialists
-    assert all(a.role.value == "specialist" for a in specialists)
-    catalog = registry.to_catalog()
-    assert catalog["lead"]["id"] == "native:jaeger"
-    assert catalog["lead"]["role"] == "lead"
-    assert catalog["counts"]["specialist"] >= 1
 
 
 @pytest.mark.integration
@@ -1134,7 +1012,6 @@ class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
 
 
 def test_lead_is_named_jaeger_old_default_migrates_and_test_agents_are_hidden(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import json as _json
     from jaeger_ai.core.agent_registry.specialists import is_test_agent
 
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
@@ -1157,3 +1034,13 @@ def test_lead_is_named_jaeger_old_default_migrates_and_test_agents_are_hidden(tm
     assert is_test_agent(R("os-1.bak.20260913T040826", "runtime"))
     assert not is_test_agent(R("everyday", "specialist"))
     assert not is_test_agent(R("health", "runtime"))
+
+
+def test_fresh_registry_lists_no_builtin_third_party_agents(tmp_path):
+    """OpenClaw / Hermes / Roundtable faces were retired on 2026-11-17; a fresh
+    registry only shows agents someone registered or Jaeger's own."""
+    from jaeger_ai.core.agent_registry import AgentRegistry, types
+
+    assert not hasattr(types, "BUILTIN_THIRD_PARTY")
+    ids = [a.id for a in AgentRegistry(root=tmp_path).list_agents()]
+    assert not [i for i in ids if i.startswith("tp:")]

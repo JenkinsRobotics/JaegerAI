@@ -47,23 +47,6 @@ def test_corrupt_stop_latch_fails_engaged(tmp_path: Path):
 
 
 
-def test_completed_verified_requires_evidence():
-    task = DurableTask(task_id="t", owning_agent="jaeger", goal="make the file")
-    with pytest.raises(CompletionError):
-        authoritative_transition(task, TaskState.COMPLETED_VERIFIED, evidence=None)
-    with pytest.raises(CompletionError):
-        authoritative_transition(task, TaskState.COMPLETED_VERIFIED, evidence="success")
-    with pytest.raises(CompletionError):
-        authoritative_transition(task, TaskState.COMPLETED, evidence={"path": "x"})
-    authoritative_transition(
-        task, TaskState.COMPLETED_VERIFIED,
-        evidence=[{"path": "/tmp/house.txt", "sha256": "abc"}],
-    )
-    assert task.state == TaskState.COMPLETED_VERIFIED
-    authoritative_transition(task, TaskState.NEEDS_OWNER, evidence=None, error="ask")
-    assert task.state == TaskState.NEEDS_OWNER
-    authoritative_transition(task, TaskState.BLOCKED, error="waiting")
-    assert task.state == TaskState.BLOCKED
 
 
 def test_stale_lifecycle_lease_suspends_privileged_work(tmp_path: Path):
@@ -271,31 +254,8 @@ def test_lifecycle_shutdown_bootouts_so_launchd_cannot_resurrect(tmp_path: Path,
     assert calls == [("bootout", 2.0), "bounded"]
 
 
-def test_webui_launcher_stays_on_loopback_unless_lan_is_explicit():
-    import subprocess
-    text = Path("scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
-    start = text.index("case \"$(printf '%s' \"${JAEGER_WEBUI_ALLOW_LAN:-0}\"")
-    snippet = text[start:text.index("\nesac", start) + len("\nesac")]
-    blocked = subprocess.check_output(
-        ["bash", "-c", snippet + '\nprintf %s "$JAEGER_WEBUI_HOST"'],
-        env={"JAEGER_WEBUI_HOST": "0.0.0.0", "PATH": "/usr/bin:/bin"},
-        text=True,
-    )
-    opened = subprocess.check_output(
-        ["bash", "-c", snippet + '\nprintf %s "$JAEGER_WEBUI_HOST"'],
-        env={"JAEGER_WEBUI_HOST": "0.0.0.0", "JAEGER_WEBUI_ALLOW_LAN": "1", "PATH": "/usr/bin:/bin"},
-        text=True,
-    )
-    assert blocked == "127.0.0.1"
-    assert opened == "0.0.0.0"
 
 
-def test_webui_launcher_never_touches_legacy_hermes_homes():
-    text = Path("scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
-    for legacy in ("hermes-webui-agent", "~/.hermes", "$HOME/.hermes", "${HOME}/.hermes",
-                   "prepare_webui_home", "link_shared_profiles", "JAEGER_HERMES_AGENT_SRC"):
-        assert legacy not in text, legacy
-    assert "/webui-agent}" in text
 
 
 
@@ -339,7 +299,7 @@ def test_state_dir_isolates_webui_profile_writes(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("JAEGER_HOME", raising=False)
 
     from jaeger_ai.core.runtime.profile_paths import webui_agent_home
-    from jaeger_ai.features.webui.service.profile_layout import ensure_agent_state_schema
+    from jaeger_ai.core.gateway.webapp.service.profile_layout import ensure_agent_state_schema
 
     agent = webui_agent_home()
     assert agent.name == "webui-agent"

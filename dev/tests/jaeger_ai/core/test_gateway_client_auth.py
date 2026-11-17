@@ -73,7 +73,7 @@ def test_turn_client_sends_the_header_on_calls_and_streams(monkeypatch):
 
 
 def test_webui_proxy_authenticates_as_webui():
-    from jaeger_ai.features.webui.api.jaeger_sessions import _add_caller_auth
+    from jaeger_ai.core.gateway.webapp.jaeger_sessions import _add_caller_auth
 
     req = Request("http://127.0.0.1:33418/v1/sessions")
     _add_caller_auth(req)

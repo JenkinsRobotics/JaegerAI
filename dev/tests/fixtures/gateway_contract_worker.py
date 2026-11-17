@@ -217,9 +217,8 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
         allowed_connections.add(("127.0.0.1", gateway_port))
         os.environ["JAEGER_GATEWAY_URL"] = f"http://127.0.0.1:{gateway_port}"
         os.environ["JAEGER_GATEWAY_PORT"] = str(gateway_port)
-        webui_root = Path(__file__).resolve().parents[3] / "jaeger_ai/features/webui"
-        sys.path.insert(0, str(webui_root))
-        from server import Handler, QuietHTTPServer
+        from jaeger_ai.core.gateway.webapp.server import Handler
+        from jaeger_ai.core.gateway.webapp.server import _Server as QuietHTTPServer
 
         # Real handlers and authentication, without production launcher's
         # optional model warmups, service management or package installation.

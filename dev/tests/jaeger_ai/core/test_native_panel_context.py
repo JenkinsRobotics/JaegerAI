@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-_SOURCE = Path(__file__).resolve().parents[4] / "jaeger_ai/features/webui/api/native_panel_context.py"
+_SOURCE = Path(__file__).resolve().parents[4] / "jaeger_ai/core/gateway/webapp/native_panel_context.py"
 
 
 def _module():

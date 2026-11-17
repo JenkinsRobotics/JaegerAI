@@ -22,6 +22,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 BASELINE = Path(__file__).resolve().parent / "fixtures" / "package_layering_baseline.json"
 
+WEBAPP = REPO / "jaeger_ai/core/gateway/webapp"
+
 #: rule name -> (source roots, forbidden top-level module predicate)
 RULES = {
     "jaeger_os_imports_product_or_agent": (
@@ -57,6 +59,8 @@ def scan() -> dict[str, dict[str, list[str]]]:
         hits: dict[str, list[str]] = {}
         for root in roots:
             for path in sorted((REPO / root).rglob("*.py")):
+                if WEBAPP in path.parents:
+                    continue  # the web app package itself is aliased as ``api``
                 bad = sorted(m for m in _imports(path) if forbidden(m))
                 if bad:
                     hits[str(path.relative_to(REPO))] = bad

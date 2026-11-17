@@ -17,7 +17,7 @@ PACKAGES = ('jaeger_ai', 'jaeger_agent', 'jaeger_os', 'jaeger_kokoro_tts', 'jaeg
 REQUIRED_SUFFIXES = {
     'jaeger_ai-': (
         'jaeger_ai/core/instance/schemas.py', 'jaeger_ai/core/settings/catalog.py',
-        'jaeger_ai/core/runtime/agent_controller.py', 'jaeger_ai/features/webui/service/service.py',
+        'jaeger_ai/core/runtime/agent_controller.py', 'jaeger_ai/core/gateway/webapp/service/service.py',
         'jaeger_ai/assets/shared-ui/index.html', 'jaeger_ai/assets/shared-ui/build.json',
     ),
     'jaeger_agent-': (

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from jaeger_ai.contract.frameworks import display_name
 from jaeger_ai.core.sessions import SessionStore
-from jaeger_ai.features.webui.service.session_unify import (
+from jaeger_ai.core.gateway.webapp.service.session_unify import (
     ROLLBACK_MIN_KEEP,
     infer_session_profile,
     profile_badge_for_session,
@@ -140,7 +140,7 @@ def test_reconcile_stamps_ended_at_without_replay(tmp_path: Path, monkeypatch) -
     db.parent.mkdir()
     _hermes_db(db, [("web-session", "webui", "t", 2)])
     monkeypatch.setattr(
-        "jaeger_ai.features.webui.service.session_unify.close_reconciled_webui_session",
+        "jaeger_ai.core.gateway.webapp.service.session_unify.close_reconciled_webui_session",
         lambda sid: stamp_ended_at(db, sid),
     )
     def backend(run, workspace):

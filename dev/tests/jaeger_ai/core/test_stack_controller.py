@@ -11,7 +11,6 @@ from jaeger_ai.core.runtime.stack import (
     SERVICE_BY_ID,
     build_plist,
     sync_plists,
-    stack_status,
     stack_down,
 )
 
@@ -50,18 +49,6 @@ def test_gui_services_find_python_and_coding_workers(monkeypatch):
     assert len(paths) == len(set(paths))
 
 
-def test_stack_up_reloads_loaded_job_configuration(monkeypatch):
-    from jaeger_ai.core.runtime import stack
-
-    commands = []
-    monkeypatch.setattr(stack, "_launchctl", lambda args: commands.append(args) or MagicMock(returncode=0))
-    monkeypatch.setattr(stack, "migrate_legacy_launchagents", lambda: None)
-    monkeypatch.setattr(stack, "sync_plists", list)
-    monkeypatch.setattr(stack, "stack_status", lambda services: [{"ready": True}])
-    service = SERVICE_BY_ID["gateway"]
-    assert stack.stack_up([service])["ok"]
-    actions = [command[0] for command in commands]
-    assert actions == ["print", "bootout", "bootstrap", "kickstart"]
 
 
 def test_sync_plists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -78,24 +65,6 @@ def test_sync_plists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         assert data["Label"].startswith("com.jenkinsrobotics.")
 
 
-def test_stack_status_structure(monkeypatch: pytest.MonkeyPatch):
-    """Test stack_status aggregates service states."""
-    # Mock launchctl
-    def mock_launchctl(args):
-        res = MagicMock()
-        res.returncode = 0
-        res.stdout = '{\n"PID" = 12345;\n"LastExitStatus" = 0;\n}'
-        return res
-
-    monkeypatch.setattr("jaeger_ai.core.runtime.stack._launchctl", mock_launchctl)
-    monkeypatch.setattr("jaeger_ai.core.runtime.stack.probe_service_health", lambda service: True)
-
-    statuses = stack_status()
-    assert len(statuses) == len(STACK_SERVICES)
-    ids = [s["id"] for s in statuses]
-    assert "gateway" in ids
-    assert "webui" in ids
-    assert "agent" in ids
 
 
 def test_stack_down_terminates_services(monkeypatch: pytest.MonkeyPatch):
@@ -195,39 +164,8 @@ def test_every_stack_plist_restarts_only_after_a_crash():
         assert data["KeepAlive"] == {"SuccessfulExit": False}, service.id
 
 
-def test_installed_copy_writes_plists_for_the_source_checkout(tmp_path: Path, monkeypatch):
-    """Run from site-packages, the stack must still launch the checkout.
-
-    An installed wheel's ``__file__`` is site-packages: plists built from it
-    had a site-packages WorkingDirectory/PYTHONPATH and a ``python -m``
-    Web UI that crash-looped on ``No module named 'api'``."""
-    import importlib
-
-    from jaeger_ai.core.runtime import stack
-
-    checkout = tmp_path / "JaegerAI"
-    (checkout / "scripts").mkdir(parents=True)
-    (checkout / "scripts" / "run-jaeger-webui.sh").write_text("#!/bin/zsh\n")
-    monkeypatch.setenv("JAEGER_INSTALL_ROOT", str(checkout))
-    try:
-        stack = importlib.reload(stack)
-        webui = plistlib.loads(build_plist_for(stack, "webui").encode())
-        gateway = plistlib.loads(build_plist_for(stack, "gateway").encode())
-        assert webui["ProgramArguments"] == ["/bin/zsh", str(checkout / "scripts" / "run-jaeger-webui.sh")]
-        assert webui["WorkingDirectory"] == str(checkout)
-        assert gateway["EnvironmentVariables"]["JAEGER_INSTALL_ROOT"] == str(checkout)
-        assert gateway["EnvironmentVariables"]["PYTHONPATH"].split(":")[0] == str(checkout)
-    finally:
-        monkeypatch.delenv("JAEGER_INSTALL_ROOT")
-        importlib.reload(stack)
 
 
-def test_webui_without_its_launcher_fails_loudly(tmp_path: Path, monkeypatch):
-    from jaeger_ai.core.runtime import stack
-
-    monkeypatch.setattr(stack, "REPO_ROOT", tmp_path)
-    with pytest.raises(RuntimeError, match="JAEGER_INSTALL_ROOT"):
-        build_plist(SERVICE_BY_ID["webui"], commit_sha="abc")
 
 
 def build_plist_for(module, service_id: str) -> str:

@@ -51,7 +51,7 @@ def test_playback_amplitude_tracks_pcm_and_underrun():
 
 
 def test_webui_url_ignores_obsolete_container_runtime(monkeypatch):
-    from jaeger_ai.features.webui.service import service
+    from jaeger_ai.core.gateway.webapp.service import service
 
     ui = service.WebUIService.__new__(service.WebUIService)
     ui.webui_port = 8790

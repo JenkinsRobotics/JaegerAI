@@ -87,7 +87,7 @@ def test_webui_static_dispatch_contract_has_not_silently_drifted():
             encoding="utf-8"
         )
     )
-    source = (ROOT / "jaeger_ai/features/webui/api/routes.py").read_text(encoding="utf-8")
+    source = (ROOT / "jaeger_ai/core/gateway/webapp/server.py").read_text(encoding="utf-8")
     routes = inspect_python(source)["routes"]
     rows = sorted(
         (route["method"], route["matcher"], route["literal"], route["dispatcher"])

@@ -78,7 +78,7 @@ def test_authenticated_webui_proxy_preserves_binary_ranges(monkeypatch):
     from types import SimpleNamespace
     from urllib.parse import urlparse
 
-    source = Path(__file__).resolve().parents[4] / 'jaeger_ai/features/webui/api/character_scenes.py'
+    source = Path(__file__).resolve().parents[4] / 'jaeger_ai/core/gateway/webapp/character_scenes.py'
     spec = importlib.util.spec_from_file_location('scene_proxy_under_test', source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

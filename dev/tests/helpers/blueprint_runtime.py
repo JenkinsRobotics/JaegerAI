@@ -27,7 +27,7 @@ async def main(state: Path, ui_dist: Path) -> None:
         raise RuntimeError('Require an explicitly named blueprint fixture')
     source_sha = {name: hashlib.sha256((repo/name).read_bytes()).hexdigest() for name in [
         'jaeger_ai/core/gateway/server.py', 'jaeger_ai/core/gateway/turn_parts.py',
-        'jaeger_ai/contract/tool_outcomes.py', 'jaeger_ai/features/webui/api/jaeger_sessions.py']}
+        'jaeger_ai/contract/tool_outcomes.py', 'jaeger_ai/core/gateway/webapp/jaeger_sessions.py']}
     state.mkdir(parents=True, exist_ok=True)
     if (state/'gateway_sessions.sqlite3').exists():
         raise RuntimeError('Use a fresh unique fixture state; never replay a prior test')
@@ -103,8 +103,7 @@ async def main(state: Path, ui_dist: Path) -> None:
     runner=web.AppRunner(gateway.app);await runner.setup()
     await web.TCPSite(runner,'127.0.0.1',0).start();port=runner.addresses[0][1];allowed.add(('127.0.0.1',port))
     os.environ.update(JAEGER_GATEWAY_URL=f'http://127.0.0.1:{port}',JAEGER_GATEWAY_PORT=str(port))
-    sys.path.insert(0,str(repo/'jaeger_ai/features/webui'))
-    from server import Handler,QuietHTTPServer
+    from jaeger_ai.core.gateway.webapp.server import Handler,_Server as QuietHTTPServer
     server=QuietHTTPServer(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
     (state/'listener.json').write_text(json.dumps({'pid':os.getpid(),'gateway_port':port,'webui_port':server.server_port,'state':str(state),'dist':str(ui_dist.resolve()),'source_sha256':source_sha}))
     print(f'Owned fixture ready: http://127.0.0.1:{server.server_port}/?host=web',flush=True)

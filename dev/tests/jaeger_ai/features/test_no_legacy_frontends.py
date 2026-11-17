@@ -10,6 +10,6 @@ def test_old_frontends_are_absent():
 
 
 def test_backend_routes_have_no_old_shell_renderer():
-    source = (ROOT / 'jaeger_ai/features/webui/api/routes.py').read_text()
+    source = (ROOT / 'jaeger_ai/core/gateway/webapp/routes.py').read_text()
     assert '_render_index_shell_base' not in source
     assert 'inject_extension_tags(html)' not in source

@@ -1,24 +1,29 @@
 {
   "_ceilings": {
-    "core_or_mind_imports_webui_api": 12,
-    "jaeger_agent_imports_product": 26,
+    "core_or_mind_imports_webui_api": 0,
+    "jaeger_agent_imports_product": 47,
     "jaeger_os_imports_product_or_agent": 1
   },
-  "core_or_mind_imports_webui_api": {
-    "jaeger_ai/core/diagnostics/doctor.py": [
-      "jaeger_ai.features.webui.service.service"
-    ],
-    "jaeger_ai/core/frameworks/native_runs.py": [
-      "jaeger_ai.features.webui.service.session_unify"
-    ],
-    "jaeger_ai/core/frameworks/recovery.py": [
-      "jaeger_ai.features.webui.service.session_unify"
-    ],
-    "jaeger_ai/core/sessions.py": [
-      "jaeger_ai.features.webui.service.session_unify"
-    ]
-  },
+  "core_or_mind_imports_webui_api": {},
   "jaeger_agent_imports_product": {
+    "packages/jaeger-agent/jaeger_agent/adapters/cli_backend.py": [
+      "jaeger_ai.core.instance.instance",
+      "jaeger_ai.core.models.discovery",
+      "jaeger_ai.core.models.request_policy",
+      "jaeger_ai.core.runtime.cron_turns",
+      "jaeger_ai.features.cli_backends.discovery"
+    ],
+    "packages/jaeger-agent/jaeger_agent/adapters/cli_turn_mcp.py": [
+      "jaeger_ai.core.models.request_policy",
+      "jaeger_ai.core.runtime.autonomy",
+      "jaeger_ai.interfaces.mcp_server"
+    ],
+    "packages/jaeger-agent/jaeger_agent/adapters/ollama.py": [
+      "jaeger_ai.core.models.router"
+    ],
+    "packages/jaeger-agent/jaeger_agent/adapters/openai.py": [
+      "jaeger_ai.core.models.router"
+    ],
     "packages/jaeger-agent/jaeger_agent/core/trace.py": [
       "jaeger_ai.core.instance.instance"
     ],
@@ -27,6 +32,10 @@
     ],
     "packages/jaeger-agent/jaeger_agent/loop/bus_confirm.py": [
       "jaeger_ai.core.runtime"
+    ],
+    "packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py": [
+      "jaeger_ai.core.runtime.cron_turns",
+      "jaeger_ai.core.runtime.maintenance_text"
     ],
     "packages/jaeger-agent/jaeger_agent/loop/runtime_bridge.py": [
       "jaeger_ai.core.runtime.usage_stats",
@@ -45,6 +54,14 @@
       "jaeger_ai.core.bench",
       "jaeger_ai.main"
     ],
+    "packages/jaeger-agent/jaeger_agent/tools/bot_template.py": [
+      "jaeger_ai.core.redaction"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/connectors.py": [
+      "jaeger_ai.core.instance.atomic_files",
+      "jaeger_ai.core.mcp",
+      "jaeger_ai.plugins.mcp"
+    ],
     "packages/jaeger-agent/jaeger_agent/tools/diagnostics.py": [
       "jaeger_ai.core.diagnostics"
     ],
@@ -60,6 +77,8 @@
     ],
     "packages/jaeger-agent/jaeger_agent/tools/messaging.py": [
       "jaeger_ai.core",
+      "jaeger_ai.features.channels.relay",
+      "jaeger_ai.features.channels.relay.outbox",
       "jaeger_ai.plugins"
     ],
     "packages/jaeger-agent/jaeger_agent/tools/models.py": [
@@ -77,6 +96,15 @@
     ],
     "packages/jaeger-agent/jaeger_agent/tools/speak.py": [
       "jaeger_ai.main"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/vision.py": [
+      "jaeger_ai.core.models"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/web.py": [
+      "jaeger_ai.core.secrets_env"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/x_search.py": [
+      "jaeger_ai.core.secrets_env"
     ],
     "packages/jaeger-agent/jaeger_agent/util/lazy_deps.py": [
       "jaeger_ai.main"

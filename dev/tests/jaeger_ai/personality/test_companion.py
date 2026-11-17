@@ -143,7 +143,7 @@ def test_chat_route_404_card_and_chat(monkeypatch, tmp_path):
 
 
 def test_webui_passthrough_allows_only_companion_routes():
-    from jaeger_ai.features.webui.api.jaeger_sessions import passthrough_match
+    from jaeger_ai.core.gateway.webapp.jaeger_sessions import passthrough_match
     assert passthrough_match("/v1/companion/glados/chat", "POST")
     assert passthrough_match("/v1/companion/import", "POST")
     assert passthrough_match("/v1/companion/glados/ccv3", "GET")

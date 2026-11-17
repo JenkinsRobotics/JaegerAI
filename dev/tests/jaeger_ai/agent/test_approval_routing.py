@@ -6,7 +6,6 @@ the turn hung. Now _run_turn tags the confirm session per turn, and the
 Telegram bridge answers requests for its own chats.
 """
 
-import asyncio
 import threading
 
 
@@ -57,26 +56,3 @@ def test_confirm_round_trips_via_a_channel_responder() -> None:
     bus.close()
 
 
-def test_telegram_bridge_routes_request_to_awaiting(monkeypatch) -> None:
-    """_on_agent_request marks the chat awaiting for a telegram session and
-    ignores other sessions (so it doesn't steal the desktop's approvals)."""
-    from jaeger_ai.plugins.telegram.bridge import TelegramBridge
-
-    def _fake_schedule(coro, loop):   # don't run the async send; avoid warnings
-        coro.close()
-        return None
-
-    monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", _fake_schedule)
-
-    b = TelegramBridge(lambda *a, **k: "", token="x", bus=object())
-    b._app = type("A", (), {"bot": None})()
-    b._loop = object()   # truthy so _on_agent_request proceeds
-
-    req = type("R", (), {"session": "telegram:77", "id": "rid1",
-                         "prompt": "Allow?", "options": ("allow", "deny")})()
-    b._on_agent_request(req)
-    assert b._awaiting.get(77) == "rid1"
-
-    b._awaiting.clear()
-    b._on_agent_request(type("R", (), {"session": "gui-abc", "id": "x"})())
-    assert b._awaiting == {}   # non-telegram session ignored

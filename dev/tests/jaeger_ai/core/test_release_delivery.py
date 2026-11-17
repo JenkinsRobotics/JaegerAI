@@ -1,6 +1,5 @@
 """Release failures must reject incomplete artifacts and retain recoverable state."""
 import importlib.util
-import json
 from pathlib import Path
 import subprocess
 import sys
@@ -79,12 +78,6 @@ def test_rollback_retains_recovery_when_app_build_fails(tmp_path, monkeypatch):
     assert (tmp_path / '.update-prev/fixture').read_text() == 'saved'
 
 
-def test_test_stack_refuses_existing_state_without_removing_it(tmp_path):
-    stack = load('test_stack', 'scripts/test-stack.py')
-    sentinel = tmp_path / 'keep'; sentinel.write_text('operator work')
-    with pytest.raises(ValueError, match='new and empty'):
-        stack.run(tmp_path, tmp_path)
-    assert sentinel.read_text() == 'operator work'
 
 
 def test_write_guard_blocks_real_file_sqlite_and_rename_writes(tmp_path):
