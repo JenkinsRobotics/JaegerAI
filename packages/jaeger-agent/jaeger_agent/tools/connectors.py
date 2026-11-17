@@ -97,8 +97,10 @@ def add_connector(name: str, command: str = "", args: list[str] | None = None,
             specs = registry.add_server(cfg)
         out.update(connected=bool(specs), tool_count=len(specs),
                    tools=[s.agent_name or f"mcp__{staged['name']}__{s.tool_name}" for s in specs][:40],
-                   next=("Connected and loaded. Call these tools directly by name now (no describe_tool, "
-                         "load_tools or reading mcp.json needed)."))
+                   next=("Connected. Your tool list was fixed when this turn started, so call the new "
+                         "tools in THIS turn through execute_with_tools, e.g. code: import jaeger_tools as jt; "
+                         f"print(jt.call('{(specs[0].agent_name if specs else 'mcp__' + staged['name'] + '__<tool>')}', arg=value)). "
+                         "From the next message on they are callable directly. Do not read mcp.json."))
     except Exception as exc:  # noqa: BLE001
         out.update(connect_error=f"{type(exc).__name__}: {exc}",
                    note="Saved and enabled; it will connect at the next gateway start.")

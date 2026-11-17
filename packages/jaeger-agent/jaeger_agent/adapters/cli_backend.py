@@ -281,7 +281,7 @@ _DEAD_END_TEXT = re.compile(
 )
 
 
-_RAW_TOOL_EVENT = re.compile(r'^\{\s*"(?:type|tool_name|server_name)"\s*:\s*"(?:MCP|mcp|tool_result|tool_call)?')
+_RAW_TOOL_EVENT = re.compile(r'^\{\s*"(?:type|tool_name|server_name)"\s*:\s*"(?:MCP|mcp|tool_result|tool_call|[A-Za-z]*Tool\b)?')
 
 
 def _is_raw_tool_event(value: str) -> bool:
@@ -297,7 +297,10 @@ def _is_raw_tool_event(value: str) -> bool:
         obj = json.loads(value)
     except (TypeError, ValueError):
         return '"tool_name"' in value[:400]
-    return isinstance(obj, dict) and bool(obj.get("tool_name") or obj.get("type") in {"MCP", "tool_result", "tool_call"})
+    # {"type":"SearchTool","result_count":5,"content":...} ended a P10 turn.
+    kind = str(obj.get("type") or "") if isinstance(obj, dict) else ""
+    return isinstance(obj, dict) and bool(obj.get("tool_name") or kind in {"MCP", "tool_result", "tool_call"}
+                                          or (kind.endswith("Tool") and ("content" in obj or "result_count" in obj)))
 
 
 def _usable_cli_text(text: str) -> str:
