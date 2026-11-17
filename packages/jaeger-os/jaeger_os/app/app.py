@@ -133,7 +133,6 @@ class JaegerApp:
         finally:
             if self.spec.event_loop != "none":
                 self.shutdown()
-        return 0
 
     def startup_report(self) -> list[str]:
         """What actually came up, one line per node.
