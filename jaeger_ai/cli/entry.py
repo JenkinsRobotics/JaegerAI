@@ -75,7 +75,9 @@ def _route(argv: list[str], py: str) -> list[str]:
         # launcher at all while the WebUI integrations pointed clients at it.
         return [py, "-m", "jaeger_ai.core.gateway.server", *rest[1:]]
     if cmd == "gateway":
-        return [py, "-m", "jaeger_ai.features.agentgateway", *rest]
+        # The external Agentgateway (:8811/:8812) was archived 2026-11-16 (C7);
+        # MCP is served on 8792 and A2A by the a2a service.
+        return [py, "-m", "jaeger_ai.core.gateway.server", *rest]
     if cmd == "runs":
         return [py, "-m", "jaeger_ai.core.frameworks.recovery", *rest]
     if cmd == "doctor":

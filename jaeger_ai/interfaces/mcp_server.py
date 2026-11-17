@@ -615,9 +615,10 @@ def resolve_mcp_token(explicit: str | None = None) -> str | None:
     if env:
         return env
     try:
-        from jaeger_ai.features.agentgateway.constants import mcp_token_path
+        from jaeger_ai.core.instance.instance import operator_state_root
 
-        path = mcp_token_path()
+        # Same file the archived Agentgateway wrote (~/.jaeger/gateway/mcp.token).
+        path = operator_state_root() / "gateway" / "mcp.token"
         if os.environ.get("JAEGER_MCP_REQUIRE_TOKEN", "").strip() in {"1", "true", "yes"}:
             if path.exists():
                 return path.read_text(encoding="utf-8").strip() or None

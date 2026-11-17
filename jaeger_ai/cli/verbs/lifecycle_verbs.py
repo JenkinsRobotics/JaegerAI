@@ -270,15 +270,6 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
                         failures.append(f"container stop: {name}")
                     else:
                         print(f"  Stopped container {name}")
-    if args.dry_run:
-        print("  [dry-run] Would stop Jaeger-owned MCP/A2A gateway")
-    else:
-        try:
-            from jaeger_ai.features.agentgateway.service import stop
-            if not stop().get("ok"):
-                failures.append("Jaeger gateway")
-        except Exception:
-            failures.append("Jaeger gateway")
     if failures:
         print("  Shutdown incomplete: " + "; ".join(failures))
         return 1
@@ -381,23 +372,6 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
                 time.sleep(0.2)
             else:
                 failures.append(f"not ready: {name}")
-
-    if args.dry_run:
-        print("  [dry-run] Would start Jaeger-owned MCP/A2A gateway")
-    else:
-        try:
-            from jaeger_ai.features.agentgateway.service import start
-            if not start().get("ok"):
-                failures.append("Jaeger gateway")
-            else:
-                for _ in range(10):
-                    if _is_port_open(MCP_GATEWAY_PORT) and _is_port_open(A2A_GATEWAY_PORT):
-                        break
-                    time.sleep(0.2)
-                else:
-                    failures.append("Jaeger gateway readiness")
-        except Exception:
-            failures.append("Jaeger gateway")
 
     if not args.no_app:
         app_pids = _find_app_pids()

@@ -1697,8 +1697,8 @@ class JaegerGatewayApp:
         register(self)
         from jaeger_ai.features.web_search.routes import register as register_web_search
         register_web_search(self)
-        from jaeger_ai.features.oss_stack.routes import register as register_oss_stack
-        register_oss_stack(self)
+        # The oss_stack HTTP routes (model router, shared tools, docs RAG)
+        # were archived 2026-11-16 (C7): no callers. oss_stack/docs.py stays (companion embeds).
         from jaeger_ai.features.browser.routes import register as register_browser
         self.browser_runtime = register_browser(self)
         from jaeger_ai.features.engines.catalog import register as register_engine_catalog

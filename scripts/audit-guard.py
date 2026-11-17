@@ -272,6 +272,24 @@ def c_cut_blocked():
     return True, "archived (approved by Matthew 2026-11-16 1:45 PM PST); no backlog routes or MCP tools left"
 
 
+C7_CUT = ("jaeger_ai/features/agentgateway", "jaeger_ai/features/goals",
+          "jaeger_ai/features/oss_stack/routes.py", "jaeger_ai/features/oss_stack/router.py",
+          "jaeger_ai/features/oss_stack/mcp_pool.py", "jaeger_ai/features/oss_stack/docs_indexer.py",
+          "jaeger_ai/features/oss_stack/browser_proxy.py")
+
+
+def c_c7_cut():
+    left = [p for p in C7_CUT if (REPO / p).exists()]
+    keep = [p for p in ("jaeger_ai/features/oss_stack/docs.py", "jaeger_ai/core/team") if not (REPO / p).exists()]
+    wired = [f for f in ("jaeger_ai/core/gateway/server.py", "jaeger_ai/main.py", "jaeger_ai/features/agent_bridge/mcp.py",
+                         "jaeger_ai/core/gateway/caller_auth.py")
+             if any(t in (REPO / f).read_text("utf-8") for t in ("features.goals import", "oss_stack.routes",
+                                                                 "features.agentgateway", "/v1/docs/search"))]
+    if left or keep or wired:
+        return False, f"still present: {left} missing keepers: {keep} wired: {wired}"
+    return True, "agentgateway, goals, oss_stack routes archived (general cut approval 1:45 PM PST); docs.py + core/team kept"
+
+
 def c_one_phone_relay():
     left = [p for p in ("jaeger_ai/plugins/telegram", "jaeger_ai/plugins/imessage", "jaeger_ai/plugins/discord") if (REPO / p).exists()]
     return not left, f"duplicate relays: {left}" if left else "features/channels only"
@@ -359,6 +377,7 @@ CHECKS = [
     ("G22", "Cut list: backlog + ARES/Muse bridge parts", c_cut_blocked, True),
     ("G23", "Blocking pre-tool hooks in the default tool chain", c_blocking_hooks, True),
     ("G24", "Schedules/heartbeat/board run only in the Gateway (bridge never takes the lease)", c_bridge_no_producers, True),
+    ("G25", "C7 cuts: agentgateway, goals, unused oss_stack routes", c_c7_cut, True),
 ]
 
 
