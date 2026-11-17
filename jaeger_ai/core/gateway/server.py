@@ -5846,6 +5846,7 @@ class JaegerGatewayApp:
             # (steps, statuses, an optional note) leaves this callback.
             self._request_tools.setdefault(request_id, []).append(str(name or ""))
             output_text = _tool_output_text(str(name or ""), result)
+            needs_permission = isinstance(result, dict) and result.get("needs_permission") is True
             sources = _tool_sources(result) if ok else []
             attachment = None
             if ok:
@@ -5936,6 +5937,9 @@ class JaegerGatewayApp:
                 "text": detail,
                 "summary": detail,
                 **({"output": output_text} if output_text else {}),
+                # A flag, not the result: says the tool was blocked by a missing
+                # OS permission (e.g. macOS Accessibility) so the cause is visible.
+                **({"needs_permission": True} if needs_permission else {}),
             })
             if sources:
                 self.event_bus.publish(session_id, "sources", {**ids, "sources": sources})
