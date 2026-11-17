@@ -370,7 +370,9 @@ def recall(key: str, subject: str | None = None) -> str | None:
         if overlap > best_overlap:
             best_overlap = overlap
             best_value = r["value"]
-    return best_value if best_overlap >= 1 else None
+    # More than half the asked-for words must match: one shared generic word
+    # made "r7 demo word" return the unrelated "probe_word" fact (R7 demo).
+    return best_value if best_overlap * 2 > len(needle_words) else None
 
 
 def recall_history(key: str, subject: str | None = None) -> list[dict[str, str]]:
@@ -411,7 +413,31 @@ def forget(key: str, subject: str | None = None) -> bool:
             f"DELETE FROM facts WHERE subject = ? AND key = ? AND {src_sql}",
             (subj, key, *src_args),
         )
+        if cur.rowcount > 0:
+            _tombstone(conn, subj, key)
         return cur.rowcount > 0
+
+
+FORGOTTEN_NOTE = "forgotten"
+
+
+def _tombstone(conn, subject: str, key: str) -> None:
+    """Mark the fact as forgotten in its history so the agent does not
+    re-save it from old transcripts (R7: a forget must stick)."""
+    conn.execute(
+        "INSERT INTO fact_log (subject,key,value,category,source,tags,note,ts) "
+        "VALUES (?,?,'','forgotten',?,'',?,?)",
+        (subject, key, current_memory_source(), FORGOTTEN_NOTE,
+         datetime.now(timezone.utc).isoformat(timespec="seconds")))
+
+
+def forgotten_at(key: str, subject: str | None = None) -> str | None:
+    """When the owner last forgot this fact, if that is its latest history row."""
+    from jaeger_agent.memory import sqlite_store
+    row = sqlite_store.connection().execute(
+        "SELECT note, ts FROM fact_log WHERE subject = ? AND key = ? ORDER BY id DESC LIMIT 1",
+        (_norm_subject(subject), key)).fetchone()
+    return row["ts"] if row is not None and row["note"] == FORGOTTEN_NOTE else None
 
 
 def list_facts(subject: str | None = "user") -> dict[str, str]:
