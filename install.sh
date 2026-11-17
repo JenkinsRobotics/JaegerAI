@@ -247,9 +247,19 @@ else
   if [[ "$(uname -s)" == "Darwin" ]]; then
     echo "Mac production installation is deferred; no old SwiftUI app is installed automatically."
   fi
+  # First run: a free brain (signed-in subscription CLI or local Ollama, no
+  # API keys), the agent, the launchd jobs and the menu bar app.
+  if [[ "${JAEGER_SKIP_QUICKSTART:-0}" != "1" ]]; then
+    echo; echo "→ First run (jaeger quickstart)…"
+    QS_ARGS=()
+    [[ -t 0 ]] || QS_ARGS+=(--yes)
+    "$REPO_ROOT/jaeger" quickstart "${QS_ARGS[@]}" \
+      || echo "  ⚠ quickstart did not finish — rerun: ./jaeger quickstart"
+  fi
   echo
   echo "Next steps:"
-  echo "  ./jaeger agent create   # create your first agent"
+  echo "  ./jaeger quickstart     # rerun first-run setup (pick a free brain, services, menu app)"
+  echo "  ./jaeger agent create   # create another agent"
   echo "  ./jaeger                # run it   (--tui for terminal)"
   echo "  ./jaeger launcher install  # refresh the Applications/Launchpad icon"
   echo "  ./jaeger doctor         # environment + readiness check"

@@ -55,6 +55,9 @@ def _route(argv: list[str], py: str) -> list[str]:
             gui_rest = [arg for arg in rest if arg not in ("gui", "--gui")]
             return [py, "-m", "jaeger_ai.cli.run", "agent", "create", *gui_rest]
         return [py, "-m", "jaeger_ai.cli.run", "setup", *rest]
+    if cmd in ("quickstart", "first-run"):
+        # First run for a new Mac: free brain, agent, launchd jobs, menu app.
+        return [py, "-m", "jaeger_ai.cli.verbs.quickstart_verb", *rest]
     if cmd == "stack":
         return [py, "-m", "jaeger_ai.core.runtime.stack", *rest]
     if cmd == "multimodal":
