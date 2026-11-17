@@ -559,7 +559,10 @@ def interactive_followup(answer: str, objective: str, halt_reason: str | None,
     if verdict in {"continue", "empty"}:
         return continuation.continuation_prompt(objective)
     if not paths_checked:
-        missing = missing_named_paths(objective)
+        # Only paths the request asks to produce: a file it merely names
+        # (summarise scripts/x.py) sits outside the workspace and is not
+        # missing work (R13 spent a pass proving an existing script exists).
+        missing = missing_deliverable_paths(objective)
         if missing:
             return MISSING_PATHS_NOTE.format(paths=", ".join(missing[:8]))
     if changed_state(tools_used) and (done == 0 or (check_changed and done < MAX_CHECKS)):
