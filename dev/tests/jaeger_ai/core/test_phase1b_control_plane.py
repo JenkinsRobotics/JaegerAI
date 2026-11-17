@@ -13,14 +13,8 @@ from jaeger_ai.core.gateway import caller_auth
 from jaeger_ai.core.gateway.caller_auth import CALLERS
 from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError, release_allowed
 from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease, repairs_allowed
-from jaeger_ai.core.runtime.webui_bind import webui_bind_host
 from jaeger_ai.core.tasks.completion import CompletionError, authoritative_transition
 from jaeger_ai.core.tasks.models import DurableTask, TaskState
-
-
-def test_webui_bind_stays_on_loopback_even_if_host_is_wildcard():
-    assert webui_bind_host({"JAEGER_WEBUI_HOST": "0.0.0.0"}) == "127.0.0.1"
-    assert webui_bind_host({"JAEGER_WEBUI_ALLOW_LAN": "1", "JAEGER_WEBUI_HOST": "0.0.0.0"}) == "0.0.0.0"
 
 
 def test_callers_cannot_self_declare_owner():

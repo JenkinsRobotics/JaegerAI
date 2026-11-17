@@ -351,31 +351,12 @@ Port map (defaults chosen to avoid clashes):
 | Instance webhooks | **8793** | |
 | Jaeger MCP HTTP | **8792** | Native framework endpoint: `http://127.0.0.1:8792/mcp` |
 | Jaeger A2A | **8796** | Native AgentCard and JSON-RPC endpoint |
-| Agentgateway MCP | **8811** | Optional compatibility proxy to native MCP |
-| Agentgateway A2A | **8812** | Optional compatibility proxy to native A2A |
 
 `jaeger webui status` shows toggle state, container/adapter health, and URLs.
 
-Jaeger owns Agentgateway. Install the public v1.5.0 binary with `jaeger gateway install`
-(into `~/.jaeger/bin`), write `~/.jaeger/gateway/config.yaml`, then start MCP HTTP,
-A2A, and the proxy:
-
-```bash
-jaeger mcp --http          # 127.0.0.1:8792/mcp, attaches to the live bridge
-jaeger a2a                 # 127.0.0.1:8796 official a2a-sdk JSON-RPC
-jaeger gateway start       # 8811 MCP + 8812 A2A, targeting those Jaeger backends
-jaeger gateway verify      # protocol handshake, tools, bridge health, capability inventory, card
-```
-
 Codex, Claude Code, and native Hermes Agent profiles connect directly to
-`127.0.0.1:8792/mcp`. The OpenClaw Apple container crosses the host boundary
-through Jaeger's Agentgateway at `192.168.64.1:8811/mcp`. The generated contract is recorded under
-`~/.jaeger/agent-network.json`; the proxy ports remain available for clients
-that specifically require Agentgateway. Both proxy ports require the private
-bearer stored at `~/.jaeger/gateway/mcp.token`; only its SHA-256 hash appears in
-Agentgateway configuration.
-
-The ARES Agentgateway plist and `~/.ares/gateway` config are archive. Do not start them.
+`127.0.0.1:8792/mcp` (MCP) and `127.0.0.1:8796` (A2A). The external
+Agentgateway proxy (8811/8812) was archived on 2026-11-16.
 
 Remote access stays disabled by default. Start the WebUI on loopback and
 publish only Jaeger WebUI through Tailscale Serve with:
@@ -404,8 +385,8 @@ authenticated session. The authentication implementation lives in
 
 ### External agent delegates
 
-Jaeger can delegate a task to `claude`, `codex`, `grok`, `gemini`, `hermes`,
-`openclaw`, `ollama`, `opencode`, or `cursor`. Each adapter lives in its own
+Jaeger can delegate a task to `claude`, `codex`, `grok`, `gemini`, `ollama`,
+`opencode`, or `cursor`. Each adapter lives in its own
 feature folder under `jaeger_agent/delegates/`. Ask Jaeger to call
 `list_delegate_runtimes` for live health/capabilities, then use
 `delegate_task(runtime="codex", goal="...")` or `runtime="auto"` for ranked
@@ -423,15 +404,10 @@ as the active brain with `/model use cli claude` — Jaeger keeps tools,
 memory, and permissions. `delegate_task` is still the worker path: go
 do this whole job in that agent. Do not confuse the two.
 
-### ARES absorption and migration
+### Importing ARES history
 
-Imported product capabilities are split by feature under `jaeger_ai/features/`;
-delegate implementations are split by runtime under
-`packages/jaeger-agent/jaeger_agent/delegates/`. The `ares_migration` feature
-provides a read-only audit, idempotent state import, restricted backup, and a
-retirement rehearsal. It imports ARES sessions, documents, schedules, worker
-health observations, passkeys, and Kanban state without modifying ARES. ARES
-must remain installed until the rehearsal reports no blockers.
+`jaeger_ai/features/history_import/ares` imports past ARES sessions read-only,
+so old conversations stay searchable. ARES itself is retired.
 
 ### Running the WebUI in development
 

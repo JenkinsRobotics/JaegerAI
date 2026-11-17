@@ -36,7 +36,7 @@ def _cmd_container_argv(argv: Sequence[str]) -> int:
             "\n"
             "examples:\n"
             "  jaeger container list\n"
-            "  jaeger container start ares-openclaw\n"
+            "  jaeger container start NAME\n"
             "  jaeger container status hermes-webui-hermes-webui\n",
             file=sys.stderr,
         )
@@ -90,7 +90,7 @@ def _container_list(argv: Sequence[str]) -> int:
 
 def _container_start(argv: Sequence[str]) -> int:
     if not argv:
-        print("error: container name required (e.g. `jaeger container start ares-openclaw`)", file=sys.stderr)
+        print("error: container name required (e.g. `jaeger container start NAME`)", file=sys.stderr)
         return 2
     name = argv[0]
     print(f"Starting container {name!r}...")

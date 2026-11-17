@@ -2,7 +2,7 @@
 
 These CLIs are models, not delegates. ``jaeger runtime`` stays the
 GGUF/MLX engine panel; this verb is the PATH onboarding surface
-(OpenClaw practice: probe known binaries, show installed vs missing).
+(probes known binaries and shows installed vs missing).
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Container management tool for Apple native containers.
 
 Allows the agent to list, start, stop, inspect, create, and delete container tools
-(ares-openclaw, hermes-webui-hermes-webui, ares-n8n, etc.) backed by Apple container.
+backed by Apple container.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def container(
 
     ``action`` selects the operation:
       - ``list``    — list installed container tools and their live status
-      - ``start``   — start a container tool (needs ``name``, e.g. "ares-openclaw")
+      - ``start``   — start a container tool (needs ``name``)
       - ``stop``    — stop a running container tool (needs ``name``)
       - ``status``  — inspect container state, IP, ports, and recent logs (needs ``name``)
       - ``delete``  — delete a container tool from disk (needs ``name``)

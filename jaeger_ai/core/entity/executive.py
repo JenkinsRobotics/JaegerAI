@@ -249,7 +249,7 @@ class ExecutiveStrategySelector:
                     complexity_score=float(complexity["score"]),
                 )
 
-            # Default for human messages: ReAct Tool Loop (matches Hermes & OpenClaw)
+            # Default for human messages: ReAct Tool Loop
             # The model is mounted with tools and decides per-turn whether to call a tool or reply in prose.
             return ExecutiveDecision(
                 strategy=CognitiveStrategy.REACT_LOOP,

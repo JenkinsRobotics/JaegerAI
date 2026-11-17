@@ -158,7 +158,7 @@ else
   echo "→ --skip-deps: leaving $VENV untouched"
 fi
 
-# 4. Scaffold ~/.jaeger/ (idempotent) — operator state root (OpenClaw standard)
+# 4. Scaffold ~/.jaeger/ (idempotent) — operator state root
 STATE_ROOT="${JAEGER_STATE_DIR:-$HOME/.jaeger}"
 mkdir -p "$STATE_ROOT/instances" "$STATE_ROOT/logs"
 if [[ -f "$REPO_ROOT/scripts/migrate-webui-config.py" ]]; then

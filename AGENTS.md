@@ -33,7 +33,7 @@ Current product definition: [`docs/PRODUCT.md`](docs/PRODUCT.md). Read it before
 
 ---
 
-## 1. Zero In-Repo State & Clean Architecture Doctrine (OpenClaw Standard)
+## 1. Zero In-Repo State & Clean Architecture Doctrine
 
 The repository source tree must remain pristine, deterministic, and free of runtime side-effects.
 
@@ -83,7 +83,6 @@ exercised; none are aspirational.
 | Process | Bind | Launch | Owns |
 |---|---|---|---|
 | Jaeger Gateway | `127.0.0.1:33418` | `jaeger gateway daemon` | sessions, SSE, approvals |
-| Agentgateway (external) | `:8811` MCP, `:8812` A2A | `jaeger gateway start` | external MCP/A2A proxy |
 | Jaeger WebUI | `:8790` | `./scripts/run-jaeger-webui.sh` | browser UI |
 | MCP server | stdio / `--http` | `jaeger mcp` | tool surface |
 | A2A server | loopback `:8796` | `jaeger a2a` | agent-to-agent JSON-RPC |
@@ -112,7 +111,7 @@ shell is Swift/AppKit; preserve its existing bundle identity and permission boun
 
 | Canonical (Authoritative) | Legacy / Shadow / Alias (Do NOT Edit) | Distinction & Invariant |
 |---|---|---|
-| `jaeger gateway daemon` (`:33418`) | `jaeger gateway` (`:8811`, `:8812`) | `daemon` owns Jaeger sessions & SSE; bare `gateway` is external proxy. |
+| `jaeger gateway daemon` (`:33418`) | Agentgateway (`:8811`, `:8812`, archived 2026-11-16) | `daemon` owns Jaeger sessions & SSE; there is no external proxy. |
 | `packages/jaeger-agent/` | `jaeger_ai/vendor/` | `jaeger-agent` is live uv workspace; `vendor/` is deleted and forbidden. |
 | `jaeger_ai/interfaces/macos-shell` | `apps/macos` | Canonical native shell; old SwiftUI target is not an automatic fallback. |
 | `jaeger_ai/interfaces/ui` | `apps/web` | Canonical shared frontend; retain `features/webui` backend dependencies. |
@@ -175,8 +174,8 @@ before, so answer them in order:
    and it gets a `README.md` in the same commit. Every feature folder has one;
    keep it that way.
 2. **Do two or more features need it?** → `jaeger_ai/core/`. `core/frameworks/`
-   (per-framework turn execution) lives there because the WebUI, Roundtable, the
-   Dispatcher and the Gateway all call it.
+   (per-framework turn execution) lives there because the WebUI and the Gateway
+   both call it.
 3. **Is it only *how a human or peer connects*?** → `jaeger_ai/interfaces/`.
    A window, a terminal, a socket. Never business logic — that was the mistake
    that put turn execution under `interfaces/` for months.
