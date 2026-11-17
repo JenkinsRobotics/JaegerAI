@@ -14,3 +14,7 @@ Install it as a connector:
 4. Restart the gateway: `launchctl kickstart -k gui/$UID/com.jenkinsrobotics.jaeger-gateway`.
 
 Tools show up as `mcp__github__*`. They are gated and load on demand through tool_search/load_tools.
+
+## Read-only approval
+
+The server runs with `--read-only`, so declare its tools read-only in the instance `mcp.json` (`"tools": {"read_only": ["*"]}` on the `github` entry). Otherwise every call asks for approval, and the call is refused when nobody is there to answer.
