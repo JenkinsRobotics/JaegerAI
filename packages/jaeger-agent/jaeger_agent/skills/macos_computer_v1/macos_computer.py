@@ -77,6 +77,7 @@ def computer_do(goal: Any) -> dict:
         "steps": out_steps,
         "wall_ms": round((time.perf_counter() - started) * 1000.0, 1),
         **({"halt_reason": halt_reason} if halt_reason else {}),
+        **({"needs_permission": True} if any(st.get("needs_permission") for st in out_steps) else {}),
     }
 
 
@@ -155,6 +156,8 @@ def computer_look(app: str = "", include_screenshot: bool = False) -> dict:
     semantic_ok = bool(apps_result.get("ok") or focus_result.get("ok"))
     screenshot_ok = not include_screenshot or "screenshot" not in errors
     out["ok"] = semantic_ok and screenshot_ok
+    if focus_result.get("needs_permission") or apps_result.get("needs_permission"):
+        out["needs_permission"] = True
     if errors:
         out["errors"] = errors
     return out
