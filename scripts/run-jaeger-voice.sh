@@ -8,4 +8,6 @@ ROOT="${JAEGER_INSTALL_ROOT:-$HOME/GitHub/JaegerAI}"
 VENV="${JAEGER_VOICE_VENV:-$HOME/.jaeger/voice-venv}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export PYTHONUNBUFFERED=1
-exec "$VENV/bin/python" "$ROOT/jaeger_ai/features/voice/realtime/service.py"
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
+exec "$VENV/bin/python" -B "$ROOT/jaeger_ai/features/voice/realtime/service.py"
