@@ -18,44 +18,47 @@ def _format_ts(value: float | int | str | None) -> str:
         return str(value)
 
 
-def _store():
-    from jaeger_ai.core.sessions import get_store
+def _gateway():
+    from jaeger_ai.core.gateway.client import GatewayTurnClient
 
-    return get_store()
+    return GatewayTurnClient(caller="jaegerd")
 
 
 def _summary(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        "session_id": str(row.get("id") or ""),
-        "title": str(row.get("title") or row.get("preview") or "Untitled"),
+        "session_id": str(row.get("session_id") or row.get("id") or ""),
+        "title": str(row.get("title") or row.get("last_message_preview") or "Untitled"),
         "source": "jaeger",
         "created_at": _format_ts(row.get("created_at")),
-        "last_active": _format_ts(row.get("last_active")),
-        "message_count": int(row.get("messages") or 0),
-        "execution_state": str(row.get("execution_state") or "idle"),
+        "last_active": _format_ts(row.get("last_activity_at") or row.get("updated_at")),
+        "message_count": int(row.get("message_count") or 0),
+        "execution_state": str(row.get("status") or "idle"),
     }
 
 
 def _read(session_id: str) -> dict[str, Any] | None:
-    store = _store()
-    if store is None or not store.exists(session_id):
+    from jaeger_ai.core.gateway.client import GatewayUnavailable
+    try:
+        row = _gateway().get_session(session_id)
+    except GatewayUnavailable as exc:
+        if "HTTP 404" in str(exc):
+            return None
+        raise
+    if not row:
         return None
-    rows = {str(row.get("id")): row for row in store.list_sessions(limit=100_000)}
-    row = rows.get(session_id, {})
-    brain = store.brain(session_id)
     messages = [
         {
             "role": item.get("role"),
-            "content": item.get("text"),
-            "timestamp": _format_ts(item.get("ts")),
-            "metadata": item.get("metadata") or {},
+            "content": item.get("content") or item.get("text"),
+            "timestamp": _format_ts(item.get("timestamp") or item.get("created_at")),
+            "metadata": item.get("metadata") or item.get("meta") or {},
         }
-        for item in store.history(session_id)
+        for item in (row.get("messages") or row.get("transcript") or [])
     ]
     return {
-        **_summary({"id": session_id, **row}),
-        "model": brain.get("model"),
-        "provider": brain.get("provider"),
+        **_summary({"session_id": session_id, **row}),
+        "model": row.get("model"),
+        "provider": row.get("provider"),
         "message_count": len(messages),
         "messages": messages,
     }
@@ -95,38 +98,25 @@ def session_search(
             "sessions": [],
         }
 
-    store = _store()
-    if store is None:
-        return {
-            "ok": True,
-            "mode": mode,
-            "total_sessions": 0,
-            "total_matches": 0,
-            "sessions": [],
-        }
-
-    from jaeger_ai.features.session_search import prepare_search_query, search_sessions
-
-    needle = prepare_search_query(str(query or ""))
-    rows = (
-        search_sessions(store, needle, limit=bounded_limit)
-        if needle
-        else store.list_sessions(limit=bounded_limit)
-    )
-    sessions = [_summary(row) for row in rows]
+    from urllib.parse import quote
+    client = _gateway()
+    needle = str(query or "").strip()
+    rows = (client._call("GET", f"/v1/sessions?q={quote(needle)}").get("sessions") or []
+            if needle else client.list_sessions())
+    sessions = [_summary(row) for row in rows[:bounded_limit]]
     if needle:
         return {
             "ok": True,
             "mode": "search",
             "query": needle,
-            "total_matches": len(sessions),
+            "total_matches": len(rows),
             "sessions": sessions,
         }
     return {
         "ok": True,
         "mode": "browse",
-        "total_sessions": len(sessions),
-        "summary": f"Found {len(sessions)} Jaeger session(s).",
+        "total_sessions": len(rows),
+        "summary": f"Found {len(rows)} Jaeger session(s).",
         "sessions": sessions,
     }
 

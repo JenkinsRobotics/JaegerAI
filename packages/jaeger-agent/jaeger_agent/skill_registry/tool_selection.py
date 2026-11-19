@@ -92,22 +92,33 @@ def budget_visible_tools(tools, selection, guard, system_prompt: str, query: str
     import re
     discovery = {'list_tools', 'describe_tool', 'load_tools', 'tool_search'}
     from .toolset_scoping import CORE, resolve_groups
-    # CORE must stay visible. A large system prompt used to shrink the
-    # schema budget so read_file / search_files / terminal were dropped
-    # and Grok fell back to a leftover directory tool.
-    # Intent-matched tools (infer_toolsets) are required too: ranking them
-    # under the 2k-token schema budget dropped them behind CORE, so a
-    # "run it in the background" turn never saw queue_background_task
-    # (parity P2, 2026-11-16) and agents burned turns in tool_search.
-    required = discovery | set(CORE) | selection.names | resolve_groups(selection.groups) | set(selection.inferred)
+    # Intent-matched and explicitly loaded tools win. CORE is a preference,
+    # not an exemption from the model's hard context window: forcing every
+    # CORE schema into an 8K lane used 7.5K tokens after a 5K system prompt
+    # and made ordinary chat fail before its first token. Keep at least one
+    # discovery path when it fits, then use remaining room for CORE.
+    intent = selection.names | resolve_groups(selection.groups) | set(selection.inferred)
     limit = max(0, min(2048, guard.budget.prompt_budget
                        - guard.estimate_text_tokens(system_prompt) - 1536))
     costs = {t.name: guard.estimate_text_tokens(json.dumps(t.to_openai_schema())) + 2
              for t in tools}
     if sum(costs.values()) <= limit:
         return tools
-    selected = {t.name for t in tools if t.name in required}
-    used = sum(costs[n] for n in selected)
+    selected = set()
+    used = 0
+
+    def add_ranked(names):
+        nonlocal used
+        for name in sorted(names, key=lambda n: (costs.get(n, 10**9), n)):
+            if name in selected or name not in costs:
+                continue
+            if used + costs[name] <= limit:
+                selected.add(name)
+                used += costs[name]
+
+    add_ranked(intent)
+    add_ranked(discovery)
+    add_ranked(CORE)
     mentioned = set(re.findall(r'[A-Za-z_][A-Za-z_0-9]*', query))
     ranked = sorted(tools, key=lambda t: (
         t.name not in mentioned, t.name not in selection.inferred, costs[t.name], t.name))
