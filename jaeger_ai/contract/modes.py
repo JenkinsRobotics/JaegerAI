@@ -1,13 +1,13 @@
 """jaeger_ai/contract/modes.py — Authoritative interaction tiers and presence contracts.
 
 Defines the work styles in JaegerAI:
-  1. "chat"  — Conversational & memory-aware. Responds only when prompted; text-only, no tools.
-  2. "agent" — Task worker. Bounded ReAct tool loop (shell/files/git) under autonomy policy.
-  3. "plan"  — Read-only tools; the model researches and ends with a plan for approval.
+  1. "agent" — Normal conversation: answer directly or use tools under autonomy policy.
+  2. "plan"  — Read-only tools; the model researches and ends with a plan for approval.
                The owner switches to Agent to execute. Write and exec tools are blocked.
 
-The former "jaeger" resident/always-on run mode has been removed. Saved
-values of "jaeger" are read as "agent".
+The former "chat" tool-free and "jaeger" resident run modes have been removed.
+Saved values of either are read as "agent". Tool grants and action permissions
+are enforced separately; selecting a work style does not override them.
 
 Defined here, once, because Gateway, WebUI, IDE, TUI, and settings schema all consult it.
 """
@@ -16,28 +16,25 @@ from __future__ import annotations
 import re
 from typing import Final, Literal
 
-InteractionTier = Literal["chat", "agent", "plan"]
+InteractionTier = Literal["agent", "plan"]
 
-INTERACTION_TIERS: Final[tuple[InteractionTier, ...]] = ("chat", "agent", "plan")
+INTERACTION_TIERS: Final[tuple[InteractionTier, ...]] = ("agent", "plan")
 DEFAULT_INTERACTION_TIER: Final[InteractionTier] = "agent"
 # Retired run-mode value; never offered, always read as Agent.
-RETIRED_INTERACTION_TIERS: Final[frozenset[str]] = frozenset({"jaeger"})
+RETIRED_INTERACTION_TIERS: Final[frozenset[str]] = frozenset({"chat", "jaeger"})
 
 TIER_NUMBERS: Final[dict[InteractionTier, int]] = {
-    "chat": 1,
     "plan": 2,
     "agent": 3,
 }
 
 TIER_NAMES: Final[dict[int, InteractionTier]] = {
-    1: "chat",
     2: "plan",
     3: "agent",
 }
 
 TIER_DESCRIPTIONS: Final[dict[InteractionTier, str]] = {
-    "chat": "Conversational only; no tool execution.",
-    "agent": "Task worker; runs tools under the approval policy until the task is done or the fuse trips.",
+    "agent": "Normal conversation; answers directly or uses tools under the approval policy.",
     "plan": "Read-only tools; Jaeger researches and writes a plan for you to approve before anything is changed.",
 }
 
@@ -74,7 +71,7 @@ _PLAN_ALLOW = frozenset({
 })
 
 EntityPresence = Literal[
-    "dormant",      # Chat mode / sleeping
+    "dormant",      # Sleeping
     "idle",         # Agent mode / idle between tasks
     "observing",    # Listening to sensors, zero LLM calls (not a run-mode)
     "deliberating", # Evaluating salience and planning
@@ -84,7 +81,7 @@ EntityPresence = Literal[
 
 
 def normalize_interaction_tier(value: str | None) -> InteractionTier:
-    """Public work style. Retired 'jaeger' (resident mode) becomes Agent."""
+    """Public work style. Retired modes become the normal Agent conversation."""
     raw = (value or "").strip().lower()
     if raw in RETIRED_INTERACTION_TIERS:
         return "agent"

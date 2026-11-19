@@ -27,6 +27,17 @@ async def call(app, path, *, action=None, body=None, method="POST", query=None):
 
 
 @pytest.mark.asyncio
+async def test_plan_cannot_run_a_schedule(gateway):
+    gateway._current_tier = lambda: "plan"
+    code, receipt = await call(gateway, "/v1/schedules/{action}", action="run", body={
+        "operation_id": "plan-run", "job_id": "example",
+    })
+    assert code == 400
+    assert "Plan mode" in receipt["error"]
+    assert gateway.task_owner.store.list_tasks() == []
+
+
+@pytest.mark.asyncio
 async def test_schedule_create_edit_pause_replay_and_run_are_owned(gateway):
     body = {"operation_id": "create-1", "name": "native-test", "prompt": "Return a harmless status", "schedule": "0 9 * * *"}
     code, receipt = await call(gateway, "/v1/schedules/{action}", action="create", body=body)

@@ -487,10 +487,9 @@ class AutomationConfig(BaseModel):
         "agent",
         json_schema_extra=_setting("autonomy"),
         description=(
-            "Work style: 'chat' (conversational only, no tools), "
-            "'agent' (task worker, tools under the approval policy), "
+            "Work style: 'agent' (normal conversation, tools under the approval policy), "
             "'plan' (read-only tools; writes a plan for you to approve, then switch to Agent to execute). "
-            "A saved 'jaeger' value is treated as 'agent'."
+            "Saved 'chat' and 'jaeger' values are treated as 'agent'."
         ),
     )
 

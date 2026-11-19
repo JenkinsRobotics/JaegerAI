@@ -75,7 +75,7 @@ NO_TOOLS_LANE_NOTE = (
 
 
 def no_tools_lane_system_prompt(system_prompt: str | None) -> str:
-    """System prompt for the tool-less model-only lane (Chat tier, specialists).
+    """System prompt for explicit tool-free requests and unscoped specialists.
 
     The base prompt still describes Jaeger's tools. With ``interaction_tier: chat``
     the SOTA run (2026-10-16) sent every request down this lane, and the model
@@ -6588,9 +6588,6 @@ class JaegerGatewayApp:
                 (session or {}).get("metadata", {}).get("actionable")
                 or is_actionable_request(request_text)
             )
-            if early_tier == "chat":
-                actionable = False
-
             loop = asyncio.get_running_loop()
 
             async def _run_native_coro(prompt: str) -> tuple[str, str] | None:
@@ -6600,8 +6597,7 @@ class JaegerGatewayApp:
 
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
-                # Agent turns keep their tools, including image analysis. Chat mode
-                # uses the selected adapter's direct image support below.
+                # Normal conversations keep their tools, including image analysis.
                 owner_first = os.environ.get("JAEGER_OWNER_REACT", "").strip() in {"1", "true", "yes"}
                 try:
                     from jaeger_ai.core.entity.ownership import EntityRuntimeMode
@@ -6718,9 +6714,9 @@ class JaegerGatewayApp:
             req_opts = (execution or {}).get("options") or {}
             fast_lane = is_voice_session or bool(req_opts.get("fast_lane"))
             turn_meta = {
-                "execution_mode": "text_only" if (text_only or tier == "chat") else "agent",
+                "execution_mode": "text_only" if text_only else "agent",
                 "interaction_tier": tier,
-                "actionable": False if tier == "chat" else actionable,
+                "actionable": actionable,
                 "role": role_s,
                 "agent_id": agent_fields.get("agent_id"),
                 "specialist": agent_fields.get("agent_id") if role_s == "specialist" else None,
@@ -6779,10 +6775,8 @@ class JaegerGatewayApp:
                 model_only = True
                 from jaeger_ai.features.voice.brain import voice_brain as _voice_brain, voice_history, voice_prompt
                 voice_brain = _voice_brain()
-            elif tier == "chat":
-                model_only = True
             else:
-                model_only = (text_only and not actionable) or (
+                model_only = (execution or {}).get("allowed_tools") == [] or (text_only and not actionable) or (
                     role_s == "specialist" and specialist_scope is None)
             if specialist_scope is not None and not model_only:
                 prompt = (f"[Agent]\n{system_prompt}\nYour own notes: use the agent_notes tool "
@@ -6987,7 +6981,7 @@ class JaegerGatewayApp:
         The existing ExecutiveStrategySelector judges the prepared turn; the existing
         owner ReAct is the worker, run in durable mode so it must return evidence.
         """
-        if prepared is None or execution is None or not actionable or tier == "chat" or role_s == "specialist":
+        if prepared is None or execution is None or not actionable or role_s == "specialist":
             return None, execution
         from jaeger_ai.core.entity.executive import CognitiveStrategy
 
@@ -8122,7 +8116,7 @@ class JaegerGatewayApp:
         )
 
     def _migrate_retired_interaction_tier(self) -> None:
-        """Rewrite a saved 'jaeger' run mode to Agent (resident mode was removed)."""
+        """Rewrite retired Chat/resident selections to the normal Agent work style."""
         from jaeger_ai.contract.modes import normalize_interaction_tier
         from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
 
@@ -8130,7 +8124,11 @@ class JaegerGatewayApp:
         if path is None or not Path(path).is_file():
             return
         config = load_yaml(Path(path), Config)
-        raw = getattr(getattr(config, "automation", None), "interaction_tier", None)
+        # Config validation already normalizes retired values. Compare the
+        # persisted value so the old selection is actually rewritten once.
+        import yaml
+        saved = yaml.safe_load(Path(path).read_text()) or {}
+        raw = (saved.get("automation") or {}).get("interaction_tier")
         wanted = normalize_interaction_tier(raw)
         if raw == wanted:
             return
@@ -8138,7 +8136,7 @@ class JaegerGatewayApp:
         dump_yaml(Path(path), config)
 
     def _current_tier(self) -> str:
-        """Return the active work style ('chat', 'agent', or 'plan')."""
+        """Return the active work style ('agent' or 'plan')."""
         from jaeger_ai.contract.modes import DEFAULT_INTERACTION_TIER, normalize_interaction_tier
 
         path = self._config_path()
@@ -8189,7 +8187,7 @@ class JaegerGatewayApp:
         ]
 
     async def handle_get_tier(self, request: web.Request) -> web.Response:
-        """GET /v1/runtime/tier: active work style ('chat' | 'agent' | 'plan')."""
+        """GET /v1/runtime/tier: normal conversation ('agent') or read-only 'plan'."""
         from jaeger_ai.contract.modes import INTERACTION_TIERS, TIER_DESCRIPTIONS
 
         self._migrate_retired_interaction_tier()
@@ -8201,9 +8199,9 @@ class JaegerGatewayApp:
         })
 
     async def handle_set_tier(self, request: web.Request) -> web.Response:
-        """POST /v1/runtime/tier ``{"tier": "chat"|"agent"|"plan"}``: save work style.
+        """POST /v1/runtime/tier ``{"tier": "agent"|"plan"}``: save work style.
 
-        A legacy ``jaeger`` value is accepted and stored as ``agent``.
+        Legacy ``chat`` and ``jaeger`` values are accepted and stored as ``agent``.
         """
         from jaeger_ai.contract.modes import (
             INTERACTION_TIERS, RETIRED_INTERACTION_TIERS, TIER_DESCRIPTIONS,
@@ -8891,8 +8889,8 @@ class JaegerGatewayApp:
                 tasks = [t for t in tasks if t.get('agent_id') == agent_filter]
             return web.json_response({'tasks': tasks})
         tier = self._current_tier()
-        if tier in {"chat", "plan"}:
-            return web.json_response({'error': 'Task submission is disabled in Chat and Plan modes'}, status=403)
+        if tier == "plan":
+            return web.json_response({'error': 'Task submission is disabled in Plan mode'}, status=403)
         body = await request.json()
         parent = self.store.get_session(str(body.get('session_id') or ''))
         if parent is None:
@@ -8984,8 +8982,8 @@ class JaegerGatewayApp:
     async def handle_create_orchestration_task(self, request: web.Request) -> web.Response:
         """Validate and reserve a worker request before acknowledging admission."""
         tier = self._current_tier()
-        if tier == "chat":
-            return web.json_response({"error": "Orchestration tasks are disabled in Chat mode"}, status=403)
+        if tier == "plan":
+            return web.json_response({"error": "Orchestration tasks are disabled in Plan mode"}, status=403)
         if self.orchestration is None:
             return web.json_response({"error": "IDE orchestration service unavailable"}, status=503)
 
