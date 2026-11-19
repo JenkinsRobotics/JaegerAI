@@ -134,6 +134,94 @@ def test_new_run_may_repeat_the_same_external_call():
     assert calls == ["a@b.c", "a@b.c"]
 
 
+@pytest.mark.parametrize("name", ["terminal", "exec_command"])
+def test_shell_test_can_run_again_after_an_edit(tmp_path, name):
+    import subprocess
+    import sys
+
+    from jaeger_agent import LedgerToolExecutor
+    from jaeger_agent.cognition.effects import InMemoryEffectLedger
+    from jaeger_agent.live import tool_call
+
+    class Args(BaseModel):
+        cmd: str
+
+    checked_file = tmp_path / "value.txt"
+    checked_file.write_text("before")
+    invocations = []
+
+    def run(cmd):
+        invocations.append(cmd)
+        return subprocess.run([sys.executable, "-c", cmd], cwd=tmp_path).returncode
+
+    tool = ToolDef(name=name, description="Shell", fn=run, args_model=Args, side_effect="external")
+    command = {"cmd": "from pathlib import Path; assert Path('value.txt').read_text() == 'after'"}
+    ledger = InMemoryEffectLedger()
+    executor = LedgerToolExecutor(ledger, run_id="run-1")
+    with tool_call("first-test"):
+        assert executor.execute(tool, command) != 0
+    checked_file.write_text("after")
+    with tool_call("second-test"):
+        assert executor.execute(tool, command) == 0
+    checked_file.write_text("before")
+    with tool_call("second-test"):
+        assert LedgerToolExecutor(ledger, run_id="run-1").execute(tool, command) == 0
+    assert len(invocations) == 2
+
+
+def test_shell_preserves_existing_argument_key_on_upgrade():
+    from jaeger_agent import LedgerToolExecutor
+    from jaeger_agent.cognition.effects import InMemoryEffectLedger
+    from jaeger_agent.live import tool_call
+
+    class Args(BaseModel):
+        cmd: str
+
+    calls = []
+    tool = ToolDef(name="terminal", description="Shell", fn=lambda cmd: calls.append(cmd) or "old",
+                   args_model=Args, side_effect="external")
+    executor = LedgerToolExecutor(InMemoryEffectLedger(), run_id="existing-run")
+    assert executor.execute(tool, {"cmd": "echo hi"}) == "old"
+    with tool_call("restored-call"):
+        assert executor.execute(tool, {"cmd": "echo hi"}) == "old"
+    assert calls == ["echo hi"]
+
+
+def test_agent_executes_identical_test_command_after_edit():
+    from jaeger_agent import LedgerToolExecutor
+    from jaeger_agent.cognition.effects import InMemoryEffectLedger
+
+    class ShellArgs(BaseModel):
+        cmd: str
+
+    results = []
+    workspace = {"fixed": False}
+
+    def run_test(cmd):
+        results.append(workspace["fixed"])
+        return {"ok": workspace["fixed"]}
+
+    def edit(value):
+        workspace["fixed"] = True
+        return {"ok": True}
+
+    shell = ToolDef(name="exec_command", description="Run tests", fn=run_test,
+                    args_model=ShellArgs, side_effect="external")
+    before = {"role": "assistant", "content": None, "tool_calls": [
+        {"id": "provider-reused-id", "name": "exec_command", "arguments": {"cmd": "run tests"}},
+    ]}
+    adapter = _ScriptedAdapter()
+    adapter.script = [before, {"role": "assistant", "content": None, "tool_calls": [
+        {"id": "edit", "name": "double", "arguments": {"value": 4}},
+    ]}, before, {"role": "assistant", "content": "verified"}]
+    agent = JaegerAgent(adapter=adapter, tools=[shell, _tool(edit)],
+                       tool_executor=LedgerToolExecutor(InMemoryEffectLedger()))
+    agent.bind_run("run-1")
+
+    assert agent.run_turn("Fix the problem and rerun the tests") == "verified"
+    assert results == [False, True]
+
+
 def test_validation_failure_does_not_claim_the_ledger():
     from jaeger_agent.cognition.effects import InMemoryEffectLedger
     from jaeger_agent import LedgerToolExecutor

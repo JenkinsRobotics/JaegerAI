@@ -74,6 +74,46 @@ def test_local_only_and_tool_result_boundary(configured,adapter):
     assert not adapter.calls
 
 
+def test_host_pressure_stops_local_calls_and_preserves_egress_policy(adapter, monkeypatch):
+    from jaeger_ai.core.models import request_policy
+    from jaeger_ai.core.gateway.webapp import resource_manager
+
+    manager = SimpleNamespace(inference_blockers=lambda model, **options: ["memory pressure is high"])
+    monkeypatch.setattr(resource_manager, "shared", lambda root: manager)
+    monkeypatch.setattr(request_policy, "sys", SimpleNamespace(platform="darwin"))
+    local = ModelRoute("ollama", "test:latest", "http://localhost:11434/v1", True)
+    cloud = ModelRoute("ollama-cloud", "test:cloud", "http://localhost:11434/v1", False)
+    public = {"messages": [{"role": "user", "content": "Hello"}]}
+    private = {"messages": [{"role": "user", "content": "my password is synthetic-test-only"}]}
+    interrupt = threading.Event()
+    with pytest.raises(request_policy.LocalInferenceBusy, match="memory pressure"):
+        GovernedAdapter(adapter, local).call(public, interrupt)
+    with pytest.raises(ModelPolicyError, match="memory pressure"):
+        GovernedAdapter(adapter, local).call(private, interrupt)
+    with pytest.raises(ModelPolicyError, match="memory pressure"):
+        GovernedAdapter(adapter, local, local_only=True).call(public, interrupt)
+    assert not adapter.calls
+    GovernedAdapter(adapter, cloud).call(public, interrupt)
+    assert adapter.calls == [public]
+
+
+def test_agent_uses_configured_fallback_when_local_inference_is_busy(adapter, monkeypatch):
+    from jaeger_agent.loop.jaeger_agent import JaegerAgent
+    from jaeger_ai.core.models import request_policy
+
+    def check_headroom(route, payload, *, local_only):
+        if route.local:
+            raise request_policy.LocalInferenceBusy("Mac is busy")
+
+    monkeypatch.setattr(request_policy, "require_inference_headroom", check_headroom)
+    local = GovernedAdapter(adapter, ModelRoute("ollama", "test:latest", "", True))
+    cloud = GovernedAdapter(adapter, ModelRoute("ollama-cloud", "test:cloud", "", False, "fallback"))
+    agent = JaegerAgent(adapter=local, fallback_adapters=[cloud])
+    agent.messages = [{"role": "user", "content": "Say hello"}]
+    assert agent._one_model_step()["content"] == "Hello there"
+    assert len(adapter.calls) == 1
+
+
 def test_cancel_prevents_dispatch(configured,adapter):
     from jaeger_agent.loop.interrupt import AgentInterrupted
     interrupt=threading.Event();interrupt.set()

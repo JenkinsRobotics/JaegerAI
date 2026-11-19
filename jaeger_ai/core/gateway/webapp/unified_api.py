@@ -720,6 +720,11 @@ def _yt():
 
 def _rmmod():
     try:
+        from jaeger_ai.core.gateway.webapp import resource_manager as rmm
+        return rmm
+    except ImportError:
+        pass
+    try:
         from api import resource_manager as rmm  # type: ignore
     except ImportError:
         import importlib.util, sys

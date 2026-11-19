@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import sys
 from typing import Any
 from urllib.parse import urlparse
 
@@ -17,6 +18,10 @@ from .router import classify, normalize_ollama_provider
 
 class ModelPolicyError(RuntimeError):
     pass
+
+
+class LocalInferenceBusy(RuntimeError):
+    """A temporary host constraint, eligible for an already configured fallback."""
 
 
 @dataclass(frozen=True)
@@ -72,6 +77,35 @@ def require_egress(route: ModelRoute, payload: Any, *, local_only: bool = False)
         raise ModelPolicyError(
             "This request contains local-only content. Select a configured on-device model "
             "or remove the private content. This payload was not sent to the cloud.")
+
+
+def require_inference_headroom(
+    route: ModelRoute, payload: Any, *, local_only: bool, loading: bool = False,
+) -> None:
+    if not route.local or sys.platform != "darwin":
+        return
+    from jaeger_ai.core.gateway.webapp.resource_manager import shared
+    from jaeger_ai.core.instance.instance import operator_state_root
+
+    provider = normalize_ollama_provider(route.provider)
+    manager = shared(operator_state_root)
+    blockers = manager.inference_blockers(
+        route.model, ollama_endpoint=route.endpoint if provider == "ollama" else "",
+        resident=provider == "local" and not loading,
+    )
+    if blockers:
+        message = "On-device model paused because " + ", ".join(blockers) + ". Retry when the Mac has more headroom."
+        stays_local = local_only or classify(payload_text(payload))[0] == "private"
+        recorder = getattr(manager, "record_inference_deferral", None)
+        if callable(recorder):
+            recorder(
+                route.model,
+                blockers,
+                outcome="blocked_private" if stays_local else "deferred_fallback_eligible",
+            )
+        if stays_local:
+            raise ModelPolicyError(message)
+        raise LocalInferenceBusy(message)
 
 
 WITHHELD_NOTE = ("[Withheld: this tool output looks local-only (credential, ID or other private "
@@ -273,6 +307,7 @@ class GovernedAdapter:
         checked = self._formatted_policy
         payload = checked[1] if checked and checked[0] == self._fingerprint(formatted) else formatted
         require_egress(self.route, payload, local_only=self.local_only)
+        require_inference_headroom(self.route, payload, local_only=self.local_only)
         return self.adapter.call(formatted, interrupt_event, **kwargs)
 
 
@@ -299,5 +334,7 @@ class GovernedClient:
         return getattr(self.client, name)
 
     def chat(self, messages, **kwargs):
-        require_egress(route_for(self.client), messages, local_only=self.local_only)
+        route = route_for(self.client)
+        require_egress(route, messages, local_only=self.local_only)
+        require_inference_headroom(route, messages, local_only=self.local_only)
         return self.client.chat(messages, **kwargs)
