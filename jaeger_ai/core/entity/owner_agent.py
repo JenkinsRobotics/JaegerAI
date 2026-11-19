@@ -75,13 +75,16 @@ def _prompt_signature(layout: Any) -> str:
         return str(getattr(layout, "root", ""))
 
 
-def _system_prompt(main: Any, layout: Any) -> str:
+def _system_prompt(main: Any, layout: Any, mode: str = "agent") -> str:
     from jaeger_agent.skill_registry.toolset_scoping import _scoping_enabled
-    sig = f"{_prompt_signature(layout)}:scoped={_scoping_enabled()}"
+    sig = f"{_prompt_signature(layout)}:scoped={_scoping_enabled()}:mode={mode}"
     cached = _prompt_cache.get(sig)
     if cached is None:
-        cached = main.build_system_prompt(layout)
-        _prompt_cache.clear()
+        if mode == "agent":
+            cached = main.build_system_prompt(layout)
+        else:
+            from jaeger_agent.prompts.assemble import assemble_prompt
+            cached = assemble_prompt(layout, mode=mode)
         _prompt_cache[sig] = cached
     return cached
 
@@ -99,7 +102,9 @@ def _is_real_layout(layout: Any) -> bool:
     return all(isinstance(getattr(layout, name, None), (str, Path)) for name in _LAYOUT_PATHS)
 
 
-def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
+def owner_agent_options(
+    layout: Any, cfg: Any, client: Any, *, prompt_mode: str = "agent",
+) -> dict[str, Any]:
     """Keyword arguments for ``build_jaeger_agent`` on the OWNER turn path."""
     global _registered_for, _owns_pipeline
     import jaeger_ai.main as main
@@ -113,13 +118,21 @@ def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
         pipeline = main._pipeline
         if _owns_pipeline is None:
             _owns_pipeline = pipeline.get("layout") is None
-        prompt = _system_prompt(main, layout)
+        # The compact prompt is a latency optimization for an on-device model,
+        # not a weaker cloud-agent personality. The same tools, authority
+        # kernel, confirmation provider and execution loop remain in force.
+        effective_mode = "lean" if prompt_mode == "lean" and is_local_client(client) else "agent"
+        prompt = (_system_prompt(main, layout, "lean")
+                  if effective_mode == "lean" else _system_prompt(main, layout))
         # Only a real instance layout is published process-wide; a stand-in
         # (tests, previews) must never become the layout other code persists under.
         if _owns_pipeline and _is_real_layout(layout):
             pipeline["layout"] = layout
             pipeline["config"] = cfg
-            pipeline["system_prompt"] = prompt
+            # Built-ins read this process-global value. Keep it authoritative
+            # and stable across concurrent turns; a lean prompt belongs only
+            # to the agent being constructed for this one request.
+            pipeline["system_prompt"] = _system_prompt(main, layout)
         key = (id(layout), getattr(client, "provider", None), getattr(client, "model_name", None))
         if _registered_for != key:
             # delegate_task & co. close over the client; re-register when the

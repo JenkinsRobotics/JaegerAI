@@ -19,7 +19,7 @@ from typing import Any
 
 from . import _common as c
 
-_MODES = ["agent", "subagent", "deep_think", "idle_board", "cron"]
+_MODES = ["agent", "subagent", "deep_think", "idle_board", "cron", "lean"]
 
 
 def register(subparsers: Any) -> None:

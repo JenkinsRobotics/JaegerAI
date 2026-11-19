@@ -54,9 +54,9 @@ def test_in_process_worker_is_local():
 
 def test_background_budget_follows_admitted_model_not_primary():
     cfg = _cfg('cli', 'grok')
-    assert owner_agent.background_budget_tokens(cfg) == 4096
+    assert owner_agent.background_budget_tokens(cfg) == 1024
     assert owner_agent.background_budget_tokens(cfg, model='@ollama:qwen2.5:3b') == 1024
-    assert owner_agent.background_budget_tokens(cfg, model='kimi:cloud', provider='ollama') == 4096
+    assert owner_agent.background_budget_tokens(cfg, model='kimi:cloud', provider='ollama') == 1024
     assert owner_agent.background_budget_tokens(cfg, model='local', provider='huggingface') == 1024
 
 
@@ -73,11 +73,42 @@ def test_options_carry_system_prompt_budget_and_artifacts(layout, monkeypatch):
     assert main._pipeline["layout"] is layout and main._pipeline["system_prompt"] == opts["system_prompt"]
 
 
-def test_cloud_lane_keeps_full_surface(layout, monkeypatch):
+def test_local_routine_lane_uses_compact_prompt_without_losing_safety(layout, monkeypatch):
+    import jaeger_ai.main as main
+    monkeypatch.setattr(main, "_context_budget_for", lambda cfg: (16384, 2048))
+    full = owner_agent.owner_agent_options(
+        layout, _cfg(), _client("ollama", "lfm2.5:8b"), prompt_mode="agent",
+    )
+    lean = owner_agent.owner_agent_options(
+        layout, _cfg(), _client("ollama", "lfm2.5:8b"), prompt_mode="lean",
+    )
+    assert len(lean["system_prompt"]) < len(full["system_prompt"]) / 2
+    assert "SAFETY CONTRACT" in lean["system_prompt"]
+    assert "ROUTINE OPERATIONAL DIRECTIVE" in lean["system_prompt"]
+    assert "never guess a tool result" in lean["system_prompt"]
+    assert lean["ctx_window"] == 16384
+    assert lean["completion_reserve"] == 2048
+    assert lean["scope_tools"] == full["scope_tools"]
+    assert main._pipeline["system_prompt"] == full["system_prompt"]
+
+
+def test_cloud_model_rejects_lean_prompt_request(layout, monkeypatch):
+    import jaeger_ai.main as main
+    monkeypatch.setattr(main, "_context_budget_for", lambda cfg: (None, None))
+    full = owner_agent.owner_agent_options(
+        layout, _cfg("openai", "gpt-5"), _client("openai", "gpt-5"),
+    )
+    requested_lean = owner_agent.owner_agent_options(
+        layout, _cfg("openai", "gpt-5"), _client("openai", "gpt-5"), prompt_mode="lean",
+    )
+    assert requested_lean["system_prompt"] == full["system_prompt"]
+
+
+def test_cloud_lane_uses_the_same_curated_surface(layout, monkeypatch):
     import jaeger_ai.main as main
     monkeypatch.setattr(main, "_context_budget_for", lambda cfg: (None, None))
     opts = owner_agent.owner_agent_options(layout, _cfg("openai", "gpt-5"), _client("openai", "gpt-5"))
-    assert opts["scope_tools"] is False
+    assert opts["scope_tools"] is True
 
 
 def test_full_tools_env_overrides_scoping(layout, monkeypatch):
@@ -141,4 +172,4 @@ def test_prompt_and_visibility_use_same_effective_scope(layout, monkeypatch):
     local = owner_agent.owner_agent_options(layout, _cfg(), _client('ollama', 'local'))
     cloud = owner_agent.owner_agent_options(layout, _cfg('openai', 'cloud'), _client('openai', 'cloud'))
     assert local['system_prompt'] == 'progressive' and local['scope_tools'] is True
-    assert cloud['system_prompt'] == 'full' and cloud['scope_tools'] is False
+    assert cloud['system_prompt'] == 'progressive' and cloud['scope_tools'] is True

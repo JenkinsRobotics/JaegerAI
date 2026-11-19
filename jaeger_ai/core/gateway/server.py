@@ -6038,6 +6038,7 @@ class JaegerGatewayApp:
         execution: dict[str, Any] | None = None,
         continuation_state: dict[str, Any] | None = None,
         context_references: tuple[Any, ...] = (),
+        prompt_mode: str = "agent",
     ) -> dict[str, Any]:
         """Run one inner ReAct step in the EntityRuntime OWNER process."""
         from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -6144,6 +6145,7 @@ class JaegerGatewayApp:
                     provider=str(selection.get("provider") or lane or "") or None,
                     local_only=bool(options.get("local_only")),
                     attachments=self._turn_attachments(session_key, execution),
+                    prompt_mode=prompt_mode,
                     **_react_kw,
                     on_model=on_model,
                     on_agent=lambda agent: self._active_agents.__setitem__(request_id, agent),
@@ -6194,6 +6196,8 @@ class JaegerGatewayApp:
                 on_model=on_model, execution=execution,
                 continuation_state=continuation_state,
                 context_references=context_references,
+                prompt_mode=("lean" if is_routine_lookup_turn(objective or prompt)
+                             and not _options.get("task_id") else "agent"),
             )
             return {
                 **out,
@@ -6205,7 +6209,9 @@ class JaegerGatewayApp:
 
         from jaeger_ai.core.runtime.work_ledger import ledger_scope, last_completion
         from jaeger_ai.contract.modes import normalize_interaction_tier
-        from jaeger_agent.loop.runtime_bridge import is_simple_or_chat_turn, turn_effort_hint
+        from jaeger_agent.loop.runtime_bridge import (
+            is_routine_lookup_turn, is_simple_or_chat_turn, turn_effort_hint,
+        )
         _options = ((execution or {}).get("options") or {})
         _tier = normalize_interaction_tier((execution or {}).get("interaction_tier"))
         _effort_hint = "low" if is_simple_or_chat_turn(objective or prompt, _tier) else None

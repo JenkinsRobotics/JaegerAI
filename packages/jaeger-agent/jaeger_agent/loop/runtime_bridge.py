@@ -243,6 +243,15 @@ _HARD_TURN = re.compile(
     re.I,
 )
 
+_ROUTINE_LOOKUP = re.compile(
+    r"(?:\bhow many\b.{0,48}\b(?:chat )?sessions?\b|"
+    r"\b(?:list|show)\b.{0,32}\b(?:chat )?sessions?\b|"
+    r"\b(?:current|local)\s+(?:time|date|weather)\b|"
+    r"\b(?:system|gateway|service|model)\s+(?:status|health)\b|"
+    r"\b(?:installed|available|loaded)\s+models?\b)",
+    re.I | re.S,
+)
+
 
 def is_simple_or_chat_turn(text: str, tier: str | None) -> bool:
     """True for Chat mode or a short, non-implementation Agent request."""
@@ -250,6 +259,18 @@ def is_simple_or_chat_turn(text: str, tier: str | None) -> bool:
         return True
     cleaned = (text or "").strip()
     return bool(cleaned) and len(cleaned) <= 280 and not _HARD_TURN.search(cleaned)
+
+
+def is_routine_lookup_turn(text: str) -> bool:
+    """True only for narrow, read-only live-state lookups.
+
+    This selects a smaller prompt, never a different executor or authority
+    path. General short messages remain fully agentic because brevity alone
+    says nothing about whether research, memory, skills or implementation is
+    required.
+    """
+    cleaned = (text or "").strip()
+    return bool(cleaned) and len(cleaned) <= 280 and bool(_ROUTINE_LOOKUP.search(cleaned))
 
 
 @contextmanager
