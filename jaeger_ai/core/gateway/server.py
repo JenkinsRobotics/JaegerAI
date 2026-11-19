@@ -69,8 +69,8 @@ NO_TOOLS_LANE_NOTE = (
     "This turn runs without tools: you cannot run commands, read or write files, "
     "or change memory here. Do not write tool calls, JSON tool arguments, or "
     "commands as if you were running them, and never claim an action happened. "
-    "Answer from what you already know, or say plainly that the task needs Agent "
-    "mode (tools enabled)."
+    "Answer from what you already know, or say plainly that the task requires "
+    "tool access that is unavailable for this request."
 )
 
 
