@@ -1,8 +1,8 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <strong>Jaeger: an AI assistant product built on its own model-agnostic agent framework</strong><br>
-  <em>Mac app · Web UI · Terminal · Voice — one AI companion across all your devices</em>
+  <strong>JaegerAI: an autonomous, self-improving AI research, development, and execution system</strong><br>
+  <em>Human-equivalent digital agency · Model-independent · Local-first with optional cloud</em>
 </p>
 
 <p align="center">
@@ -21,78 +21,35 @@
 
 ---
 
-## What Jaeger is
+## What JaegerAI is
 
-An agent framework is the software that turns an AI model into an assistant that can do work.
+JaegerAI is an autonomous, self-improving AI system designed to research, develop, operate, and continuously expand its capabilities across digital environments.
 
-The model generates answers and decides what to try. The framework connects those decisions to tools, remembers progress, controls permissions, and handles execution.
+Its foundational requirement is **human-equivalent digital agency**: any legitimate workflow a person can accomplish using a computer — across browsers, desktop applications, terminals, development environments, creative software, and online services — should be learnable and executable by Jaeger through appropriate interfaces, tools, and automation. Official APIs are optional, not prerequisites.
 
-For Jaeger, that means:
+Jaeger combines AI models, deterministic execution systems, computer-use capabilities, persistent memory, agent orchestration, and independent evaluation into a unified operational architecture. It is model-independent, framework-independent, and designed for local-first operation with optional cloud resources.
 
-| Part | Responsibility |
+| Component | Responsibility |
 |---|---|
-| Models | Understand requests, reason, and generate responses |
-| Tools | Browse, edit files, run commands, and interact with apps |
-| Execution loop | Ask the model → run its requested tool → return the result → continue |
-| State and memory | Preserve conversations, task progress, and useful knowledge |
-| Permissions | Decide which actions are allowed or require approval |
-| Orchestration | Select models and coordinate specialist agents |
-| Reliability | Handle cancellation, timeouts, failures, and recovery |
-| Events | Tell the interface what is happening as it happens |
+| Models | Reasoning, perception, generation |
+| Tools | Computers, browsers, files, applications |
+| Execution engine | Plan, act, observe, continue |
+| Memory and state | Preserve knowledge and progress |
+| Decision layer | Fast local routing and structured choices |
+| Orchestration | Coordinate models and agents |
+| Permissions | User-controlled execution boundaries |
+| Evaluation | Verify results and measure improvement |
+| Scheduler / events | Trigger ongoing autonomous work |
 
-For example, when you say “fix this webpage,” the framework supplies the page and project context, lets the model inspect and edit files, runs checks, and sends actual progress and results into your chat.
+No single model or framework defines Jaeger. The personal assistant is one application of the system, not its entire identity — its capabilities extend across software development, research, creative production, business operations, and other human-accessible digital activities.
 
-Jaeger is the whole product. Its agent framework is the execution machinery underneath the chat, avatar, browser, and desktop interface. Multiple models can use that same machinery; changing models shouldn’t require rebuilding the app or losing the conversation.
+Its primary development objective is to become progressively more capable of completing useful work with less human intervention: researching improvements to its own implementation, modifying and testing software in authorized environments, evaluating changes against measurable criteria, and retaining verified improvements (targeting at least 1% measurable daily progress).
 
-> **JaegerAI** — an AI assistant product built on its own model-agnostic agent framework
-> Model-agnostic · Approval-gated · Open source (Apache 2.0)
+> **Guiding mission:** *Help humanity, one human at a time.*
+>
+> **Note:** The existing repository is the starting implementation. Current software structure, legacy documentation, and incomplete functionality do not define or constrain the intended end-state architecture. See [docs/PRODUCT.md](docs/PRODUCT.md) for the authoritative product definition.
 
-## What it does
-
-Day to day, Jaeger remembers your work, helps with projects, runs tasks in the background, and talks to you through a Mac app, web browser, terminal, or voice — with the same memory and personality everywhere.
-
-Under the hood, it's a persistent artificial entity with one continuing identity — it thinks through different models, acts through software and physical devices, remembers its life, learns capabilities, and appears through whatever body or interface is available.
-
-**Current product definition (2026-10-22, see docs/PRODUCT.md):** JaegerAI is
-a standalone intelligence stack — a platform for proactive, world-model AI
-companions and operators. It is one identity that listens, sees live,
-speaks to you, remembers you and your work, helps day to day, runs your
-projects, and eventually moves in a robotic body, with the same memory and
-the same enforced authority tiers in every case (Tier 1 autonomous,
-Tier 2 act-and-notify, Tier 3 owner authorization — see docs/PRODUCT.md). It integrates with robot operating
-systems (JROS/JaegerOS), CAD and simulation tools (Aether Suite or alternatives),
-your NAS or file storage, and YouTube (real engineering work, the fastest
-revenue engine). It is not a workspace hub, not a CAD suite, and not
-a machine project. The app/runtime runs on your own hardware and the
-models are interchangeable (hosted, CLI-backed, or local); on-device
-inference is one supported feature, not the product's identity. See
-docs/TRUST.md and docs/STACK.md.
-
-That shapes every design decision here. The model is a component the entity
-thinks with, not the thing itself — swap Ollama for Claude and the same
-entity continues, with its memory, its learned skills, and its history
-intact. Sessions, interfaces, and devices belong to the entity; it never
-belongs to them. Identity survives a restart, a model change, and a move
-from the desktop app to a phone browser to a terminal.
-
-In practice, today, that means an assistant that works across your computer
-and your accounts, keeps durable memory you can inspect, runs scheduled and
-background work on its own, learns and stores verified procedures as skills,
-and checks whether its actions actually happened rather than trusting what a
-model said. It runs on your own hardware, with local, hosted, or CLI-backed
-models, reachable from a desktop app, a browser, a terminal, or voice.
-
-Physical embodiment is a supported direction, not a requirement — the same
-entity runs headless on a server or drives hardware through JaegerOS.
-
-What is actually built versus experimental versus planned is tracked in
-[docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md), with
-each claim marked. Contributor workflow is in
-[CONTRIBUTING.md](CONTRIBUTING.md). Extensions use public contracts
-([docs/EXTENSION_GUIDE.md](docs/EXTENSION_GUIDE.md)); do not edit
-`EntityRuntime` to add a skill.
-
-### What it can do
+## Current repository capabilities
 
 - **Work across your computer** — inspect and edit files, run code and shell
   commands, use the clipboard, control supported applications, and analyze
