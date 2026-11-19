@@ -24,6 +24,7 @@ import time
 import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 DEFAULTS = {
     "min_free_mem_gb": 4.0,            # keep this much unified memory free after a model loads
@@ -36,6 +37,7 @@ DEFAULTS = {
     "min_battery_pct": 30,             # on battery below this → wait (no battery = AC)
     "user_active_idle_s": 60,          # HID idle below this = user is using the Mac
     "user_active_policy": "throttle",  # "throttle": heavy work only if well under limits; "pause": wait
+    "max_active_model_memory_fraction": 0.5,
     "concurrency": {"heavy": 1, "light": 2},
     "model_gb": {"gemma4:12b": 9.5, "qwen3-vl:8b": 7.0, "qwen2.5vl:7b": 7.0, "minicpm-v:latest": 5.5, "_default": 8.0},
     "backoff_s": [5, 60],
@@ -56,6 +58,8 @@ class ResourceManager:
         self._active: dict[int, dict] = {}
         self._jobs: dict[str, dict] = {}
         self._snap: tuple[float, dict] | None = None
+        self._inference_inventory: dict[str, tuple[set[str], dict[str, float]]] = {}
+        self._deferrals: list[dict] = []
         self._resident: str | None = None
 
     # ── config / probe ────────────────────────────────────────────────
@@ -75,15 +79,20 @@ class ResourceManager:
         cfg["model_gb"] = {**DEFAULTS["model_gb"], **(user.get("model_gb") or {})}
         return cfg
 
-    def snapshot(self, max_age: float = 3.0) -> dict:
+    def _host_snapshot(self, max_age: float = 3.0) -> dict:
         now = self._clock()
         if self._snap and now - self._snap[0] < max_age:
             return self._snap[1]
-        s = self._probe(Path(self._root()))
-        s["research_gb"] = research_usage_gb(Path(self._root()) / "research")
-        s["at"] = now
+        s = {**self._probe(Path(self._root())), "at": now}
+        self._inference_inventory.clear()
         self._snap = (now, s)
         return s
+
+    def snapshot(self, max_age: float = 3.0) -> dict:
+        host = self._host_snapshot(max_age)
+        if "research_gb" not in host:
+            host["research_gb"] = research_usage_gb(Path(self._root()) / "research")
+        return host
 
     # ── decisions ─────────────────────────────────────────────────────
     def check(self, kind: str, model: str | None = None, snap: dict | None = None) -> list[str]:
@@ -126,6 +135,45 @@ class ResourceManager:
     def _recent_own(self, window_s: float = 15.0) -> bool:
         """GPU load right after our own heavy step is ours, not the user's."""
         return self._clock() - getattr(self, "_last_heavy_end", -1e9) < window_s
+
+    def inference_blockers(
+        self, model: str, *, ollama_endpoint: str = "", resident: bool = False,
+    ) -> list[str]:
+        """Check an interactive local call without queuing or evicting models."""
+        config, host = self.config(), self._host_snapshot()
+        active = host.get("idle_s") is not None and host["idle_s"] < config["user_active_idle_s"]
+        reserve = config["min_free_mem_gb"] * (1.5 if active else 1)
+        model_memory = config["model_gb"].get(model, config["model_gb"]["_default"])
+        loaded = resident
+        if ollama_endpoint:
+            root = ollama_endpoint.rstrip("/").removesuffix("/v1")
+            inventory = self._inference_inventory
+            if root not in inventory:
+                inventory[root] = _inference_ollama_inventory(root, host)
+            resident, sizes = inventory[root]
+            name = model if ":" in model.rsplit("/", 1)[-1] else f"{model}:latest"
+            loaded = name in resident
+            # The weight file alone omits the KV cache and runtime workspace.
+            model_memory = max(model_memory, sizes.get(name, 0) * 1.2)
+        if loaded:
+            model_memory = 0
+        reasons = []
+        if (host.get("mem_pressure") or 1) > config["max_memory_pressure"]:
+            reasons.append("memory pressure is high")
+        if host.get("mem_free_gb") is not None and host["mem_free_gb"] < reserve + model_memory:
+            reasons.append("the model would leave too little memory for the desktop")
+        if not loaded and active:
+            if config["user_active_policy"] == "pause":
+                reasons.append("the desktop is in use")
+            elif host.get("mem_total_gb") and model_memory > host["mem_total_gb"] * config["max_active_model_memory_fraction"]:
+                reasons.append("the model is too large to load while the desktop is in use")
+            elif host.get("cpu_load") is not None and host["cpu_load"] > config["max_cpu_load"] * 0.6:
+                reasons.append("the desktop is busy")
+            elif host.get("gpu_util") is not None and host["gpu_util"] > config["max_gpu_util_pct"] * 0.6:
+                reasons.append("the GPU is busy")
+        if config["pause_on_thermal"] and host.get("thermal") not in (None, "nominal"):
+            reasons.append("the Mac is under thermal load")
+        return reasons
 
     # ── queue ─────────────────────────────────────────────────────────
     def _klass(self, kind: str) -> str:
@@ -218,14 +266,32 @@ class ResourceManager:
         u = self._jobs.get(job)
         return json.loads(json.dumps(u)) if u else {"wait_s": 0.0, "wait_events": 0, "steps": {}, "last_wait_reason": None}
 
+    def record_inference_deferral(
+        self, model: str, reasons: list[str], *, outcome: str = "deferred",
+    ) -> dict:
+        entry = {
+            "at": self._clock(),
+            "model": model,
+            "reasons": list(reasons),
+            "outcome": outcome,
+        }
+        with self._cv:
+            self._deferrals.append(entry)
+            if len(self._deferrals) > 20:
+                self._deferrals = self._deferrals[-20:]
+        return entry
+
     def status(self) -> dict:
         s = self.snapshot()
         with self._cv:
             active = [dict(a) for a in self._active.values()]
             queued = [{"priority": p, "class": k} for p, _, k in sorted(self._heap)]
+            deferrals = [dict(d) for d in self._deferrals]
         return {"snapshot": s, "config": self.config(), "config_path": str(self.config_path()),
                 "can_start": {k: self.check(k, snap=s) for k in ("llm", "whisper", "ocr", "download")},
-                "active": active, "queued": queued, "jobs": {j: self.job_usage(j) for j in list(self._jobs)}}
+                "active": active, "queued": queued, "jobs": {j: self.job_usage(j) for j in list(self._jobs)},
+                "inference_deferrals": deferrals,
+                "last_inference_deferral": deferrals[-1] if deferrals else None}
 
 
 # ── macOS probes (each one optional; None when unavailable) ─────────
@@ -275,12 +341,27 @@ def probe_mac(root: Path) -> dict:
     return s
 
 
-def _ollama_call(path: str, body: dict | None = None, timeout: float = 30):
-    req = urllib.request.Request("http://127.0.0.1:11434" + path, data=None if body is None else json.dumps(body).encode(),
+def _ollama_call(path: str, body: dict | None = None, timeout: float = 30, *, root: str = "http://127.0.0.1:11434"):
+    req = urllib.request.Request(root + path, data=None if body is None else json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"}, method="POST" if body is not None else "GET")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         raw = r.read()
         return json.loads(raw) if raw else {}
+
+
+def _inference_ollama_inventory(root: str, host: dict) -> tuple[set[str], dict[str, float]]:
+    resident = set()
+    sizes = {}
+    try:
+        if urlsplit(root).port == 11434 and host.get("ollama_loaded") is not None:
+            resident = set(host["ollama_loaded"])
+        else:
+            resident = {row["name"] for row in _ollama_call("/api/ps", root=root, timeout=0.25)["models"]}
+        sizes = {row["name"]: row["size"] / 2**30
+                 for row in _ollama_call("/api/tags", root=root, timeout=0.25)["models"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return resident, sizes
 
 
 def research_usage_gb(path: Path) -> float:

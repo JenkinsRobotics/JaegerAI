@@ -936,7 +936,7 @@ class EntityRuntime:
     def local_model_client(self, config):
         """One explicitly configured local engine per resident owner; never auto-download."""
         from jaeger_ai.core.models.model_resolver import resolve_model_path
-        from jaeger_ai.core.models.request_policy import ModelPolicyError
+        from jaeger_ai.core.models.request_policy import ModelPolicyError, ModelRoute, require_inference_headroom
         from jaeger_ai.contract.model_ids import UNCONFIGURED_MODEL
         if str(config.model.model_path) == UNCONFIGURED_MODEL:
             raise ModelPolicyError("Choose and connect a model in Models before starting a conversation.")
@@ -947,6 +947,9 @@ class EntityRuntime:
                     raise ModelPolicyError("Local model settings changed. Restart Jaeger to release the previous model before loading another.")
                 return self._local_client
             resolved = resolve_model_path(config.model.model_path, auto_download=False)
+            require_inference_headroom(
+                ModelRoute("local", Path(resolved).name, "", True), "", local_only=True, loading=True,
+            )
             from jaeger_ai.main import make_client
             local_config = config.model_copy(deep=True)
             local_config.model.model_path = resolved

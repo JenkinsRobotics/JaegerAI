@@ -563,9 +563,8 @@ class LedgerToolExecutor:
     Every other non-read call (local write, hardware, unclassified) gets a
     per-invocation intent/outcome record — see :meth:`_record_local`.
 
-    Keys include the bound ``run_id`` so a new run may legitimately
-    repeat the same tool+args (a second user request) while a crash
-    resume of the *same* run cannot.
+    Keys include the bound ``run_id``. Shell launches also distinguish
+    separate tool calls within a run so a test can be rerun after an edit.
     """
 
     def __init__(
@@ -654,7 +653,18 @@ class LedgerToolExecutor:
     def _effect_key(self, tool_name: str, args: dict[str, Any]) -> str:
         payload = json.dumps(args, sort_keys=True, default=str)
         prefix = self._run_id or "unbound"
-        return f"{prefix}:{tool_name}:{payload}"
+        legacy_key = f"{prefix}:{tool_name}:{payload}"
+        if self._run_id is None or tool_name not in {"terminal", "exec_command"}:
+            return legacy_key
+        from jaeger_agent.live import current_tool_call
+
+        call_id = current_tool_call()
+        if not call_id or self._ledger.get(legacy_key) is not None:
+            return legacy_key
+        # Replay of the same admitted call still reuses the original receipt.
+        # Existing claims retain their old key across upgrades.
+        identity = json.dumps([call_id, args], sort_keys=True, default=str)
+        return f"{prefix}:{tool_name}:call:{identity}"
 
     @staticmethod
     def _validate(tool: ToolDef, args: dict[str, Any]) -> Exception | None:
