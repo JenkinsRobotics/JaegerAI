@@ -86,8 +86,8 @@ def register(gateway):
             elif action == "update":
                 result = owner.update_job(name, prompt=str(body.get("prompt") or ""), schedule=str(body.get("schedule") or ""), timezone_name=body.get("timezone"), expected_revision=body.get("expected_revision"))
             elif action == "run":
-                if gateway._current_tier() == "chat":
-                    raise ValueError("Scheduled execution is disabled in Chat mode")
+                if gateway._current_tier() == "plan":
+                    raise ValueError("Scheduled execution is disabled in Plan mode")
                 job = next((j for j in owner.list_jobs()["schedules"] if j["name"] == name), None)
                 if job is None:
                     raise ValueError("Schedule not found")

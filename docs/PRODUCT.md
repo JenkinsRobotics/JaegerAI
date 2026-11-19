@@ -48,6 +48,8 @@ ONE FACT = ONE AUTHORITATIVE OWNER.
 
 Jaeger is an **autonomous operator**, not a proposer-only chatbot. Authority is enforced in code at tool boundaries by the policy kernel (`core/authority/kernel.py`: ALLOW / DENY / MODIFY / REQUIRE_APPROVAL, fail-closed), not only in a prompt.
 
+Ordinary conversations use the agent loop: Jaeger can answer directly or use permitted tools as needed. There is no separate tool-free Chat mode. Plan remains an explicit read-only work style; tool grants and action-level permissions remain enforced in either style.
+
 - **Tier 1 — act independently:** research, read files, draft content, organise non-destructively, edit authorised project files, run tests, produce **local git commits**, monitor status, restart approved services.
 - **Tier 2 — act and notify:** significant failures, unexpected behaviour, material plan changes, authorised operations warranting an immediate report.
 - **Tier 3 — obtain authorization:** financial transactions, external communications, public publishing, destructive actions, permission changes, physical actuation. Approved physical operations must also pass independent hardware safety checks.

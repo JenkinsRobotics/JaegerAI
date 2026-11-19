@@ -1355,7 +1355,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
-          <AutonomyControl host={host} dimmed={runTier === "chat"} />
+          <AutonomyControl host={host} />
           <RunModeControl host={host} onTier={setRunTier} />
           <span className="jg-composer__spacer" />
           <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} />

@@ -942,8 +942,7 @@ window.addEventListener('message', ({ data }) => {
 
 // ── composer bar: permission pill + IDE-context toggle ─────────────────────
 const TIER_OPTIONS = [
-  { id: 'tier-chat', value: 'chat', label: 'Chat', hint: 'Chat (Tier 1): Pure conversational intelligence. Zero tool calls, commands, or file edits.' },
-  { id: 'tier-agent', value: 'agent', label: 'Agent', hint: 'Agent (Tier 2): Interactive task worker with tools upon your request.' },
+  { id: 'tier-agent', value: 'agent', label: 'Agent', hint: 'Normal conversation: answer directly or use tools within your permissions.' },
 ];
 
 const MODE_OPTIONS = [
@@ -1085,7 +1084,6 @@ window.addEventListener('keydown', event => {
 });
 $('workspace').onclick = () => post('executionLocation');
 $('worktree').onclick = () => post('selectWorktree');
-if ($('tier-chat')) $('tier-chat').onclick = () => setTier('chat');
 if ($('tier-agent')) $('tier-agent').onclick = () => setTier('agent');
 if ($('mode-deep-think')) {
   $('mode-deep-think').onclick = () => {

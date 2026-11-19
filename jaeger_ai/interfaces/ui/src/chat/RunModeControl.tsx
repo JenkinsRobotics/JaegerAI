@@ -7,8 +7,7 @@ import type { ChatHost } from './host';
 type ModeHost = Pick<ChatHost, 'runtimeTier' | 'setRuntimeTier'>;
 const label = (tier: RuntimeTier) => tier.charAt(0).toUpperCase() + tier.slice(1);
 const MODE_COPY: Record<string, { icon: typeof MessageSquare; description: string }> = {
-  chat: { icon: MessageSquare, description: "Talk only — no tools." },
-  agent: { icon: Wrench, description: "Use tools to get the work done." },
+  agent: { icon: MessageSquare, description: "Talk naturally. Jaeger uses tools when needed, within your permissions." },
   plan: { icon: FileText, description: "Look around, then propose a plan for you to approve." },
 };
 const modeMeta = (tier: RuntimeTier) => MODE_COPY[tier] ?? { icon: Wrench, description: "" };
@@ -54,7 +53,7 @@ export function RunModeControl({host, disabled = false, onTier}: {host: ModeHost
     } finally {locked.current = false; if (owner === generation.current) setSaving(false);}
   };
   return <div className="jg-runmode">
-    <button ref={trigger} type="button" className="jg-composer__policy jg-runmode__trigger" aria-label={`Run mode: ${snapshot ? label(snapshot.tier) : 'unavailable'}`} aria-haspopup="menu" aria-expanded={open} disabled={disabled || saving} title={disabled ? 'Run mode can change after this turn' : 'Choose Chat, Agent, or Plan mode'} onClick={() => {setOpen(value=>!value); if (!open) void refresh();}}>
+    <button ref={trigger} type="button" className="jg-composer__policy jg-runmode__trigger" aria-label={`Run mode: ${snapshot ? label(snapshot.tier) : 'unavailable'}`} aria-haspopup="menu" aria-expanded={open} disabled={disabled || saving} title={disabled ? 'Run mode can change after this turn' : 'Normal conversation or read-only planning'} onClick={() => {setOpen(value=>!value); if (!open) void refresh();}}>
       {(() => { const Icon = snapshot ? modeMeta(snapshot.tier).icon : Wrench; return <Icon size={20}/>; })()}<span className="jg-composer__policy-label">{snapshot ? label(snapshot.tier) : 'Run mode'}</span><ChevronDown size={14} className="jg-composer__chevron"/>
     </button>
     {open && <div className="jg-autonomy-menu jg-runmode-menu" role="menu" aria-label="Run mode">

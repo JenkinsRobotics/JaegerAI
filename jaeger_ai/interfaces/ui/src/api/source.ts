@@ -3,7 +3,7 @@ import type { ChatSession } from "../chat/host";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export type RuntimeAutonomy = "ask" | "scoped" | "auto";
-export type RuntimeTier = "chat" | "agent" | "plan";
+export type RuntimeTier = "agent" | "plan";
 export interface RuntimeTierSnapshot {
   tier: RuntimeTier;
   options: RuntimeTier[];

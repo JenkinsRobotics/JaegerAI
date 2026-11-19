@@ -1,194 +1,147 @@
-"""Unit and contract tests for the 3-Tier Agency architecture (Chat, Agent, Jaeger)."""
-from __future__ import annotations
+"""Normal conversations can use tools; Plan and explicit grants still restrict them."""
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
-import pathlib
 import pytest
-from pydantic import ValidationError
+from aiohttp.test_utils import make_mocked_request
 
 from jaeger_ai.contract.modes import (
-    DEFAULT_INTERACTION_TIER,
-    INTERACTION_TIERS,
-    TIER_DESCRIPTIONS,
-    TIER_NAMES,
-    TIER_NUMBERS,
-    InteractionTier,
+    DEFAULT_INTERACTION_TIER, INTERACTION_TIERS, TIER_DESCRIPTIONS,
+    normalize_interaction_tier,
 )
+from jaeger_ai.core.gateway.server import JaegerGatewayApp
+from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 from jaeger_ai.core.instance.schemas import AutomationConfig, Config, ModelConfig, dump_yaml, load_yaml
 from jaeger_ai.core.settings.catalog import describe
 
 
-def test_interaction_tiers_contract() -> None:
-    """The canonical contract defines chat=1, agent=2, jaeger=3."""
-    assert INTERACTION_TIERS == ("chat", "agent", "jaeger")
-    assert DEFAULT_INTERACTION_TIER == "agent"
-    assert TIER_NUMBERS["chat"] == 1
-    assert TIER_NUMBERS["agent"] == 2
-    assert TIER_NUMBERS["jaeger"] == 3
-    assert TIER_NAMES[1] == "chat"
-    assert TIER_NAMES[2] == "agent"
-    assert TIER_NAMES[3] == "jaeger"
-    for t in INTERACTION_TIERS:
-        assert t in TIER_DESCRIPTIONS
-        assert len(TIER_DESCRIPTIONS[t]) > 10
+def test_normal_conversation_contract():
+    assert INTERACTION_TIERS == ('agent', 'plan')
+    assert DEFAULT_INTERACTION_TIER == 'agent'
+    assert set(TIER_DESCRIPTIONS) == set(INTERACTION_TIERS)
+    for old in ('chat', 'jaeger'):
+        assert normalize_interaction_tier(old) == 'agent'
+        assert AutomationConfig(interaction_tier=old).interaction_tier == 'agent'
+    assert AutomationConfig().autonomy == 'scoped'
+    assert AutomationConfig(interaction_tier='plan').interaction_tier == 'plan'
 
 
-def test_automation_config_interaction_tier_schema() -> None:
-    """AutomationConfig defaults to 'agent' and validates allowable tiers."""
-    cfg = AutomationConfig()
-    assert cfg.interaction_tier == "agent"
-    assert cfg.autonomy == "scoped"  # Constitution invariant 11: scoped, not auto
-
-    cfg_chat = AutomationConfig(interaction_tier="chat")
-    assert cfg_chat.interaction_tier == "chat"
-
-    cfg_jaeger = AutomationConfig(interaction_tier="jaeger")
-    assert cfg_jaeger.interaction_tier == "jaeger"
-
-    with pytest.raises(ValidationError):
-        AutomationConfig(interaction_tier="droid")  # forbidden string
+def test_settings_catalog_exposes_only_current_styles(tmp_path):
+    path = tmp_path / 'config.yaml'
+    dump_yaml(path, Config(instance_name='test', model=ModelConfig(model_path='/dev/null')))
+    desc = describe(SimpleNamespace(config_path=path), 'automation.interaction_tier')
+    assert desc['choices'] == ['agent', 'plan']
+    assert desc['current'] == desc['default'] == 'agent'
 
 
-def test_settings_catalog_derives_interaction_tier(tmp_path: pathlib.Path) -> None:
-    """Single-source derivation: the settings catalog exposes automation.interaction_tier automatically."""
-    class _Layout:
-        def __init__(self, p: pathlib.Path) -> None:
-            self.config_path = p
-
-    cfg_path = tmp_path / "config.yaml"
-    dump_yaml(cfg_path, Config(instance_name="test-inst", model=ModelConfig(model_path="/dev/null")))
-
-    desc = describe(_Layout(cfg_path), "automation.interaction_tier")
-    assert desc is not None
-    assert desc["type"] == "enum"
-    assert desc["group"] == "autonomy"
-    assert desc["default"] == "agent"
-    assert desc["current"] == "agent"
-    assert desc["choices"] == ["chat", "agent", "jaeger"]
-    assert "Agency tier:" in desc["description"]
+@pytest.mark.parametrize('grant', [None, [], ['read_file']])
+def test_admission_migrates_chat_without_widening_explicit_tool_grants(tmp_path, grant):
+    store = GatewaySessionStore(tmp_path / 'gateway.sqlite3')
+    requested = {'interaction_tier': 'chat', 'caller': 'owner:webui'}
+    if grant is not None:
+        requested['allowed_tools'] = grant
+    admitted = store.admit_request('s', 'Inspect saved chats', request_id='r', requested=requested)
+    execution = admitted['execution']
+    assert execution['interaction_tier'] == 'agent'
+    assert execution['allowed_tools'] == grant
+    assert execution['caller'] == 'owner:webui'
+    replay = store.admit_request('s', 'Inspect saved chats', request_id='r', requested=requested)
+    assert replay['replayed'] and replay['execution'] == execution
 
 
-def test_interaction_tier_admission_snapshot(tmp_path: pathlib.Path) -> None:
-    """GatewaySessionStore normalizes and freezes interaction_tier into execution snapshot."""
-    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
-
-    store = GatewaySessionStore(tmp_path / "gateway_sessions.sqlite3")
-
-    # Explicit chat tier
-    req_chat = store.admit_request(
-        "sess-1", "hello world", request_id="req-1",
-        requested={"interaction_tier": "chat"},
+@pytest.fixture
+def gateway(tmp_path, monkeypatch):
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    monkeypatch.setenv('JAEGER_STATE_DIR', str(tmp_path / 'state'))
+    monkeypatch.setenv('JAEGER_LEGACY_PATHS', '0')
+    store = GatewaySessionStore(tmp_path / 'gateway.sqlite3')
+    app = JaegerGatewayApp(store=store)
+    app.app.on_startup.clear()
+    runtime = SimpleNamespace(
+        prepare_turn=Mock(side_effect=lambda text, **kw: SimpleNamespace(prompt=text, context_references=())),
+        finish_turn=Mock(),
     )
-    assert req_chat["accepted"]
-    assert req_chat["execution"]["interaction_tier"] == "chat"
-
-    # Replay preserves the snapshot
-    replay = store.admit_request(
-        "sess-1", "hello world", request_id="req-1",
-        requested={"interaction_tier": "chat"},
-    )
-    assert replay["replayed"]
-    assert replay["execution"]["interaction_tier"] == "chat"
-
-    # Invalid tier rejected on admission
-    with pytest.raises(ValueError, match="interaction_tier must be one of"):
-        store.admit_request("sess-1", "another", request_id="req-bad", requested={"interaction_tier": "cyborg"})
+    monkeypatch.setattr(EntityRuntime, 'get_singleton', lambda: runtime)
+    monkeypatch.setattr(app, '_resolve_session_agent', lambda _: None)
+    monkeypatch.setattr(app, '_one_mind_front_door', lambda *args: None)
+    monkeypatch.setattr(app, '_auto_route', lambda *args: False)
+    monkeypatch.setattr(app, '_system_prompt_for_agent', lambda _: 'You are Jaeger.')
+    monkeypatch.setattr(app, '_collaboration_prompt', lambda: '')
+    monkeypatch.setattr(app, '_open_turn_card', lambda *a, **kw: (None, kw['execution']))
+    monkeypatch.setattr(app, '_schedule_summary', lambda *a: None)
+    monkeypatch.setattr(app, '_maybe_queue_skill_review', lambda *a, **kw: None)
+    monkeypatch.setattr(app, '_catalog_tool_names', lambda: ['read_file', 'write_file', 'terminal'])
+    app._continued_owner_react = Mock(return_value={'text': 'Verified answer', 'status': 'completed'})
+    app._model_chat = AsyncMock(return_value='Tools are explicitly disabled for this request.')
+    return app
 
 
 @pytest.mark.asyncio
-async def test_gateway_tier_enforcement_and_events(tmp_path: pathlib.Path) -> None:
-    """The Gateway enforces interaction tiers: gating background turns, task creation, and broadcasting events."""
-    from unittest.mock import AsyncMock, MagicMock
-    from jaeger_ai.core.gateway.server import JaegerGatewayApp
-    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
-    from aiohttp.test_utils import make_mocked_request
-
-    cfg_path = tmp_path / "config.yaml"
-    tuning = {"env": {"ollama": {"OLLAMA_MAX_LOADED_MODELS": "1",
-                                 "OLLAMA_NUM_PARALLEL": 1,
-                                 "OLLAMA_CONTEXT_LENGTH": "32768"}}}
-    dump_yaml(cfg_path, Config(instance_name="test-inst", model=ModelConfig(model_path="/dev/null"),
-                              stack=tuning))
-
-    store = GatewaySessionStore(tmp_path / "gateway_sessions.sqlite3")
-    gw = JaegerGatewayApp(store=store)
-    gw._config_path = lambda: cfg_path  # point to temp config
-
-    # Default is agent tier
-    assert gw._current_tier() == "agent"
-
-    # In Agent mode, proactive background turns are rejected
-    bg_result = await gw._run_background_turn("proactive prompt", session_id="s1", request_id="r1", source="sensor")
-    assert bg_result["status"] == "disabled"
-    assert "requires 'jaeger' mode" in bg_result["error"]
-
-    # Switch to Jaeger mode via handle_set_tier
-    events = []
-    gw.event_bus.publish = lambda sid, evt, data: events.append((sid, evt, data))
-
-    req = make_mocked_request("POST", "/v1/runtime/tier")
-    req.json = AsyncMock(return_value={"tier": "jaeger"})
-    resp = await gw.handle_set_tier(req)
-    assert resp.status == 200
-    assert gw._current_tier() == "jaeger"
-    assert any(evt == "runtime.tier.changed" and data.get("tier") == "jaeger" for _, evt, data in events)
-
-    # In Jaeger mode, background turns are accepted into admission and executed
-    gw._execute_turn = AsyncMock()
-    bg_result_jaeger = await gw._run_background_turn("proactive prompt", session_id="s1", request_id="r2", source="sensor")
-    assert gw._execute_turn.await_count == 1
-
-    # Switch to Chat mode
-    req.json = AsyncMock(return_value={"tier": "chat"})
-    await gw.handle_set_tier(req)
-    assert gw._current_tier() == "chat"
-    assert load_yaml(cfg_path, Config).stack.model_dump() == tuning
-
-    # In Chat mode, task submission is disabled
-    req_task = make_mocked_request("POST", "/v1/tasks")
-    req_task.json = AsyncMock(return_value={"session_id": "s1", "goal": "do work"})
-    resp_task = await gw.handle_tasks(req_task)
-    assert resp_task.status == 403
-
-    # In Chat mode, orchestration task creation is disabled
-    req_orch = make_mocked_request("POST", "/v1/orchestration/tasks")
-    resp_orch = await gw.handle_create_orchestration_task(req_orch)
-    assert resp_orch.status == 403
+@pytest.mark.parametrize('tier,text', [('chat', 'How many saved chats are there?'), ('agent', 'Hello')])
+async def test_conversation_uses_agent_loop_without_requiring_an_action_keyword(gateway, tier, text):
+    request = gateway.store.admit_request('s', text, request_id='r', requested={
+        'interaction_tier': tier, 'caller': 'owner:webui', 'allowed_tools': ['read_file'],
+    })
+    await gateway._execute_turn('s', request['turn_id'], text, request_id='r', execution=request['execution'])
+    gateway._model_chat.assert_not_awaited()
+    gateway._continued_owner_react.assert_called_once()
+    execution = gateway._continued_owner_react.call_args.kwargs['execution']
+    assert execution['caller'] == 'owner:webui'
+    assert execution['allowed_tools'] == ['read_file']
+    assert gateway.store.get_request('r')['status'] == 'completed'
 
 
 @pytest.mark.asyncio
-async def test_chat_tier_enforces_model_only_lane(tmp_path: pathlib.Path) -> None:
-    """In Chat tier, turns are strictly conversational (model-only lane) and never invoke tool ReAct."""
-    from unittest.mock import AsyncMock, patch
-    from jaeger_ai.core.gateway.server import JaegerGatewayApp
-    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
-
-    store = GatewaySessionStore(tmp_path / "gateway_sessions.sqlite3")
-    gw = JaegerGatewayApp(store=store)
-
-    # Admit turn with explicit chat tier
-    admitted = store.admit_request(
-        "sess-chat", "Can you edit my file please?", request_id="req-chat-1",
-        requested={"interaction_tier": "chat"},
-    )
-    assert admitted["execution"]["interaction_tier"] == "chat"
-
-    # Mock ollama_chat to return a conversational response
-    gw._model_chat = AsyncMock(return_value="I am in Chat mode and cannot run tools.")
-    react_mock = AsyncMock()
-    gw._continued_owner_react = react_mock
-
-    # Execute the turn
-    await gw._execute_turn(
-        "sess-chat",
-        admitted["turn_id"],
-        "Can you edit my file please?",
-        request_id="req-chat-1",
-        execution=admitted["execution"],
-    )
-
-    # _model_chat was invoked for pure conversational answer
-    assert gw._model_chat.await_count == 1
-    # ReAct / tool execution was NEVER called
-    assert react_mock.await_count == 0
+async def test_explicit_empty_tool_grant_still_uses_no_tools(gateway):
+    text = 'Inspect files'
+    request = gateway.store.admit_request('s', text, request_id='r', requested={
+        'interaction_tier': 'agent', 'allowed_tools': [],
+    })
+    await gateway._execute_turn('s', request['turn_id'], text, request_id='r', execution=request['execution'])
+    gateway._continued_owner_react.assert_not_called()
+    gateway._model_chat.assert_awaited_once()
+    assert gateway.store.get_request('r')['status'] == 'completed'
 
 
+@pytest.mark.asyncio
+async def test_plan_still_narrows_the_grant_to_read_only(gateway):
+    text = 'Plan a file edit'
+    request = gateway.store.admit_request('s', text, request_id='r', requested={
+        'interaction_tier': 'plan', 'allowed_tools': ['read_file', 'write_file', 'terminal'],
+    })
+    await gateway._execute_turn('s', request['turn_id'], text, request_id='r', execution=request['execution'])
+    gateway._model_chat.assert_not_awaited()
+    execution = gateway._continued_owner_react.call_args.kwargs['execution']
+    assert execution['interaction_tier'] == 'plan'
+    assert execution['allowed_tools'] == ['read_file']
+    assert request['execution']['allowed_tools'] == ['read_file', 'terminal', 'write_file']
+
+
+@pytest.mark.asyncio
+async def test_plan_cannot_start_background_execution(gateway):
+    gateway._current_tier = lambda: 'plan'
+    request = make_mocked_request('POST', '/v1/tasks')
+    assert (await gateway.handle_tasks(request)).status == 403
+    assert (await gateway.handle_create_orchestration_task(request)).status == 403
+
+
+@pytest.mark.asyncio
+async def test_saved_chat_and_old_clients_migrate_without_changing_permissions(gateway, tmp_path):
+    path = tmp_path / 'config.yaml'
+    config = Config(instance_name='test', model=ModelConfig(model_path='/dev/null'))
+    config.automation.autonomy = 'ask'
+    dump_yaml(path, config)
+    path.write_text(path.read_text().replace('interaction_tier: agent', 'interaction_tier: chat'))
+    gateway._config_path = lambda: path
+    response = await gateway.handle_get_tier(make_mocked_request('GET', '/v1/runtime/tier'))
+    assert json.loads(response.body)['options'] == ['agent', 'plan']
+    assert 'interaction_tier: agent' in path.read_text()
+    assert load_yaml(path, Config).automation.autonomy == 'ask'
+    request = make_mocked_request('POST', '/v1/runtime/tier')
+    request.json = AsyncMock(return_value={'tier': 'chat'})
+    response = await gateway.handle_set_tier(request)
+    assert json.loads(response.body)['tier'] == 'agent'
+    assert load_yaml(path, Config).automation.autonomy == 'ask'
+    request.json = AsyncMock(return_value={'tier': 'unknown'})
+    assert (await gateway.handle_set_tier(request)).status == 400
