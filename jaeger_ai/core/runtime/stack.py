@@ -277,7 +277,7 @@ def operator_env(service: ServiceDef) -> dict[str, str]:
 
     Precedence (later wins): conservative local defaults, current plist, values derived from
     the instance's chosen model (``external_model.ctx`` sets Ollama's context
-    for a local model, bounded to 32K unless stack.env explicitly overrides; ``external_model.model`` sets the Gateway's direct
+    for a local model without an artificial cap; ``external_model.model`` sets the Gateway's direct
     Ollama model), then ``stack.env.all`` / ``stack.env.<service id>`` in
     the instance config. Only tuning keys pass; see ``_operator_env_allowed``.
     """
@@ -295,7 +295,7 @@ def operator_env(service: ServiceDef) -> dict[str, str]:
                  and bool(model) and not model.endswith((":cloud", "-cloud")))
         if service.id == "ollama" and local and isinstance(ctx, int) \
                 and not isinstance(ctx, bool) and ctx > 0:
-            env["OLLAMA_CONTEXT_LENGTH"] = str(min(ctx, 32768))
+            env["OLLAMA_CONTEXT_LENGTH"] = str(ctx)
         if service.id == "gateway" and model and provider == "ollama":
             env["JAEGER_GATEWAY_OLLAMA_MODEL"] = model
     stack_section = config.get("stack")

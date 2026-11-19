@@ -158,19 +158,25 @@ def test_local_injects_modelfile_or_explicit_num_ctx():
         ) is True, source
 
 
-def test_local_injects_model_info_as_a_capped_copy():
-    """``model_info`` (the training max) is injected, not skipped.
+def test_local_injects_model_info_full_context_limit(monkeypatch):
+    """Local Ollama injects the model's full reported context limit (not capped at 16K)."""
+    from jaeger_ai.core.instance.schemas import ExternalModelConfig
+    from jaeger_ai.core.models import ollama_context as oc
+    from jaeger_ai.core.models.external_model import ExternalModelClient
 
-    It was excluded originally to avoid allocating an unsafe KV cache.
-    That backfired: without an explicit ``num_ctx`` the daemon stayed at
-    its ~4096 default, which zeroed the context guard whenever
-    ``max_tokens`` matched. The cap the caller applies is what keeps the
-    allocation safe, so the value is injected rather than dropped.
-    """
     assert should_inject_num_ctx(
         provider="ollama", base_url="http://localhost:11434/v1",
-        model="llama3.2", source="model_info",
+        model="qwen3:14b", source="model_info",
     ) is True
+    monkeypatch.setattr(oc, "probe_ollama_context", lambda *a, **k: (40_960, "model_info"))
+    ext = ExternalModelConfig(
+        enabled=True, provider="ollama",
+        base_url="http://localhost:11434/v1", model="qwen3:14b", ctx=0,
+    )
+    client = ExternalModelClient(ext, layout=None)
+    assert client.loaded_ctx == 40_960
+    assert client.num_ctx == 40_960
+    assert client.ext.ctx == 40_960
 
 
 def test_unknown_source_is_not_injected():
