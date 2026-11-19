@@ -41,6 +41,13 @@ def test_session_search_browse_reports_total_independent_of_limit():
     assert len(result["sessions"]) == 1
 
 
+@pytest.mark.parametrize("surface", ["webui", "cli", "native", "bridge", "agent"])
+def test_session_search_surface_hint_uses_one_gateway_store(surface):
+    result = session_search(source=surface, limit=1)
+    assert result["total_sessions"] == 2
+    assert len(result["sessions"]) == 1
+
+
 def test_session_search_query_uses_gateway_search():
     result = session_search(query="attention heads")
     assert result["total_matches"] == 1

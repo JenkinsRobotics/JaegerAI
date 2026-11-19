@@ -87,16 +87,13 @@ def session_search(
             }
         return {"ok": True, "mode": "read", "session": session}
 
-    requested_source = str(source or "").strip().lower()
     mode = "search" if str(query or "").strip() else "browse"
-    if requested_source and requested_source not in {"jaeger", "runtime"}:
-        return {
-            "ok": True,
-            "mode": mode,
-            "total_sessions": 0,
-            "total_matches": 0,
-            "sessions": [],
-        }
+    # ``source`` is retained as an input compatibility hint, not a store
+    # selector. WebUI, CLI, native, bridge and agent are surfaces over the one
+    # Gateway-owned session database; treating them as separate transcript
+    # stores made an agent asking for ``source='webui'`` report a false zero.
+    # Search the authoritative store regardless of which surface the model
+    # names.
 
     from urllib.parse import quote
     client = _gateway()
