@@ -1,65 +1,78 @@
-# JaegerAI — what it is
+# JaegerAI — Product Definition
 
-JaegerAI is a standalone AI intelligence stack — a platform for building proactive, world-model AI companions and operators.
+JaegerAI is an autonomous, self-improving AI research, development, and execution system designed to learn, build, test, and operate software to accomplish real-world objectives across digital environments.
 
-It is, in one line: a proactive, world-model AI companion and operator. One identity that listens, sees live, speaks to you, remembers you and your work, helps day to day, runs your projects, and eventually moves in a robotic body — with the same memory and the same enforced authority model in every case.
+The personal assistant is one application of that system, not its entire identity.
 
-## What it is
+Its guiding mission:
 
-- **Standalone intelligence, not a workspace, not a CAD suite, not a machine project.** JaegerAI integrates with other tools, it does not absorb them.
-- **Proactive, not turn-based.** It acts from sensor events, background monitoring, and a heartbeat, not only from a prompt. It keeps a world model — a checkable model of projects, machines, and work — and it imagines what happens next before it acts.
-- **A companion, not just a worker.** The same identity that talks to you is the one that knows your projects, your machines, and your work. It is one companion identity. Characters are persona packs that one companion can wear (see jaeger_ai/modules/personality/README.md) — 20 character folders in features/personality/, including work roles — not separate identities, not separate products. Personalities are a JaegerAI framework feature and stay in the stack.
-- **A project operator.** JaegerAI runs your projects: content, automation, and products to sell. YouTube integration is the fastest way to get automated content working, using real engineering work, not templated content.
-- **A future humanoid brain.** Robotics companies and makers can use JaegerAI as the intelligence layer for humanoid robots, building up over time from consumer-grade hardware to better units.
+> **Help humanity, one human at a time.**
 
-## What it is not
+---
 
-- Not a chatbot or a model wrapper. The model is a component, not the agent: MODEL != AGENT.
-- Not a local-model system by default. The app/runtime runs locally on your hardware, but LLM work today uses cloud models. On-device is the goal to build toward, not a current claim.
-- Not a workspace hub. Aether Suite, JROS, and the machine repos stay separate.
-- Not a plugin marketplace, not a multi-agent swarm, not a custom CAD kernel, renderer, OS, or chip.
-- Not a proven edge on its own. Persistence alone is not unique (Honcho and others do it), and code existing is not proof it works end to end. The edge, if it is real, is the combination below, and it must be proven by shipping.
+## Core Definition
 
-## The edge, in combination
+JaegerAI's foundational requirement is **human-equivalent digital agency**: any legitimate workflow a person can accomplish using a computer should be learnable and executable by Jaeger through appropriate interfaces, tools, and automation.
 
-1. Proactive, world-model intelligence, not turn-based prompting.
-2. Autonomy by default within explicit, configurable, revocable authority scopes (Tier 1 act independently / Tier 2 act and notify / Tier 3 obtain authorization), enforced at tool boundaries in code by the policy kernel — not by prompt. Simulation-first, artefact-bound approval still applies to Tier 3 physical work: simulate the exact artefact, verify deterministically, owner approves, then act, plus an independent hardware safety check. Re-plan = re-simulate + re-approve. (Corrected 2026-11-05: approval is the Tier 3 gate, not the default for all work.)
-3. On-device Apple trust: memory, approvals, audit, and raw senses stay on the customer's device/NAS. See docs/TRUST.md.
-4. Our own operating layer and engineering tools underneath: JROS (our ROS 2 alternative, Jaeger Robot Operating Software) and Aether Suite (CAD and simulations).
-5. A real business and real machine projects underneath it, not just a demo.
+Jaeger combines AI models, deterministic execution systems, computer-use capabilities, persistent memory, agent orchestration, and independent evaluation into a unified operational architecture. It is model-independent, framework-independent, and designed for local-first operation with optional cloud resources.
 
-## How it works with other tools
+Its primary development objective is to become progressively more capable of completing useful work with less human intervention.
 
-- **jaeger-agent** (in packages/, also a standalone repo): the reusable headless agent brain — loop, tools, skills, cognition, SQLite memory, sandbox, verify gate. JaegerAI depends on it. JaegerAgent must never import JaegerAI. Do not edit the inside copy and the standalone copy separately.
-- **JROS / JaegerOS**: our operating layer for humanoid robots, drones, and digital agents — transport, nodes, topics, body contract, local-first on Apple Silicon / Jetson Orin.
-- **Aether Suite**: CAD and simulations — Aether CAD, Aether Animation / animacore, Aether Dynamics as the simulation piece to build out.
-- **NAS / file storage**: your business / content / project home, system of record for files. Configured per-instance via `config.yaml`. GitHub (or any git host) is the system of record for code.
-- **YouTube / CGI tools**: available tools only (Remotion, Blender, Unreal/Unity, FFmpeg). Jaeger writes script, shot list, and checks the render; it does not build a new video engine. Channel configuration is per-instance via `youtube.toml`.
-- **CNC / 3D printing projects**: completed machine projects can be used as simulation / test material, not as new product work.
+---
 
-## Rules that do not change
+## Established Requirements
 
-MODEL != AGENT, SESSION != AGENT, CLIENT != AGENT, DEVICE != AGENT.
-PROPOSED ACTION != AUTHORIZED ACTION. TOOL SUCCESS != VERIFIED SUCCESS.
-MEMORY != CONTEXT WINDOW. OBSERVATION != CLAIM != BELIEF != FACT.
-ONE FACT = ONE AUTHORITATIVE OWNER.
+### 1. Human-Equivalent Digital Autonomy
+If a human can perform a legitimate task through a computer, Jaeger should be able to learn and automate it — across browsers, desktop applications, terminals, development environments, creative software, and online services.
 
-## Authority model (vNext, agreed 2026-11-04, reconciled after the 2026-11-05 audit)
+Official APIs and API keys are optional integration methods, not prerequisites for using software. The system must support direct interaction with interfaces as humans do.
 
-Jaeger is an **autonomous operator**, not a proposer-only chatbot. Authority is enforced in code at tool boundaries by the policy kernel (`core/authority/kernel.py`: ALLOW / DENY / MODIFY / REQUIRE_APPROVAL, fail-closed), not only in a prompt.
+### 2. Autonomous Research and Development
+Jaeger develops its own capabilities rather than depending on manual human implementation for every improvement.
 
-Ordinary conversations use the agent loop: Jaeger can answer directly or use permitted tools as needed. There is no separate tool-free Chat mode. Plan remains an explicit read-only work style; tool grants and action-level permissions remain enforced in either style.
+**Autonomous Improvement Loop (continuous):**
+1. Identify objective or deficiency
+2. Research existing solutions
+3. Design and implement
+4. Run experiments and tests
+5. Evaluate results independently
+6. Preserve verified improvements
+7. Repeat with the next objective
 
-- **Tier 1 — act independently:** research, read files, draft content, organise non-destructively, edit authorised project files, run tests, produce **local git commits**, monitor status, restart approved services.
-- **Tier 2 — act and notify:** significant failures, unexpected behaviour, material plan changes, authorised operations warranting an immediate report.
-- **Tier 3 — obtain authorization:** financial transactions, external communications, public publishing, destructive actions, permission changes, physical actuation. Approved physical operations must also pass independent hardware safety checks.
+Its continuous improvement target is **at least 1% measurable progress per day** — a goal requiring defined metrics, not merely reporting activity or a claimed current performance level.
 
-**Authority grants** specify: permitted actions, resources, repositories, branches, identity, grantor, expiration / revocation conditions, and audit evidence. Specialists (ARES, Grok Bot, Muse, future) cannot escalate or inherit permissions beyond their delegated scope. **Local Git commits are Tier 1; remote pushes require an explicit grant covering the specific destination and branch.** Verification is engineering, not a human bottleneck: check authority before an action, monitor during, verify the observable outcome after, recover or report on failure. Operational learning updates operational memory; it never silently rewrites safety or permission policies.
+### 3. Whole-System Self-Improvement
+Self-improvement means improving Jaeger's engineering system (distinct from training a foundation model): prompts, tools, memory, routing, execution strategies, workflows, agent coordination, and evaluation processes.
 
-**Human needs (J-077, reconciled):** gentle nudges only, quiet hours 22:00–07:00, never pause tasks, never contact anyone else; connection/purpose go to a daily digest. Needs do NOT outrank tasks — the implementation lives in one place, `jaeger_ai/features/human_needs/policy.py`.
+Jaeger experiments with different models and frameworks, retains improvements supported by evidence, and rejects changes that regress performance.
 
-**Phase 4 demo target:** autostart backend, realtime two-way voice with interruption, 10 consecutive voice exchanges, concurrent background task during conversation, memory surviving controlled restart, webcam frame understood in a voice turn, verified recovery — each with observable evidence.
+### 4. One System, Replaceable Components
+An agent framework is the software that turns AI models into systems capable of doing work. No single model or framework defines Jaeger.
 
-## Status
+| Component | Responsibility |
+|---|---|
+| **Models** | Reasoning, perception, generation |
+| **Tools** | Computers, browsers, files, applications |
+| **Execution engine** | Plan, act, observe, continue |
+| **Memory and state** | Preserve knowledge and progress |
+| **Decision layer** | Fast local routing and structured choices |
+| **Orchestration** | Coordinate models and agents |
+| **Permissions** | User-controlled execution boundaries |
+| **Evaluation** | Verify results and measure improvement |
+| **Scheduler / events** | Trigger ongoing autonomous work |
 
-This file is the current product definition, updated 2026-11-05 (vNext authority model). Supersedes the 2026-10-22 wording in which approval was the default gate for all work; that was an earlier agent's misreading, not the owner's design. Older docs that say something different (IDE-first direction, workspace hub, local-model by default, 14 characters as the product) are historical, not current, even if they are still in the tree. See docs/README.md for classification.
+### 5. Real Objectives, Not Simulated Productivity
+Concrete autonomous work includes:
+- Building and improving Jaeger's own software in authorized environments.
+- Developing products and workflows that generate revenue.
+- Creating and publishing YouTube content within authorized scopes.
+- Researching and implementing solutions to real problems.
+- Maintaining forward progress without requiring a new prompt for every step.
+
+Jaeger's capabilities extend beyond software development into personal assistance, research, creative production, business operations, and other human-accessible digital activities.
+
+### 6. Build on the Existing Repository
+Jaeger is not a greenfield project. The objective is to get the existing partially working system functional, reuse proven open-source implementations where appropriate, remove obstructive legacy components, and evolve it toward the target architecture.
+
+- **Protected runtime:** The dedicated Mac Studio runtime remains protected from development modifications without separate authorization.
+- **No legacy lock-in:** The existing repository is the starting implementation. Current software structure, legacy documentation, and incomplete functionality do not define or constrain the intended end-state architecture.
