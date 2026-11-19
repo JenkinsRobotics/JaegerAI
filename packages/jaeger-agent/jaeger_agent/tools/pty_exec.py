@@ -353,7 +353,7 @@ def start_session(*, cmd: str, workdir: str | None, yield_time_ms: int) -> dict[
     if not command:
         return {"ok": False, "error": "empty command"}
     project = get_project_root()
-    cwd = workdir or (str(project) if project is not None else None)
+    cwd = os.path.join(project, workdir or ".") if project is not None else workdir
     try:
         _audit("exec_command", {"command": command[:500], "cwd": cwd or "(scratch tempdir)"})
     except Exception:  # noqa: BLE001
@@ -380,7 +380,8 @@ def _t_exec_command(cmd: str, workdir: str | None = None, yield_time_ms: int = 1
     `write_stdin(session_id)` (empty chars), type input with
     `write_stdin(session_id, chars="...\\n")`, or stop it with
     `kill_command`. If it finished you get `exit_code` instead. Runs in the
-    selected project. For a quick one-shot command use `terminal`."""
+    selected project. Relative workdirs are relative to that project. For a
+    quick one-shot command use `terminal`."""
     return start_session(cmd=cmd, workdir=workdir, yield_time_ms=yield_time_ms)
 
 @register_tool_from_function(name="write_stdin", side_effect="external")

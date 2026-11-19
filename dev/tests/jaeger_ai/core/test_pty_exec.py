@@ -215,3 +215,18 @@ def test_starts_are_audited(guarded, tmp_path):
     logs = "".join(p.read_text(errors="ignore") for p in (tmp_path / "agent").rglob("*.jsonl")
                    ) + "".join(p.read_text(errors="ignore") for p in (tmp_path / "agent").rglob("*.log"))
     assert "exec_command" in logs and "audited-marker" in logs
+
+
+@pytest.mark.parametrize("workdir", [None, ".", "nested", "absolute"])
+def test_exec_workdir_is_relative_to_selected_project(guarded, tmp_path, workdir):
+    from jaeger_agent.core.workspace import project_scope
+
+    project = tmp_path / "project"
+    nested = project / "nested"
+    nested.mkdir(parents=True)
+    requested = str(nested) if workdir == "absolute" else workdir
+    expected = nested if workdir in {"nested", "absolute"} else project
+    with project_scope(project), use_policy(PermissionPolicy(confirmation=AllowAllProvider())):
+        result = pty_exec.start_session(cmd="pwd -P", workdir=requested, yield_time_ms=1000)
+    assert result["exit_code"] == 0
+    assert result["output"].strip() == str(expected.resolve())
