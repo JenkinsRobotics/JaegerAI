@@ -10,7 +10,7 @@ from jaeger_ai.contract.modes import (
     DEFAULT_INTERACTION_TIER, INTERACTION_TIERS, TIER_DESCRIPTIONS,
     normalize_interaction_tier,
 )
-from jaeger_ai.core.gateway.server import JaegerGatewayApp
+from jaeger_ai.core.gateway.server import JaegerGatewayApp, no_tools_lane_system_prompt
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 from jaeger_ai.core.instance.schemas import AutomationConfig, Config, ModelConfig, dump_yaml, load_yaml
 from jaeger_ai.core.settings.catalog import describe
@@ -25,6 +25,9 @@ def test_normal_conversation_contract():
         assert AutomationConfig(interaction_tier=old).interaction_tier == 'agent'
     assert AutomationConfig().autonomy == 'scoped'
     assert AutomationConfig(interaction_tier='plan').interaction_tier == 'plan'
+    note = no_tools_lane_system_prompt('You are Jaeger.')
+    assert 'tool access that is unavailable for this request' in note
+    assert 'needs Agent mode' not in note
 
 
 def test_settings_catalog_exposes_only_current_styles(tmp_path):
