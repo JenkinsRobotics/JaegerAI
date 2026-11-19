@@ -90,10 +90,13 @@ def test_provider_model_inventory_reports_context_length(monkeypatch):
     monkeypatch.setattr(discovery, "discover_lmstudio", lambda *a, **k: {"online": False, "models": []})
     inv = provider_model_inventory()
     ollama = next(p for p in inv["providers"] if p["id"] == "ollama")
+    cloud = next(p for p in inv["providers"] if p["id"] == "ollama-cloud")
     by_id = {m["id"]: m for m in ollama["models"]}
-    assert isinstance(by_id["glm-5.3-flash:cloud"]["context_length"], int)
-    assert by_id["glm-5.3-flash:cloud"]["context_length"] > 0
     assert by_id["qwen3:8b"]["context_length"] == 131_072
+    cloud_by_id = {m["id"]: m for m in cloud["models"]}
+    assert isinstance(cloud_by_id["glm-5.3-flash"]["context_length"], int)
+    assert cloud_by_id["glm-5.3-flash"]["context_length"] > 0
+    assert cloud["configured"] and cloud["reachable"]
 
 
 def test_composer_has_no_hardcoded_orphan_models():

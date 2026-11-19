@@ -186,10 +186,20 @@ def provider_model_inventory(instance_root: Path | None = None) -> dict[str, Any
             })
         return out
 
-    # Local Ollama only when the daemon is up. Cloud is a separate hosted API.
+    # Local weights and signed-in Desktop cloud proxies share one daemon but
+    # remain separate provider lanes in policy and UI.
+    daemon_rows = list(ollama.get("models") or [])
     local_rows = [
-        row for row in list(ollama.get("models") or [])
+        row for row in daemon_rows
         if not (
+            str(row.get("name") or "").endswith(":cloud")
+            or str(row.get("name") or "").endswith("-cloud")
+            or row.get("remote_host")
+        )
+    ]
+    proxied_cloud_rows = [
+        row for row in daemon_rows
+        if (
             str(row.get("name") or "").endswith(":cloud")
             or str(row.get("name") or "").endswith("-cloud")
             or row.get("remote_host")
@@ -218,20 +228,28 @@ def provider_model_inventory(instance_root: Path | None = None) -> dict[str, Any
         ollama_cloud_api_model(str(m.get("name") or ""))
         for m in (api_cloud.get("models") or [])
     ]
-    merged = _merge_ollama_cloud_names(names, OLLAMA_CLOUD_CURATED)
+    proxied_names = [
+        ollama_cloud_api_model(str(m.get("name") or m.get("id") or ""))
+        for m in proxied_cloud_rows
+    ] if ollama.get("online") else []
+    merged = _merge_ollama_cloud_names([*names, *proxied_names], OLLAMA_CLOUD_CURATED)
     cloud_rows = [{"name": name, "id": name} for name in merged if name]
     if ollama_cloud_uses_direct_api():
         cloud_reason = None if api_cloud.get("online") else str(api_cloud.get("detail") or "Ollama Cloud is unreachable")
         cloud_reachable = bool(api_cloud.get("online"))
     else:
-        cloud_reason = "needs API key"
+        cloud_reason = "Sign in to Ollama Desktop or configure an API key"
         cloud_reachable = False
+    proxy_reachable = bool(ollama.get("online")) and bool(proxied_names)
+    if proxy_reachable:
+        cloud_reachable = True
+        cloud_reason = None
     providers.append({
         "id": "ollama-cloud",
         "display_name": "Ollama Cloud",
         "location": "cloud",
         "supported": True,
-        "configured": ollama_cloud_uses_direct_api(),
+        "configured": ollama_cloud_uses_direct_api() or proxy_reachable,
         "reachable": cloud_reachable,
         "reason": cloud_reason,
         "models": _models(cloud_rows),
