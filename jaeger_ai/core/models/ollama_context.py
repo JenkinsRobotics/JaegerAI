@@ -240,21 +240,16 @@ def should_inject_num_ctx(
     sending a leftover local number would shrink them.
 
     Locally we inject the Modelfile runtime value, an explicit operator
-    setting, or a training maximum read from model metadata. The
-    metadata case was once excluded for fear of allocating an unsafe KV
-    cache on a laptop; leaving it out was worse, because the daemon then
-    stayed at its ~4096 default and the context guard zeroed out whenever
-    ``max_tokens`` matched. It is injected as a CAPPED copy instead —
-    the caller applies the cap, which is what keeps the KV cache safe.
+    setting, or the full context length read from model metadata so the
+    daemon does not fall back to its ~4096 default and the framework does
+    not artificially lock a model below its native context limit.
     """
     if is_hosted_ollama(provider, base_url, model):
         return False
     if (provider or "").lower() != "ollama":
         return False
-    # num_ctx / configured: operator or Modelfile runtime value.
-    # model_info: training max — inject a CAPPED copy so local OpenAI-compat
-    # does not stay at Ollama's ~4096 default (which zeroed the guard when
-    # max_tokens matched). Cap is applied by the caller.
+    # num_ctx / configured / model_info: pass the model's full context limit
+    # (or explicit operator ctx) so local Ollama never falls back to 4096.
     return source in {"num_ctx", "configured", "model_info"}
 
 
