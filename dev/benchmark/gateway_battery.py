@@ -191,8 +191,12 @@ def run_one(gateway: str, model: str, provider: str, task: Task, auto_approve: b
         error = ""
     except Exception as exc:  # noqa: BLE001 — a crashed run is a failed run, recorded
         turn, error = {"terminal": None, "status": None, "tools": [], "plans": [], "answer": ""}, repr(exc)
-    passed, detail = grade(task, workspace)
-    return {"model": model, "task": task.id, "passed": passed, "verifier": detail,
+    artifact_passed, detail = grade(task, workspace)
+    completed = turn["terminal"] == "turn.finish" and turn["status"] == "completed"
+    if artifact_passed and not completed:
+        detail = f"Artifact passed; Gateway did not complete ({turn['status'] or 'unknown'})."
+    return {"model": model, "task": task.id, "passed": artifact_passed and completed,
+            "artifact_passed": artifact_passed, "verifier": detail,
             "terminal": turn["terminal"], "status": turn["status"],
             "seconds": round(time.time() - started, 1), "tools": turn["tools"],
             "plan_updates": len(turn["plans"]), "error": error,
