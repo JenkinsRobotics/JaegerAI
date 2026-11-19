@@ -678,10 +678,8 @@ export function StableDemo({ source }: { source: JaegerSource }) {
             ["library", "Library", FolderOpen], ["automations", "Automations", Clock],
             ["feed", "Feed", Compass], ["agents", "Agents", Bot],
           ] as const).map(([id, title, Icon]) => <button key={id} type="button" title={title} aria-label={title} aria-current={route.page === id ? "page" : undefined} onClick={() => navigate(pathOf(id))}><Icon size={20} /><span>{title}</span></button>)}
-          <details className="jg-stable-demo__more"><summary aria-label="More tools" title="More tools"><MoreHorizontal size={20} /></summary>
-            {([["work", "Work", Workflow], ["research", "Research", Search], ["machine", "Machine", Cpu]] as const).map(([id,title,Icon]) => <button key={id} type="button" title={title} aria-label={title} onClick={() => navigate(pathOf(id))}><Icon size={20}/><span>{title}</span></button>)}
-          <button type="button" aria-label="Tasks" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={20} /><span>Tasks</span></button>
-          </details>
+          {([["work", "Work", Workflow], ["research", "Research", Search], ["machine", "Machine", Cpu]] as const).map(([id,title,Icon]) => <button key={id} type="button" title={title} aria-label={title} aria-current={activeSection === id ? "page" : undefined} onClick={() => navigate(pathOf(id))}><Icon size={20}/><span>{title}</span></button>)}
+          <button type="button" title="Tasks" aria-label="Tasks" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={20} /><span>Tasks</span></button>
         </nav>
         <button className="jg-stable-demo__rail-settings" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /><span>Settings</span></button>
       </div>

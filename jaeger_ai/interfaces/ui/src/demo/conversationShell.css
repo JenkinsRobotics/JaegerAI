@@ -32,8 +32,8 @@ html[data-jaeger-host=macos] .jg-stable-demo__header { padding-left:max(12px,var
 .jg-stable-demo[data-sidebar=false] .jg-stable-demo__sidebar { grid-template-columns:var(--jg-rail-width); }
 .jg-stable-demo__context[hidden], .jg-stable-demo__resize[hidden] { display:none; }
 .jg-stable-demo__rail { padding:10px 5px; gap:8px; border-right:0; overflow-x:hidden; }
-.jg-stable-demo__rail button, .jg-stable-demo__more, .jg-stable-demo__more summary { width:40px; height:40px; min-height:40px; border-radius:10px; }
-.jg-stable-demo__rail nav { gap:5px; }
+.jg-stable-demo__rail button { width:40px; height:40px; min-height:40px; flex-shrink:0; border-radius:10px; }
+.jg-stable-demo__rail nav { gap:5px; min-height:0; overflow-y:auto; overflow-x:hidden; }
 .jg-stable-demo__context { padding:12px 10px; border-left:1px solid var(--jg-color-border); }
 .jg-stable-demo__brand { padding:0 4px 8px; min-height:32px; }
 .jg-stable-demo__wordmark { font-size:15px; }
