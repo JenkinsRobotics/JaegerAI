@@ -115,8 +115,12 @@ def test_cli_tool_descriptions_do_not_trigger_private_data_fallback(monkeypatch)
 
 def test_explicit_cloud_alias_never_becomes_a_local_route(configured, adapter):
     from jaeger_ai.core.models.request_policy import route_for
-    client=select_request_client(configured,None,model="@ollama-cloud:hosted-model")
-    assert client.ext.base_url == "http://localhost:11434/v1"
+    from unittest.mock import patch
+    with patch('jaeger_ai.core.models.router.ensure_local_ollama', return_value=True):
+        client=select_request_client(configured,None,model="@ollama-cloud:hosted-model")
+    assert client.ext.base_url in {
+        "http://localhost:11434/v1", "http://127.0.0.1:11434/v1",
+    }
     assert client.ext.provider == "ollama"
     assert client.selected_lane == "ollama-cloud"
     assert not route_for(client).local

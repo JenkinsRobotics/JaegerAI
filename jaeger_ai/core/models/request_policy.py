@@ -176,16 +176,29 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
         ext.api_key_env = ""
     if owner == "ollama-cloud":
         from jaeger_ai.core.models.router import (
-            ollama_cloud_api_model, ollama_cloud_uses_direct_api, resolve_ollama_cloud_base_url,
+            ensure_local_ollama, ollama_cloud_api_model,
+            ollama_cloud_uses_direct_api, resolve_ollama_base_url,
+            resolve_ollama_cloud_base_url,
         )
-        if not ollama_cloud_uses_direct_api():
+        if ensure_local_ollama():
+            # Ollama Desktop can execute signed-in ``:cloud`` models without
+            # exposing an API key to Jaeger.  Keep the requested lane for
+            # policy/telemetry, but execute through the loopback daemon.
+            owner = "ollama"
+            ext.base_url = resolve_ollama_base_url()
+            ext.api_key_credential = ""
+            ext.api_key_env = ""
+            name = f"{ollama_cloud_api_model(name)}:cloud"
+        elif ollama_cloud_uses_direct_api():
+            ext.base_url = resolve_ollama_cloud_base_url(openai_compat=False)
+            ext.api_key_credential = ext.api_key_credential or "ollama_cloud_api_key"
+            ext.api_key_env = ext.api_key_env or "OLLAMA_API_KEY"
+            name = ollama_cloud_api_model(name)
+        else:
             raise ModelPolicyError(
-                "Ollama Cloud needs an API key in ~/.jaeger/secrets.env."
+                "Ollama Cloud is not connected. Open Ollama and sign in, "
+                "or configure an Ollama API key."
             )
-        ext.base_url = resolve_ollama_cloud_base_url(openai_compat=False)
-        ext.api_key_credential = ext.api_key_credential or "ollama_cloud_api_key"
-        ext.api_key_env = ext.api_key_env or "OLLAMA_API_KEY"
-        name = ollama_cloud_api_model(name)
     elif owner in {"ollama", "ollama-local"}:
         from jaeger_ai.core.models.router import ensure_local_ollama, resolve_ollama_base_url
         if not ensure_local_ollama():
