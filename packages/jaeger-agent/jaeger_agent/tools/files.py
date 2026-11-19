@@ -828,7 +828,12 @@ def apply_patch(patch: str) -> dict[str, Any]:
             body.append(line)
     flush()
     if not sections:
-        return {"ok": False, "error": "no Add/Update/Delete sections found"}
+        return {"ok": False, "error": (
+            "Expected *** Add File:, *** Update File:, or *** Delete File: sections. "
+            "For a unified diff, replace each ---/+++ header pair with "
+            "*** Update File: <workspace-relative path>, keep its @@ hunks, "
+            "and wrap all sections in *** Begin Patch and *** End Patch."
+        )}
 
     changed: list[dict[str, Any]] = []
     for action, path, body in sections:
@@ -1152,10 +1157,11 @@ def _t_read_many_files(paths: list[str], max_chars: int = 24000) -> dict:
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="files", operation="apply_patch",
                summary="apply a multi-file patch in the operator's project")
 def _t_apply_patch(patch: str) -> dict:
-    """Apply a Codex-style patch (Begin Patch / Add File / Update File
-    / Delete File / End Patch) to files in the write sandbox. Prefer
-    this for a multi-hunk or multi-file change; use patch for a single
-    old/new replacement."""
+    """Apply edits in the write sandbox. Start with `*** Begin Patch`, use
+    `*** Update File: relative/path` before each file's @@ hunks, and end
+    with `*** End Patch`. For whole-file changes use `*** Add File:` (with
+    + lines) or `*** Delete File:`. Git-style ---/+++ headers are unsupported.
+    Prefer this for multi-file changes; use patch for a single replacement."""
     return apply_patch(patch=patch)
 
 

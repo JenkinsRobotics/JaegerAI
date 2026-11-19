@@ -18,6 +18,16 @@ from jaeger_agent import tools
 from jaeger_ai.core.instance.instance import InstanceLayout
 
 
+def test_apply_patch_explains_how_to_convert_unified_diff():
+    from jaeger_agent.tools.files import apply_patch
+
+    result = apply_patch("--- a/example.py\n+++ b/example.py\n@@ -1 +1 @@\n-old\n+new")
+
+    assert result["ok"] is False
+    assert "*** Update File: <workspace-relative path>" in result["error"]
+    assert "*** Begin Patch and *** End Patch" in result["error"]
+
+
 def test_search_includes_large_source_file(bound_instance, tmp_path):
     source = tmp_path / "routes.py"
     source.write_text("# padding\n" * 110_000 + "build_runtime_adapter()\n")
