@@ -977,6 +977,7 @@ class EntityRuntime:
         attachments: Any = (),
         finalize_after_first_tools: bool = False,
         finalize_prompt: str | None = None,
+        prompt_mode: str = "agent",
     ) -> dict[str, Any]:
         """Execute subordinate ReAct loop inside the EntityRuntime.
 
@@ -1083,7 +1084,9 @@ class EntityRuntime:
             agent = build_jaeger_agent(client, max_iterations=max_iterations,
                                        max_tool_calls=max_tool_calls,
                                        callbacks=observe_tool_calls(callbacks, session_key),
-                                       **owner_agent_options(layout, cfg, client))
+                                       **owner_agent_options(
+                                           layout, cfg, client, prompt_mode=prompt_mode,
+                                       ))
             from jaeger_ai.core.models.request_policy import GovernedAdapter, route_for, guarded_adapter
             agent.primary_adapter = GovernedAdapter(agent.primary_adapter, route_for(client), local_only=local_only)
             agent.fallback_adapters = [guarded_adapter(a, local_only=local_only) for a in agent.fallback_adapters]
