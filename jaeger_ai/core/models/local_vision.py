@@ -26,7 +26,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-DEFAULT_MODEL = "qwen3-vl:8b"
+DEFAULT_MODEL = "qwen3.5:9b"
 PROBE_NUMBER = "47"
 
 
@@ -88,10 +88,17 @@ def _jpeg(data: bytes, max_edge: int = 1024) -> bytes:
 def describe(image: bytes, question: str = "", *, model: str | None = None,
              timeout: float = 120.0, max_edge: int = 1024) -> dict[str, Any]:
     """Ask the local vision model about one image. Returns ``{ok, answer, model, elapsed_s}``."""
-    model = model or certified_model()
-    if not model:
-        return {"ok": False, "error": "no VISION-certified local model"}
+    model = (
+        (model or "").strip()
+        or certified_model()
+        or (os.environ.get("JAEGER_VISION_MODEL") or "").strip()
+        or DEFAULT_MODEL
+    )
     q = (question or "").strip() or "Describe this image in two short sentences. Read any visible text."
+    opts: dict[str, Any] = {"temperature": 0, "num_predict": 400}
+    raw_ctx = (os.environ.get("JAEGER_VISION_CTX") or "").strip()
+    if raw_ctx.isdigit() and int(raw_ctx) > 0:
+        opts["num_ctx"] = int(raw_ctx)
     body = json.dumps({
         "model": model,
         "messages": [{"role": "user", "content": q,
@@ -99,7 +106,7 @@ def describe(image: bytes, question: str = "", *, model: str | None = None,
         "stream": False,
         "think": False,
         "keep_alive": "15m",
-        "options": {"temperature": 0, "num_predict": 400, "num_ctx": 8192},
+        "options": opts,
     }).encode()
     started = time.perf_counter()
     try:

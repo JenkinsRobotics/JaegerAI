@@ -84,7 +84,7 @@ TOOL_TIMEOUT = 240.0
 # "Hey Jaeger," followed by a breath is not a finished request: hold such a
 # fragment briefly so the rest of the sentence joins it.
 HOLD_SECS = 1.2
-_FRAGMENT = re.compile(r"^(?:(?:hey|hi|okay|ok|so|um|uh|and)[ ,]+)?(?:jaeger)?[ ,.!?]*$|^[^ ]+(?: [^ ]+)?,$", re.I)
+_FRAGMENT = re.compile(r"^(?:(?:hey|hi|okay|ok|so|um|uh|and)[ ,]+)?(?:jaeger|truth)?[ ,.!?]*$|^[^ ]+(?: [^ ]+)?,$", re.I)
 
 _ready = {"local": False}
 _sessions: dict[str, dict] = {}
@@ -232,11 +232,11 @@ def _local_pipeline(transport):
 
 
 GEMINI_SYSTEM = (
-    "You are Jaeger, the user's personal AI assistant, in a live voice conversation. "
-    "Keep replies short and natural; never read out markdown. For anything that needs the "
-    "user's files, apps, accounts, calendar, email, the web, memory, code, or any action on "
-    "their computer, call ask_jaeger with a clear, complete request and tell the user you're "
-    "on it; when the result comes back, summarize it briefly. Do not invent results."
+    "You are Truth, the user's persistent personal intelligence on JaegerAI, in a live voice conversation. "
+    "Keep replies short, truthful, and natural; never read out markdown. Distinguish facts from "
+    "guesses and never invent results. For anything that needs the user's files, apps, accounts, "
+    "calendar, email, the web, memory, code, or any action on their computer, call ask_jaeger with "
+    "a clear, complete request and tell the user you're on it; when the result comes back, summarize it briefly."
 )
 
 

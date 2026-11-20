@@ -148,7 +148,9 @@ class VoiceSession:
             turn.error = reply
 
         self._barge_in.clear()
-        self.listener.set_paused(True)
+        full_duplex = bool(getattr(self.speaker, "supports_barge_in", False))
+        if not full_duplex:
+            self.listener.set_paused(True)
         try:
             timing["tts_start"] = time.time()
             outcome = self.speaker.speak(_speakable(reply))
@@ -159,7 +161,8 @@ class VoiceSession:
             turn.error = f"speech output failed ({exc}); reply: {reply}"
             PrintSpeaker().speak(reply)
         finally:
-            self.listener.set_paused(False)
+            if not full_duplex:
+                self.listener.set_paused(False)
         if self._barge_in.is_set():
             timing["barge_in"] = time.time()
         self._emit(turn)
