@@ -100,16 +100,22 @@ _FP = r"\bi(?:'ve| have)\s+(?:now\s+)?(?:also\s+)?(?:already\s+)?(?:successfully
 _CLAIM_FAMILIES: tuple[tuple[re.Pattern[str], frozenset[str]], ...] = (
     # file writes: "I've saved/written it to notes.txt"
     (re.compile(_FP + r"(?:saved|written|wrote)\b", re.IGNORECASE),
-     frozenset({"write_file", "append_file", "patch", "delete_file",
-                "execute_code", "terminal"})),
+     frozenset({"write_file", "append_file", "patch", "apply_patch", "delete_file",
+                "execute_code", "terminal", "exec_command", "settings_set",
+                "knowledge_record_claim", "knowledge_verify_claim",
+                "human_needs_add_goal", "human_needs_record_outcome"})),
     # board filing: "I've added/filed a card", "I have noted them"
     (re.compile(_FP + r"(?:added|filed|noted|logged)\b", re.IGNORECASE),
      frozenset({"board_add", "board_update", "board_move", "board_delete",
                 "remember", "memory", "todo", "skill_note", "reflect",
-                "propose_deep_think_task", "write_file", "append_file"})),
+                "propose_deep_think_task", "write_file", "append_file", "apply_patch",
+                "knowledge_record_claim", "knowledge_verify_claim",
+                "human_needs_add_goal", "human_needs_propose_opportunity",
+                "human_needs_record_outcome", "settings_set"})),
     # memory: "I've remembered/stored that"
     (re.compile(_FP + r"(?:remembered|stored)\b", re.IGNORECASE),
-     frozenset({"remember", "memory"})),
+     frozenset({"remember", "memory", "knowledge_record_claim", "knowledge_verify_claim",
+                "human_needs_add_goal", "human_needs_record_outcome"})),
     # scheduling: "I've scheduled the reminder"
     (re.compile(_FP + r"scheduled\b", re.IGNORECASE),
      frozenset({"schedule_prompt"})),
@@ -118,8 +124,8 @@ _CLAIM_FAMILIES: tuple[tuple[re.Pattern[str], frozenset[str]], ...] = (
      frozenset({"propose_deep_think_task", "board_add"})),
     # deletion: "I've deleted/removed the file"
     (re.compile(_FP + r"(?:deleted|removed)\b", re.IGNORECASE),
-     frozenset({"delete_file", "board_delete", "forget", "memory",
-                "cancel_schedule", "terminal", "execute_code"})),
+     frozenset({"delete_file", "board_delete", "forget", "memory", "session_manage",
+                "cancel_schedule", "terminal", "exec_command", "execute_code"})),
 )
 
 _ACTION_REQUEST = re.compile(
@@ -138,6 +144,10 @@ _DECLARATIVE_COMPLETE = re.compile(
 _ACTION_TOOLS = frozenset().union(*(family for _, family in _CLAIM_FAMILIES)) | frozenset({
     "computer_do", "computer_use", "execute_with_tools", "move_file",
     "copy_file", "rename_file", "work_ledger", "complete_task",
+    "apply_patch", "exec_command", "session_manage", "settings_set",
+    "knowledge_record_claim", "knowledge_verify_claim",
+    "human_needs_add_goal", "human_needs_propose_opportunity",
+    "human_needs_record_outcome",
 })
 
 

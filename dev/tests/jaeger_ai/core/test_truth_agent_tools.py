@@ -135,3 +135,14 @@ def test_untrusted_callers_cannot_write_epistemic_or_human_needs_stores(tmp_path
     )
     assert decision.decision == AuthorityDecisionType.DENY
     assert decision.policy_name == "memory_authority"
+
+
+def test_verify_gate_recognizes_truth_management_and_patch_tools():
+    from jaeger_agent.loop.verify_gate import verify_final
+
+    assert verify_final(
+        "I have deleted the disposable session and added your goal.",
+        tool_successes=["apply_patch", "exec_command", "session_manage", "human_needs_add_goal", "knowledge_record_claim"],
+        tool_names=["apply_patch", "exec_command", "session_manage", "human_needs_add_goal", "knowledge_record_claim"],
+        user_prompt="Fix the file, record a claim, add a goal, and delete the session.",
+    ) is None

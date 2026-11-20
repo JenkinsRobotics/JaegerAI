@@ -50,6 +50,7 @@ def test_local_context_is_bounded_without_explicit_service_override(monkeypatch)
     monkeypatch.setattr(stack,'_existing_plist_env',lambda _: {})
     cfg={'external_model':{'enabled':True,'provider':'ollama','model':'installed:latest','ctx':131072}}
     monkeypatch.setattr(stack,'_instance_config',lambda:cfg)
-    assert stack.operator_env(stack.SERVICE_BY_ID['ollama'])['OLLAMA_CONTEXT_LENGTH']=='32768'
+    # Framework does not artificially cap a model's configured context window.
+    assert stack.operator_env(stack.SERVICE_BY_ID['ollama'])['OLLAMA_CONTEXT_LENGTH']=='131072'
     cfg['stack']={'env':{'ollama':{'OLLAMA_CONTEXT_LENGTH':'49152'}}}
     assert stack.operator_env(stack.SERVICE_BY_ID['ollama'])['OLLAMA_CONTEXT_LENGTH']=='49152'
