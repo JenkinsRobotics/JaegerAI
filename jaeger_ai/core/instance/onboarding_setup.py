@@ -7,6 +7,43 @@ from jaeger_ai.core.instance.schemas import Config, Identity, dump_yaml, load_ya
 from jaeger_ai.core.models.configuration import selected_model_config
 
 
+def onboarding_blueprint(layout: Any) -> dict[str, Any]:
+    """Return the coherent 10-step first-run onboarding blueprint with safe defaults.
+
+    Distinguishes a brand-new installation (``fresh_install``) from a clean
+    personal workspace migrated from an older dev profile (``migrated_clean_personal``)
+    or an already established instance (``existing_instance``). Every optional step
+    carries sensible defaults and may be skipped so users can talk to Truth right away.
+    """
+    from jaeger_ai.core.instance.first_boot import snapshot
+    record = snapshot(layout) if layout is not None else {}
+    install_mode = str(record.get("install_mode") or "")
+    if not install_mode:
+        if record.get("migrated"):
+            install_mode = "existing_instance"
+        elif layout is not None and getattr(layout, "exists", lambda: False)():
+            install_mode = "existing_instance"
+        else:
+            install_mode = "fresh_install"
+
+    return {
+        "install_mode": install_mode,
+        "default_companion": "Truth",
+        "steps": [
+            {"id": "companion_name", "title": "Companion name", "default": "Truth", "skippable": True},
+            {"id": "avatar_voice", "title": "Avatar and preferred voice", "default": {"character_id": "truth", "voice_profile": "female"}, "skippable": True},
+            {"id": "audio_devices", "title": "Microphone and speakers", "default": {"audio_input": "system_default", "audio_output": "system_default"}, "skippable": True},
+            {"id": "camera_vision", "title": "Camera and vision options", "default": {"camera_device": "auto", "vision_enabled": True, "vision_model": "qwen3.5:9b"}, "skippable": True},
+            {"id": "models", "title": "Local and cloud model preferences", "default": {"awake_provider": "ollama", "awake_model": "mistral-large-4:cloud", "local_fallback_model": "qwen3.5:9b"}, "skippable": False},
+            {"id": "memory_privacy", "title": "Memory and privacy settings", "default": {"epistemic_memory": True, "privacy_local_only": False}, "skippable": True},
+            {"id": "autonomy", "title": "Operating mode", "default": "auto", "options": ["ask", "scoped", "auto"], "labels": {"ask": "Manual", "scoped": "Smart Auto", "auto": "Full Auto"}, "skippable": True},
+            {"id": "computer_access", "title": "Permitted computer and application access", "default": {"computer_use": True, "filesystem_write": True, "shell_mode": "confirm"}, "skippable": True},
+            {"id": "heartbeat_notifications", "title": "Heartbeat, quiet hours, and notifications", "default": {"heartbeat_interval_minutes": 30, "quiet_start_hour": 22, "quiet_end_hour": 7, "digest_enabled": True}, "skippable": True},
+            {"id": "personal_goals", "title": "Personal goals and optional human needs priorities", "default": {"disabled_dimensions": [], "initial_goals": []}, "skippable": True},
+        ],
+    }
+
+
 def onboarding_identity(layout: Any) -> dict[str, str]:
     if layout is None or not layout.exists():
         return {}
@@ -75,9 +112,9 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
     else:
         from jaeger_ai.core.instance.setup_wizard import create_instance
         layout = create_instance(
-            character_id=str(args.get("character_id") or "assistant"),
+            character_id=str(args.get("character_id") or "truth"),
             name=(layout.root.name if layout is not None else args.get("name")),
-            display_name=args.get("display_name") or None,
+            display_name=args.get("display_name") or "Truth",
             role=args.get("role") or None,
             voice_id=("af_heart" if profile == "female" else "am_michael") if profile else None,
             awake_model=model, awake_provider=provider,
@@ -85,6 +122,41 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
             permission_mode=str(args.get("permission_mode") or "confirm"),
             autonomy=str(args.get("autonomy") or "") or None,
         )
+    # Persist optional Human Needs / Heartbeat onboarding preferences & initial goals.
+    hn_updates: dict[str, Any] = {}
+    for key in ("heartbeat_interval_minutes", "quiet_start_hour", "quiet_end_hour", "disabled_dimensions", "proactive_enabled", "digest_enabled"):
+        if args.get(key) is not None:
+            hn_updates[key] = args[key]
+    initial_goals = args.get("initial_goals")
+    if hn_updates or (isinstance(initial_goals, list) and initial_goals):
+        from jaeger_ai.features.human_needs.store import HumanNeedsStore
+        hn_store = HumanNeedsStore()
+        if hn_updates:
+            hn_store.update_preferences(hn_updates)
+        if isinstance(initial_goals, list):
+            for g in initial_goals:
+                if isinstance(g, dict) and str(g.get("title") or "").strip():
+                    hn_store.add_goal(
+                        title=str(g["title"]).strip(),
+                        dimension=str(g.get("dimension") or "self_actualization"),
+                        priority=int(g.get("priority", 3)),
+                        notes=str(g.get("notes") or ""),
+                        success_metric=str(g.get("success_metric") or ""),
+                    )
+    # Persist optional device/vision/privacy onboarding metadata into first_boot state.
+    extra_prefs = {
+        k: args[k] for k in (
+            "audio_input", "audio_output", "camera_device", "vision_enabled",
+            "local_fallback_model", "privacy_local_only", "computer_access",
+        ) if args.get(k) is not None
+    }
+    if extra_prefs:
+        from jaeger_ai.core.instance.first_boot import snapshot
+        import yaml
+        fb_path = layout.root / "first_boot.yaml"
+        cur = snapshot(layout)
+        cur["onboarding_preferences"] = {**(cur.get("onboarding_preferences") or {}), **extra_prefs}
+        fb_path.write_text(yaml.safe_dump(cur, sort_keys=False), encoding="utf-8")
     from jaeger_ai.core.models.onboarding_credentials import persist_pending
     from jaeger_ai.core.instance.first_boot import (
         begin,

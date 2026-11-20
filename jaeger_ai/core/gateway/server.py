@@ -2384,14 +2384,18 @@ class JaegerGatewayApp:
     @staticmethod
     def _first_run_payload(layout):
         from jaeger_ai.core.instance import first_boot
+        from jaeger_ai.core.instance.onboarding_setup import onboarding_blueprint
         first_boot.ensure_migrated(layout)
         record = first_boot.snapshot(layout)
         state = first_boot.status(layout)
+        blueprint = onboarding_blueprint(layout)
         return {"status": state.value,
                 "completed": state is first_boot.FirstBootStatus.COMPLETED,
                 "skipped": bool(record.get("skipped_at")),
+                "install_mode": blueprint["install_mode"],
                 "character_id": record.get("character_id"),
-                "model_selection": record.get("model_selection")}
+                "model_selection": record.get("model_selection"),
+                "onboarding_steps": blueprint["steps"]}
 
     async def handle_first_run_status(self, request: web.Request) -> web.Response:
         return web.json_response(self._first_run_payload(self._first_run_layout()),
@@ -2408,11 +2412,18 @@ class JaegerGatewayApp:
             body = await request.json()
             if not isinstance(body, dict):
                 raise ValueError("Expected a JSON object")
-            # Expose only the existing setup choices, not arbitrary config edits.
-            allowed = {"character_id", "awake_provider", "awake_model"}
-            if set(body) - allowed:
+            # Expose only bounded first-run setup choices, never arbitrary config edits.
+            required = {"character_id", "awake_provider", "awake_model"}
+            optional = {
+                "display_name", "voice_profile", "interaction_posture", "user_name",
+                "audio_input", "audio_output", "camera_device", "vision_enabled",
+                "local_fallback_model", "privacy_local_only", "autonomy", "computer_access",
+                "heartbeat_interval_minutes", "quiet_start_hour", "quiet_end_hour",
+                "disabled_dimensions", "proactive_enabled", "digest_enabled", "initial_goals",
+            }
+            if set(body) - (required | optional):
                 raise ValueError("Unknown setup field")
-            if not all(str(body.get(key) or "").strip() for key in allowed):
+            if not all(str(body.get(key) or "").strip() for key in required):
                 raise ValueError("character_id, awake_provider and awake_model are required")
             from jaeger_ai.core.instance.onboarding_setup import complete_setup
             complete_setup(layout, body)
