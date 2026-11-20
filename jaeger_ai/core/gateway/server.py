@@ -1691,6 +1691,8 @@ class JaegerGatewayApp:
         register_agent_templates(self)
         from .entity_memory import register as register_entity_memory
         register_entity_memory(self)
+        from jaeger_ai.features.human_needs.routes import register as register_human_needs
+        register_human_needs(self)
         from .native_controls import register as register_native_controls
         register_native_controls(self)
         from jaeger_ai.features.agent_bridge.routes import register

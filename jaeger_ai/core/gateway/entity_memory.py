@@ -71,8 +71,45 @@ def register(gateway):
         except Exception:return web.json_response({'execution_unknown':True,'operation_id':oid,'error':'Claim outcome unknown; inspect saved receipt without replay'},status=503)
         gateway.store.finish_control_operation(oid,receipt)
         return web.json_response(receipt,status=receipt['http_status'])
+    async def contradictions(request):
+        try:
+            owner = loaded_owner()
+            subject = (request.query.get("subject") or "").strip() or None
+            predicate = (request.query.get("predicate") or "").strip() or None
+            items = await asyncio.to_thread(owner.find_contradictions, subject=subject, predicate=predicate)
+            return web.json_response({"available": True, "contradictions": items, "count": len(items)})
+        except ValueError as exc:
+            return web.json_response({"available": False, "contradictions": [], "count": 0, "error": str(exc)}, status=409)
+
+    async def verify_claim_route(request):
+        if not admin(request):
+            return web.json_response({"error": "Existing owner admin scope required"}, status=403)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("JSON object required")
+            owner = loaded_owner(writing=True)
+            from .server import _control_plane_block
+            if _control_plane_block():
+                raise ValueError("Global Stop or live-owner guard prevents memory changes")
+            receipt = await asyncio.to_thread(
+                owner.verify_claim,
+                request.match_info["id"],
+                source_type=str(body.get("source_type") or ""),
+                source_id=str(body.get("source_id") or ""),
+                snippet=str(body.get("snippet") or ""),
+                uri=body.get("uri"),
+                confidence=float(body.get("confidence", 1.0)),
+                actor=str(request.get("caller_actor") or "owner"),
+            )
+            return web.json_response(receipt, status=200)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
     gateway.app.router.add_get('/v1/runtime/memory/claims',read)
+    gateway.app.router.add_get('/v1/runtime/memory/contradictions',contradictions)
     gateway.app.router.add_get('/v1/runtime/memory/claims/{id}',detail)
+    gateway.app.router.add_post('/v1/runtime/memory/claims/{id}/verify',verify_claim_route)
     gateway.app.router.add_post('/v1/runtime/memory/claims/{id}/{action}',mutate)
     gateway.app.router.add_get('/v1/runtime/memory/claim-operations/{id}',operation)
 

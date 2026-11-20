@@ -250,12 +250,53 @@ class SqliteWorldStore:
             value=self._claim_snapshot(conn,row)
             history=[json.loads(r['snippet']) for r in conn.execute("SELECT snippet FROM world_evidence WHERE target_id=? AND source_type='operator_claim_change' ORDER BY rowid DESC LIMIT 20",(claim_id,))]
             origin=conn.execute("SELECT snippet FROM world_evidence WHERE target_id=? AND source_type='operator_claim_origin' ORDER BY rowid DESC LIMIT 1",(claim_id,)).fetchone()
-        active=row['valid_until'] is None or row['valid_until']>time.time()
+            evidence=[
+                {
+                    "evidence_id": r["evidence_id"],
+                    "source_type": r["source_type"],
+                    "source_id": r["source_id"],
+                    "snippet": r["snippet"],
+                    "uri": r["uri"],
+                    "created_at": r["created_at"],
+                }
+                for r in conn.execute(
+                    "SELECT evidence_id,source_type,source_id,snippet,uri,created_at FROM world_evidence "
+                    "WHERE target_id=? AND source_type NOT IN ('operator_claim_change','operator_claim_origin') "
+                    "ORDER BY created_at DESC LIMIT 50",
+                    (claim_id,),
+                )
+            ]
+            now = time.time()
+            active=row['valid_until'] is None or row['valid_until']>now
+            conflicts = []
+            if active and row["provenance"] not in (
+                EpistemicProvenance.PREFERENCE.value,
+                EpistemicProvenance.UNKNOWN.value,
+            ):
+                conflict_rows = conn.execute(
+                    "SELECT * FROM world_claims WHERE lower(subject)=lower(?) AND lower(predicate)=lower(?) "
+                    "AND claim_id!=? AND (valid_until IS NULL OR valid_until>?) "
+                    "AND provenance NOT IN ('preference','unknown') ORDER BY created_at DESC",
+                    (row["subject"], row["predicate"], claim_id, now),
+                ).fetchall()
+                norm_val = str(row["value"]).strip().lower()
+                for cr in conflict_rows:
+                    if str(cr["value"]).strip().lower() != norm_val:
+                        conflicts.append({
+                            "claim_id": cr["claim_id"],
+                            "value": cr["value"],
+                            "provenance": cr["provenance"],
+                            "confidence": cr["confidence"],
+                            "source_id": cr["source_id"],
+                            "created_at": cr["created_at"],
+                        })
         value['active']=active;value['truncated']=len(value['value'])>16000
         value['value']=value['value'][:16000]
         value['changes']=history
+        value['evidence']=evidence
+        value['contradictions']=conflicts
         value['replaces_claim_id']=json.loads(origin[0])['replaces_claim_id'] if origin else None
-        value['actions']=[] if row['provenance']=='system' else ['correct','forget'] if active else ['restore'] if history and history[0]['action']=='forget' and (history[0]['previous_valid_until'] is None or history[0]['previous_valid_until']>time.time()) else []
+        value['actions']=[] if row['provenance']=='system' else ['correct','forget'] if active else ['restore'] if history and history[0]['action']=='forget' and (history[0]['previous_valid_until'] is None or history[0]['previous_valid_until']>now) else []
         return value
 
     @staticmethod
@@ -489,3 +530,132 @@ class SqliteWorldStore:
                 ),
             )
         return evi
+
+    def list_evidence(self, target_id: str, *, include_audit: bool = False) -> list[WorldEvidence]:
+        """List grounding evidence linked to a claim or belief."""
+        sql = "SELECT * FROM world_evidence WHERE target_id = ?"
+        if not include_audit:
+            sql += " AND source_type NOT IN ('operator_claim_change', 'operator_claim_origin')"
+        sql += " ORDER BY created_at DESC"
+        with self._get_connection() as conn:
+            rows = conn.execute(sql, (target_id,)).fetchall()
+        return [
+            WorldEvidence(
+                evidence_id=r["evidence_id"],
+                target_id=r["target_id"],
+                source_type=r["source_type"],
+                source_id=r["source_id"],
+                snippet=r["snippet"],
+                uri=r["uri"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    def find_contradictions(
+        self,
+        *,
+        subject: str | None = None,
+        predicate: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Detect active claims on the same (subject, predicate) with conflicting values."""
+        now = time.time()
+        clauses = [
+            "(valid_until IS NULL OR valid_until > ?)",
+            "provenance NOT IN ('preference', 'unknown')",
+        ]
+        params: list[Any] = [now]
+        if subject:
+            clauses.append("lower(subject) = lower(?)")
+            params.append(subject.strip())
+        if predicate:
+            clauses.append("lower(predicate) = lower(?)")
+            params.append(predicate.strip())
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM world_claims WHERE " + " AND ".join(clauses) + " ORDER BY created_at DESC",
+                params,
+            ).fetchall()
+            evidence_counts: dict[str, int] = {}
+            for r in rows:
+                cnt = conn.execute(
+                    "SELECT COUNT(*) FROM world_evidence WHERE target_id=? "
+                    "AND source_type NOT IN ('operator_claim_change','operator_claim_origin')",
+                    (r["claim_id"],),
+                ).fetchone()[0]
+                evidence_counts[r["claim_id"]] = int(cnt)
+        groups: dict[tuple[str, str], list[sqlite3.Row]] = {}
+        for r in rows:
+            key = (str(r["subject"]).strip().lower(), str(r["predicate"]).strip().lower())
+            groups.setdefault(key, []).append(r)
+        contradictions: list[dict[str, Any]] = []
+        for (_sub_k, _pred_k), members in groups.items():
+            distinct_vals = {str(m["value"]).strip().lower() for m in members}
+            if len(distinct_vals) < 2:
+                continue
+            contradictions.append({
+                "subject": members[0]["subject"],
+                "predicate": members[0]["predicate"],
+                "distinct_values": len(distinct_vals),
+                "detected_at": now,
+                "claims": [
+                    {
+                        "claim_id": m["claim_id"],
+                        "value": m["value"],
+                        "provenance": m["provenance"],
+                        "confidence": m["confidence"],
+                        "source_id": m["source_id"],
+                        "evidence_count": evidence_counts.get(m["claim_id"], 0),
+                        "created_at": m["created_at"],
+                    }
+                    for m in members
+                ],
+            })
+        return contradictions
+
+    def verify_claim(
+        self,
+        claim_id: str,
+        *,
+        source_type: str,
+        source_id: str,
+        snippet: str = "",
+        uri: str | None = None,
+        confidence: float = 1.0,
+        actor: str = "verifier",
+    ) -> dict[str, Any]:
+        """Attach grounding evidence and promote an active claim to VERIFIED."""
+        src_type = (source_type or "").strip()
+        src_id = (source_id or "").strip()
+        if not src_type or not src_id:
+            raise ValueError("Verification requires source_type and source_id")
+        now = time.time()
+        evid = f"evi_{uuid.uuid4().hex[:12]}"
+        conf = max(0.0, min(1.0, float(confidence)))
+        with self._get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM world_claims WHERE claim_id = ?", (claim_id,)).fetchone()
+            if row is None:
+                raise ValueError("Claim unavailable")
+            if row["valid_until"] is not None and row["valid_until"] <= now:
+                raise ValueError("Cannot verify an inactive claim")
+            conn.execute(
+                "INSERT INTO world_evidence (evidence_id, target_id, source_type, source_id, snippet, uri, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (evid, claim_id, src_type, src_id, str(snippet or ""), uri, now),
+            )
+            conn.execute(
+                "UPDATE world_claims SET provenance = ?, confidence = ? WHERE claim_id = ?",
+                (EpistemicProvenance.VERIFIED.value, conf, claim_id),
+            )
+            updated = conn.execute("SELECT * FROM world_claims WHERE claim_id = ?", (claim_id,)).fetchone()
+            snap = self._claim_snapshot(conn, updated)
+        return {
+            "ok": True,
+            "claim_id": claim_id,
+            "evidence_id": evid,
+            "provenance": EpistemicProvenance.VERIFIED.value,
+            "confidence": conf,
+            "actor": actor,
+            "revision": snap["revision"],
+        }

@@ -296,3 +296,51 @@ def test_concurrent_claim_commands_allow_only_one_current_revision(tmp_path):
     assert len(store.query_claims('Owned concurrent'))==1
     assert len(store.query_claims('Owned concurrent',include_inactive=True))==2
     assert len(store.claim_detail(claim.claim_id)['changes'])==1
+
+
+def test_epistemic_types_contradictions_evidence_and_verification(temp_store: SqliteWorldStore):
+    """Truth distinguishes hypothesis/preference/unknown, surfaces contradictions, and verifies with evidence."""
+    c_hyp = temp_store.record_claim(
+        "actuator_1", "failure_cause", "heat_loss",
+        provenance=EpistemicProvenance.HYPOTHESIS, confidence=0.6, source_id="analysis",
+    )
+    c_obs = temp_store.record_claim(
+        "actuator_1", "failure_cause", "voltage_drop",
+        provenance=EpistemicProvenance.OBSERVED, confidence=0.9, source_id="scope_log",
+    )
+    # Preferences and unknowns must not trigger factual contradiction alarms
+    temp_store.record_claim("user", "priority", "reliability", provenance=EpistemicProvenance.PREFERENCE)
+    temp_store.record_claim("user", "priority", "cost", provenance=EpistemicProvenance.PREFERENCE)
+    temp_store.record_claim("actuator_1", "failure_cause", "not yet determined", provenance=EpistemicProvenance.UNKNOWN)
+
+    contradictions = temp_store.find_contradictions()
+    assert len(contradictions) == 1
+    assert contradictions[0]["subject"] == "actuator_1"
+    assert contradictions[0]["predicate"] == "failure_cause"
+    assert {c["claim_id"] for c in contradictions[0]["claims"]} == {c_hyp.claim_id, c_obs.claim_id}
+
+    # Verify observed claim with empirical evidence
+    receipt = temp_store.verify_claim(
+        c_obs.claim_id,
+        source_type="tool_call",
+        source_id="bench_run_42",
+        snippet="Rail dropped to 9.1V under peak load",
+        uri="file:///tmp/scope.csv",
+        confidence=0.99,
+        actor="owner:cli",
+    )
+    assert receipt["ok"] is True and receipt["provenance"] == "verified"
+
+    detail = temp_store.claim_detail(c_obs.claim_id)
+    assert detail["provenance"] == "verified"
+    assert len(detail["evidence"]) == 1
+    assert detail["evidence"][0]["source_id"] == "bench_run_42"
+    assert len(detail["contradictions"]) == 1
+    assert detail["contradictions"][0]["claim_id"] == c_hyp.claim_id
+
+    # Retracting the disproven hypothesis clears the contradiction
+    hyp_rev = temp_store.claim_detail(c_hyp.claim_id)["revision"]
+    temp_store.manage_claim(
+        c_hyp.claim_id, "forget", expected_revision=hyp_rev, operation_id="op-retract-hyp", actor="owner:cli",
+    )
+    assert temp_store.find_contradictions() == []

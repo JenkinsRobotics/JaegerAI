@@ -30,6 +30,7 @@ from jaeger_ai.core.instance.instance import operator_state_root
 logger = logging.getLogger("jaeger.entity.identity")
 
 IDENTITY_FILE_NAME = "entity_identity.json"
+DEFAULT_COMPANION_NAME = "Truth"
 
 
 @dataclass(frozen=True)
@@ -41,8 +42,9 @@ class EntityIdentity:
     created_at: float
     instance_name: str
     system_role: str = (
-        "Persistent cognitive assistant entity. Operates with continuous memory, "
-        "environmental perception, structured world knowledge, and safety-verified execution."
+        "Persistent, truth-seeking personal intelligence dedicated to human flourishing. "
+        "Operates with continuous memory, evidence-based reasoning, user-owned goals, "
+        "and permission-enforced execution."
     )
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -68,7 +70,7 @@ class EntityIdentity:
     def create_default(
         cls,
         instance_name: str = "default",
-        display_name: str = "Jaeger",
+        display_name: str = DEFAULT_COMPANION_NAME,
     ) -> EntityIdentity:
         return cls(
             entity_id=f"jaeger-entity-{uuid.uuid4().hex[:12]}",
@@ -95,7 +97,7 @@ class EntityIdentity:
 
 def resolve_entity_identity(
     state_root: Path | str | None = None,
-    default_name: str = "Jaeger",
+    default_name: str = DEFAULT_COMPANION_NAME,
     instance_name: str = "default",
 ) -> EntityIdentity:
     """Resolve or mint the persistent entity identity under the state root.

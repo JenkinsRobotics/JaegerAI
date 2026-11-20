@@ -90,7 +90,11 @@ def test_chat_builds_persona_prompt_and_stores_memory(tmp_path: Path):
     sysmsg = seen["body"]["messages"][0]["content"]
     assert char.personality.name in sysmsg and "user name is Matthew" in sysmsg and C.MEMORY_NOTE in sysmsg
     assert [m["role"] for m in seen["body"]["messages"]] == ["system", "user", "user"]
-    assert len(mem.recent("glados")) == 2
+    assert "options" not in seen["body"]  # never hardcode num_ctx=8192
+    recent = mem.recent("glados")
+    assert len(recent) == 3
+    assert recent[0]["kind"] == "assistant" and recent[0]["text"] == "Oh. It's you."
+    assert recent[1]["kind"] == "user" and recent[1]["text"] == "hello"
 
 
 def test_chat_rejects_empty_and_reports_model_down():
@@ -113,7 +117,14 @@ def test_routes_registered_outside_public_prefix():
     app = web.Application()
     register_character_routes(app)
     paths = {r.resource.canonical for r in app.router.routes()}
-    new = {"/v1/companion/{id}/ccv3", "/v1/companion/import", "/v1/companion/{id}/chat", "/v1/companion/{id}/memories"}
+    new = {
+        "/v1/companion/{id}/ccv3",
+        "/v1/companion/import",
+        "/v1/companion/council",
+        "/v1/companion/{id}/chat",
+        "/v1/companion/{id}/chat/stream",
+        "/v1/companion/{id}/memories",
+    }
     assert new <= paths
     assert not any(p.startswith(pre) for p in new for pre in PUBLIC_ROUTE_PREFIXES)
 
@@ -138,13 +149,75 @@ def test_chat_route_404_card_and_chat(monkeypatch, tmp_path):
             r = await cl.post("/v1/companion/glados/chat", json={"message": "hi"})
             assert r.status == 200 and (await r.json())["reply"] == "ok"
             r = await cl.get("/v1/companion/glados/memories")
-            assert [m["text"] for m in (await r.json())["memories"]] == ["hi"]
+            mems = (await r.json())["memories"]
+            assert [(m["kind"], m["text"]) for m in mems] == [("assistant", "ok"), ("user", "hi")]
     asyncio.run(run())
+
+
+def test_default_memory_db_respects_state_dir(monkeypatch, tmp_path):
+    monkeypatch.delenv("JAEGER_COMPANION_DB", raising=False)
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    assert C.default_memory_db() == tmp_path / "companion" / "memory.db"
+
+
+def test_chat_stream_supports_barge_in_and_persists_exchange(tmp_path):
+    import threading
+
+    mem = C.CompanionMemory(tmp_path / "m.db", embedder=_fake_embed)
+    char = load_character(characters_root() / "truth")
+    interrupt = threading.Event()
+
+    def fake_stream(_url, _body, _timeout):
+        yield {"message": {"content": "Check "}, "done": False}
+        interrupt.set()
+        yield {"message": {"content": "never seen"}, "done": True}
+
+    events = list(C.chat_stream(char, "Verify this claim", memory=mem, interrupt_event=interrupt, streamer=fake_stream))
+    assert events[0] == {"type": "delta", "character_id": "truth", "text": "Check "}
+    assert events[-1]["type"] == "done"
+    assert events[-1]["interrupted"] is True
+    assert events[-1]["reply"] == "Check"
+    assert [(m["kind"], m["text"]) for m in mem.recent("truth")] == [
+        ("assistant", "Check"), ("user", "Verify this claim"),
+    ]
+
+
+def test_council_isolates_character_memory_and_adds_truth_synthesis(tmp_path):
+    mem = C.CompanionMemory(tmp_path / "m.db", embedder=_fake_embed)
+    mem.add("paul_atreides", "Paul-only desert secret")
+    mem.add("lelouch", "Lelouch-only chess note")
+    seen_prompts: dict[str, str] = {}
+
+    def fake_post(_url, body, _timeout):
+        sys_txt = body["messages"][0]["content"]
+        if "Paul Atreides" in sys_txt:
+            seen_prompts["paul"] = sys_txt
+            return {"message": {"content": "Long-term prescience matters most."}}
+        if "Lelouch" in sys_txt:
+            seen_prompts["lelouch"] = sys_txt
+            return {"message": {"content": "Control the board and leverage asymmetry."}}
+        seen_prompts["truth"] = sys_txt
+        return {"message": {"content": "Both frames omit empirical validation; test assumptions with data."}}
+
+    paul = load_character(characters_root() / "paul_atreides")
+    lelouch = load_character(characters_root() / "lelouch")
+    result = C.council_chat([paul, lelouch], "Should we launch now or test more?", memory=mem, post=fake_post)
+
+    assert result["mode"] == "council"
+    assert [t["character_id"] for t in result["turns"]] == ["paul_atreides", "lelouch"]
+    assert "Paul-only desert secret" in seen_prompts["paul"]
+    assert "Lelouch-only chess note" not in seen_prompts["paul"]
+    assert "Lelouch-only chess note" in seen_prompts["lelouch"]
+    assert "Paul-only desert secret" not in seen_prompts["lelouch"]
+    assert result["truth_synthesis"]["character_id"] == "truth"
+    assert "empirical validation" in result["truth_synthesis"]["reply"]
 
 
 def test_webui_passthrough_allows_only_companion_routes():
     from jaeger_ai.core.gateway.webapp.jaeger_sessions import passthrough_match
     assert passthrough_match("/v1/companion/glados/chat", "POST")
+    assert passthrough_match("/v1/companion/glados/chat/stream", "POST")
+    assert passthrough_match("/v1/companion/council", "POST")
     assert passthrough_match("/v1/companion/import", "POST")
     assert passthrough_match("/v1/companion/glados/ccv3", "GET")
     assert passthrough_match("/v1/companion/glados/memories", "GET")

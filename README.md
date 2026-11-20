@@ -1,8 +1,8 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <strong>JaegerAI: an autonomous, self-improving AI research, development, and execution system</strong><br>
-  <em>Human-equivalent digital agency · Model-independent · Local-first with optional cloud</em>
+  <strong>JaegerAI: a persistent personal intelligence platform by Jenkins Robotics</strong><br>
+  <em>Default companion: Truth · Evidence-seeking · Human flourishing · Model-independent & user-owned</em>
 </p>
 
 <p align="center">
@@ -23,31 +23,28 @@
 
 ## What JaegerAI is
 
-JaegerAI is an autonomous, self-improving AI system designed to research, develop, operate, and continuously expand its capabilities across digital environments.
+**Core mission:** *Help humanity, one human at a time.*
 
-Its foundational requirement is **human-equivalent digital agency**: any legitimate workflow a person can accomplish using a computer — across browsers, desktop applications, terminals, development environments, creative software, and online services — should be learnable and executable by Jaeger through appropriate interfaces, tools, and automation. Official APIs are optional, not prerequisites.
+JaegerAI is a platform for **persistent personal intelligence**, built on the reusable **JaegerAgent** execution framework (`packages/jaeger-agent`). Its default companion, **Truth**, is a proactive, evidence-seeking intelligence that develops a long-term relationship with its human, understands their goals and circumstances, and uses permitted tools to help improve their life.
 
-Jaeger combines AI models, deterministic execution systems, computer-use capabilities, persistent memory, agent orchestration, and independent evaluation into a unified operational architecture. It is model-independent, framework-independent, and designed for local-first operation with optional cloud resources.
+- **Truth-seeking below the persona layer:** Truth distinguishes observations, verified facts, hypotheses, predictions, preferences, and unknowns — linking evidence, surfacing contradictions, and preserving correction history. Switching characters never disables truthfulness.
+- **Human flourishing as the objective:** User-controlled goals, opportunities, and measurable outcomes across physical well-being, security, belonging, competence/esteem, self-actualization, and self-transcendence — non-intrusive, inspectable, and fully exportable.
+- **One persistent intelligence, summonable characters:** Identity and memory persist across models, devices, and interfaces. Users can personalize Truth, summon characters with scoped memory, convene multi-character Councils evaluated by Truth, and delegate real digital work through JaegerAgent.
+- **Model-independent & user-owned:** Runs local-first with optional cloud models, enforces fail-closed tool permissions in code, and keeps memory, audit trails, and controls under the user's ownership.
 
 | Component | Responsibility |
 |---|---|
-| Models | Reasoning, perception, generation |
+| Models | Reasoning, perception, generation (cloud + local, full native context) |
 | Tools | Computers, browsers, files, applications |
-| Execution engine | Plan, act, observe, continue |
-| Memory and state | Preserve knowledge and progress |
+| Execution engine | Plan, act, observe, continue (`JaegerAgent`) |
+| Memory and state | Persistent episodic, epistemic world-state, and user-owned goals |
 | Decision layer | Fast local routing and structured choices |
-| Orchestration | Coordinate models and agents |
-| Permissions | User-controlled execution boundaries |
-| Evaluation | Verify results and measure improvement |
-| Scheduler / events | Trigger ongoing autonomous work |
+| Orchestration | Coordinate models, specialist agents, and Character Councils |
+| Permissions | User-controlled execution boundaries (`core/authority/kernel.py`) |
+| Evaluation | Verify results, track contradictions, and measure improvement |
+| Scheduler / events | Trigger ongoing authorized autonomous work |
 
-No single model or framework defines Jaeger. The personal assistant is one application of the system, not its entire identity — its capabilities extend across software development, research, creative production, business operations, and other human-accessible digital activities.
-
-Its primary development objective is to become progressively more capable of completing useful work with less human intervention: researching improvements to its own implementation, modifying and testing software in authorized environments, evaluating changes against measurable criteria, and retaining verified improvements (targeting at least 1% measurable daily progress).
-
-> **Guiding mission:** *Help humanity, one human at a time.*
->
-> **Note:** The existing repository is the starting implementation. Current software structure, legacy documentation, and incomplete functionality do not define or constrain the intended end-state architecture. See [docs/PRODUCT.md](docs/PRODUCT.md) for the authoritative product definition.
+> **Note:** See [docs/PRODUCT.md](docs/PRODUCT.md) for the authoritative product definition and a truthful table of what is implemented & verified vs. partial vs. planned. The dedicated Mac Studio runtime remains protected from development modifications without separate authorization.
 
 ## Current repository capabilities
 

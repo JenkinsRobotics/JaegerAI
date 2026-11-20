@@ -26,15 +26,27 @@ def utc_now_iso() -> str:
 
 
 class EpistemicProvenance(str, Enum):
-    """Epistemic origin of knowledge."""
-    OBSERVED = "observed"      # Directly perceived from tool/sensor output
-    TOLD = "told"              # Asserted by human or external communication
-    INFERRED = "inferred"      # Deductive/inductive reasoning product
-    BELIEVED = "believed"      # Synthesized world consensus
-    PREDICTED = "predicted"    # Probabilistic forecast
-    SYSTEM = "system"          # Ground-truth configuration or commissioning fact
-    PLANNED = "planned"        # What the executive intends to do; not yet done
-    VERIFIED = "verified"      # Confirmed by evidence an independent verifier checked
+    """Epistemic origin / knowledge type of a claim."""
+    OBSERVED = "observed"          # Directly perceived from tool/sensor output
+    TOLD = "told"                  # Asserted by human or external communication
+    INFERRED = "inferred"          # Deductive/inductive reasoning product
+    BELIEVED = "believed"          # Synthesized world consensus
+    HYPOTHESIS = "hypothesis"      # Proposed causal/explanatory claim awaiting test
+    PREDICTED = "predicted"        # Probabilistic forecast or model estimate
+    PREFERENCE = "preference"      # Subjective user preference or value priority
+    UNKNOWN = "unknown"            # Explicit marker of insufficient evidence
+    SYSTEM = "system"              # Ground-truth configuration or commissioning fact
+    PLANNED = "planned"            # What the executive intends to do; not yet done
+    VERIFIED = "verified"          # Confirmed by evidence an independent verifier checked
+
+
+@dataclass(frozen=True)
+class ClaimContradiction:
+    """Two or more active claims on the same (subject, predicate) with conflicting values."""
+    subject: str
+    predicate: str
+    claims: tuple[dict[str, Any], ...]
+    detected_at: float = field(default_factory=time.time)
 
 
 class BeliefStatus(str, Enum):

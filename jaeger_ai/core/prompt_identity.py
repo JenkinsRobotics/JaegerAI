@@ -46,6 +46,19 @@ from __future__ import annotations
 from typing import Any
 
 IDENTITY_FRAGMENT = "identity_name"
+EPISTEMIC_FRAGMENT = "epistemic_invariant"
+
+# System-wide truth-seeking invariant operating below the personality layer.
+# Switching characters or voices never disables truthfulness or evidence rules.
+EPISTEMIC_INVARIANT = (
+    "Epistemic standard (applies under every persona): "
+    "Seek objective truth through observation, evidence, verification, and correction — "
+    "not automatic agreement or claimed infallibility. "
+    "Explicitly distinguish observations, verified facts, hypotheses, predictions, "
+    "user preferences, and unknowns. Never present unverified inference or fictional "
+    "character perspective as verified fact; use tools and checks to verify claims "
+    "whenever feasible, and surface contradictions openly."
+)
 
 # The replacement first line for the Mode-C self-model digest. Says what
 # the old line said that was TRUE (local, one tool, the capability list
@@ -86,10 +99,15 @@ def _identity_name(ctx: Any) -> str:
     return f"Your name is {name}." if name else ""
 
 
+def _epistemic_invariant(_ctx: Any) -> str:
+    """System-wide truth-seeking invariant injected below every persona."""
+    return EPISTEMIC_INVARIANT
+
+
 def register_agent_identity() -> bool:
     """Point the dependency's identity surfaces at
-    :func:`agent_display_name`. Idempotent; returns True when the prompt
-    fragment now carries JaegerAI's builder.
+    :func:`agent_display_name` and install the system-wide epistemic invariant.
+    Idempotent; returns True when the prompt fragment carries JaegerAI's builder.
 
     Called at boot from ``build_system_prompt``, before the first prompt
     assembly, alongside
@@ -104,20 +122,36 @@ def register_agent_identity() -> bool:
         return False
 
     fragments = assemble.PROMPT_FRAGMENTS
+    found_identity = False
+    identity_index = -1
     for index, fragment in enumerate(fragments):
         if fragment.name != IDENTITY_FRAGMENT:
             continue
-        if fragment.build is _identity_name:
-            return True
-        fragments[index] = dataclasses.replace(
-            fragment,
-            build=_identity_name,
-            source="(generated: active character, else identity.yaml)",
-            note="the name the agent answers to — the active character's, "
-                 "or the instance's own while the neutral sheet is selected",
+        identity_index = index
+        found_identity = True
+        if fragment.build is not _identity_name:
+            fragments[index] = dataclasses.replace(
+                fragment,
+                build=_identity_name,
+                source="(generated: active character, else identity.yaml)",
+                note="the name the agent answers to — the active character's, "
+                     "or the instance's own while the neutral sheet is selected",
+            )
+        break
+
+    if found_identity and not any(f.name == EPISTEMIC_FRAGMENT for f in fragments):
+        template = fragments[identity_index]
+        fragments.insert(
+            identity_index + 1,
+            dataclasses.replace(
+                template,
+                name=EPISTEMIC_FRAGMENT,
+                build=_epistemic_invariant,
+                source="(system invariant: truth-seeking below persona)",
+                note="non-overridable epistemic discipline applied across all personas",
+            ),
         )
-        return True
-    return False
+    return found_identity
 
 
 def _patch_self_model_header() -> None:
