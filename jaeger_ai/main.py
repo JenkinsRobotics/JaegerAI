@@ -1255,6 +1255,156 @@ def _register_builtins(client: Any) -> None:
             return {"ok": False, "error": "instance layout not loaded"}
         return _set(layout, path=path, value=value)
 
+    @register_tool_from_function(side_effect="local_write", replace=True)
+    @requires_tier(PermissionTier.WRITE_LOCAL, skill="host",
+                   operation="knowledge_record_claim",
+                   summary="record a typed epistemic claim in Truth's knowledge store")
+    def knowledge_record_claim(
+        subject: str,
+        predicate: str,
+        value: str,
+        provenance: str = "observed",
+        confidence: float = 0.8,
+        source_id: str = "truth_agent",
+        evidence_snippet: str = "",
+        evidence_uri: str = "",
+    ) -> dict:
+        """Record an epistemic claim (observed, verified, told, inferred, hypothesis,
+        prediction, preference, or unknown) with optional evidence and contradiction check."""
+        from jaeger_ai.core.world.tools import knowledge_record_claim as _rec
+        return _rec(
+            subject=subject, predicate=predicate, value=value,
+            provenance=provenance, confidence=confidence, source_id=source_id,
+            evidence_snippet=evidence_snippet, evidence_uri=evidence_uri,
+        )
+
+    @register_tool_from_function(side_effect="read", replace=True)
+    @requires_tier(PermissionTier.READ_ONLY, skill="host",
+                   operation="knowledge_query",
+                   summary="query Truth's epistemic claims")
+    def knowledge_query(query: str = "", subject: str = "", include_inactive: bool = False) -> dict:
+        """Search or inspect epistemic claims by keyword or exact subject."""
+        from jaeger_ai.core.world.tools import knowledge_query as _qry
+        return _qry(query=query, subject=subject, include_inactive=include_inactive)
+
+    @register_tool_from_function(side_effect="read", replace=True)
+    @requires_tier(PermissionTier.READ_ONLY, skill="host",
+                   operation="knowledge_contradictions",
+                   summary="detect conflicting claims in Truth's knowledge store")
+    def knowledge_contradictions(subject: str = "", predicate: str = "") -> dict:
+        """Find active claims with conflicting values for the same (subject, predicate)."""
+        from jaeger_ai.core.world.tools import knowledge_contradictions as _ctr
+        return _ctr(subject=subject, predicate=predicate)
+
+    @register_tool_from_function(side_effect="local_write", replace=True)
+    @requires_tier(PermissionTier.WRITE_LOCAL, skill="host",
+                   operation="knowledge_verify_claim",
+                   summary="attach empirical evidence and verify a claim")
+    def knowledge_verify_claim(
+        claim_id: str,
+        source_type: str,
+        source_id: str,
+        snippet: str = "",
+        uri: str = "",
+        confidence: float = 1.0,
+    ) -> dict:
+        """Attach grounding evidence and promote an active claim to VERIFIED."""
+        from jaeger_ai.core.world.tools import knowledge_verify_claim as _ver
+        return _ver(
+            claim_id=claim_id, source_type=source_type, source_id=source_id,
+            snippet=snippet, uri=uri, confidence=confidence,
+        )
+
+    @register_tool_from_function(side_effect="read", replace=True)
+    @requires_tier(PermissionTier.READ_ONLY, skill="host",
+                   operation="human_needs_summary",
+                   summary="inspect user-owned flourishing goals, opportunities, and outcomes")
+    def human_needs_summary(include_inactive: bool = False) -> dict:
+        """Inspect user-owned Human Needs goals, opportunities, outcomes, and quiet-hours status."""
+        from jaeger_ai.features.human_needs.tools import human_needs_summary as _sum
+        return _sum(include_inactive=include_inactive)
+
+    @register_tool_from_function(side_effect="local_write", replace=True)
+    @requires_tier(PermissionTier.WRITE_LOCAL, skill="host",
+                   operation="human_needs_add_goal",
+                   summary="add a user-owned flourishing goal")
+    def human_needs_add_goal(
+        title: str,
+        dimension: str,
+        priority: int = 3,
+        notes: str = "",
+        success_metric: str = "",
+        signal_kind: str = "user_preference",
+    ) -> dict:
+        """Record a user-owned goal across one of the six flourishing dimensions."""
+        from jaeger_ai.features.human_needs.tools import human_needs_add_goal as _add
+        return _add(
+            title=title, dimension=dimension, priority=priority,
+            notes=notes, success_metric=success_metric, signal_kind=signal_kind,
+        )
+
+    @register_tool_from_function(side_effect="local_write", replace=True)
+    @requires_tier(PermissionTier.WRITE_LOCAL, skill="host",
+                   operation="human_needs_propose_opportunity",
+                   summary="propose a policy-gated flourishing opportunity")
+    def human_needs_propose_opportunity(
+        title: str,
+        dimension: str,
+        rationale: str,
+        goal_id: str = "",
+        proposed_action: str = "",
+        contacts_third_party: bool = False,
+        active_task_running: bool = False,
+    ) -> dict:
+        """Propose a non-intrusive opportunity subject to quiet-hours and third-party contact guardrails."""
+        from jaeger_ai.features.human_needs.tools import human_needs_propose_opportunity as _prop
+        return _prop(
+            title=title, dimension=dimension, rationale=rationale,
+            goal_id=goal_id, proposed_action=proposed_action,
+            contacts_third_party=contacts_third_party,
+            active_task_running=active_task_running,
+        )
+
+    @register_tool_from_function(side_effect="local_write", replace=True)
+    @requires_tier(PermissionTier.WRITE_LOCAL, skill="host",
+                   operation="human_needs_record_outcome",
+                   summary="record a measurable flourishing outcome")
+    def human_needs_record_outcome(
+        summary: str,
+        goal_id: str = "",
+        opportunity_id: str = "",
+        metric_name: str = "",
+        metric_before: str = "",
+        metric_after: str = "",
+        evidence_ref: str = "",
+        signal_kind: str = "objective_measure",
+    ) -> dict:
+        """Record a measurable outcome linked to a user goal or opportunity."""
+        from jaeger_ai.features.human_needs.tools import human_needs_record_outcome as _out
+        return _out(
+            summary=summary, goal_id=goal_id, opportunity_id=opportunity_id,
+            metric_name=metric_name, metric_before=metric_before,
+            metric_after=metric_after, evidence_ref=evidence_ref,
+            signal_kind=signal_kind,
+        )
+
+    @register_tool_from_function(side_effect="read", replace=True)
+    @requires_tier(PermissionTier.READ_ONLY, skill="host",
+                   operation="summon_council",
+                   summary="summon a multi-character council with Truth epistemic synthesis")
+    def summon_council(
+        characters: list[str],
+        topic: str,
+        include_truth_synthesis: bool = True,
+        model: str = "",
+    ) -> dict:
+        """Summon 2-6 characters for an Avatar-style perspective council with scoped memory and Truth synthesis."""
+        from jaeger_ai.features.personality.tools import summon_council as _council
+        return _council(
+            characters=characters, topic=topic,
+            include_truth_synthesis=include_truth_synthesis, model=model,
+        )
+
 
 
 
