@@ -267,3 +267,25 @@ def test_explicit_shell_deny_is_never_overridden_by_full_auto(tmp_path: Path):
     )
     assert decision.decision == AuthorityDecisionType.DENY
     assert decision.policy_name == "commissioning_authority"
+
+
+# ── 8. Desktop computer use: owner Full Auto ALLOW, untrusted DENY ──────
+
+@pytest.mark.parametrize("tool", ["computer_do", "computer_use", "computer_click", "computer_type_text"])
+def test_desktop_computer_use_allows_owner_in_full_auto_and_denies_external(tmp_path: Path, tool: str):
+    layout = _make_instance(tmp_path, autonomy="auto")
+    owner_decision = PolicyKernel().evaluate(
+        ProposedAction(tool_name=tool, arguments={"action": "list_apps"}, actor="owner:webui", tier="external_effect"),
+        instance_root=layout.root,
+        dry_run=True,
+    )
+    assert owner_decision.decision == AuthorityDecisionType.ALLOW
+
+    for actor in ("mcp", "mcp:codex", "a2a", "helper:worker", "guest", "external_agent:bot"):
+        ext_decision = PolicyKernel().evaluate(
+            ProposedAction(tool_name=tool, arguments={"action": "click"}, actor=actor, tier="external_effect"),
+            instance_root=layout.root,
+            dry_run=True,
+        )
+        assert ext_decision.decision == AuthorityDecisionType.DENY
+        assert ext_decision.policy_name == "identity_trust"

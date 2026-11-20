@@ -128,8 +128,12 @@ def test_security_discussion_does_not_select_gemma():
 
 
 def test_cli_tool_descriptions_do_not_trigger_private_data_fallback(monkeypatch):
+    from jaeger_agent.adapters import cli_turn_mcp
     from jaeger_agent.adapters.cli_backend import CliBackendAdapter
     from jaeger_ai.core.models.router import classify
+    # Exercise the non-MCP flattened-schema path where tool descriptions appear in
+    # formatted["prompt"] (grok uses MCP by default, which omits inline schemas).
+    monkeypatch.setattr(cli_turn_mcp, "MCP_BACKENDS", frozenset())
     adapter = CliBackendAdapter(backend_id="grok")
     calls = []
     monkeypatch.setattr(adapter, "call", lambda payload, interrupt, **kw: calls.append(payload))
@@ -144,8 +148,16 @@ def test_cli_tool_descriptions_do_not_trigger_private_data_fallback(monkeypatch)
     assert classify(formatted["prompt"])[0] == "private"  # flattened schemas caused the regression
     guarded.call(formatted, threading.Event())
     assert len(calls) == 1
+    # Private tool outputs are withheld rather than sent to the cloud model.
+    from jaeger_ai.core.models.request_policy import WITHHELD_NOTE
+    withheld_formatted = guarded.format_messages(
+        [{"role": "tool", "content": "confidential user record"}], tools, "Be helpful"
+    )
+    assert "confidential user record" not in withheld_formatted["prompt"]
+    assert WITHHELD_NOTE in withheld_formatted["prompt"]
+    # Private user messages still fail closed before egress.
     with pytest.raises(ModelPolicyError):
-        guarded.format_messages([{"role": "tool", "content": "confidential user record"}], tools, "Be helpful")
+        guarded.format_messages([{"role": "user", "content": "confidential user record"}], tools, "Be helpful")
     # Mutation after formatting cannot reuse the earlier policy decision.
     formatted["prompt"] += "\nmy password is synthetic-only"
     with pytest.raises(ModelPolicyError):

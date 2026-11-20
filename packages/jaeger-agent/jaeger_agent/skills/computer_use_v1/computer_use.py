@@ -127,16 +127,60 @@ def _osascript(script: str, timeout: float = 20.0) -> tuple[bool, str]:
 # ── perceive ─────────────────────────────────────────────────────────
 
 
-def screenshot(path: str = "screen.png") -> dict[str, Any]:
-    """Capture the screen to a PNG under the instance's skills/ directory."""
+def _resolve_screenshot_target(path: str) -> tuple[Any, Any]:
+    """Resolve screenshot output path cleanly across bound and unbound contexts.
+
+    Returns ``(target_path, layout_or_none)``:
+    - Explicit absolute paths inside the OS temp directory (``/tmp``,
+      ``/private/tmp``, ``tempfile.gettempdir()``) are allowed directly so
+      diagnostics and tools work even before a workspace layout is bound.
+    - When a workspace layout is bound, relative paths stay confined inside
+      ``layout.skills_dir`` via ``_resolve_under``.
+    - When no workspace layout is bound, relative paths land in
+      ``<operator_state_root>/screenshots`` (never in-repo).
+    """
+    import os
+    import tempfile
+    from pathlib import Path
     from jaeger_agent.core.workspace import (  # lazy — keep module import-clean
         SandboxError, _require_layout, _resolve_under,
     )
+
+    clean = str(path or "screen.png").strip() or "screen.png"
+    candidate = Path(clean).expanduser()
+    if candidate.is_absolute():
+        real = Path(os.path.realpath(str(candidate)))
+        tmp_roots = {
+            Path(os.path.realpath(tempfile.gettempdir())),
+            Path("/tmp"),
+            Path("/private/tmp"),
+        }
+        if any(real == root or root in real.parents for root in tmp_roots):
+            return real, None
+    try:
+        layout = _require_layout()
+    except RuntimeError:
+        # Unbound standalone/daemon context: store strictly under operator state root.
+        try:
+            from jaeger_ai.core.instance.instance import operator_state_root
+            base = Path(operator_state_root()) / "screenshots"
+        except Exception:  # noqa: BLE001
+            base = Path(tempfile.gettempdir()) / "jaeger-screenshots"
+        base.mkdir(parents=True, exist_ok=True)
+        name = Path(clean).name or "screen.png"
+        return (base / name).resolve(), None
+    target = _resolve_under(layout.skills_dir, clean)
+    return target, layout
+
+
+def screenshot(path: str = "screen.png") -> dict[str, Any]:
+    """Capture the screen to a PNG under the instance's skills/ directory (or temp path)."""
+    from jaeger_agent.core.workspace import SandboxError  # lazy — keep module import-clean
+
     if not _IS_MAC:
         return {"ok": False, "error": "computer_use is macOS-only"}
-    layout = _require_layout()
     try:
-        target = _resolve_under(layout.skills_dir, path)
+        target, layout = _resolve_screenshot_target(path)
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -146,11 +190,16 @@ def screenshot(path: str = "screen.png") -> dict[str, Any]:
         )
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-    if proc.returncode != 0 or not target.exists():
+    if proc.returncode != 0 or not target.exists() or target.stat().st_size == 0:
         return {"ok": False, "error": ("screencapture failed — the host "
                 "process may need Screen Recording permission.")}
-    return {"ok": True, "path": str(target.relative_to(layout.root)),
-            "bytes": target.stat().st_size}
+    rel_or_abs = str(target.relative_to(layout.root)) if layout is not None else str(target)
+    return {
+        "ok": True,
+        "path": rel_or_abs,
+        "absolute_path": str(target),
+        "bytes": target.stat().st_size,
+    }
 
 
 def _parse_screen(raw: str) -> dict[str, Any]:

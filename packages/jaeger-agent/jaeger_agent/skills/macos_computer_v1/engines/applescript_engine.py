@@ -375,6 +375,8 @@ class AppleScriptEngine:
         # ``{app}`` carries the target app's process name for templates
         # that need BOTH an app and a value (window management).
         safe_app = str(action.target or args.get("app") or "").replace('"', r'\"')
+        if not safe_value and kind in {"is_running", "activate"} and safe_app:
+            safe_value = safe_app
         script = template.replace("{value}", safe_value).replace("{app}", safe_app)
         try:
             out = subprocess.run(
