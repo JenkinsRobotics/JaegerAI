@@ -123,13 +123,21 @@ def running_apps_without_ax() -> dict[str, Any]:
     return {"ok": True, "apps": _running_apps(), "frontmost": frontmost}
 
 
-def _running_apps() -> list[dict[str, Any]]:
-    """Every running app with a UI — name, bundle id, PID."""
+def _running_apps(*, include_accessory: bool = False) -> list[dict[str, Any]]:
+    """Every running app with a UI — name, bundle id, PID.
+
+    In AppKit, ``NSApplicationActivationPolicyRegular == 0`` (standard Dock
+    GUI apps like Finder, Safari, Chrome, Notes, Terminal) and
+    ``NSApplicationActivationPolicyAccessory == 1`` (menu-bar apps).
+    ``NSApplicationActivationPolicyProhibited == 2`` are background daemons.
+    """
     import AppKit
+    regular = getattr(AppKit, "NSApplicationActivationPolicyRegular", 0)
+    accessory = getattr(AppKit, "NSApplicationActivationPolicyAccessory", 1)
+    allowed = (regular, accessory) if include_accessory else (regular,)
     out: list[dict[str, Any]] = []
     for app in AppKit.NSWorkspace.sharedWorkspace().runningApplications():
-        # 1 == NSApplicationActivationPolicyRegular (has a Dock presence).
-        if app.activationPolicy() != 0:
+        if app.activationPolicy() in allowed:
             out.append({
                 "name": str(app.localizedName() or ""),
                 "bundle_id": str(app.bundleIdentifier() or ""),
@@ -139,16 +147,23 @@ def _running_apps() -> list[dict[str, Any]]:
 
 
 def _resolve_pid(app: str) -> int | None:
-    """Map an app name or bundle id to a PID (case-insensitive)."""
+    """Map an app name or bundle id to a PID (case-insensitive).
+
+    Prefers standard GUI apps (regular activation policy), falling back to
+    menu-bar/accessory apps so both Dock apps (Finder, Notes, Chrome) and
+    status-bar utilities resolve reliably.
+    """
     needle = (app or "").strip().lower()
     if not needle:
         return None
-    for row in _running_apps():
-        if needle in (row["name"].lower(), row["bundle_id"].lower()):
-            return row["pid"]
-    for row in _running_apps():            # looser: substring on the name
-        if needle in row["name"].lower():
-            return row["pid"]
+    for include_accessory in (False, True):
+        rows = _running_apps(include_accessory=include_accessory)
+        for row in rows:
+            if needle in (row["name"].lower(), row["bundle_id"].lower()):
+                return row["pid"]
+        for row in rows:            # looser: substring on the name
+            if needle in row["name"].lower():
+                return row["pid"]
     return None
 
 

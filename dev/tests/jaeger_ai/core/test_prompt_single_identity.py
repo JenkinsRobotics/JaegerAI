@@ -181,7 +181,8 @@ def test_the_lane_header_names_no_framework() -> None:
     register_agent_identity()
     assert persona_lane._SELF_MODEL_HEADER == SELF_MODEL_HEADER
     assert "jaeger" not in SELF_MODEL_HEADER.lower()
-    assert "perform_task" in SELF_MODEL_HEADER
+    assert "not tool names" in SELF_MODEL_HEADER.lower()
+    assert "through your tools" in SELF_MODEL_HEADER.lower()
 
 
 def test_the_assembled_digest_names_no_framework() -> None:

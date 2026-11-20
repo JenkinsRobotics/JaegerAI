@@ -295,18 +295,44 @@ def ax_focused_window(*, app: str = "") -> dict[str, Any]:
     if not ready:
         return ax._unavailable(detail)
     import ApplicationServices as _AX
+    resolved_app_name = app
     if app:
         pid = ax._resolve_pid(app)
         if pid is None:
             return {"ok": False, "error": f"no running app matches {app!r}"}
         target_app = _AX.AXUIElementCreateApplication(pid)
-        focused = ax._copy_attr(target_app, _AX.kAXFocusedWindowAttribute)
+        focused = (
+            ax._copy_attr(target_app, _AX.kAXFocusedWindowAttribute)
+            or ax._copy_attr(target_app, _AX.kAXMainWindowAttribute)
+        )
+        if focused is None:
+            wins = ax._copy_attr(target_app, _AX.kAXWindowsAttribute) or []
+            if wins:
+                focused = wins[0]
     else:
-        # System-wide focused element walks up to its enclosing window.
+        # System-wide focused element walks up to its enclosing window; fall back
+        # to the frontmost NSWorkspace application's focused/main/first window.
         system = _AX.AXUIElementCreateSystemWide()
         focused_el = ax._copy_attr(system, _AX.kAXFocusedUIElementAttribute)
         focused = ax._copy_attr(focused_el, _AX.kAXWindowAttribute) \
             if focused_el is not None else None
+        if focused is None:
+            try:
+                import AppKit
+                front = AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+                if front is not None:
+                    resolved_app_name = str(front.localizedName() or "")
+                    target_app = _AX.AXUIElementCreateApplication(int(front.processIdentifier()))
+                    focused = (
+                        ax._copy_attr(target_app, _AX.kAXFocusedWindowAttribute)
+                        or ax._copy_attr(target_app, _AX.kAXMainWindowAttribute)
+                    )
+                    if focused is None:
+                        wins = ax._copy_attr(target_app, _AX.kAXWindowsAttribute) or []
+                        if wins:
+                            focused = wins[0]
+            except Exception:  # noqa: BLE001
+                pass
     if focused is None:
         return {"ok": False, "error": "no focused window"}
 
@@ -323,7 +349,7 @@ def ax_focused_window(*, app: str = "") -> dict[str, Any]:
         })
     return {
         "ok": True,
-        "app": app or "(focused)",
+        "app": resolved_app_name or "(focused)",
         "title": title,
         "position": pos,
         "size": size,

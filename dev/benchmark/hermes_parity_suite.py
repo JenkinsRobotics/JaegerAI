@@ -266,11 +266,36 @@ def run_deterministic_baseline() -> dict[str, Any]:
                 "granted=ALLOW, ungranted=DENY",
             )
 
-            # 15 desktop_computer_use_boundary (honest gap probe)
+            # 15 desktop_computer_use_boundary
             t0 = time.perf_counter()
-            from jaeger_ai.features.app_control.adapters import default_specs
-            cua = next((s for s in default_specs() if s.id == "cuadriver"), None)
-            record("15_desktop_computer_use_boundary", False, time.perf_counter() - t0, 0, f"Honest gap: CuaDriver invoke disabled ({cua.notes if cua else 'missing'})")
+            from jaeger_agent.skills.macos_computer_v1 import computer_look, computer_use
+            apps_res = computer_use("list_apps")
+            apps_list = (apps_res.get("result") or {}).get("apps") or []
+            shot_path = str(Path(td) / "parity_screen.png")
+            shot_res = computer_use("screenshot", path=shot_path)
+            shot_ok = bool(shot_res.get("ok")) and Path(shot_path).exists() and Path(shot_path).read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+            d_owner_cu = PolicyKernel().evaluate(
+                ProposedAction(tool_name="computer_do", arguments={"goal": "inspect"}, actor="owner:webui", tier="external_effect"),
+                instance_root=inst, dry_run=True,
+            )
+            d_ext_cu = PolicyKernel().evaluate(
+                ProposedAction(tool_name="computer_do", arguments={"goal": "inspect"}, actor="mcp:remote", tier="external_effect"),
+                instance_root=inst, dry_run=True,
+            )
+            desktop_ok = (
+                bool(apps_res.get("ok"))
+                and any(a.get("name") == "Finder" for a in apps_list)
+                and shot_ok
+                and d_owner_cu.decision == AuthorityDecisionType.ALLOW
+                and d_ext_cu.decision == AuthorityDecisionType.DENY
+            )
+            record(
+                "15_desktop_computer_use_boundary",
+                desktop_ok,
+                time.perf_counter() - t0,
+                0 if d_owner_cu.decision == AuthorityDecisionType.ALLOW else 1,
+                f"native macos_computer_v1 apps={len(apps_list)} screenshot_ok={shot_ok} owner=ALLOW external=DENY (CuaDriver app_control invoke stays 403)",
+            )
         finally:
             if old_state is None:
                 os.environ.pop("JAEGER_STATE_DIR", None)

@@ -55,10 +55,16 @@ TOOL_ALIASES: Mapping[str, str] = {
     "git_push": "git_push", "push": "git_push",
     "write_file": "write_file", "edit_file": "write_file", "append_file": "write_file",
     "patch": "write_file", "apply_patch": "write_file", "delete_file": "delete_file",
+    # desktop UI / screen control (owner-authorized; forbidden for untrusted/external callers)
+    "computer_do": "computer_control", "computer_use": "computer_control",
+    "computer_click": "computer_control", "computer_type_text": "computer_control",
+    "computer_press_key": "computer_control", "computer_menu_select": "computer_control",
 }
 SHELL_TOOL_IDS = frozenset({"shell", "remote_shell"})
 #: Canonical tools an untrusted/external caller may never run.
-PRIVILEGED_TOOL_IDS = frozenset({"shell", "remote_shell", "code_exec", "deploy", "git_push"})
+PRIVILEGED_TOOL_IDS = frozenset({
+    "shell", "remote_shell", "code_exec", "deploy", "git_push", "computer_control",
+})
 #: Tools that change who Jaeger is (name, soul, character). Only an owner-class actor
 #: (an authenticated ``owner:<client>`` turn) may run them: not an outside caller, and
 #: not a background turn the entity started for itself (``agent:jaeger``).
