@@ -333,6 +333,25 @@ def execute_heartbeat_event(
     kind = briefing_kind(now=clock)
     is_briefing_due = bool(kind and not already_briefed(layout, kind, now=clock))
 
+    # Run Truth's bounded Human Needs awareness pass (0 LLM calls when quiet).
+    hn_summary: dict[str, Any] = {}
+    has_hn_action = False
+    try:
+        from jaeger_ai.features.human_needs.heartbeat_loop import run_human_needs_heartbeat
+        inst_root = getattr(layout, "root", None) if layout is not None else None
+        hn_report = run_human_needs_heartbeat(now=clock, instance_root=inst_root)
+        hn_summary = {
+            "goals_evaluated": hn_report.goals_evaluated,
+            "admitted_tasks": len(hn_report.admitted_tasks),
+            "digest_items": len(hn_report.digest_items),
+            "blocked_unauthorized": len(hn_report.blocked_unauthorized),
+            "in_quiet_hours": hn_report.in_quiet_hours,
+            "silent_ok": hn_report.silent_ok,
+        }
+        has_hn_action = bool(hn_report.notifications)
+    except Exception:  # noqa: BLE001 — awareness pass degrades cleanly, never breaks heartbeat
+        hn_summary = {}
+
     # Ingest event into the canonical entity runtime
     runtime = EntityRuntime.get_singleton()
     event, decision = runtime.submit_heartbeat(
@@ -340,7 +359,8 @@ def execute_heartbeat_event(
         payload={
             "briefing_kind": kind,
             "pending_briefing": kind if is_briefing_due else None,
-            "urgent_work": False,
+            "urgent_work": has_hn_action,
+            "human_needs_awareness": hn_summary,
         },
     )
 
