@@ -23,21 +23,21 @@ import urllib.request
 from datetime import datetime
 
 DEFAULT_PROVIDER = "ollama"
-DEFAULT_MODEL = "gemma4:latest"
+DEFAULT_MODEL = "qwen3.5:9b"
 VOICE_HISTORY = 8  # recent messages carried into a spoken turn
 VOICE_CLIP = 400  # characters kept per history message
 VOICE_BACKGROUND = 1200  # characters of recalled background kept before the request
-VOICE_CTX = 8192
 VOICE_STYLE = (
-    "You are Jaeger, the user's personal AI assistant, talking with them by voice. "
+    "You are Truth, the user's persistent personal intelligence on JaegerAI, talking with them by voice. "
     "Your reply is spoken aloud the moment you write it. "
     "Answer in one to three short, natural sentences. Lead with the answer. "
     "No markdown, lists, tables, emoji, code or URLs. Spell out symbols. "
+    "Distinguish verified facts from hypotheses or unknowns; never invent live facts "
+    "you were not given (time in other places, weather, news, prices, scores, anything in files or accounts); "
+    "say you'll check instead. "
     "If the person asks for real work (files, tools, research, messages), say briefly "
     "that you're on it; the work itself runs in the chat. "
-    "The current local date and time are given with each request; use them. "
-    "Never guess live facts you were not given (time in other places, weather, news, "
-    "prices, scores, anything in files or accounts); say you'll check instead."
+    "The current local date and time are given with each request; use them."
 )
 
 # Requests that need live facts or the user's data go to full Jaeger (tools), never
@@ -105,10 +105,14 @@ def selection() -> tuple[str, str]:
 
 def voice_brain() -> dict:
     provider, model = selection()
+    controls: dict[str, object] = {"reasoning_effort": "none", "max_tokens": 400}
+    raw_ctx = (os.environ.get("JAEGER_VOICE_CTX") or "").strip()
+    if raw_ctx.isdigit() and int(raw_ctx) > 0:
+        controls["ctx"] = int(raw_ctx)
     return {
         "provider": provider,
         "model": model,
-        "controls": {"ctx": VOICE_CTX, "reasoning_effort": "none", "max_tokens": 400},
+        "controls": controls,
         "system": VOICE_STYLE,
         "history": VOICE_HISTORY,
     }
@@ -168,8 +172,11 @@ def warm(timeout: float = 30.0) -> None:
                 base = base[:-3]
         except Exception:  # noqa: BLE001
             base = "http://127.0.0.1:11434"
-        body = json.dumps({"model": model, "messages": [], "keep_alive": "30m",
-                           "options": {"num_ctx": VOICE_CTX}}).encode()
+        payload: dict[str, object] = {"model": model, "messages": [], "keep_alive": "30m"}
+        raw_ctx = (os.environ.get("JAEGER_VOICE_CTX") or "").strip()
+        if raw_ctx.isdigit() and int(raw_ctx) > 0:
+            payload["options"] = {"num_ctx": int(raw_ctx)}
+        body = json.dumps(payload).encode()
         try:
             urllib.request.urlopen(urllib.request.Request(
                 base + "/api/chat", body, {"Content-Type": "application/json"}), timeout=timeout).read()
