@@ -17,12 +17,12 @@ it("restores only this chat's pending handoff; decisions remain explicit and fai
   await act(async () => root.render(<SessionApprovals sessionId="home" host={host} excludeIds={["tool"]}/>));
   expect(el.textContent).toContain("Allow handoff to Beta?"); expect(el.textContent).toContain("exact bounded task");
   expect(el.textContent).not.toContain("foreign"); expect(host.respondToConfirmation).not.toHaveBeenCalled();
-  const allow=()=>Array.from(el.querySelectorAll("button")).find(b=>b.textContent==="Allow once")!;
+  const allow=()=>Array.from(el.querySelectorAll("button")).find(b=>b.textContent==="Approve once")!;
   await act(async () => allow().click());
-  expect(el.textContent).toContain("Save rejected"); expect(el.textContent).toContain("Allow once");
+  expect(el.textContent).toContain("Save rejected"); expect(el.textContent).toContain("Approve once");
   await act(async () => allow().click());
-  expect(host.respondToConfirmation).toHaveBeenLastCalledWith("home","own","approve");
-  expect(el.textContent).not.toContain("Allow once");
+  expect(host.respondToConfirmation).toHaveBeenLastCalledWith("home","own","approve","once");
+  expect(el.textContent).not.toContain("Approve once");
   await act(async () => root.unmount());
 });
 
@@ -31,7 +31,7 @@ it("restores tool approval after reload without an active turn, and never decide
  const el=document.createElement('div');const root=createRoot(el);
  await act(async()=>root.render(<SessionApprovals sessionId="home" host={host}/>));
  expect(el.textContent).toContain('Allow fixture write?');expect(host.respondToConfirmation).not.toHaveBeenCalled();
- await act(async()=>Array.from(el.querySelectorAll('button')).find(b=>b.textContent?.startsWith('Deny once'))!.click());
- expect(host.respondToConfirmation).toHaveBeenCalledExactlyOnceWith('home','restored-tool','deny');
+ await act(async()=>Array.from(el.querySelectorAll('button')).find(b=>b.textContent?.startsWith('Deny'))!.click());
+ expect(host.respondToConfirmation).toHaveBeenCalledExactlyOnceWith('home','restored-tool','deny','once');
  expect(el.textContent).not.toContain('Allow fixture write?');await act(async()=>root.unmount());
 });
