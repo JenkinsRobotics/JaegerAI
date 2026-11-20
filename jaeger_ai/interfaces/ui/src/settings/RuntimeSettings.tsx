@@ -90,6 +90,8 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
     void settings.read(sessionId).then(current => { if (live && current.session_id === sessionId) setBase(current); }, () => { /* the opened picker shows the actionable error */ });
     return () => { live = false; };
   }, [settings, sessionId]);
+  const [reloadTick, setReloadTick] = useState(0);
+  const reload = () => { if (!locked.current) setReloadTick((n) => n + 1); };
   useEffect(() => {
     if (!open || !settings || !sessionId) return;
     let live = true; generation.current++;setConfirmCancel(false);setNeedsRefresh(false);setLoaded(false);setBase(undefined); setError(undefined); setNotice(undefined);
@@ -107,10 +109,13 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
       setSelected(nextSelected);
       const matching=runtimeChoices(models).find(model=>model.id===nextSelected);
       setProviderGroup(matching?.group??(runtimeChoices(models).some(model=>model.group==="ollama-cloud")?"ollama-cloud":"all"));
+      if (reloadTick > 0 && Number.isSafeInteger(current.model_choice_revision)) {
+        setNotice(`Models refreshed (revision ${current.model_choice_revision}).`);
+      }
       setLoaded(true);
     }).catch(e => { if (live) setError(String((e as Error).message ?? e)); });
     return () => { live = false; generation.current++; };
-  }, [open, settings, sessionId]);
+  }, [open, settings, sessionId, reloadTick]);
   if (!settings || !sessionId) return null;
   const choices = runtimeChoices(inventory);
   const providerGroups = Array.from(new Map(choices.map(model => [model.group, model.groupLabel])).entries());
@@ -183,6 +188,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
       {pending&&settings.operation&&<button className="jg-runtime-secondary" type="button" disabled={busy} onClick={()=>void check()}>Check original model save</button>}
       {pending&&settings.cancelPending&&!confirmCancel&&<button className="jg-runtime-secondary" type="button" disabled={busy} onClick={()=>setConfirmCancel(true)}>Review pending model cancellation</button>}
       {pending&&confirmCancel&&<div className="jg-runtime-confirm" role="group" aria-label="Confirm model save cancellation"><p>Cancel the pending command while preserving the committed choice and this proposal?</p><button type="button" disabled={busy} onClick={()=>void check(true)}>Confirm pending model cancellation</button><button type="button" disabled={busy} onClick={()=>setConfirmCancel(false)}>Keep pending model save</button></div>}
+      {(loaded || needsRefresh || Boolean(error)) && <button className="jg-runtime-secondary" type="button" disabled={busy} onClick={reload}>Refresh models and settings</button>}
       <details className="jg-runtime-providers"><summary>Gateway provider status</summary><ul>{inventory?.providers.map(provider => <li key={provider.id}><strong>{provider.display_name}</strong> · {providerStatus(provider)}</li>)}</ul></details>
       
     </section>}

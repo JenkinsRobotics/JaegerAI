@@ -62,7 +62,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "containers": (r"\b(container|containers|containerized)\b",),
     "media": (r"\b(image|video|audio|speech|voice|camera|microphone|listen)\b",),
     "web": (r"\b(weather|forecast|twitter|tweets?|x\.com|x_search|x search|search x)\b",),
-    "sessions": (r"\b(conversation|session|chat history)\b",),
+    "sessions": (r"\b(conversations?|sessions?|chats?|chat history|topics?|folders?|projects?|organize)\b",),
     "board": (r"\b(board|kanban|card)\b",),
     "agent_notes": (r"\b(notes?|remember|preferences?|keep track)\b",),
     "frameworks": (r"\b(claude code|claude|codex|gemini|antigravity|grok|other agents?|frameworks?)\b",),

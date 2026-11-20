@@ -57,3 +57,39 @@ it('fails open to the app when first-run status cannot load', async () => {
   await mount(<FirstRunGate api={client}><div>Home content</div></FirstRunGate>);
   expect(location.pathname).toBe('/'); expect(el!.textContent).toContain('Home content');
 });
+it('defaults companion to Truth and submits full personalized onboarding preferences without dev tools', async () => {
+  const client = api(); await mount(<FirstRunPage api={client} onDone={vi.fn()} />);
+  await click(button('Get started'));
+  expect(el!.querySelector('.jg-first-run__characters button[aria-pressed="true"]')?.textContent).toContain('Truth');
+  await click(button('Choose character'));
+  const selects = el!.querySelectorAll('select');
+  await act(async () => { selects[0].value = 'ollama'; selects[0].dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(async () => { selects[1].value = 'qwen3:4b'; selects[1].dispatchEvent(new Event('change', { bubbles: true })); });
+  const setInput = async (label: string, value: string) => {
+    const input = el!.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  };
+  await setInput('Companion display name', 'Truth');
+  await setInput('First personal goal', 'Stay focused and healthy');
+  await click(button('Connect models'));
+  expect(client.setup).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    character_id: 'truth',
+    awake_provider: 'ollama',
+    awake_model: 'qwen3:4b',
+    display_name: 'Truth',
+    voice_profile: 'female',
+    audio_input: 'Insta360 Link 2',
+    audio_output: 'Mac Studio Speakers',
+    camera_device: 'Insta360 Link 2',
+    vision_enabled: true,
+    autonomy: 'auto',
+    heartbeat_interval_minutes: 30,
+    quiet_start_hour: 22,
+    quiet_end_hour: 7,
+    initial_goals: [{ title: 'Stay focused and healthy', dimension: 'self_actualization', priority: 2 }],
+  }));
+});

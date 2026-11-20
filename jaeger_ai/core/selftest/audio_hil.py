@@ -191,7 +191,17 @@ def temporary_physical_audio_ready(
                         adjusted.append(f"mic_gain:{mic_name}")
                     break
         if adjusted:
-            time.sleep(0.55)
+            time.sleep(0.8)
+            # Warm up USB microphone stream briefly so first capture never catches post-unmute zero samples
+            try:
+                import sounddevice as _sd
+                _devs = _sd.query_devices()
+                _mi = next((i for i, d in enumerate(_devs) if mic_name.lower() in str(d.get("name") or "").lower() and int(d.get("max_input_channels") or 0) > 0), None)
+                if _mi is not None:
+                    _w = _sd.rec(int(48000 * 0.25), samplerate=48000, channels=1, dtype="float32", device=_mi)
+                    _sd.wait()
+            except Exception:  # noqa: BLE001
+                pass
         yield {"coreaudio_adjusted": bool(adjusted), "adjusted": adjusted}
     finally:
         for did, sel, scope, ch, kind, val in reversed(saved):
@@ -449,10 +459,10 @@ def _play_nssound_blocking(samples: np.ndarray, sr: int, device_uid: str) -> tup
         ok = bool(snd.play())
         if not ok:
             return False, 0.0
-        deadline = t0 + dur + 0.55
+        deadline = t0 + dur + 0.85
         while time.perf_counter() < deadline:
             NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.04))
-            if not snd.isPlaying() and (time.perf_counter() - t0) > max(0.25, dur * 0.5):
+            if not snd.isPlaying() and (time.perf_counter() - t0) > max(0.4, dur * 0.85):
                 break
         snd.stop()
         return True, round((time.perf_counter() - t0) * 1000.0, 1)
@@ -468,8 +478,8 @@ def play_and_capture_acoustic(
     input_device_index: int,
     output_device_name: str = "",
     device_sr: int = 48000,
-    lead_silence_s: float = 0.4,
-    tail_silence_s: float = 0.4,
+    lead_silence_s: float = 0.6,
+    tail_silence_s: float = 0.9,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Play TTS through real physical speakers and capture simultaneously via physical mic."""
     import sounddevice as sd
@@ -498,12 +508,11 @@ def play_and_capture_acoustic(
         if dev_uid:
             try:
                 time.sleep(lead_silence_s)
-                play_start_samples = sum(c.size for c in rec_chunks)
+                play_start_samples = max(0, sum(c.size for c in rec_chunks) - int(device_sr * 0.15))
                 ok_ns, _ = _play_nssound_blocking(samples, tts_sr, dev_uid)
                 if ok_ns:
-                    time.sleep(0.15)
+                    time.sleep(tail_silence_s)
                     play_end_samples = sum(c.size for c in rec_chunks)
-                    time.sleep(max(0.05, tail_silence_s - 0.15))
                     used_nssound = True
                     playback_backend = "macos_nssound"
             except Exception:  # noqa: BLE001
@@ -512,7 +521,7 @@ def play_and_capture_acoustic(
             play_start_samples = int(device_sr * lead_silence_s)
             sd.play(out_stereo, samplerate=device_sr, device=output_device_index, blocking=True)
             sd.wait()
-            play_end_samples = max(play_start_samples + body.size, sum(c.size for c in rec_chunks) - int(device_sr * tail_silence_s * 0.5))
+            play_end_samples = max(play_start_samples + body.size, sum(c.size for c in rec_chunks))
     elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 1)
 
     rec = np.concatenate(rec_chunks) if rec_chunks else np.zeros(1, dtype=np.float32)
@@ -721,10 +730,11 @@ def run_physical_barge_in_check(
     from AppKit import NSSound
     from Foundation import NSDate, NSRunLoop
 
-    # Prefer secondary speaker for Truth and Mac Studio Speakers for sharp interruption (or vice versa)
+    # Prefer Logi Z407 (if present) for Truth and Mac Studio Speakers for sharp interruption
     dev_map = coreaudio_device_map()
     mac_spk = next((o for o in outputs if "mac studio" in o["name"].lower()), outputs[0])
-    other_spk = next((o for o in outputs if o["index"] != mac_spk["index"]), outputs[1])
+    logi_spk = next((o for o in outputs if "logi" in o["name"].lower() and o["index"] != mac_spk["index"]), None)
+    other_spk = logi_spk or next((o for o in outputs if o["index"] != mac_spk["index"]), outputs[1])
     truth_speaker = other_spk
     interrupter_speaker = mac_spk
     sr = 48000

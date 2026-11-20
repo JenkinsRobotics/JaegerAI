@@ -11,7 +11,7 @@ export function primaryAction(o: { running: boolean; hasContent: boolean; voiceC
   if (o.hasContent) return "send";
   if (o.voiceChat) return "voice";
   if (o.dictation) return "dictate";
-  return "idle";
+  return "send";
 }
 
 export const MAX_ATTACHMENTS = 8;

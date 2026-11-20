@@ -9,16 +9,17 @@ it('reads restored home state from the server', async () => {
   await httpGetJson()('/v1/agents/native%3Ajaeger/home');
   expect(fetch).toHaveBeenCalledWith('/v1/agents/native%3Ajaeger/home', expect.objectContaining({cache:'no-store'}));
 });
-it.each(['/v1/sessions/s?view=control','/api/jaeger/gateway/health'])('never restores stale authority from the service-worker cache: %s', async path => {
+it.each(['/v1/sessions/s?view=control','/api/jaeger/gateway/health'])('never restores stale authority from the service-worker cache: %s', async () => {
   const listeners:Record<string,Function>={};
-  const fetch=vi.fn().mockRejectedValue(new Error('offline'));
-  const caches={match:vi.fn().mockResolvedValue(Response.json({status:'running'})),open:vi.fn()};
-  runInNewContext(readFileSync('public/sw.js','utf8'),{self:{addEventListener:(name:string,fn:Function)=>{listeners[name]=fn}},URL,fetch,caches,console});
-  let response:Promise<Response>|undefined;
-  const request={method:'GET',url:'http://localhost'+path};
-  listeners.fetch({request,respondWith:(result:Promise<Response>)=>{response=result}});
-  await expect(response).rejects.toThrow('offline');
-  expect(fetch).toHaveBeenCalledWith(request,{cache:'no-store'});
-  expect(caches.match).not.toHaveBeenCalled();
-  expect(caches.open).not.toHaveBeenCalled();
+  const deleted:string[]=[];
+  const caches={keys:vi.fn().mockResolvedValue(['jaeger-v0.13-stale']),delete:vi.fn(async (k:string)=>{deleted.push(k);return true;}),match:vi.fn(),open:vi.fn()};
+  const clients={claim:vi.fn().mockResolvedValue(undefined)};
+  runInNewContext(readFileSync('public/sw.js','utf8'),{self:{addEventListener:(name:string,fn:Function)=>{listeners[name]=fn},skipWaiting:vi.fn(),clients},URL,caches,console});
+  // Push-only service worker deliberately installs NO fetch interceptor and purges legacy caches on activate.
+  expect(listeners.fetch).toBeUndefined();
+  let pending:Promise<unknown>|undefined;
+  listeners.activate({waitUntil:(p:Promise<unknown>)=>{pending=p;}});
+  await pending;
+  expect(deleted).toEqual(['jaeger-v0.13-stale']);
+  expect(clients.claim).toHaveBeenCalledOnce();
 });

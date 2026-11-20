@@ -79,7 +79,14 @@ class Request(dict):
         self.body=body
     async def json(self):return self.body
 
-def test_agent_can_propose_but_cannot_apply(organizer):
+def test_agent_can_propose_but_cannot_apply(organizer, tmp_path, monkeypatch):
+    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_ai.core.instance.schemas import Config, dump_yaml
+    lay = InstanceLayout(root=tmp_path / "manual_inst"); lay.ensure_dirs()
+    cfg = Config(instance_name="manual", model={"model_path": "unconfigured"})
+    cfg.automation.autonomy = "ask"; cfg.permissions.mode = "confirm"
+    dump_yaml(lay.config_path, cfg)
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(lay.root))
     gateway=JaegerGatewayApp(store=organizer.store)
     req=Request('jaegerd',{'action':'apply','revision':0,'operation_id':'bad','actions':[{'type':'pin','session_ids':['a'],'value':True}]})
     assert asyncio.run(gateway.handle_chat_organization(req)).status==403
@@ -88,6 +95,35 @@ def test_agent_can_propose_but_cannot_apply(organizer):
     assert organizer.store.get_session('a')['title']=='First'
     req=Request('webui',{'action':'apply','revision':0,'operation_id':'ok','actions':[{'type':'pin','session_ids':['a'],'value':True}]})
     assert asyncio.run(gateway.handle_chat_organization(req)).status==200
+
+
+def test_agent_can_apply_and_undo_organization_in_full_auto(organizer, tmp_path, monkeypatch):
+    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_ai.core.instance.schemas import Config, dump_yaml
+    lay = InstanceLayout(root=tmp_path / "auto_inst"); lay.ensure_dirs()
+    cfg = Config(instance_name="auto", model={"model_path": "unconfigured"})
+    cfg.automation.autonomy = "auto"; cfg.permissions.mode = "allow"
+    dump_yaml(lay.config_path, cfg)
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(lay.root))
+    gateway = JaegerGatewayApp(store=organizer.store)
+    # Create both a project and a folder/topic section, and move sessions into them
+    actions = [
+        {'type': 'create_group', 'id': 'proj-robotics', 'kind': 'project', 'name': 'Jenkins Robotics'},
+        {'type': 'create_group', 'id': 'sec-health', 'kind': 'section', 'name': 'Health & Focus'},
+        {'type': 'move', 'session_ids': ['a'], 'field': 'project_id', 'group_id': 'proj-robotics'},
+        {'type': 'move', 'session_ids': ['b'], 'field': 'section_id', 'group_id': 'sec-health'},
+    ]
+    req = Request('jaegerd', {'action': 'apply', 'revision': 0, 'operation_id': 'auto-org-1', 'actions': actions})
+    assert asyncio.run(gateway.handle_chat_organization(req)).status == 200
+    assert organizer.store.get_session('a')['metadata']['chat_organization']['project_id'] == 'proj-robotics'
+    assert organizer.store.get_session('b')['metadata']['chat_organization']['section_id'] == 'sec-health'
+    # Atomic undo also succeeds in Full Auto
+    req_undo = Request('jaegerd', {'action': 'undo', 'operation_id': 'auto-org-1'})
+    assert asyncio.run(gateway.handle_chat_organization(req_undo)).status == 200
+    assert organizer.snapshot()['groups'] == []
+    # External callers remain strictly denied even in Full Auto
+    ext = Request('mcp', {'action': 'apply', 'revision': 2, 'operation_id': 'ext-bad', 'actions': actions})
+    assert asyncio.run(gateway.handle_chat_organization(ext)).status == 403
 
 def test_outside_caller_cannot_read_organization(organizer):
     gateway=JaegerGatewayApp(store=organizer.store)

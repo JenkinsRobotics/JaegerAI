@@ -141,6 +141,45 @@ def test_session_manage_archives_deletes_verifies_and_rejects_wildcards(monkeypa
     assert refuse_wild["ok"] is False and "wildcard" in refuse_wild["error"].lower()
 
 
+def test_session_manage_delete_old_preserves_active_and_verifies(monkeypatch):
+    from jaeger_ai.core.gateway.client import GatewayUnavailable
+
+    store = {
+        "active-now": {"session_id": "active-now", "title": "Current chat", "archived": False, "messages": []},
+        "old-1": {"session_id": "old-1", "title": "Old chat 1", "archived": False, "messages": []},
+        "old-2": {"session_id": "old-2", "title": "Old chat 2", "archived": False, "messages": []},
+        "pinned-keep": {"session_id": "pinned-keep", "title": "Keep me", "archived": False, "messages": []},
+    }
+
+    class FakeGateway:
+        def list_sessions(self):
+            return list(store.values())
+
+        def get_session(self, sid):
+            if sid not in store:
+                raise GatewayUnavailable("HTTP 404")
+            return dict(store[sid])
+
+        def _call(self, method, path, body=None):
+            if method == "GET" and path == "/v1/sessions/active":
+                return {"active_session_id": "active-now"}
+            sid = path.rsplit("/", 1)[-1]
+            if method == "DELETE":
+                if sid not in store:
+                    raise GatewayUnavailable("HTTP 404")
+                del store[sid]
+                return {"deleted": True}
+            raise AssertionError(f"unexpected {method} {path}")
+
+    monkeypatch.setattr("jaeger_ai.core.session_tools._gateway", lambda: FakeGateway())
+    res = session_manage("delete_old", keep_session_ids=["pinned-keep"])
+    assert res["ok"] is True and res["verified"] is True
+    assert res["deleted_count"] == 2
+    assert set(res["succeeded"]) == {"old-1", "old-2"}
+    assert set(res["kept"]) == {"active-now", "pinned-keep"}
+    assert set(store.keys()) == {"active-now", "pinned-keep"}
+
+
 # ── 3. Zero redundant approvals in Full Auto vs Manual/Smart Auto ──────
 
 def test_full_auto_removes_redundant_shell_and_granted_delegate_prompts(tmp_path: Path, monkeypatch):

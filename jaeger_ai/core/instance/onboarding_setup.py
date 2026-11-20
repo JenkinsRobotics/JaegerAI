@@ -143,20 +143,13 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
                         notes=str(g.get("notes") or ""),
                         success_metric=str(g.get("success_metric") or ""),
                     )
-    # Persist optional device/vision/privacy onboarding metadata into first_boot state.
+    # Capture optional device/vision/privacy onboarding metadata before first_boot reset.
     extra_prefs = {
         k: args[k] for k in (
             "audio_input", "audio_output", "camera_device", "vision_enabled",
             "local_fallback_model", "privacy_local_only", "computer_access",
         ) if args.get(k) is not None
     }
-    if extra_prefs:
-        from jaeger_ai.core.instance.first_boot import snapshot
-        import yaml
-        fb_path = layout.root / "first_boot.yaml"
-        cur = snapshot(layout)
-        cur["onboarding_preferences"] = {**(cur.get("onboarding_preferences") or {}), **extra_prefs}
-        fb_path.write_text(yaml.safe_dump(cur, sort_keys=False), encoding="utf-8")
     from jaeger_ai.core.models.onboarding_credentials import persist_pending
     from jaeger_ai.core.instance.first_boot import (
         begin,
@@ -166,7 +159,11 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
         record_model_selection,
         record_setup_preferences,
         reset,
+        snapshot,
     )
+    prev_snapshot = snapshot(layout)
+    prev_install_mode = prev_snapshot.get("install_mode")
+    prev_onboarding_prefs = dict(prev_snapshot.get("onboarding_preferences") or {})
     persist_pending(layout)
     if not args.get("resume_onboarding"):
         reset(layout)
@@ -188,4 +185,14 @@ def complete_setup(layout: Any, args: dict[str, Any]) -> Any:
         from jaeger_agent.memory.sqlite_store import seed_facts
         seed_facts(layout, facts)
     commit_to_instance(layout)
+    if extra_prefs or prev_install_mode or prev_onboarding_prefs:
+        import yaml
+        from jaeger_ai.core.instance.first_boot import _read, _write
+        doc = _read(layout)
+        if prev_install_mode:
+            doc.setdefault("install_mode", prev_install_mode)
+        merged_prefs = {**prev_onboarding_prefs, **extra_prefs}
+        if merged_prefs:
+            doc["onboarding_preferences"] = merged_prefs
+        _write(layout, doc)
     return layout
