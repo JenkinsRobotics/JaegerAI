@@ -74,7 +74,11 @@ IDENTITY_TOOL_IDS = frozenset({"set_name", "update_soul", "adjust_trait"})
 OWNER_MANAGEMENT_TOOL_IDS = frozenset({"settings_set", "session_manage"})
 #: Tools that write durable memory. The resident Entity is the one memory writer; an
 #: outside caller's turn (mcp, a2a, helper) may read memory but not write it.
-MEMORY_WRITE_TOOL_IDS = frozenset({"remember", "forget", "memory", "remember_person"})
+MEMORY_WRITE_TOOL_IDS = frozenset({
+    "remember", "forget", "memory", "remember_person",
+    "knowledge_record_claim", "knowledge_verify_claim",
+    "human_needs_add_goal", "human_needs_propose_opportunity", "human_needs_record_outcome",
+})
 OWNER_ACTOR_PREFIXES = ("owner", "human")
 #: Actors (exact, or ``<prefix>:<name>``) that are outside callers, not the owner.
 UNTRUSTED_ACTOR_PREFIXES = ("guest", "untrusted", "external_agent", "helper", "mcp", "a2a")

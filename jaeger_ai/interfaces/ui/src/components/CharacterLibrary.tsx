@@ -700,7 +700,11 @@ function CharacterDetail({ character, onClose, onCreateAgent }: {
             <p className="detail-role">{character.role}</p>
             <p className="detail-description">{character.description}</p>
             
-            <CompanionChat characterId={character.id} name={character.name} />
+            <CompanionChat
+              characterId={character.id}
+              name={character.name}
+              peers={CHARACTERS.map((c) => ({ id: c.id, name: c.name }))}
+            />
             
             <div className="detail-section">
               <h4>📖 Backstory</h4>
