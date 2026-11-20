@@ -8081,8 +8081,13 @@ class JaegerGatewayApp:
 
     def _config_path(self) -> Path | None:
         from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
 
-        layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+        rt = getattr(EntityRuntime, "_instance", None)
+        layout = getattr(rt, "layout", None) if rt is not None else None
+        if layout is None:
+            inst = os.environ.get("JAEGER_INSTANCE_DIR")
+            layout = InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
         return getattr(layout, "config_path", None)
 
     async def handle_get_autonomy(self, request: web.Request) -> web.Response:

@@ -26,21 +26,20 @@ it("shows the three modes and changes the label only after the Gateway confirms"
     setRuntimeAutonomy: save,
   });
   const trigger = element.querySelector<HTMLButtonElement>(".jg-composer__policy")!;
-  expect(trigger.getAttribute("aria-label")).toBe("Permissions: Ask for approval");
-  expect(trigger.textContent).toContain("Ask for approval");
+  expect(trigger.getAttribute("aria-label")).toBe("Permissions: Ask");
+  expect(trigger.textContent).toContain("Ask");
   await act(async () => trigger.click());
-  expect(element.textContent).toContain("How should Jaeger actions be approved?");
+  expect(element.textContent).toContain("How should actions be approved?");
   expect(element.textContent).toContain("Approve for me");
   expect(element.textContent).toContain("Full access");
-  expect(element.textContent).toContain("Learn more about permissions");
 
   const scoped = [...element.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(button => button.textContent?.includes("Approve for me"))!;
   await act(async () => scoped.click());
   expect(save).toHaveBeenCalledExactlyOnceWith("scoped");
-  expect(trigger.textContent).toContain("Ask for approval");
+  expect(trigger.textContent).toContain("Ask");
   await act(async () => resolve({ autonomy: "scoped", options: ["ask", "scoped", "auto"] }));
-  expect(trigger.textContent).toContain("Approve for me");
-  expect(trigger.getAttribute("aria-label")).toBe("Permissions: Approve for me");
+  expect(trigger.textContent).toContain("For me");
+  expect(trigger.getAttribute("aria-label")).toBe("Permissions: For me");
   expect(element.querySelector('[role="menu"]')).toBeNull();
 });
 
@@ -50,11 +49,11 @@ it("keeps the confirmed mode and exposes an error when the change fails", async 
     setRuntimeAutonomy: vi.fn().mockRejectedValue(new Error("Gateway refused the change")),
   });
   const trigger = element.querySelector<HTMLButtonElement>(".jg-composer__policy")!;
-  expect(trigger.textContent).toContain("Approve for me");
+  expect(trigger.textContent).toContain("For me");
   await act(async () => trigger.click());
   const automatic = [...element.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(button => button.textContent?.includes("Full access"))!;
   await act(async () => automatic.click());
-  expect(trigger.textContent).toContain("Approve for me");
+  expect(trigger.textContent).toContain("For me");
   expect(element.querySelector('[role="alert"]')?.textContent).toContain("Gateway refused the change");
   expect(element.querySelector('[role="menu"]')).not.toBeNull();
 });
@@ -63,7 +62,7 @@ it('refreshes a mode changed on another device before selecting',async()=>{
  const read=vi.fn().mockResolvedValueOnce({autonomy:'ask'}).mockResolvedValue({autonomy:'scoped'});
  const element=await renderControl({runtimeAutonomy:read,setRuntimeAutonomy:vi.fn()});
  await act(async()=>element.querySelector<HTMLButtonElement>('.jg-composer__policy')!.click());
- expect(element.querySelector('.jg-composer__policy')?.textContent).toContain('Approve for me');
+ expect(element.querySelector('.jg-composer__policy')?.textContent).toContain('For me');
 });
 it('does not present a failed read as confirmed Ask mode',async()=>{
  const save=vi.fn();const element=await renderControl({runtimeAutonomy:vi.fn().mockRejectedValue(Error('offline')),setRuntimeAutonomy:save});

@@ -32,8 +32,8 @@ def onboarding_blueprint(layout: Any) -> dict[str, Any]:
         "steps": [
             {"id": "companion_name", "title": "Companion name", "default": "Truth", "skippable": True},
             {"id": "avatar_voice", "title": "Avatar and preferred voice", "default": {"character_id": "truth", "voice_profile": "female"}, "skippable": True},
-            {"id": "audio_devices", "title": "Microphone and speakers", "default": {"audio_input": "system_default", "audio_output": "system_default"}, "skippable": True},
-            {"id": "camera_vision", "title": "Camera and vision options", "default": {"camera_device": "auto", "vision_enabled": True, "vision_model": "qwen3.5:9b"}, "skippable": True},
+            {"id": "audio_devices", "title": "Microphone and speakers", "default": {"audio_input": "Insta360 Link 2", "audio_output": "Mac Studio Speakers"}, "skippable": True},
+            {"id": "camera_vision", "title": "Camera and vision options", "default": {"camera_device": "Insta360 Link 2", "vision_enabled": True, "vision_model": "qwen3.5:9b"}, "skippable": True},
             {"id": "models", "title": "Local and cloud model preferences", "default": {"awake_provider": "ollama", "awake_model": "mistral-large-4:cloud", "local_fallback_model": "qwen3.5:9b"}, "skippable": False},
             {"id": "memory_privacy", "title": "Memory and privacy settings", "default": {"epistemic_memory": True, "privacy_local_only": False}, "skippable": True},
             {"id": "autonomy", "title": "Operating mode", "default": "auto", "options": ["ask", "scoped", "auto"], "labels": {"ask": "Manual", "scoped": "Smart Auto", "auto": "Full Auto"}, "skippable": True},
