@@ -9,6 +9,7 @@ Exposes the character/personality library to the frontend:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -316,13 +317,16 @@ def _companion_character(cid: str) -> Character:
 
 
 _companion_memory = None
+_companion_memory_path = None
 
 
 def _memory():
-    global _companion_memory
-    if _companion_memory is None:
-        from jaeger_ai.features.personality.companion import CompanionMemory
-        _companion_memory = CompanionMemory()
+    global _companion_memory, _companion_memory_path
+    from jaeger_ai.features.personality.companion import CompanionMemory, default_memory_db
+    target = default_memory_db()
+    if _companion_memory is None or (_companion_memory_path is not None and _companion_memory_path != target):
+        _companion_memory = CompanionMemory(target)
+        _companion_memory_path = target
     return _companion_memory
 
 
@@ -352,7 +356,7 @@ async def handle_companion_import(request: web.Request) -> web.Response:
 
 
 async def handle_companion_chat(request: web.Request) -> web.Response:
-    """POST /v1/companion/{id}/chat {message, history?} — local-model reply."""
+    """POST /v1/companion/{id}/chat {message, history?, model?} — companion reply."""
     import asyncio
 
     from jaeger_ai.features.personality.companion import CompanionError, chat
@@ -362,9 +366,106 @@ async def handle_companion_chat(request: web.Request) -> web.Response:
     except ValueError:
         return web.json_response({"error": "invalid JSON"}, status=400)
     try:
-        out = await asyncio.to_thread(chat, char, str(body.get("message") or ""),
-                                      body.get("history") if isinstance(body.get("history"), list) else None,
-                                      memory=_memory())
+        out = await asyncio.to_thread(
+            chat,
+            char,
+            str(body.get("message") or ""),
+            body.get("history") if isinstance(body.get("history"), list) else None,
+            memory=_memory(),
+            model=str(body.get("model") or "") or None,
+        )
+    except CompanionError as e:
+        return web.json_response({"error": str(e)}, status=e.status)
+    return web.json_response(out)
+
+
+async def handle_companion_chat_stream(request: web.Request) -> web.StreamResponse:
+    """POST /v1/companion/{id}/chat/stream — SSE streaming companion reply with interruption."""
+    import asyncio
+    import json
+    import threading
+
+    from jaeger_ai.features.personality.companion import CompanionError, chat_stream
+    char = _companion_character(request.match_info["id"])
+    try:
+        body = await request.json()
+    except ValueError:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+
+    message = str(body.get("message") or "")
+    history = body.get("history") if isinstance(body.get("history"), list) else None
+    model = str(body.get("model") or "") or None
+    mem = _memory()
+
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+    await response.prepare(request)
+
+    interrupt = threading.Event()
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def _produce() -> None:
+        try:
+            for item in chat_stream(
+                char, message, history=history, memory=mem, model=model, interrupt_event=interrupt,
+            ):
+                loop.call_soon_threadsafe(queue.put_nowait, item)
+        except CompanionError as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "error": str(exc), "status": exc.status})
+        except Exception as exc:  # noqa: BLE001
+            loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "error": str(exc), "status": 500})
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    producer = asyncio.create_task(asyncio.to_thread(_produce))
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            event_name = str(item.get("type") or "message")
+            payload = f"event: {event_name}\ndata: {json.dumps(item, ensure_ascii=False)}\n\n".encode("utf-8")
+            await response.write(payload)
+    except (ConnectionResetError, asyncio.CancelledError):
+        interrupt.set()
+    finally:
+        interrupt.set()
+        await producer
+    with contextlib.suppress(Exception):
+        await response.write_eof()
+    return response
+
+
+async def handle_companion_council(request: web.Request) -> web.Response:
+    """POST /v1/companion/council {characters, topic, history?, model?, include_truth_synthesis?}."""
+    import asyncio
+
+    from jaeger_ai.features.personality.companion import CompanionError, council_chat
+    try:
+        body = await request.json()
+    except ValueError:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    raw_ids = body.get("characters")
+    if not isinstance(raw_ids, list) or len(raw_ids) < 2:
+        return web.json_response({"error": "characters must be a list of at least 2 character ids"}, status=400)
+    chars = [_companion_character(str(cid)) for cid in raw_ids]
+    try:
+        out = await asyncio.to_thread(
+            council_chat,
+            chars,
+            str(body.get("topic") or ""),
+            history=body.get("history") if isinstance(body.get("history"), list) else None,
+            memory=_memory(),
+            model=str(body.get("model") or "") or None,
+            include_truth_synthesis=bool(body.get("include_truth_synthesis", True)),
+        )
     except CompanionError as e:
         return web.json_response({"error": str(e)}, status=e.status)
     return web.json_response(out)
@@ -387,7 +488,9 @@ def register_character_routes(app: web.Application) -> None:
     # Companion (J-070) lives outside the public /v1/characters/ prefix so it needs auth.
     app.router.add_get("/v1/companion/{id}/ccv3", handle_companion_card)
     app.router.add_post("/v1/companion/import", handle_companion_import)
+    app.router.add_post("/v1/companion/council", handle_companion_council)
     app.router.add_post("/v1/companion/{id}/chat", handle_companion_chat)
+    app.router.add_post("/v1/companion/{id}/chat/stream", handle_companion_chat_stream)
     app.router.add_get("/v1/companion/{id}/memories", handle_companion_memories)
     
     logger.info("Character library routes registered: /v1/characters, /v1/agents/from-template")

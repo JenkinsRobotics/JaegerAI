@@ -2,23 +2,28 @@
 
 ## What Jaeger is
 
-JaegerAI is an autonomous, self-improving AI research, development, and execution system that learns, builds, tests, and operates software to accomplish real-world objectives. The personal assistant is one application of that system, not its entire identity.
+**Core mission:** *Help humanity, one human at a time.*
 
-Its foundational requirement is human-equivalent digital agency: any legitimate workflow a human can perform on a computer should be learnable and executable by Jaeger through appropriate interfaces, tools, and automation. It is model-independent, framework-independent, and local-first with optional cloud resources.
+JaegerAI is Jenkins Robotics' **persistent personal intelligence platform**, built on the reusable **JaegerAgent** execution framework (`packages/jaeger-agent`). Its default persistent companion identity is **Truth** (user-customizable without losing `entity_id` or continuity).
+
+- **Truth-seeking is a system-wide architectural invariant** below the persona layer (`core/prompt_identity.py`, `core/world/`): observations, verified facts, hypotheses, predictions, preferences, and unknowns remain explicitly separated, backed by evidence, contradiction detection, and atomic correction.
+- **Human flourishing is the operating objective** (`features/human_needs/`), strictly user-owned, non-intrusive, and exportable.
+- **Characters are summonable simulated personalities** (`features/personality/`) with scoped memory and Council synthesis — never silently inheriting private user tools or overriding Truth's epistemic rules.
+- **One persistent intelligence** coordinates models (cloud + local), tools, computer-use, specialists, characters, devices, and autonomous improvement loops.
 
 | Component | Responsibility |
 |---|---|
-| Models | Reasoning, perception, generation |
+| Models | Reasoning, perception, generation (cloud + local, full model context limits) |
 | Tools | Computers, browsers, files, applications |
-| Execution engine | Plan, act, observe, continue |
-| Memory and state | Preserve knowledge and progress |
+| Execution engine | Plan, act, observe, continue (`JaegerAgent`) |
+| Memory and state | Persistent episodic, epistemic semantic (`core/world`), and human-needs state |
 | Decision layer | Fast local routing and structured choices |
-| Orchestration | Coordinate models and agents |
-| Permissions | User-controlled execution boundaries |
-| Evaluation | Verify results and measure improvement |
-| Scheduler / events | Trigger ongoing autonomous work |
+| Orchestration | Coordinate models, specialists, and Character Councils |
+| Permissions | User-controlled execution boundaries (`core/authority/kernel.py`) |
+| Evaluation | Verify results, track contradictions, and measure improvement |
+| Scheduler / events | Trigger ongoing authorized autonomous work |
 
-**When auditing, evaluate the actual codebase fresh against these nine system components and the autonomous improvement loop — never parrot legacy docs.**
+**When auditing, evaluate the actual codebase fresh against these system components, the Truth/Human-Flourishing architecture, and working runtime evidence — never parrot legacy docs.**
 
 ---
 

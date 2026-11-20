@@ -21,6 +21,7 @@ from jaeger_ai.core.entity.identity import (
 
 def test_the_entity_id_survives_a_rename_and_every_reload(tmp_path):
     first = resolve_entity_identity(tmp_path)
+    assert first.display_name == "Truth"
     renamed = rename_entity(tmp_path, "Erin")
 
     assert renamed.entity_id == first.entity_id
@@ -28,6 +29,20 @@ def test_the_entity_id_survives_a_rename_and_every_reload(tmp_path):
     assert resolve_entity_identity(tmp_path).entity_id == first.entity_id
     assert resolve_entity_identity(tmp_path).display_name == "Erin"
     assert EntityIdentity.load_from_file(tmp_path / IDENTITY_FILE_NAME).display_name == "Erin"
+
+
+def test_epistemic_invariant_is_registered_below_persona():
+    from jaeger_agent.prompts import assemble
+    from jaeger_ai.core.prompt_identity import (
+        EPISTEMIC_FRAGMENT,
+        EPISTEMIC_INVARIANT,
+        register_agent_identity,
+    )
+
+    assert register_agent_identity() is True
+    frag = next(f for f in assemble.PROMPT_FRAGMENTS if f.name == EPISTEMIC_FRAGMENT)
+    assert frag.build(None) == EPISTEMIC_INVARIANT
+    assert "contradictions" in EPISTEMIC_INVARIANT.lower()
 
 
 def test_a_rename_to_the_same_name_changes_nothing_and_a_blank_name_is_refused(tmp_path):

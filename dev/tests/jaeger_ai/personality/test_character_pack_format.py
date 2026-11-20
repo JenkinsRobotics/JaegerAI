@@ -22,7 +22,7 @@ def test_every_bundled_pack_is_a_portable_static_character() -> None:
     assert root.name == "characters"
     assert not (root / "characters").exists()
     packs = sorted(root.glob("*/character.yaml"))
-    assert len(packs) == 20
+    assert len(packs) == 21
     for manifest in packs:
         doc = yaml.safe_load(manifest.read_text(encoding="utf-8"))
         assert doc["schema"] == characters.CHARACTER_SCHEMA
