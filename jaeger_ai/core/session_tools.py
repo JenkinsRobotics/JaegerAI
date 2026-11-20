@@ -138,3 +138,89 @@ def session_organize(actions_json: str = "", label: str = "Jaeger suggestions") 
     if body:
         result["next_step"] = "Saved for owner review in Manage > Suggestions to review. No chats changed."
     return result
+
+
+_SESSION_MANAGE_MAX = 20
+_WILDCARD_IDS = frozenset({"*", "all", "everything", "any"})
+
+
+def session_manage(
+    action: str,
+    session_ids: list[str],
+    *,
+    active_session_id: str = "",
+) -> dict[str, Any]:
+    """Archive, unarchive, or delete explicitly named chat sessions and verify the outcome.
+
+    Never accepts wildcards or blank lists, caps each batch at 20 explicit IDs,
+    refuses deleting the active session, and independently verifies each session
+    through the Gateway after mutating it.
+    """
+    act = str(action or "").strip().lower()
+    if act not in {"archive", "unarchive", "delete"}:
+        return {
+            "ok": False,
+            "error": f"Unsupported action {action!r}; choose 'archive', 'unarchive', or 'delete'.",
+        }
+    if not isinstance(session_ids, list) or not session_ids:
+        return {"ok": False, "error": "session_ids must be a non-empty list of explicit session IDs."}
+    if len(session_ids) > _SESSION_MANAGE_MAX:
+        return {"ok": False, "error": f"At most {_SESSION_MANAGE_MAX} explicit sessions per call."}
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in session_ids:
+        sid = str(raw or "").strip()
+        if not sid or sid.lower() in _WILDCARD_IDS or any(ch in sid for ch in "*?/%"):
+            return {"ok": False, "error": f"Invalid or wildcard session_id {raw!r}; provide exact session IDs."}
+        if sid not in seen:
+            seen.add(sid)
+            cleaned.append(sid)
+
+    active_clean = str(active_session_id or "").strip()
+    if act == "delete" and active_clean and active_clean in seen:
+        return {"ok": False, "error": f"Refused to delete active session {active_clean!r}."}
+
+    from urllib.parse import quote
+    from jaeger_ai.core.gateway.client import GatewayUnavailable
+
+    client = _gateway()
+    succeeded: list[str] = []
+    not_found: list[str] = []
+    failed: list[dict[str, str]] = []
+
+    for sid in cleaned:
+        encoded = quote(sid, safe="")
+        try:
+            if act == "delete":
+                client._call("DELETE", f"/v1/sessions/{encoded}")
+                # Independent verification: deleted session must return 404 on readback
+                if _read(sid) is None:
+                    succeeded.append(sid)
+                else:
+                    failed.append({"session_id": sid, "error": "session still exists after DELETE"})
+            else:
+                want_archived = act == "archive"
+                updated = client._call("PATCH", f"/v1/sessions/{encoded}", {"archived": want_archived})
+                verified = bool(updated.get("archived")) is want_archived if isinstance(updated, dict) else False
+                if verified:
+                    succeeded.append(sid)
+                else:
+                    failed.append({"session_id": sid, "error": f"archived state did not verify as {want_archived}"})
+        except GatewayUnavailable as exc:
+            msg = str(exc)
+            if "HTTP 404" in msg:
+                not_found.append(sid)
+            else:
+                failed.append({"session_id": sid, "error": msg})
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"session_id": sid, "error": str(exc)})
+
+    return {
+        "ok": len(failed) == 0 and len(succeeded) > 0,
+        "verified": len(failed) == 0,
+        "action": act,
+        "succeeded": succeeded,
+        "not_found": not_found,
+        "failed": failed,
+    }

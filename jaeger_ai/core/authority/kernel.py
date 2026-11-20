@@ -44,6 +44,7 @@ logger = logging.getLogger("jaeger.core.authority.kernel")
 TOOL_ALIASES: Mapping[str, str] = {
     # local shell
     "shell": "shell", "terminal": "shell", "run_shell": "shell", "exec": "shell",
+    "exec_command": "shell",
     "bash": "shell", "sh": "shell", "zsh": "shell", "run_command": "shell",
     "shell_exec": "shell", "execute_command": "shell", "run_terminal_command": "shell",
     # remote shell
@@ -53,7 +54,7 @@ TOOL_ALIASES: Mapping[str, str] = {
     # git / files
     "git_push": "git_push", "push": "git_push",
     "write_file": "write_file", "edit_file": "write_file", "append_file": "write_file",
-    "patch": "write_file", "delete_file": "delete_file",
+    "patch": "write_file", "apply_patch": "write_file", "delete_file": "delete_file",
 }
 SHELL_TOOL_IDS = frozenset({"shell", "remote_shell"})
 #: Canonical tools an untrusted/external caller may never run.
@@ -62,6 +63,9 @@ PRIVILEGED_TOOL_IDS = frozenset({"shell", "remote_shell", "code_exec", "deploy",
 #: (an authenticated ``owner:<client>`` turn) may run them: not an outside caller, and
 #: not a background turn the entity started for itself (``agent:jaeger``).
 IDENTITY_TOOL_IDS = frozenset({"set_name", "update_soul", "adjust_trait"})
+#: Owner-only instance management tools (changing Jaeger settings or deleting/archiving
+#: explicitly chosen sessions). Delegated/external/background actors may never run them.
+OWNER_MANAGEMENT_TOOL_IDS = frozenset({"settings_set", "session_manage"})
 #: Tools that write durable memory. The resident Entity is the one memory writer; an
 #: outside caller's turn (mcp, a2a, helper) may read memory but not write it.
 MEMORY_WRITE_TOOL_IDS = frozenset({"remember", "forget", "memory", "remember_person"})
@@ -295,7 +299,7 @@ class PolicyKernel:
             # ── 2b. Destructive / irreversible actions (non-overridable) ─────
             # Needs a fresh owner approval for this call. Evaluated before
             # grants, operator hooks and commissioning so none can waive it.
-            if (d := step("destructive", self._check_destructive(proposal, proposal.arguments))) is not None:
+            if (d := step("destructive", self._check_destructive(proposal, proposal.arguments, instance_root=instance_root, dry_run=dry_run))) is not None:
                 return d
             # ── 2c. Review rules: team policy over local rules ───────────────
             rule_decision, rule_info = self._check_review_rules(
@@ -525,6 +529,14 @@ class PolicyKernel:
                 granted_by="policy_kernel",
                 proposal_id=proposal.proposal_id,
             )
+        if canonical_tool_id(proposal.tool_name) in OWNER_MANAGEMENT_TOOL_IDS and not is_owner_actor(actor):
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason=f"Actor {actor!r} may not modify Jaeger settings or delete/archive sessions ({proposal.tool_name!r} is owner-only)",
+                policy_name="owner_management_authority",
+                granted_by="policy_kernel",
+                proposal_id=proposal.proposal_id,
+            )
         if is_untrusted_actor(actor) and canonical_tool_id(proposal.tool_name) in MEMORY_WRITE_TOOL_IDS:
             return AuthorityDecision(
                 decision=AuthorityDecisionType.DENY,
@@ -606,16 +618,48 @@ class PolicyKernel:
             return _deny(proposal, f"Capability grant check failed: {exc} (fail-closed)", "tool_allowlist")
         return None
 
+    def _owner_full_auto_enabled(
+        self,
+        proposal: ProposedAction,
+        *,
+        instance_root: Path | str | None = None,
+        dry_run: bool = False,
+    ) -> bool:
+        """True ONLY when an authenticated owner turn runs on an instance with
+        explicitly saved Full Auto (``automation.autonomy == 'auto'``)."""
+        if not is_owner_actor(proposal.actor):
+            return False
+        try:
+            from jaeger_ai.core.runtime.autonomy import configured_autonomy
+            root = _resolve_instance_root(proposal, instance_root=instance_root, allow_runtime=not dry_run)
+            if root is None:
+                return False
+            return configured_autonomy(root / "config.yaml") == "auto"
+        except Exception:  # noqa: BLE001 — fail closed on any unreadable config
+            return False
+
     def _check_destructive(
-        self, proposal: ProposedAction, arguments: Mapping[str, Any],
+        self,
+        proposal: ProposedAction,
+        arguments: Mapping[str, Any],
+        *,
+        instance_root: Path | str | None = None,
+        dry_run: bool = False,
     ) -> AuthorityDecision | None:
         """Destructive or irreversible -> REQUIRE_APPROVAL (fresh, per call).
 
-        Not overridable: standing "always" grants, autonomy "auto",
-        commissioning policy and hooks never reach this decision, and the
-        executor answers it only through a provider that asks a human for
-        this call (``fresh_approval``). Detection failure fails closed.
+        Not overridable for catastrophic/destructive ops: standing "always"
+        grants, autonomy "auto", commissioning policy and hooks never waive
+        them. An already owner-granted ``framework_delegate`` call (verified
+        in Step 2a) is exempt ONLY for an authenticated owner turn under
+        explicit Full Auto so specialist delegation does not trigger a
+        redundant prompt; ``framework_apply_diff`` always requires approval.
         """
+        raw_name = str(proposal.tool_name or "").strip().lower()
+        if raw_name == "framework_delegate" and self._owner_full_auto_enabled(
+            proposal, instance_root=instance_root, dry_run=dry_run
+        ):
+            return None
         try:
             from jaeger_ai.core.authority.destructive import destructive_reason
             reason = destructive_reason(proposal.tool_name, arguments)
@@ -724,6 +768,13 @@ class PolicyKernel:
                         proposal_id=proposal.proposal_id,
                     )
                 elif shell_mode == "confirm":
+                    if self._owner_full_auto_enabled(
+                        proposal, instance_root=root, dry_run=dry_run
+                    ):
+                        # Owner explicitly enabled Full Auto; non-destructive shell
+                        # commands pass without a redundant commissioning prompt.
+                        # Catastrophic shell commands were already gated in Step 2b.
+                        return None
                     return AuthorityDecision(
                         decision=AuthorityDecisionType.REQUIRE_APPROVAL,
                         reason="Shell execution requires human approval per commissioning policy",

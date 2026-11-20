@@ -18,8 +18,8 @@ _LOCK = threading.Lock()
 
 
 def default_path() -> Path:
-    home = Path(os.environ.get("JAEGER_HOME", str(Path.home() / ".jaeger")))
-    return home / "instances" / "jaeger" / "framework_grants.json"
+    from jaeger_ai.core.instance.instance import operator_state_root
+    return operator_state_root() / "instances" / "jaeger" / "framework_grants.json"
 
 
 class FrameworkGrants:

@@ -50,8 +50,8 @@ KEYCHAIN_SERVICE = "ai.jaeger.gateway.caller"
 TOKEN_DIR_ENV = "JAEGER_CALLER_TOKEN_DIR"
 SECURITY_BIN = "/usr/bin/security"
 
-ALL_SCOPES = frozenset({"read", "turn", "delegate", "approve", "ide", "stop", "admin", "handoff", "search"})
-_OWNER = frozenset({"read", "turn", "delegate", "approve", "stop", "admin", "search"})
+ALL_SCOPES = frozenset({"read", "turn", "delegate", "approve", "ide", "stop", "admin", "handoff", "search", "session_delete"})
+_OWNER = frozenset({"read", "turn", "delegate", "approve", "stop", "admin", "search", "session_delete"})
 
 
 @dataclass(frozen=True)
@@ -92,7 +92,7 @@ CALLERS: Mapping[str, CallerSpec] = {
                    description="Owner phone channels relay (Telegram bot + iMessage self-chat)"),
         CallerSpec("bridge", "owner:bridge", frozenset({"read", "turn", "approve", "stop"}),
                    description="bridge socket (Swift chat, TUI attach)"),
-        CallerSpec("jaegerd", "agent:jaeger", frozenset({"read", "turn", "delegate"}),
+        CallerSpec("jaegerd", "agent:jaeger", frozenset({"read", "turn", "delegate", "session_delete"}),
                    description="jaegerd's own tools calling back into the Gateway",
                    display_name="Jaeger", peer_kind="resident", transport="gateway",
                    framework_id="jaeger"),
@@ -176,6 +176,8 @@ SEARCH_ROUTES = frozenset({("POST", "/v1/search"), ("POST", "/v1/fetch")})
 #: Lead → specialist handoff (``call_agent``): owners and jaegerd, never outside callers.
 #: Inner helpers use ``delegate`` (and its ``call_agent`` alias) on the same grant.
 DELEGATE_ROUTES = frozenset({("POST", "/v1/agents/{id}/handoff"), ("POST", "/v1/sessions/{id}/transfer")})
+#: Explicit session deletion: owner callers and jaegerd's owner-gated session_manage tool only.
+SESSION_DELETE_ROUTES = frozenset({("DELETE", "/v1/sessions/{id}")})
 #: GET routes an outside (prefixed) caller may use; all are session-scoped.
 PREFIXED_READ_ROUTES = frozenset({
     "/v1/agent-messages", "/v1/agent-threads/{thread}",
@@ -257,6 +259,8 @@ def required_scope(method: str, route: str | None) -> str | None:
         return "stop"
     if key in DELEGATE_ROUTES:
         return "delegate"
+    if key in SESSION_DELETE_ROUTES:
+        return "session_delete"
     return "admin"
 
 
