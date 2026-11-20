@@ -224,7 +224,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     }),
     # Ask the operator's editor: open a file at a line, list Problems, read what is open.
     "ide": frozenset({"ide_context", "ide_open_file", "ide_diagnostics"}),
-    "sessions": frozenset({"session_organize","session_search"}),
+    "sessions": frozenset({"session_organize", "session_search", "session_manage"}),
     "board": frozenset({
         # add/view used to live in CORE; they now load on intent with the rest.
         "board_add", "board_view",
@@ -260,7 +260,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # Self-modifying tools — should never fire by accident on a
         # routine chat turn. Loadable explicitly when the user asks
         # the agent to update its name / soul.
-        "set_name", "update_soul", "adjust_trait",
+        "set_name", "update_soul", "adjust_trait", "summon_council",
     }),
     "skills": frozenset({
         # Skill authoring + the Deep Think queue. ``list_skills`` and
@@ -276,7 +276,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # Task-level after-action reflection (the REFLECT loop step).
         "reflect",
     }),
-    "computer_use": frozenset({"computer_use", "browser", "computer_look"}),
+    "computer_use": frozenset({"computer_do", "computer_use", "browser", "computer_look"}),
     "credentials": frozenset({
         "get_credential", "list_credentials", "set_credential", "request_secret",
     }),
@@ -294,7 +294,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
     }),
     "people": frozenset({"remember_person", "get_person", "list_people"}),
     "models": frozenset({"list_models", "download_model", "model_location",
-                         "set_mode", "get_mode", "set_autonomy", "get_autonomy"}),
+                         "set_mode", "get_mode", "set_autonomy", "get_autonomy",
+                         "settings_get", "settings_set"}),
     "bench": frozenset({"run_benchmark"}),
     # ``self_check`` = the agent's doctor (same engine as `jaeger
     # doctor`); ``system_status`` = host cpu/disk/uptime.
@@ -325,9 +326,13 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "goal_create", "goal_list", "goal_status", "goal_update",
         "project_status", "task_spawn",
         "complete_task", "work_ledger",
+        "human_needs_summary", "human_needs_add_goal",
+        "human_needs_propose_opportunity", "human_needs_record_outcome",
     }),
     "knowledge_library": frozenset({
         "library_add", "library_index", "library_search", "library_read",
+        "knowledge_record_claim", "knowledge_query",
+        "knowledge_contradictions", "knowledge_verify_claim",
     }),
 }
 
