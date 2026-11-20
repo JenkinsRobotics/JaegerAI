@@ -71,7 +71,7 @@ PRIVILEGED_TOOL_IDS = frozenset({
 IDENTITY_TOOL_IDS = frozenset({"set_name", "update_soul", "adjust_trait"})
 #: Owner-only instance management tools (changing Jaeger settings or deleting/archiving
 #: explicitly chosen sessions). Delegated/external/background actors may never run them.
-OWNER_MANAGEMENT_TOOL_IDS = frozenset({"settings_set", "session_manage"})
+OWNER_MANAGEMENT_TOOL_IDS = frozenset({"settings_set", "session_manage", "session_organize"})
 #: Tools that write durable memory. The resident Entity is the one memory writer; an
 #: outside caller's turn (mcp, a2a, helper) may read memory but not write it.
 MEMORY_WRITE_TOOL_IDS = frozenset({

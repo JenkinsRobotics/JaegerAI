@@ -2426,7 +2426,13 @@ class JaegerGatewayApp:
             if not all(str(body.get(key) or "").strip() for key in required):
                 raise ValueError("character_id, awake_provider and awake_model are required")
             from jaeger_ai.core.instance.onboarding_setup import complete_setup
+            from jaeger_ai.core.instance import first_boot
             complete_setup(layout, body)
+            if first_boot.status(layout) is not first_boot.FirstBootStatus.COMPLETED:
+                doc = first_boot._read(layout)
+                doc["status"] = first_boot.FirstBootStatus.COMPLETED.value
+                doc.setdefault("completed_at", first_boot._now())
+                first_boot._write(layout, doc)
         except (ValueError, TypeError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
         return web.json_response(self._first_run_payload(layout),
@@ -3812,8 +3818,15 @@ class JaegerGatewayApp:
             body = await request.json()
             if not isinstance(body, dict): raise ValueError('JSON object required')
             action = body.get('action')
-            if not owner and action != 'propose':
-                return web.json_response({'error': 'The agent may propose organization changes; only the owner may apply them'}, status=403)
+            agent_full_auto = False
+            if agent and action in ('apply', 'undo'):
+                try:
+                    from jaeger_ai.core.runtime.autonomy import effective_autonomy
+                    agent_full_auto = effective_autonomy(self._config_path()) == 'auto'
+                except Exception:
+                    agent_full_auto = False
+            if not owner and action != 'propose' and not agent_full_auto:
+                return web.json_response({'error': 'The agent may propose organization changes; only the owner (or Full Auto) may apply them'}, status=403)
             if action == 'apply':
                 result = self.chat_organization.apply(body.get('revision'), body.get('actions'), body.get('operation_id'))
             elif action == 'undo':

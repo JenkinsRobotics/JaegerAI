@@ -52,7 +52,7 @@ describe("contractHome", () => {
     expect(calls).toEqual([
       "/v1/agents/native%3Ajaeger/home",
       "/v1/sessions/s-native%3Ajaeger/messages?limit=50",
-      "/v1/sessions/s-native%3Ajaeger/messages?before=old-4&limit=50",
+      "/v1/sessions/s-native%3Ajaeger/messages?limit=50&before=old-4",
     ]);
     expect(older.before).toBeUndefined();
     expect(Object.values(older.entries)[0]).toMatchObject({ kind: "summary", count: 48 });

@@ -1161,25 +1161,37 @@ def _register_builtins(client: Any) -> None:
             "boot_readiness": _pipeline.get("readiness"),
         }
 
-    @register_tool_from_function(side_effect="read", replace=True)
-    @requires_tier(PermissionTier.READ_ONLY, skill="host", operation="session_organize",
-                   summary="read chat organization or propose changes for owner review")
-    def session_organize(actions_json: str = "", label: str = "Jaeger suggestions") -> dict:
-        """Organize chats by proposing names, project groups and sidebar sections.
-        Empty actions_json returns current groups, session IDs and saved titles.
-        Use session_search to understand content before naming or grouping.
-        To propose, pass a JSON array of actions:
-        {"type":"rename","session_ids":["ID"],"title":"Name"}
+    @register_tool_from_function(side_effect="local_write", replace=True)
+    @requires_tier(PermissionTier.WRITE_LOCAL, skill="host", operation="session_organize",
+                   summary="organize chat sessions into projects, folders/sections, and topics")
+    def session_organize(
+        actions_json: str = "",
+        label: str = "Jaeger suggestions",
+        apply: bool = True,
+        undo_operation_id: str = "",
+    ) -> dict:
+        """Organize chats into projects, sidebar folders/sections/topics, rename, pin, archive, or undo.
+        Empty actions_json returns current groups, session IDs, topic entries, and saved titles.
+        Use session_search first to inspect chat contents before grouping.
+        Pass a JSON array of actions in actions_json:
         {"type":"create_group","id":"unique-id","kind":"project" or "section","name":"Name"}
         {"type":"move","session_ids":["ID"],"field":"project_id" or "section_id","group_id":"group-id"}
+        {"type":"rename","session_ids":["ID"],"title":"Name"}
         {"type":"rename_group","id":"group-id","name":"Name"}
+        {"type":"group_notes","id":"group-id","notes":"Shared project notes"}
         {"type":"pin","session_ids":["ID"],"value":true}
         {"type":"archive","session_ids":["ID"],"value":true}
-        Create groups before moves. Preserve manual titles unless asked to rename.
-        Proposals appear in Manage for preview and apply. Never claim they are applied.
+        Create groups before moves. In Full Auto with apply=True (default), changes apply atomically
+        with an undoable operation_id and verified readback; otherwise they save as a reviewable proposal.
+        Pass undo_operation_id to revert a previous organization batch.
         """
         from jaeger_ai.core.session_tools import session_organize as organize
-        return organize(actions_json=actions_json, label=label)
+        return organize(
+            actions_json=actions_json,
+            label=label,
+            apply=apply,
+            undo_operation_id=undo_operation_id,
+        )
 
     # Product sessions belong to Gateway; replace the standalone episodic
     # search default explicitly rather than registering a second tool owner.
@@ -1209,19 +1221,26 @@ def _register_builtins(client: Any) -> None:
     @register_tool_from_function(side_effect="local_write", replace=True)
     @requires_tier(PermissionTier.WRITE_LOCAL, skill="host",
                    operation="session_manage",
-                   summary="archive, unarchive, or delete explicitly specified chat sessions")
+                   summary="archive, unarchive, delete named sessions, or delete all old sessions")
     def session_manage(
         action: str,
-        session_ids: list[str],
+        session_ids: list[str] | None = None,
+        keep_session_ids: list[str] | None = None,
     ) -> dict:
-        """Archive, unarchive, or delete explicitly named chat sessions and verify the result.
+        """Archive, unarchive, delete explicitly named chat sessions, or delete all old sessions.
 
-        - action: 'archive', 'unarchive', or 'delete'
-        - session_ids: explicit list of exact session IDs (never wildcards; max 20)
-        Use session_search first to confirm exact session IDs before deleting.
+        - action: 'archive', 'unarchive', 'delete', or 'delete_old'
+        - session_ids: explicit list of exact session IDs (required for archive/unarchive/delete; max 200)
+        - keep_session_ids: optional list of session IDs to preserve when action='delete_old'
+        When the user asks to delete all old chats/conversations, call action='delete_old'
+        (which automatically protects the current active session and verifies every deletion).
         """
         from jaeger_ai.core.session_tools import session_manage as _manage
-        return _manage(action=action, session_ids=session_ids)
+        return _manage(
+            action=action,
+            session_ids=session_ids,
+            keep_session_ids=keep_session_ids,
+        )
 
     @register_tool_from_function(side_effect="read", replace=True)
     @requires_tier(PermissionTier.READ_ONLY, skill="host",

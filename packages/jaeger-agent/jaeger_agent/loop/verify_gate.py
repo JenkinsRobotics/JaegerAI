@@ -144,7 +144,7 @@ _DECLARATIVE_COMPLETE = re.compile(
 _ACTION_TOOLS = frozenset().union(*(family for _, family in _CLAIM_FAMILIES)) | frozenset({
     "computer_do", "computer_use", "execute_with_tools", "move_file",
     "copy_file", "rename_file", "work_ledger", "complete_task",
-    "apply_patch", "exec_command", "session_manage", "settings_set",
+    "apply_patch", "exec_command", "session_manage", "session_organize", "settings_set",
     "knowledge_record_claim", "knowledge_verify_claim",
     "human_needs_add_goal", "human_needs_propose_opportunity",
     "human_needs_record_outcome",

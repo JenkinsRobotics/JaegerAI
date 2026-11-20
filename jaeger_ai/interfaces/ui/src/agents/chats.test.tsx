@@ -29,12 +29,12 @@ describe("an agent's chats", () => {
     expect(shortTime(now / 1000 - 86_400, now)).toBe("Yesterday");
   });
 
-  it("renders a row per chat with the open one marked, and collapses long lists", () => {
+  it("renders date-grouped rows with the open one marked, and shows search for long lists", () => {
     const rows = Array.from({ length: 8 }, (_, i) => row(`s${i}`, 100 - i, { title: `Chat ${i}` }));
     const html = renderToStaticMarkup(<ChatList rows={rows} openId="s1" onOpen={() => {}} onRename={() => {}} onArchive={() => {}} />);
-    expect(html.match(/jg-chat-row__title/g)?.length).toBe(5);
+    expect(html.match(/jg-chat-row__title/g)?.length).toBe(8);
     expect(html).toContain('aria-current="page"');
-    expect(html).toContain("Show 3 more");
+    expect(html).toContain('aria-label="Search chats"');
   });
 });
 

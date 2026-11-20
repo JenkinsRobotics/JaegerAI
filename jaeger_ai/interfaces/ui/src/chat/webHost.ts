@@ -211,6 +211,7 @@ export class WebHost implements ChatHost {
     /** Owned background work the Stop receipt could not confirm; stays visible after the turn settles. */
     let unconfirmedOwned: string[] = [];
     const requestCancel = () => {
+      onPart({ kind: "progress", message: "Stopping… Waiting for Gateway confirmation." });
       void this.source.cancel(request.sessionId, admittedRequestId).then(receipt=>{
         if(!receipt)return;
         if(receipt.request_id!==admittedRequestId||receipt.session_id!==request.sessionId)throw Error('Stop receipt did not match the original request');

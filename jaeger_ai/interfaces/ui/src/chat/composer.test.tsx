@@ -183,7 +183,7 @@ describe("composer while Jaeger is working", () => {
       await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!.click(); });
       expect(steer).toHaveBeenCalledWith("s1", started!.turnId, "Use the compact layout", expect.any(String));
       expect(el.querySelector('[aria-label="Message sent to the active turn"] .jg-bubble--user')?.textContent).toBe("Use the compact layout");
-      expect(el.querySelector('[aria-label="Message sent to the active turn"] .jg-busy-message__status')?.textContent).toBe("Sent to Jaeger · steer");
+      expect(el.querySelector('[aria-label="Message sent to the active turn"] .jg-busy-message__status')?.textContent).toBe("Sent mid-turn");
       expect(el.querySelector('[aria-label^="Message action:"]')).toBeNull();
       expect(el.querySelector('.jg-composer__chips')?.textContent ?? "").not.toContain("Steered");
 
