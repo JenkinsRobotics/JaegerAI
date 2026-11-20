@@ -59,15 +59,8 @@ def gateway_approvals() -> list[dict]:
 
 
 def local_approvals() -> list[dict]:
-    """WebUI-process pending cards (route_approvals queue)."""
-    from api.route_approvals import _lock as qlock, _pending  # type: ignore
-    out = []
-    with qlock:
-        for sid, queue in list(_pending.items()):
-            for entry in (queue if isinstance(queue, list) else [queue] if queue else []):
-                if isinstance(entry, dict):
-                    out.append({**entry, "session_id": entry.get("session_id") or sid})
-    return out
+    """Retired WebUI-local approval queue; all live approval cards live in Gateway."""
+    return []
 
 
 def respond_local(handler, session_id: str, approval_id: str, choice: str):
