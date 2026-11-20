@@ -84,6 +84,8 @@ class DurableTask:
     agent_id: str = ""
     eta: str | None = None
     runner: str = "native"
+    #: Optional Human Flourishing linkage (never required for simple user tasks).
+    human_needs: dict[str, Any] | None = None
 
     @property
     def is_terminal(self) -> bool:
@@ -117,6 +119,7 @@ class DurableTask:
             "agent_id": self.agent_id or self.owning_agent,
             "eta": self.eta,
             "runner": self.runner or "native",
+            **({"human_needs": self.human_needs} if self.human_needs is not None else {}),
         }
 
     @classmethod
@@ -162,6 +165,7 @@ class DurableTask:
             agent_id=str(data.get("agent_id") or ""),
             eta=data.get("eta"),
             runner=str(data.get("runner") or "native"),
+            human_needs=dict(data["human_needs"]) if isinstance(data.get("human_needs"), dict) else None,
         )
 
 

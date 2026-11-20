@@ -1,26 +1,18 @@
 # Human Needs & Flourishing Engine
 
-User-controlled model of human goals, opportunities, authorized interventions, and measurable outcomes aligned with JaegerAI's mission: *Help humanity, one human at a time.*
+User-owned goal, opportunity, outcome, and heartbeat-awareness layer supporting Truth's core mission (*Help humanity, one human at a time*).
 
-## Design Principles
+## Six Dimensions
+- `physical_wellbeing` (Physiological)
+- `security` (Safety)
+- `belonging` (Love and belonging — daily digest by default)
+- `competence_esteem` (Esteem)
+- `self_actualization` (Self-actualization)
+- `self_transcendence` (Self-transcendence — daily digest by default)
 
-- **Conceptual guide, not a forced ladder:** Six flourishing dimensions (`physical_wellbeing`, `security`, `belonging`, `competence_esteem`, `self_actualization`, `self_transcendence`) help organize goals and surface connections between them. Priorities always belong to the user.
-- **Strict epistemic separation:** Every record explicitly distinguishes `objective_measure`, `user_preference`, and `inferred_opportunity`.
-- **Non-intrusive boundaries (`policy.py`):**
-  - Quiet hours default to `22:00–07:00` (gentle nudges deferred to daily digest).
-  - Never pauses or overrides an active user task.
-  - Never contacts third parties without explicit authorization.
-  - Never manufactures psychological diagnoses.
-  - The user can edit, archive, or reject any goal or inferred opportunity and export all data at any time.
-
-## Storage & Routes
-
-- SQLite store at `<operator_state_root>/human_needs.sqlite3` (honors `JAEGER_STATE_DIR` / `JAEGER_HOME`, never writes in-repo).
-- Gateway routes (authenticated):
-  - `GET /v1/human-needs/summary`
-  - `POST /v1/human-needs/goals`
-  - `PATCH /v1/human-needs/goals/{id}`
-  - `POST /v1/human-needs/opportunities`
-  - `POST /v1/human-needs/opportunities/{id}/decide`
-  - `POST /v1/human-needs/outcomes`
-  - `GET /v1/human-needs/export`
+## Modules
+- `policy.py` — Quiet hours (`22:00–07:00` default, owner-configurable), non-intrusive digest routing, active-task protection, third-party contact authorization guard.
+- `store.py` — SQLite persistence under `operator_state_root() / "human_needs.sqlite3"` (`user_goals`, `user_opportunities`, `user_outcomes`, `human_needs_preferences`, `human_needs_interventions` with unique `dedupe_key` and adaptive dimension weights).
+- `heartbeat_loop.py` — Bounded awareness cycle (`Heartbeat -> Understand -> Prioritize -> Plan -> Act -> Verify -> Learn`) integrated into `jaeger_ai/core/runtime/heartbeat.py`, reusing `SqliteDurableTaskStore`, `SqliteWorldStore`, and `PolicyKernel`.
+- `tools.py` — Agent tools registered in `jaeger_ai/main.py` (`human_needs_summary`, `human_needs_add_goal`, `human_needs_propose_opportunity`, `human_needs_record_outcome`).
+- `routes.py` — Authenticated Gateway API (`/v1/human-needs/*` including `/preferences`, `/heartbeat/run`, `/opportunities/{id}`, `/export`).
