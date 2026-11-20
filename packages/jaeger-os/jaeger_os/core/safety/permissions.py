@@ -211,6 +211,7 @@ class PermissionGrants:
     path: Path | None = None
     persistent: set[str] = field(default_factory=set)
     session: set[str] = field(default_factory=set)
+    expirations: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def load(cls, instance_dir: Any = None) -> "PermissionGrants":
@@ -218,46 +219,111 @@ class PermissionGrants:
         file ⇒ empty grants (every skill prompts)."""
         if not instance_dir:
             return cls()
+        import time
+
         path = Path(instance_dir) / "permissions.json"
         persistent: set[str] = set()
+        expirations: dict[str, float] = {}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            persistent = {str(s) for s in data.get("granted_skills", [])}
+            raw_exp = data.get("expirations") or {}
+            now = time.time()
+            for raw_skill in data.get("granted_skills", []):
+                skill = str(raw_skill)
+                exp = raw_exp.get(skill)
+                if exp is not None:
+                    try:
+                        exp_f = float(exp)
+                    except (TypeError, ValueError):
+                        continue
+                    if exp_f <= now:
+                        continue  # expired grants do not carry across restarts
+                    expirations[skill] = exp_f
+                persistent.add(skill)
         except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
             pass
-        return cls(path=path, persistent=persistent)
+        return cls(path=path, persistent=persistent, expirations=expirations)
+
+    def _expired(self, skill: str) -> bool:
+        import time
+
+        exp = self.expirations.get(skill)
+        if exp is not None and exp <= time.time():
+            self.expirations.pop(skill, None)
+            self.session.discard(skill)
+            if skill in self.persistent:
+                self.persistent.discard(skill)
+                self._save()
+            return True
+        return False
 
     def is_granted(self, skill: str) -> bool:
-        return bool(skill) and (skill in self.persistent or skill in self.session)
+        if not skill or self._expired(skill):
+            return False
+        return skill in self.persistent or skill in self.session
 
-    def grant_session(self, skill: str) -> None:
-        """Approve ``skill`` for the rest of this session."""
-        if skill:
-            self.session.add(skill)
-
-    def grant_persistent(self, skill: str) -> None:
-        """Approve ``skill`` permanently — persisted across restarts."""
+    def grant_session(self, skill: str, *, ttl_s: float | None = None) -> None:
+        """Approve ``skill`` for the rest of this session (or until ``ttl_s``)."""
         if not skill:
             return
+        import time
+
         self.session.add(skill)
-        if skill not in self.persistent:
-            self.persistent.add(skill)
+        if ttl_s is not None and ttl_s > 0:
+            self.expirations[skill] = time.time() + float(ttl_s)
+        else:
+            self.expirations.pop(skill, None)
+
+    def grant_persistent(self, skill: str, *, ttl_s: float | None = None) -> None:
+        """Approve ``skill`` permanently (or until ``ttl_s``) — persisted across restarts."""
+        if not skill:
+            return
+        import time
+
+        self.session.add(skill)
+        changed = skill not in self.persistent
+        self.persistent.add(skill)
+        if ttl_s is not None and ttl_s > 0:
+            self.expirations[skill] = time.time() + float(ttl_s)
+            changed = True
+        elif skill in self.expirations:
+            self.expirations.pop(skill, None)
+            changed = True
+        if changed:
             self._save()
 
     def revoke(self, skill: str) -> None:
         """Withdraw a grant — the skill prompts again next time it's used."""
         self.session.discard(skill)
+        self.expirations.pop(skill, None)
         if skill in self.persistent:
             self.persistent.discard(skill)
             self._save()
+
+    def inspect(self) -> list[dict[str, Any]]:
+        """Owner-readable list of active persistent and session grants."""
+        rows: list[dict[str, Any]] = []
+        for skill in sorted(self.persistent | self.session):
+            if self._expired(skill):
+                continue
+            rows.append({
+                "skill": skill,
+                "scope": "persistent" if skill in self.persistent else "session",
+                "expires_at": self.expirations.get(skill),
+            })
+        return rows
 
     def _save(self) -> None:
         if self.path is None:
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            payload: dict[str, Any] = {"granted_skills": sorted(self.persistent)}
+            active_exp = {k: v for k, v in self.expirations.items() if k in self.persistent}
+            if active_exp:
+                payload["expirations"] = active_exp
             self.path.write_text(
-                json.dumps({"granted_skills": sorted(self.persistent)}, indent=2),
+                json.dumps(payload, indent=2),
                 encoding="utf-8",
             )
         except OSError:

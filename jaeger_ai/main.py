@@ -1206,6 +1206,55 @@ def _register_builtins(client: Any) -> None:
         from jaeger_ai.core.session_tools import session_search as _search
         return _search(query=query, session_id=session_id, source=source, limit=limit)
 
+    @register_tool_from_function(side_effect="local_write", replace=True)
+    @requires_tier(PermissionTier.WRITE_LOCAL, skill="host",
+                   operation="session_manage",
+                   summary="archive, unarchive, or delete explicitly specified chat sessions")
+    def session_manage(
+        action: str,
+        session_ids: list[str],
+    ) -> dict:
+        """Archive, unarchive, or delete explicitly named chat sessions and verify the result.
+
+        - action: 'archive', 'unarchive', or 'delete'
+        - session_ids: explicit list of exact session IDs (never wildcards; max 20)
+        Use session_search first to confirm exact session IDs before deleting.
+        """
+        from jaeger_ai.core.session_tools import session_manage as _manage
+        return _manage(action=action, session_ids=session_ids)
+
+    @register_tool_from_function(side_effect="read", replace=True)
+    @requires_tier(PermissionTier.READ_ONLY, skill="host",
+                   operation="settings_get",
+                   summary="read Jaeger application settings")
+    def settings_get(path: str = "", group: str = "") -> dict:
+        """Inspect current Jaeger application settings (secrets are masked).
+
+        Pass path='model.ctx' to read one setting, or group='display' to list a group,
+        or leave both empty to list all exposed settings groups.
+        """
+        from jaeger_ai.core.settings.tools import settings_get as _get
+        layout = _pipeline.get("layout")
+        if layout is None:
+            return {"ok": False, "error": "instance layout not loaded"}
+        return _get(layout, path=path, group=group)
+
+    @register_tool_from_function(side_effect="local_write", replace=True)
+    @requires_tier(PermissionTier.WRITE_LOCAL, skill="host",
+                   operation="settings_set",
+                   summary="modify an authorized Jaeger setting and verify persistence")
+    def settings_set(path: str, value: Any) -> dict:
+        """Modify an authorized Jaeger setting in config.yaml and verify the saved value.
+
+        Validates through the canonical Config schema and re-reads from disk.
+        Security, autonomy, permission, and secret settings cannot be modified by this tool.
+        """
+        from jaeger_ai.core.settings.tools import settings_set as _set
+        layout = _pipeline.get("layout")
+        if layout is None:
+            return {"ok": False, "error": "instance layout not loaded"}
+        return _set(layout, path=path, value=value)
+
 
 
 

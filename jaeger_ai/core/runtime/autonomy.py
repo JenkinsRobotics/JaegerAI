@@ -30,6 +30,25 @@ from pathlib import Path
 from typing import Any
 
 AUTONOMY = ("ask", "scoped", "auto")
+AUTONOMY_ALIASES: dict[str, str] = {
+    "ask": "ask",
+    "manual": "ask",
+    "scoped": "scoped",
+    "smart": "scoped",
+    "smart_auto": "scoped",
+    "smart-auto": "scoped",
+    "smart auto": "scoped",
+    "auto": "auto",
+    "full": "auto",
+    "full_auto": "auto",
+    "full-auto": "auto",
+    "full auto": "auto",
+}
+AUTONOMY_LABELS: dict[str, str] = {
+    "ask": "Manual",
+    "scoped": "Smart Auto",
+    "auto": "Full Auto",
+}
 DEFAULT = "scoped"
 CONFIG_DEFAULT = "scoped"
 """The ``automation.autonomy`` value used when the instance config has no
@@ -38,6 +57,12 @@ setting. Constitution invariant 11: the default is ``scoped``, not ``auto``.
 UNREADABLE_DEFAULT = "ask"
 """Used when the config cannot be read/parsed or holds an invalid value: an
 error never widens autonomy (fail closed → ask)."""
+
+
+def normalize_autonomy(raw: Any) -> str | None:
+    """Map owner-facing mode names (Manual/Smart Auto/Full Auto) onto canonical ids."""
+    text = str(raw or "").strip().lower()
+    return AUTONOMY_ALIASES.get(text)
 
 
 def permissions_mode_for(autonomy: str) -> str:
@@ -97,8 +122,8 @@ def configured_autonomy(config_path: Path | str | None) -> str:
             if str(mode or "").strip().lower() == "allow":
                 return "auto"
             return CONFIG_DEFAULT
-        value = str(value).strip().lower()
-        return value if value in AUTONOMY else UNREADABLE_DEFAULT
+        norm = normalize_autonomy(value)
+        return norm if norm in AUTONOMY else UNREADABLE_DEFAULT
     except Exception:  # noqa: BLE001 — an unreadable config never widens autonomy
         return UNREADABLE_DEFAULT
 
@@ -118,7 +143,13 @@ def autonomy_info() -> dict:
     """The CURRENT autonomy mode + options — what the agent reports when asked
     "will you ask before acting?" (answer from fact, never guess)."""
     m = _state["mode"]
-    return {"autonomy": m, "options": list(AUTONOMY), "description": _DESC.get(m, "")}
+    return {
+        "autonomy": m,
+        "label": AUTONOMY_LABELS.get(m, m),
+        "options": list(AUTONOMY),
+        "labels": dict(AUTONOMY_LABELS),
+        "description": _DESC.get(m, ""),
+    }
 
 
 def _publish(mode: str) -> None:
@@ -136,13 +167,13 @@ def _publish(mode: str) -> None:
 def set_autonomy(name: str) -> dict:
     """Switch the autonomy mode (instant, no model swap). Returns a status dict;
     never raises. No-op-safe if already in the target mode."""
-    target = (name or "").strip().lower()
+    target = normalize_autonomy(name)
     if target not in AUTONOMY:
-        return {"ok": False, "error": f"unknown autonomy {target!r}; choose from {list(AUTONOMY)}"}
+        return {"ok": False, "error": f"unknown autonomy {name!r}; choose from {list(AUTONOMY)}"}
     _state["mode"] = target
     _state["explicit"] = True
     _publish(target)
-    return {"ok": True, "mode": target}
+    return {"ok": True, "mode": target, "label": AUTONOMY_LABELS.get(target, target)}
 
 def sync_permissions_mode(config_path: Path | str | None) -> str:
     """Make ``automation.autonomy`` the source of truth and derive ``permissions.mode``.
