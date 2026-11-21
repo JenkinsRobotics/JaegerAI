@@ -6568,6 +6568,7 @@ class JaegerGatewayApp:
         context_references: tuple[Any, ...] = ()
         pinned_references: tuple[Any, ...] = ()
         actual_model: str | None = None
+        failed_turn_result: dict[str, Any] = {}
         def observed_model(value: str | None) -> None:
             nonlocal actual_model
             actual_model = value
@@ -6595,6 +6596,31 @@ class JaegerGatewayApp:
         try:
             if self._cancellations.is_cancelled(rid):
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
+                return
+
+            from jaeger_ai.core.gateway.turn_audit import (
+                is_previous_turn_audit, previous_turn_audit,
+            )
+            if is_previous_turn_audit(request_text):
+                response_text = previous_turn_audit(self.store, session_id, rid)
+                if timing is not None:
+                    timing.turn_finish_ms = timing.now()
+                result = {
+                    "output": response_text,
+                    "status": "completed",
+                    "backend": "gateway_receipt_audit",
+                    "model": None,
+                    "turn_id": turn_id,
+                    "execution_mode": "read_only",
+                    "capabilities": {"native_tools": False, "native_memory": False},
+                    "timing": timing.snapshot() if timing is not None else None,
+                    **agent_fields,
+                }
+                self._present(session_id, "done", intent="conversation", status="completed")
+                self._persist_terminal(
+                    rid, session_id, "completed", result,
+                    assistant_text=response_text, record_entity_event=False,
+                )
                 return
 
             if agent is not None and (getattr(agent, 'metadata', None) or {}).get('knowledge_documents'):
@@ -6836,6 +6862,7 @@ class JaegerGatewayApp:
                 )
 
             if turn_result.get("error"):
+                failed_turn_result = dict(turn_result)
                 raise RuntimeError(str(turn_result["error"]))
 
             response_text = str(turn_result.get("text") or "")
@@ -6936,7 +6963,16 @@ class JaegerGatewayApp:
                     "proactive_source": "sensor",
                     "proactive_salience": _normalize_salience(options["proactive_salience"]),
                 }
-            result = {"error": str(exc), "turn_id": turn_id, "status": status, **agent_fields, **proactive_fields}
+            partial_output = str(failed_turn_result.get("text") or "").strip()
+            result = {
+                "error": str(exc), "turn_id": turn_id, "status": status,
+                **({"partial_output": partial_output, "partial": True} if partial_output else {}),
+                **({"halt_reason": failed_turn_result.get("halt_reason")}
+                   if failed_turn_result.get("halt_reason") else {}),
+                **({"continuation_steps": failed_turn_result.get("continuation_steps")}
+                   if isinstance(failed_turn_result.get("continuation_steps"), int) else {}),
+                **agent_fields, **proactive_fields,
+            }
             if status == "completed":
                 result = {
                     "output": str(reply.get("text") or ""),
@@ -6959,7 +6995,7 @@ class JaegerGatewayApp:
                 session_id,
                 status,
                 result,
-                assistant_text=str(reply.get("text") or "") or None if status == "completed" else None,
+                assistant_text=(str(reply.get("text") or "") or None) if status == "completed" else (partial_output or None),
             )
         finally:
             # Global Stop cancels this asyncio task (CancelledError skips the except

@@ -1465,6 +1465,46 @@ class GatewaySessionStore:
             ).fetchone()
             return self._request_row(row) if row else None
 
+    def previous_terminal_request(
+        self, session_id: str, *, before_request_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the terminal request immediately before ``before_request_id``.
+
+        This is a receipt read, not transcript inference.  The explicit current
+        request boundary prevents a self-audit turn from selecting itself while
+        it is running.
+        """
+        with self._get_conn() as conn:
+            current = conn.execute(
+                "SELECT created_at FROM client_requests WHERE request_id=? AND session_id=?",
+                (before_request_id, session_id),
+            ).fetchone()
+            if current is None:
+                return None
+            row = conn.execute(
+                "SELECT * FROM client_requests WHERE session_id=? AND request_id<>? "
+                "AND created_at<=? AND status IN ('completed','failed','cancelled','execution_unknown') "
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                (session_id, before_request_id, current["created_at"]),
+            ).fetchone()
+            return self._request_row(row) if row else None
+
+    def request_tool_names(self, session_id: str, request_id: str) -> list[str]:
+        """Tool names from durable lifecycle events, in first-start order."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM activity_history WHERE session_id=? "
+                "AND event='tool.started' AND json_extract(data_json,'$.request_id')=? "
+                "ORDER BY event_id",
+                (session_id, request_id),
+            ).fetchall()
+        return [
+            str(data["tool"])
+            for row in rows
+            if isinstance((data := _row_meta(row["data_json"])).get("tool"), str)
+            and data["tool"]
+        ]
+
     def sessions_with_queue(self) -> list[str]:
         """Sessions that still own queued or paused follow-up work."""
         with self._get_conn() as conn:
