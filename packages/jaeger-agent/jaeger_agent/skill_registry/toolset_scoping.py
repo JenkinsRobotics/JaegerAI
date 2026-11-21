@@ -60,7 +60,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "files": (r"\b(files?|folders?|director(?:y|ies)|patch|rename|copy|move|read|write|disk|space|path|content)\b",),
     "code": (r"\b(code|python|swift|javascript|typescript|shell|terminal|command|test suite|debug|package|disk|system|process|cpu|memory usage|df|ls|cat|ps|kill|curl|git|ping|port)\b",),
     "containers": (r"\b(container|containers|containerized)\b",),
-    "media": (r"\b(image|video|audio|speech|voice|camera|microphone|listen)\b",),
+    "media": (r"\b(image|vision|photo|picture|screenshot|diagram|video|audio|speech|voice|camera|microphone|listen)\b",),
     "web": (r"\b(weather|forecast|twitter|tweets?|x\.com|x_search|x search|search x)\b",),
     "sessions": (r"\b(conversations?|sessions?|chats?|chat history|topics?|folders?|projects?|organize)\b",),
     "board": (r"\b(board|kanban|card)\b",),
@@ -102,6 +102,9 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
 def infer_toolsets(text: str) -> set[str]:
     """Return task-relevant toolsets without an LLM routing call."""
     clean = (text or "").lower()
+    # Prohibited actions are not positive tool intent. Keep later affirmative
+    # clauses ("do not install packages; read the CSV") available to routing.
+    clean = re.sub(r"\b(?:do not|don['’]t|never)\b[^.;\n]*(?:[.;]|$)", " ", clean)
     return {
         toolset
         for toolset, patterns in _INTENT_PATTERNS.items()
@@ -280,7 +283,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "credentials": frozenset({
         "get_credential", "list_credentials", "set_credential", "request_secret",
     }),
-    "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin"}),
+    "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin", "list_connectors", "add_connector"}),
     "email": frozenset({
         "send_email", "move_mail", "batch_move",
         "sweep_mail", "schedule_inbox_sweeper",
@@ -299,13 +302,14 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "bench": frozenset({"run_benchmark"}),
     # ``self_check`` = the agent's doctor (same engine as `jaeger
     # doctor`); ``system_status`` = host cpu/disk/uptime.
-    "diagnostics": frozenset({"system_status", "self_check", "diagnostics"}),
+    "diagnostics": frozenset({"system_status", "self_check", "diagnostics", "mac_status"}),
     # 0.9.3 MAC-NATIVE TOOL SUITE — one toolset per category, each also
     # feeding a persona_lane.py SELF_MODEL group (shortcuts/spotlight/
     # calendar) so the id knows it can reach for them.
     "shortcuts": frozenset({"list_shortcuts", "run_shortcut"}),
     "spotlight": frozenset({"spotlight_search"}),
-    "calendar": frozenset({"get_events", "create_event", "list_reminders"}),
+    "calendar": frozenset({"get_events", "create_event", "list_reminders",
+                           "meeting_prep", "meeting_record", "meeting_transcribe", "meeting_summary"}),
     "contacts": frozenset({"lookup_contact"}),
     "clipboard": frozenset({"clipboard_read", "clipboard_write"}),
     "notifications": frozenset({"notify"}),

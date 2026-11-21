@@ -26,6 +26,55 @@ from typing import Any, Callable, Sequence
 logger = logging.getLogger("jaeger.entity.verification")
 
 
+def artifact_format_error(path: Path) -> str | None:
+    """Reject malformed Office artifacts before a file hash is called evidence.
+
+    Structural validation only: this does not certify layout, formula results,
+    page counts, factual accuracy, or the contents of arbitrary source files.
+    No optional Office package or external process is needed.
+    """
+    required = {".xlsx": "xl/workbook.xml", ".docx": "word/document.xml",
+                ".pptx": "ppt/presentation.xml"}.get(path.suffix.lower())
+    if required is None:
+        return None
+    import zipfile
+    from decimal import Decimal, InvalidOperation
+    from xml.etree import ElementTree as ET
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            if not {required, "[Content_Types].xml", "_rels/.rels"} <= names:
+                return f"Invalid Office package {path.name}: required parts are missing"
+            infos = archive.infolist()
+            if sum(i.file_size for i in infos) > 64 * 1024 * 1024:
+                return f"Office format verification exceeds the 64 MiB inspection budget: {path.name}"
+            for info in infos:
+                if not info.filename.endswith((".xml", ".rels")):
+                    continue
+                tree = ET.fromstring(archive.read(info))
+                if not info.filename.startswith("xl/worksheets/"):
+                    continue
+                ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+                for cell in tree.iter(ns + "c"):
+                    value = cell.find(ns + "v")
+                    if value is None or value.text is None:
+                        continue
+                    kind = cell.get("t", "n")
+                    if kind == "n":
+                        try:
+                            valid = Decimal(value.text).is_finite()
+                        except InvalidOperation:
+                            valid = False
+                        if not valid:
+                            return (f"Invalid spreadsheet {path.name}: {info.filename} cell {cell.get('r')} "
+                                    "has a nonnumeric cached value but numeric cell type; use the correct string/error type")
+                    elif kind == "b" and value.text not in {"0", "1"}:
+                        return f"Invalid spreadsheet {path.name}: boolean cell {cell.get('r')} must contain 0 or 1"
+    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, ET.ParseError) as exc:
+        return f"Invalid Office package {path.name}: {type(exc).__name__}"
+    return None
+
+
 class VerificationStatus(str, Enum):
     ATTEMPTED = "attempted"
     TOOL_SUCCESS = "tool_success"

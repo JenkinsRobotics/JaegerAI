@@ -16,6 +16,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 VERDICTS = ("approve", "deny", "unsure")
+MAX_REVIEW_CHARS = 64_000
 
 REVIEW_SYSTEM = """You are a permission reviewer for Jaeger, a personal assistant.
 The owner has chosen "Approve for me": actions inside a saved approval scope
@@ -55,16 +56,19 @@ def _redact(value: Any) -> Any:
 
 
 def reviewer_prompt(*, user_request: str, tool: str, arguments: Any, rules: str = "") -> str:
-    args = json.dumps(_redact(arguments), default=str, ensure_ascii=False)[:4000]
-    request = (user_request or "").strip()[:4000] or "(no current request text)"
+    args = json.dumps(_redact(arguments), default=str, ensure_ascii=False)
+    request = (user_request or "").strip() or "(no current request text)"
     extra = (rules or "").strip()
-    return (
+    prompt = (
         f"Owner's request:\n{request}\n\n"
         f"Proposed action: {tool or '(unknown tool)'}\n"
         f"Arguments (secrets redacted):\n{args}\n"
         + (f"\nAdditional rules:\n{extra}\n" if extra else "")
         + "\nYour decision:"
     )
+    if len(prompt) > MAX_REVIEW_CHARS:
+        raise ValueError("The complete action and request exceed the reviewer context limit.")
+    return prompt
 
 
 def parse_review(text: str) -> tuple[str, str]:
@@ -108,17 +112,23 @@ def review_action(
     arguments: Any,
     model: str | None = None,
     provider: str | None = None,
-    timeout_s: float = 25.0,
+    timeout_s: float = 45.0,
 ) -> tuple[str, str]:
     """Run a tool-less reviewer completion. On failure, return unsure."""
-    prompt = reviewer_prompt(
-        user_request=user_request, tool=tool, arguments=arguments,
-    )
+    try:
+        prompt = reviewer_prompt(
+            user_request=user_request, tool=tool, arguments=arguments,
+        )
+    except ValueError:
+        return "unsure", "The complete action and request exceed the reviewer context limit; owner review is required."
     loop = getattr(gateway, "_loop", None)
     if loop is None or not loop.is_running():
         return "unsure", "The reviewer is unavailable right now."
+    import asyncio
+    import threading
+    cancel = threading.Event()
+    fut = None
     try:
-        import asyncio
         fut = asyncio.run_coroutine_threadsafe(
             gateway._model_chat(
                 prompt,
@@ -126,11 +136,16 @@ def review_action(
                 provider=provider,
                 system_prompt=REVIEW_SYSTEM,
                 history=(),
+                controls={"reasoning_effort": "low", "max_tokens": 1024},
+                interrupt_event=cancel,
             ),
             loop,
         )
         text = fut.result(timeout=max(5.0, float(timeout_s)))
     except Exception as exc:  # noqa: BLE001 — a reviewer failure asks the owner
+        cancel.set()
+        if fut is not None and not fut.done():
+            fut.cancel()
         logger.info("approval reviewer failed: %s", type(exc).__name__)
         return "unsure", "The reviewer could not complete a decision."
     return parse_review(str(text or ""))

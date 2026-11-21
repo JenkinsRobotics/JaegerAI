@@ -39,6 +39,9 @@ function activateEntry(appName = 'Visual Studio Code') {
   const original = Module._load;
   Module._load = function (request, parent, isMain) {
     if (request === 'vscode') return vscode;
+    // Activation wiring does not own a real host-model server or bridge file.
+    if (request === 'node:http' && parent?.filename.endsWith('host-lm-bridge.js'))
+      return { createServer: () => ({ listen() {}, close() {} }) };
     if (request === './contract.json') return { gatewayUrl: 'http://127.0.0.1:1' };
     return original.call(this, request, parent, isMain);
   };

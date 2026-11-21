@@ -5,6 +5,10 @@ from jaeger_ai.core.instance.schemas import Config
 
 @pytest.fixture
 def model_completion(monkeypatch):
+    # This adapter never loads or calls a model. Host RAM and a running Ollama
+    # service must not decide an inert transport-contract test's outcome.
+    monkeypatch.setattr('jaeger_ai.core.models.request_policy.require_inference_headroom', lambda *a, **k: None)
+    monkeypatch.setattr('jaeger_ai.core.models.router.ensure_local_ollama', lambda: True)
     config=Config(instance_name='test',model={'model_path':'unused'},external_model={
         'enabled':True,'provider':'ollama','model':'owned-model','base_url':'http://127.0.0.1:11434/v1'})
     monkeypatch.setattr('jaeger_ai.core.entity.runtime.load_instance_config_or_default',lambda _:config)

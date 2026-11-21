@@ -110,11 +110,25 @@ it("creates an isolated Jaeger session only after the user starts, then keeps ch
  const source=new MockSource();const create=vi.spyOn(source,'createSession').mockResolvedValue({session_id:'demo-safe',agent_id:'native:jaeger'} as never);
  await mount(source);expect(create).not.toHaveBeenCalled();
  const start=[...document.querySelectorAll('button')].find(e=>e.textContent==='Start conversation')!;await flush(()=>start.click());
- expect(create).toHaveBeenCalledWith({agent_id:'native:jaeger',title:'Jaeger stable chat'});expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('demo-safe');
+ expect(create).toHaveBeenCalledWith({agent_id:'native:jaeger',title:'New chat'});expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('demo-safe');
  const chat=document.querySelector('[data-chat-session]');await flush(()=>[...document.querySelectorAll('nav button')].find(e=>e.textContent==='Tasks')!.dispatchEvent(new MouseEvent('click',{bubbles:true})));
- expect(location.pathname).toBe('/work/tasks');
+ expect(location.pathname).toBe('/work');
  expect(document.querySelector('[data-workspace-embedded="true"]')).not.toBeNull();
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
+});
+it("starts a new home topic on live gateways when the user starts a conversation", async () => {
+ const source=new MockSource();Object.defineProperty(source,'kind',{value:'live'});
+ vi.spyOn(source,'sessions').mockResolvedValue([]);
+ vi.spyOn(source,'session').mockResolvedValue({session_id:'agent-native:jaeger',title:'Jaeger'} as never);
+ const fetchMock=vi.fn().mockResolvedValue({ok:true,text:async()=>JSON.stringify({session_id:'agent-native:jaeger',topic:{topic_id:'t-1'}})});
+ vi.stubGlobal('fetch',fetchMock);
+ try {
+  await mount(source);
+  const start=[...document.querySelectorAll('button')].find(e=>e.textContent==='Start conversation')!;
+  await flush(()=>start.click());
+  expect(fetchMock).toHaveBeenCalledWith('/v1/agents/native%3Ajaeger/home/topics',expect.objectContaining({method:'POST'}));
+  expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','agent-native:jaeger');
+ } finally { vi.unstubAllGlobals(); }
 });
 it("retains a saved session and reports a connection failure without replacing it", async () => {
  localStorage.setItem(DEMO_SESSION_KEY,'existing-session');const source=new MockSource();vi.spyOn(source,'session').mockRejectedValue(new Error('Gateway unavailable'));const create=vi.spyOn(source,'createSession');await mount(source);
@@ -123,7 +137,7 @@ it("retains a saved session and reports a connection failure without replacing i
 
 it("switches saved conversations without creating a session and keeps the selected chat usable", async () => {
  const source = new MockSource();
- vi.spyOn(source, 'sessions').mockResolvedValue([{session_id: 'saved', title: 'Saved work', agent_id: 'native:jaeger'}]);
+ vi.spyOn(source, 'sessions').mockResolvedValue([{session_id: 'saved', title: 'Saved work', agent_id: 'native:jaeger', message_count: 2}]);
  vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
  const create = vi.spyOn(source, 'createSession');
  await mount(source);
@@ -170,8 +184,8 @@ it("keeps a disappeared conversation's exact address until the operator chooses 
  const source = new MockSource();
  Object.defineProperty(source, 'kind', {value: 'live'});
  vi.spyOn(source, 'sessions').mockResolvedValue([
-  {session_id: 'deleted-after-mount', title: 'Deleted elsewhere', agent_id: 'native:jaeger', last_activity_at: 30},
-  {session_id: 'shared-fallback', title: 'Shared fallback', agent_id: 'native:jaeger', last_activity_at: 20},
+  {session_id: 'deleted-after-mount', title: 'Deleted elsewhere', agent_id: 'native:jaeger', last_activity_at: 30, message_count: 2},
+  {session_id: 'shared-fallback', title: 'Shared fallback', agent_id: 'native:jaeger', last_activity_at: 20, message_count: 2},
  ]);
  vi.spyOn(source, 'session').mockImplementation(async id => ({session_id: id} as never));
  await mount(source);
@@ -217,10 +231,51 @@ it("matches the conversation action groups and supports menu keyboard dismissal"
  expect(document.activeElement).toBe(actions);
 });
 
+function organizedSource(opts: { pinRecent?: boolean } = {}) {
+ const source = new MockSource();
+ let rows = [
+  ...(opts.pinRecent ? [{session_id:"pinned-chat",agent_id:"native:jaeger",title:"Pinned chat",message_count:2}] : []),
+  {session_id:"project-chat",agent_id:"native:jaeger",title:"Project chat",workspace:"/Users/demo/JaegerAI",message_count:2},
+  {session_id:"recent-chat",agent_id:"native:jaeger",title:"Recent chat",message_count:2},
+ ];
+ let org = {
+  revision: 1,
+  groups: [{id:"proj-jaeger",name:"JaegerAI",kind:"project" as const,notes:""}],
+  sessions: [
+   ...(opts.pinRecent ? [{session_id:"pinned-chat",title:"Pinned chat",workspace:"",archived:false,pinned:true,project_id:null}] : []),
+   {session_id:"project-chat",title:"Project chat",workspace:"/Users/demo/JaegerAI",archived:false,pinned:false,project_id:"proj-jaeger"},
+   {session_id:"recent-chat",title:"Recent chat",workspace:"",archived:false,pinned:false,project_id:null},
+  ],
+  proposals: [],
+ };
+ vi.spyOn(source, "sessions").mockImplementation(async () => rows);
+ const baseDelete = source.deleteSession.bind(source);
+ vi.spyOn(source, "deleteSession").mockImplementation(async (id: string) => {
+  rows = rows.filter(r => r.session_id !== id);
+  org = { ...org, sessions: org.sessions.filter(s => s.session_id !== id) };
+  return baseDelete(id);
+ });
+ Object.assign(source, {
+  organization: {
+   get: async () => org,
+   command: async (body: { actions?: Array<{ type: string; session_ids?: string[]; value?: boolean }> }) => {
+    for (const action of body.actions ?? []) {
+     if (action.type === "pin" && action.session_ids) {
+      const ids = new Set(action.session_ids);
+      org = { ...org, revision: org.revision + 1, sessions: org.sessions.map(s => ids.has(s.session_id) ? { ...s, pinned: Boolean(action.value) } : s) };
+     }
+    }
+    return { operation_id: "op-1", revision: org.revision };
+   },
+  },
+ });
+ return source;
+}
+
 it("collapses each column independently without remounting the chat", async () => {
  localStorage.setItem(DEMO_SESSION_KEY, 'saved');
  const source = new MockSource();
- vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
+ vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved', title: 'Saved work'} as never);
  await mount(source);
  const chat = document.querySelector('[data-chat-session]');
  const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Toggle navigation"]')!;
@@ -231,12 +286,12 @@ it("collapses each column independently without remounting the chat", async () =
  await flush(() => toggle.click());
  expect(document.querySelector<HTMLElement>('#jaeger-navigation-context')?.hidden).toBe(false);
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
- expect(document.querySelector('.jg-stable-demo__profile')?.textContent).toContain('Jaeger');
+ expect(document.querySelector('.jg-stable-demo__profile-copy')?.textContent).toBe('Saved work');
 });
 
 it("collapses sidebar groups independently while keeping the same conversation and right panel", async () => {
  localStorage.setItem(DEMO_SESSION_KEY, 'saved');
- const source = new MockSource();
+ const source = organizedSource({ pinRecent: true });
  vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
  const create = vi.spyOn(source, 'createSession');
  await mount(source);
@@ -259,11 +314,11 @@ it("collapses sidebar groups independently while keeping the same conversation a
 });
 
 it("restores each sidebar group's expansion preference after reopening the app", async () => {
- await mount();
- const pinned = document.querySelector<HTMLButtonElement>('.jg-sidebar-section__toggle')!;
+ await mount(organizedSource({ pinRecent: true }));
+ const pinned = [...document.querySelectorAll<HTMLButtonElement>('.jg-sidebar-section__toggle')].find(button => button.textContent === 'Pinned')!;
  await flush(() => pinned.click());
  await flush(() => root.unmount());
- await mount();
+ await mount(organizedSource({ pinRecent: true }));
  const groups = [...document.querySelectorAll<HTMLButtonElement>('.jg-sidebar-section__toggle')];
  expect(groups.find(button => button.textContent === 'Pinned')).toHaveAttribute('aria-expanded', 'false');
  expect(groups.find(button => button.textContent === 'Projects')).toHaveAttribute('aria-expanded', 'true');
@@ -285,11 +340,7 @@ it("keeps disclosures usable if browser storage refuses writes", async () => {
 
 
 it("organizes sessions into pinned, projects, and recents and permanently deletes a selected session", async () => {
- const source = new MockSource();
- vi.spyOn(source, "sessions").mockResolvedValue([
-  {session_id:"project-chat",agent_id:"native:jaeger",title:"Project chat",workspace:"/Users/demo/JaegerAI"},
-  {session_id:"recent-chat",agent_id:"native:jaeger",title:"Recent chat"},
- ]);
+ const source = organizedSource();
  const remove = vi.spyOn(source, "deleteSession");
  await mount(source);
  expect(document.querySelector(".jg-stable-demo__project")?.textContent).toContain("JaegerAI");
@@ -299,7 +350,7 @@ it("organizes sessions into pinned, projects, and recents and permanently delete
  expect([...document.querySelectorAll(".jg-stable-demo__session-section")][0].textContent).toContain("Recent chat");
  await flush(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Manage")!.click());
  await flush(() => document.querySelector<HTMLInputElement>('[aria-label="Select Recent chat"]')!.click());
- await flush(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Delete selected")!.click());
+ await flush(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Delete selected…")!.click());
  expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("cannot be undone");
  await flush(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Delete permanently")!.click());
  expect(remove).toHaveBeenCalledWith("recent-chat");

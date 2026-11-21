@@ -224,7 +224,11 @@ def _synthesize_args_model(
 
     return create_model(  # type: ignore[call-overload]
         f"{tool_name.title().replace('_', '')}Args",
-        __config__=ConfigDict(arbitrary_types_allowed=True),
+        __config__=ConfigDict(
+            arbitrary_types_allowed=True,
+            extra="allow" if any(p.kind == inspect.Parameter.VAR_KEYWORD
+                                 for p in sig.parameters.values()) else "forbid",
+        ),
         **fields,
     )
 

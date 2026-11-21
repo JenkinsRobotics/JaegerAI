@@ -88,8 +88,9 @@ _DECLARATIVE_DISCUSSION = re.compile(
     r"(?i)^(?:i\s+(?:read|heard|know|think)|the\s+docs?\s+(?:say|describe)|"
     r"this\s+is\s+an\s+example|i\s+meant)\b"
 )
+_FILE_EXTENSIONS = r"md|txt|json|jsonl|csv|py|html|xlsx|pdf|docx|pptx|ics|png|jpe?g|webp|mp4|mov|wav|mp3|js|ts"
 _PATH_TOKEN = re.compile(
-    r"(?<!https:)(?<!http:)(?:`([^`]+)`|(?<![\w./~-])([\w./~-]+\.(?:md|txt|json|jsonl|csv|py|html|xlsx|pdf))\b)"
+    rf"(?<!https:)(?<!http:)(?:`([^`]+)`|(?<![\w./~-])([\w./~-]+\.(?:{_FILE_EXTENSIONS}))\b)", re.I
 )
 
 ACCEPTANCE_GUIDANCE = """[Acceptance Contract]
@@ -222,7 +223,7 @@ def _required_paths(text: str) -> list[str]:
         raw = (match.group(1) or match.group(2) or "").strip()
         if (
             not raw or "://" in raw or raw in paths
-            or not re.search(r"[/\\]|\.(?:md|txt|json|jsonl|csv|py|html|xlsx|pdf)$", raw, re.I)
+            or not re.search(rf"[/\\]|\.(?:{_FILE_EXTENSIONS})$", raw, re.I)
             or "\n" in raw
         ):
             continue
@@ -389,8 +390,8 @@ def next_continuation_prompt(
         return None
 
     use_ledger = ledger_open() if force_ledger is None else force_ledger
-    verdict = continuation.classify(answer)
     inner_cap = continuation.hit_inner_cap(halt_reason)
+    verdict = continuation.classify(answer, at_inner_cap=inner_cap)
 
     if inner_cap:
         if verdict in {"question", "blocked"}:
@@ -472,8 +473,9 @@ def missing_named_paths(text: str) -> list[str]:
         project = _ws.get_project_root()
         if project is not None:
             bases.append(Path(project))
-        layout = _ws._require_layout()
-        bases.extend([Path(layout.root), Path(_ws.get_effective_workspace_dir())])
+        else:
+            layout = _ws._require_layout()
+            bases.extend([Path(layout.root), Path(_ws.get_effective_workspace_dir())])
     except Exception:  # noqa: BLE001 — no instance bound: only absolute paths count
         pass
     missing = []
@@ -524,6 +526,24 @@ MAX_CHECKS = 2
 
 def changed_state(tools_used: list[str] | tuple[str, ...]) -> bool:
     return any(t and t not in READ_ONLY_TOOLS for t in tools_used)
+
+
+def artifact_errors(objective: str, *, since: float) -> list[str]:
+    """Check newly written, named Office outputs in the admitted workspace."""
+    from jaeger_ai.core.entity.verification import artifact_format_error
+    from jaeger_agent.core.workspace import get_effective_workspace_dir, get_project_root
+    try:
+        root = Path(get_project_root() or get_effective_workspace_dir()).resolve()
+    except (RuntimeError, TypeError):
+        return []
+    errors = []
+    for name in _required_paths(objective):
+        path = (root / Path(name).expanduser()).resolve()
+        if not path.is_relative_to(root) or not path.is_file() or path.stat().st_mtime < since:
+            continue
+        if error := artifact_format_error(path):
+            errors.append(error)
+    return errors
 
 
 def interactive_followup(answer: str, objective: str, halt_reason: str | None,
@@ -605,77 +625,104 @@ def run_continued_turn(
     checks = 0
     tools_used: list[str] = []
     last_answer = ""
+    import time
+    run_started = time.time()
+    format_corrections = 0
 
-    while True:
-        if durable and last_completion():
-            # A completed durable slice survives an owner restart. Return its
-            # actual receipt to the owner for revalidation; do not ask the model
-            # to perform completed effects again.
-            result = {"text": last_completion().get("summary", ""), "halt_reason": None}
+    with execution.run_scope(goal, budget=budget):
+        while True:
+            if durable and last_completion():
+                # A completed durable slice survives an owner restart. Return its
+                # actual receipt to the owner for revalidation; do not ask the model
+                # to perform completed effects again.
+                result = {"text": last_completion().get("summary", ""), "halt_reason": None}
+                break
+            if is_cancelled is not None and is_cancelled():
+                result = {
+                    "text": "",
+                    "error": "Cancelled before execution",
+                    "halt_reason": "interrupted",
+                }
+                break
+            result = dict(turn_fn(current) or {})
+            ans = str(result.get("text") or "").strip()
+            if result.get("error") or execution.stop_requested():
+                break
+            if is_cancelled is not None and is_cancelled():
+                result = {**result, "halt_reason": "interrupted"}
+                break
+            nxt = None
+            why = ""
+            halt = result.get("halt_reason")
+            if continuation.is_loop_breaker(halt):
+                break
+            step_tools = [str(t) for t in (result.get("tools_used") or [])]
+            tools_used.extend(step_tools)
+            if ans:
+                last_answer = ans
+            invalid = artifact_errors(goal, since=run_started)
+            if invalid:
+                if format_corrections >= 1 or step >= budget or last_completion():
+                    result = {**result, "status": "failed", "error": "; ".join(invalid),
+                              "halt_reason": "invalid_artifact"}
+                    break
+                format_corrections += 1
+                nxt = ("Independent artifact validation failed: " + "; ".join(invalid) +
+                       ". Repair these outputs and verify they can be read before claiming completion. "
+                       "The objective remains:\n" + goal)
+                why = "artifact format correction"
+            elif durable and not last_completion() and interactive and not ledger_open():
+                nxt = interactive_followup(ans, goal, halt, paths_checked=paths_checked,
+                                           tools_used=tools_used, checks_done=checks,
+                                           last_tools=step_tools if checks else None)
+                why = "owner verification follow-up"
+                if nxt and nxt.startswith(MISSING_PATHS_NOTE[:30]):
+                    paths_checked = True
+                elif nxt and nxt.startswith(CHECK_STEP[:12]):
+                    checks += 1
+                elif nxt is None and not ans and last_answer:
+                    # Verified and done, but the last inner turn said nothing:
+                    # reply with the latest real answer, never an empty one.
+                    result = {**result, "text": last_answer}
+            elif durable and not last_completion():
+                nxt = harness_prompt(objective=goal)
+                why = "durable task not completed yet"
+            elif ledger_open() or continuation.hit_inner_cap(halt):
+                why = "work ledger still open" if ledger_open() else f"inner loop hit its cap ({halt})"
+                nxt = next_continuation_prompt(
+                    ans, force_ledger=ledger_open(), halt_reason=halt, objective=goal,
+                )
+            elif continuation.enabled():
+                if continuation.classify(ans) == "continue":
+                    nxt = continuation.continuation_prompt(goal)
+                    why = "answer reads as unfinished"
+            if nxt and step < budget:
+                checkpoint = {"text": ans, "step": step, "halt_reason": halt, "reason": why}
+                checkpoints.append(checkpoint)
+                if on_checkpoint is not None:
+                    on_checkpoint(checkpoint)
+                step += 1
+                current = nxt
+                continue
             break
-        if is_cancelled is not None and is_cancelled():
-            result = {
-                "text": "",
-                "error": "Cancelled before execution",
-                "halt_reason": "interrupted",
-            }
-            break
-        result = dict(turn_fn(current) or {})
-        ans = str(result.get("text") or "").strip()
-        if result.get("error") or execution.stop_requested():
-            break
-        if is_cancelled is not None and is_cancelled():
-            result = {**result, "halt_reason": "interrupted"}
-            break
-        nxt = None
-        why = ""
+
+        unfinished = bool(nxt or continuation.hit_inner_cap(result.get("halt_reason")) or ledger_open())
+        if (durable and unfinished and step >= budget and not last_completion()
+                and not result.get("error") and not continuation.is_loop_breaker(result.get("halt_reason"))):
+            result = {**result, "halt_reason": "yielded"}
+        elif unfinished and step >= budget and not last_completion() and not result.get("error"):
+            result = {**result, "status": "failed", "halt_reason": "continuation_budget_exhausted",
+                      "error": "Continuation budget exhausted before the request completed. Partial work remains available."}
+        elif continuation.hit_inner_cap(result.get("halt_reason")) and not result.get("error"):
+            # A blocked/question verdict can end continuation before the budget.
+            # Preserve that explanation, but an exhausted inner loop is never
+            # evidence that the requested work completed.
+            result = {**result, "status": "failed",
+                      "error": "Execution stopped at its tool/iteration limit before the request completed. Review the partial result and stated blockers."}
         halt = result.get("halt_reason")
-        if continuation.is_loop_breaker(halt):
-            break
-        step_tools = [str(t) for t in (result.get("tools_used") or [])]
-        tools_used.extend(step_tools)
-        if ans:
-            last_answer = ans
-        if durable and not last_completion() and interactive and not ledger_open():
-            nxt = interactive_followup(ans, goal, halt, paths_checked=paths_checked,
-                                       tools_used=tools_used, checks_done=checks,
-                                       last_tools=step_tools if checks else None)
-            why = "owner verification follow-up"
-            if nxt and nxt.startswith(MISSING_PATHS_NOTE[:30]):
-                paths_checked = True
-            elif nxt and nxt.startswith(CHECK_STEP[:12]):
-                checks += 1
-            elif nxt is None and not ans and last_answer:
-                # Verified and done, but the last inner turn said nothing:
-                # reply with the latest real answer, never an empty one.
-                result = {**result, "text": last_answer}
-        elif durable and not last_completion():
-            nxt = harness_prompt(objective=goal)
-            why = "durable task not completed yet"
-        elif ledger_open() or continuation.hit_inner_cap(halt):
-            why = "work ledger still open" if ledger_open() else f"inner loop hit its cap ({halt})"
-            nxt = next_continuation_prompt(
-                ans, force_ledger=ledger_open(), halt_reason=halt, objective=goal,
-            )
-        elif continuation.enabled() and step < budget:
-            if continuation.classify(ans) == "continue":
-                nxt = continuation.continuation_prompt(goal)
-                why = "answer reads as unfinished"
-        if nxt and step < budget:
-            checkpoint = {"text": ans, "step": step, "halt_reason": halt, "reason": why}
-            checkpoints.append(checkpoint)
-            if on_checkpoint is not None:
-                on_checkpoint(checkpoint)
-            step += 1
-            current = nxt
-            continue
-        break
-
-    if result.get("error") or continuation.is_loop_breaker(result.get("halt_reason")):
-        pause_active_ledger(str(result.get("error") or result.get("halt_reason")))
-    if durable and nxt and step >= budget and not last_completion():
-        result = {**result, "halt_reason": "yielded"}
-    return {**result, "checkpoints": checkpoints, "continuation_steps": step}
+        if result.get("error") or (halt != "yielded" and continuation.is_loop_breaker(halt)):
+            pause_active_ledger(str(result.get("error") or halt))
+        return {**result, "checkpoints": checkpoints, "continuation_steps": step}
 
 
 WORKER_PREAMBLE = (
@@ -830,7 +877,7 @@ def missing_deliverable_paths(text: str) -> list[str]:
     """
     out = []
     for name in missing_named_paths(text):
-        pat = (r"(?:\b(?:to|into|as|at|save|saved|create|write|export|generate|produce)\s+"
+        pat = (r"(?:\b(?:to|into|as|at|save|saved|create|write|export|generate|produce|deliver)\s+"
                r"(?:(?:a|the|new)\s+)?(?:file\s+)?(?:called\s+|named\s+)?[`'\"]?)" + re.escape(name))
         if re.search(pat, text or "", re.I):
             out.append(name)

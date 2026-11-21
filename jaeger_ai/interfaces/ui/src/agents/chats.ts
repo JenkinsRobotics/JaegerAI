@@ -13,7 +13,7 @@ const activityAt = (row: SessionRow) => row.last_activity_at ?? row.updated_at ?
 /** Not archived; empty chats only when open (an empty "New chat" is not history). */
 export function visibleChats(rows: SessionRow[], openId?: string): SessionRow[] {
   return rows
-    .filter((r) => !r.archived && ((r.message_count ?? 0) > 0 || Boolean(r.last_message_preview) || r.session_id === openId))
+    .filter((r) => !r.archived && ((r.message_count ?? 0) > 0 || Boolean(r.last_message_preview) || Boolean(r.unread) || r.session_id === openId))
     .sort((a, b) => activityAt(b) - activityAt(a));
 }
 

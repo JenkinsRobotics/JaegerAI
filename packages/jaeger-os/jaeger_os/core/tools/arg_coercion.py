@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # Common parameter name aliases emitted by open-weight models (Gemma, Qwen, etc.)
 COMMON_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
     "target": ("url", "uri", "link", "path", "site", "website"),
-    "query": ("q", "search_query", "text", "prompt", "term"),
+    "query": ("q", "search_query", "text", "prompt", "term", "keyword", "keywords"),
     "url": ("target", "uri", "link"),
     "path": ("file_path", "filepath", "filename", "file"),
     "command": ("cmd", "script"),

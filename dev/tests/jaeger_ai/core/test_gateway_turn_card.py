@@ -545,3 +545,17 @@ def test_step_reports_the_tools_it_ran_and_a_state_change_gets_one_check(env, mo
                                    execution=_turn_owned(env), objective="restore the branch")
     assert len(prompts) == 2 and prompts[1].startswith("[Check step]")
     assert "r" not in env.app._request_tools
+
+
+def test_owner_verification_resolves_in_admitted_workspace(env, monkeypatch):
+    from jaeger_agent.core.workspace import get_project_root
+    from jaeger_ai.core.runtime import autonomous_runner
+    observed = []
+    def run(turn, prompt, **kwargs):
+        observed.append(get_project_root())
+        return {'text': 'done', 'status': 'completed'}
+    monkeypatch.setattr(autonomous_runner, 'run_continued_turn', run)
+    before = get_project_root()
+    env.app._continued_owner_react('summarize', session_key='s', request_id='scope', execution=_execution(env))
+    assert observed == [env.workspace]
+    assert get_project_root() == before

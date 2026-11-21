@@ -248,7 +248,7 @@ class JaegerAgentController:
             if not execution.run_active():
                 execution.begin_run(self.objective, budget=self.max_steps)
             else:
-                execution._state["budget"] = self.max_steps  # noqa: SLF001
+                execution.set_run_budget(self.max_steps)
 
         prompt = goal
         if self.isolated and self.batch and WORKER_PREAMBLE not in (goal or ""):

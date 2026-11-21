@@ -15,7 +15,8 @@ describe("live step line", () => {
     }
     expect(parts).toEqual([{ kind: "step", index: 2, state: "running", model: "grok" }]);
     expect(stepLabel(parts[0] as never)).toBe("Step 2 · grok thinking");
-    expect(segments(parts, "pending")).toEqual([]); // never a bubble
+    expect(segments(parts, "pending")).toEqual([{ activity: [] }]); // keeps live work timer placeholder, never a bubble
+    expect(segments(parts, "complete")).toEqual([]);
   });
 
   it("links the live line to the Process view for the session", () => {

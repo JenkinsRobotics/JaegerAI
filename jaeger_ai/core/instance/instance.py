@@ -729,6 +729,22 @@ class CoreVersionMismatch(RuntimeError):
     M1 we refuse-to-start and surface a clear instruction."""
 
 
+def update_manifest(layout: InstanceLayout, **changes: object) -> Manifest:
+    """Validate and atomically persist instance metadata at its owner.
+
+    Repair the historical character-only manifest by deriving the missing
+    instance name from its canonical directory; retain all existing fields.
+    """
+    import json
+    data = json.loads(layout.manifest_path.read_text()) if layout.manifest_path.exists() else {}
+    data.setdefault("instance_name", layout.root.name)
+    data.update(changes)
+    manifest = Manifest.model_validate(data)
+    layout.root.mkdir(parents=True, exist_ok=True)
+    dump_json(layout.manifest_path, manifest)
+    return manifest
+
+
 def check_manifest(layout: InstanceLayout) -> Manifest:
     manifest = load_json(layout.manifest_path, Manifest)
     if manifest.schema_version != SCHEMA_VERSION:

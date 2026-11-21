@@ -5610,7 +5610,7 @@ class JaegerGatewayApp:
         system_prompt: str | None = None, history=None, attachments=None,
         context_ids=None, context_references=(), on_model_identity=None,
         timing=None, on_delta=None, on_reasoning=None, local_only=False, on_route=None,
-        controls=None,
+        controls=None, interrupt_event=None,
     ) -> str:
         """Model-only cognition: the configured provider, shared adapters and policy."""
         from jaeger_ai.core.entity.runtime import EntityRuntime, load_instance_config_or_default
@@ -5619,8 +5619,9 @@ class JaegerGatewayApp:
         runtime = EntityRuntime.get_singleton()
         config = load_instance_config_or_default(runtime.layout)
         scope = self._cancellations.get(context_ids[1]) if context_ids else None
+        custom_system = bool(system_prompt)
         system_prompt = system_prompt or "You are Jaeger. Reply helpfully."
-        if any(w in text.lower() for w in ("capabilities", "tools available", "what can you do", "what tools")):
+        if not custom_system and any(w in text.lower() for w in ("capabilities", "tools available", "what can you do", "what tools")):
             try:
                 from jaeger_ai.interfaces.mcp_server import capability_inventory
                 groups = capability_inventory().get("groups") or {}
@@ -5650,7 +5651,7 @@ class JaegerGatewayApp:
                 complete, config, runtime.layout, text, model=model, provider=provider,
                 system_prompt=system_prompt or "You are Jaeger. Reply helpfully.",
                 history=history or (), attachments=attachments or (),
-                interrupt_event=scope.event if scope else None, on_delta=on_delta, on_reasoning=on_reasoning,
+                interrupt_event=(scope.event if scope else interrupt_event), on_delta=on_delta, on_reasoning=on_reasoning,
                 on_input=observe_input, on_route=observe_route,
                 on_model_identity=on_model_identity, local_only=local_only,
                 default_client=lambda cfg: runtime.local_model_client(cfg),
@@ -6253,13 +6254,14 @@ class JaegerGatewayApp:
             return turn_owned and (request_id in self._owner_declined or request_id in self._owner_unanswered)
 
         from jaeger_ai.core.runtime.cron_turns import cron_turn_scope
+        from jaeger_agent.core.workspace import project_scope
         try:
             _cron_steps = int(_options["max_steps"]) if _options.get("max_steps") is not None else None
         except (TypeError, ValueError):
             _cron_steps = None
         if _cron_steps is None:
             _cron_steps = (4 if turn_owned else 8) if _options.get("task_id") else None
-        with cron_turn_scope(_options, session_id=session_key), ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned), turn_effort_hint(_effort_hint):
+        with project_scope((execution or {}).get("workspace") or None), cron_turn_scope(_options, session_id=session_key), ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned), turn_effort_hint(_effort_hint):
             try:
                 result = run_continued_turn(
                     step, prompt, objective=objective or prompt,

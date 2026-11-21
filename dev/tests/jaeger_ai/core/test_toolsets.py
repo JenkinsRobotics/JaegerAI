@@ -32,14 +32,14 @@ def test_scoping_off_by_default_shows_registered_tools(monkeypatch) -> None:
     assert ts.tool_visible("get_time")
     assert ts.tool_visible("execute_code")
     assert ts.tool_visible("schedule_prompt")
-    assert ts.tool_visible("terminal")
+    assert ts.tool_visible("run_in_venv")
     assert ts.tool_visible("anything_at_all")
 
 
 def test_scoping_can_be_disabled_explicitly(monkeypatch) -> None:
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "0")
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
-    assert ts.tool_visible("terminal")
+    assert ts.tool_visible("run_in_venv")
     assert ts.tool_visible("schedule_prompt")
 
 
@@ -54,13 +54,13 @@ def test_scoping_on_via_env_hides_categorised_tools(monkeypatch) -> None:
     for context-tight runs, accepts the routing regression on some
     models in exchange for prompt-prefix savings.
 
-    Probe is ``terminal`` (in the ``code`` toolset since the
+    Probe is ``run_in_venv`` (in the ``code`` toolset since the
     visibility refactor moved ``execute_code`` into CORE)."""
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "1")
     monkeypatch.delenv("JAEGER_FULL_TOOLS", raising=False)
     ts.reset_toolsets()
     assert ts.tool_visible("get_time")        # CORE
-    assert not ts.tool_visible("terminal")    # in the ``code`` toolset → hidden
+    assert not ts.tool_visible("run_in_venv")    # in the ``code`` toolset → hidden
     assert ts.tool_visible("anything_at_all")  # fail-open for unclassified
 
 
@@ -69,7 +69,7 @@ def test_full_tools_env_overrides_explicit_scoping(monkeypatch) -> None:
     a kill-switch for bench harnesses + debug."""
     monkeypatch.setenv("JAEGER_FULL_TOOLS", "1")
     monkeypatch.setenv("JAEGER_TOOLSET_SCOPING", "1")
-    assert ts.tool_visible("terminal")
+    assert ts.tool_visible("run_in_venv")
     assert ts.tool_visible("schedule_prompt")
 
 
@@ -84,23 +84,23 @@ def test_core_tools_always_visible() -> None:
     kept passing vacuously via the unknown-name fail-open after those
     tools were renamed/removed)."""
     for name in ("get_time", "memory", "web_search", "todo",
-                 "execute_code", "board_add", "board_view",
+                 "execute_code", "terminal", "tool_search",
                  "list_skills", "load_tools"):
         assert name in ts.CORE, f"{name} not in CORE"
         assert ts.tool_visible(name), name
 
 
 def test_non_core_tool_hidden_until_its_toolset_loads() -> None:
-    """``terminal`` is in the ``code`` toolset (``execute_code`` moved
+    """``run_in_venv`` is in the ``code`` toolset (``execute_code`` moved
     to CORE) — hidden by default, visible after load."""
-    assert not ts.tool_visible("terminal")
+    assert not ts.tool_visible("run_in_venv")
     assert ts.enable_toolset("code") is True
-    assert ts.tool_visible("terminal")
+    assert ts.tool_visible("run_in_venv")
 
 
 def test_loading_one_toolset_does_not_reveal_another() -> None:
     ts.enable_toolset("code")
-    assert ts.tool_visible("terminal")              # code — loaded
+    assert ts.tool_visible("run_in_venv")              # code — loaded
     assert not ts.tool_visible("schedule_prompt")  # scheduling — not loaded
 
 
@@ -116,7 +116,7 @@ def test_uncategorised_tool_fails_open() -> None:
 def test_reset_returns_to_core_only() -> None:
     ts.enable_toolset("code")
     ts.reset_toolsets()
-    assert not ts.tool_visible("terminal")
+    assert not ts.tool_visible("run_in_venv")
 
 
 def test_active_toolset_names_always_includes_core() -> None:

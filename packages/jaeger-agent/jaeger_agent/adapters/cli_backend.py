@@ -1110,13 +1110,14 @@ class CliBackendAdapter(ProviderAdapter):
             hard = _CLI_HARD_TURN_TIMEOUT_S
         idle = None
         if cron_hard is None or float(cron_hard) <= 0:
-            try:
-                idle = float(os.environ.get("JAEGER_CLI_IDLE_TIMEOUT_S") or _CLI_IDLE_TIMEOUT_S)
-            except (TypeError, ValueError):
-                idle = _CLI_IDLE_TIMEOUT_S
             if on_delta is None:
                 # Nothing to observe without a stream: keep a plain wall clock.
                 hard = min(hard, _CLI_NONSTREAM_TIMEOUT_S)
+            else:
+                try:
+                    idle = float(os.environ.get("JAEGER_CLI_IDLE_TIMEOUT_S") or _CLI_IDLE_TIMEOUT_S)
+                except (TypeError, ValueError):
+                    idle = _CLI_IDLE_TIMEOUT_S
         # The configured ``timeout_s`` is a per-request (HTTP-style) budget;
         # a streaming CLI turn runs many tool calls, so silence governs it and
         # only the hard cap bounds it. Keep the configured value as a cap for

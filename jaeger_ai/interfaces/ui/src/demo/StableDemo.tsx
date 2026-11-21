@@ -432,8 +432,13 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     if (busy) return;
     setBusy(true); setError("");
     try {
-      const result = await sendJson<{session_id:string; topic:{topic_id:string}}>("POST", `/v1/agents/${encodeURIComponent(JAEGER_HOME_AGENT)}/home/topics`, {});
-      selectSession(result.session_id, result.topic.topic_id);
+      if (source.kind === "live") {
+        const result = await sendJson<{session_id:string; topic:{topic_id:string}}>("POST", `/v1/agents/${encodeURIComponent(JAEGER_HOME_AGENT)}/home/topics`, {});
+        selectSession(result.session_id, result.topic.topic_id);
+      } else {
+        const row = await source.createSession({ agent_id: JAEGER_HOME_AGENT, title: "New chat" });
+        selectSession(row.session_id);
+      }
     } catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(false); }
   };
@@ -554,6 +559,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     if (deleted.length) {
       const removed = new Set(deleted);
       setRecent(rows => rows.filter(row => !removed.has(row.session_id)));
+      setOrganization(org => org ? { ...org, sessions: org.sessions.filter(row => !removed.has(row.session_id)) } : org);
       setPinnedSessions(previous => {
         const next = new Set([...previous].filter(id => !removed.has(id)));
         try { localStorage.setItem(PINNED_SESSION_KEY, JSON.stringify([...next])); } catch { /* preference remains in memory */ }

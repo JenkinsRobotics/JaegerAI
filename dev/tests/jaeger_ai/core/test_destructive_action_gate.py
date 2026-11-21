@@ -156,3 +156,14 @@ def test_bus_provider_does_not_auto_approve_a_fresh_request(monkeypatch):
     req = SimpleNamespace(skill="policy:terminal", operation="terminal", summary="rm -rf", force_prompt=True)
     assert provider.confirm(req) is False         # asked (no answer) instead of auto/grant
     assert published and "always" not in published[0].options
+
+
+@pytest.mark.parametrize('sql', ['TRUNCATE TABLE users', 'TRUNCATE users;', 'TRUNCATE users CASCADE'])
+def test_truncate_sql_still_requires_approval(sql):
+    assert destructive_reason('terminal', {'command': f'psql -c "{sql}"'})
+
+
+def test_research_prose_about_truncate_is_not_a_database_action():
+    code = 'from pathlib import Path\nPath("report.md").write_text("TRUNCATE mode resets the journal. WAL is different.")'
+    assert destructive_reason('execute_code', {'code': code}) is None
+    assert destructive_reason('terminal', {'command': "python3 <<'PY'\n" + code + '\nPY'}) is None

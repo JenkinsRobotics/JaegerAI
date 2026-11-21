@@ -158,3 +158,17 @@ def test_output_path_escape_is_rejected(bound_instance, fake_http):
     res = ai_gen.generate_image_fal("prompt", output_path="../../evil.png")
     assert res["ok"] is False
     assert not fake_http["posts"]          # rejected before any network call
+
+
+def test_video_delivers_to_admitted_project(bound_instance, fake_http, tmp_path):
+    from jaeger_agent.core.workspace import project_scope
+    project = tmp_path / 'project'
+    project.mkdir()
+    fake_http['result'] = {'video': {'url': 'https://cdn.fal.example/out.mp4'}}
+    with project_scope(project):
+        target = project / 'out' / 'clip.mp4'
+        result = ai_gen.generate_video_fal('test', output_path=str(target))
+        assert result['ok'] and result['absolute_path'] == str(target)
+        assert target.read_bytes() == b'fake-media-bytes'
+        denied = ai_gen.generate_video_fal('test', output_path=str(tmp_path / 'escape.mp4'))
+        assert not denied['ok'] and not (tmp_path / 'escape.mp4').exists()

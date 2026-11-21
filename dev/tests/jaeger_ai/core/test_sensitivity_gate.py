@@ -35,7 +35,7 @@ def test_decide_routes_and_logs(tmp_path, monkeypatch):
     )
     assert decision.classification == "public"
     assert model == "glm-5.3-flash:cloud"
-    assert provider == "ollama"
+    assert provider == "ollama-cloud"
 
     from types import SimpleNamespace
     model2, provider2, decision2 = gate.apply_sensitivity_routing(
@@ -52,22 +52,27 @@ def test_decide_routes_and_logs(tmp_path, monkeypatch):
     lines = log.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
     assert '"class": "public"' in lines[0]
+    assert '"provider": "ollama-cloud"' in lines[0]
     assert '"model": "glm-5.3-flash:cloud"' in lines[0]
     assert '"class": "private"' in lines[1]
+    assert '"provider": "ollama"' in lines[1]
     assert '"model": "installed-local:latest"' in lines[1]
 
 
 def test_normalize_ollama_provider_lanes():
     from jaeger_ai.core.models.router import normalize_ollama_provider
 
-    assert normalize_ollama_provider("ollama-cloud") == "ollama"
+    assert normalize_ollama_provider("ollama-cloud") == "ollama-cloud"
+    assert normalize_ollama_provider("ollama_cloud") == "ollama-cloud"
+    assert normalize_ollama_provider("ollamacloud") == "ollama-cloud"
     assert normalize_ollama_provider("ollama-local") == "ollama"
+    assert normalize_ollama_provider("ollama_local") == "ollama"
     assert normalize_ollama_provider("openai") == "openai"
 
 
-def test_configure_model_remaps_ollama_cloud_lane(tmp_path, monkeypatch):
+def test_configure_model_preserves_ollama_cloud_lane(tmp_path, monkeypatch):
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
-    from jaeger_ai.core.instance.schemas import Config, dump_yaml
+    from jaeger_ai.core.instance.schemas import Config
     from jaeger_ai.core.models.configuration import configure_model
 
     root = tmp_path / "inst"
@@ -88,15 +93,32 @@ def test_configure_model_remaps_ollama_cloud_lane(tmp_path, monkeypatch):
         model="glm-5.3-flash:cloud",
     )
     assert result["ok"] is True
-    assert result["provider"] == "ollama"
+    assert result["provider"] == "ollama-cloud"
     cfg = Config.model_validate(
         __import__("yaml").safe_load(Layout.config_path.read_text(encoding="utf-8"))
     )
     assert cfg.external_model.enabled is True
-    assert cfg.external_model.provider == "ollama"
+    assert cfg.external_model.provider == "ollama-cloud"
     assert cfg.external_model.model == "glm-5.3-flash:cloud"
-    assert "ollama.com" not in cfg.external_model.base_url
-    assert cfg.external_model.api_key_credential == ""
+    assert cfg.external_model.base_url == "https://ollama.com/v1"
+    assert cfg.external_model.api_key_credential == "ollama_cloud_api_key"
+
+    local_result = configure_model(
+        Layout(),
+        provider="ollama-local",
+        model="qwen3:8b",
+        context_length=32768,
+    )
+    assert local_result["ok"] is True
+    assert local_result["provider"] == "ollama"
+    local_cfg = Config.model_validate(
+        __import__("yaml").safe_load(Layout.config_path.read_text(encoding="utf-8"))
+    )
+    assert local_cfg.external_model.enabled is True
+    assert local_cfg.external_model.provider == "ollama"
+    assert local_cfg.external_model.model == "qwen3:8b"
+    assert "ollama.com" not in local_cfg.external_model.base_url
+    assert local_cfg.external_model.api_key_credential == ""
 
 
 def test_private_uses_config_fallback(tmp_path, monkeypatch):

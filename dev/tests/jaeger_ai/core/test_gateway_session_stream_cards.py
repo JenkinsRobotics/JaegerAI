@@ -48,6 +48,8 @@ async def test_session_stream_carries_reasoning_tool_approval_and_handoff(tmp_pa
                 frame = (await asyncio.wait_for(stream.content.readuntil(b"\n\n"), 3)).decode()
             except TimeoutError:
                 break
+            if "data: " not in frame:
+                continue
             body = json.loads(frame.split("data: ", 1)[1])
             seen.setdefault(body["event"], body["data"])
         stream.close()

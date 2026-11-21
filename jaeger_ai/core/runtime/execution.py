@@ -33,8 +33,8 @@ Four modes:
                    (plan → execute → verify → settle); this module only
                    records that the session is in it.
 
-State is process-global (one resident agent per instance) and switching
-is INSTANT — no model swap. The autonomy coupling is remembered so
+Mode preferences are process-global; admitted request run state is context-local.
+Switching is INSTANT — no model swap. The autonomy coupling is remembered so
 leaving ``auto`` / ``supervised`` restores whatever the user had before,
 rather than silently leaving the confirm gate wide open.
 """
@@ -44,6 +44,8 @@ from __future__ import annotations
 import os
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
 
 
@@ -119,6 +121,39 @@ _state: dict[str, object] = {
 # before re-firing, so a run halts at a turn boundary with its partial
 # work intact rather than being killed mid-tool.
 _stop = threading.Event()
+
+# The legacy interactive surface keeps its status state; every admitted owner
+# request binds a fresh run and stop event, including nested/concurrent work.
+_request_run: ContextVar[tuple[dict[str, object], threading.Event] | None] = ContextVar(
+    "execution_request_run", default=None,
+)
+
+
+def _run_state() -> dict[str, object]:
+    bound = _request_run.get()
+    return bound[0] if bound is not None else _state
+
+
+def _run_stop() -> threading.Event:
+    bound = _request_run.get()
+    return bound[1] if bound is not None else _stop
+
+
+@contextmanager
+def run_scope(objective: str, *, budget: int):
+    """Own continuation state for exactly one invocation; restore on every exit."""
+    token = _request_run.set(({}, threading.Event()))
+    try:
+        begin_run(objective, budget=budget)
+        yield
+    finally:
+        end_run("request finished")
+        _request_run.reset(token)
+
+
+def set_run_budget(budget: int) -> None:
+    with _lock:
+        _run_state()["budget"] = max(1, int(budget))
 
 
 # ── mode ────────────────────────────────────────────────────────────
@@ -293,8 +328,8 @@ def inner_max(*, batch: bool = False) -> int:
 def begin_run(objective: str = "", *, budget: int | None = None) -> dict:
     """Start (or restart) an autonomous run and clear any stop request."""
     with _lock:
-        _stop.clear()
-        _state.update({
+        _run_stop().clear()
+        _run_state().update({
             "objective": (objective or "").strip(),
             "steps": 0,
             "budget": int(budget) if budget else max_steps(),
@@ -310,45 +345,45 @@ def begin_run(objective: str = "", *, budget: int | None = None) -> dict:
 def record_step(phase: str = "executing") -> int:
     """Count one continuation step; returns the new step number."""
     with _lock:
-        if not _state["active"]:
-            begin_run(str(_state.get("objective") or ""))
-        _state["steps"] = int(_state["steps"]) + 1
-        _state["phase"] = phase
-        return int(_state["steps"])
+        if not _run_state()["active"]:
+            begin_run(str(_run_state().get("objective") or ""))
+        _run_state()["steps"] = int(_run_state()["steps"]) + 1
+        _run_state()["phase"] = phase
+        return int(_run_state()["steps"])
 
 
 def steps_left() -> int:
     with _lock:
-        return max(0, int(_state["budget"]) - int(_state["steps"]))
+        return max(0, int(_run_state()["budget"]) - int(_run_state()["steps"]))
 
 
 def end_run(reason: str = "") -> dict:
     """Mark the run finished. Idempotent; keeps the counters for /status."""
     with _lock:
-        _state["active"] = False
-        _state["phase"] = "done"
+        _run_state()["active"] = False
+        _run_state()["phase"] = "done"
         if reason:
-            _state["last_reason"] = reason
+            _run_state()["last_reason"] = reason
         return run_progress()
 
 
 def run_active() -> bool:
     with _lock:
-        return bool(_state["active"])
+        return bool(_run_state()["active"])
 
 
 def run_progress() -> dict:
     with _lock:
-        started = float(_state["started_at"] or 0.0)
+        started = float(_run_state()["started_at"] or 0.0)
         return {
-            "active": bool(_state["active"]),
-            "objective": str(_state["objective"]),
-            "step": int(_state["steps"]),
-            "budget": int(_state["budget"]),
-            "phase": str(_state["phase"]),
+            "active": bool(_run_state()["active"]),
+            "objective": str(_run_state()["objective"]),
+            "step": int(_run_state()["steps"]),
+            "budget": int(_run_state()["budget"]),
+            "phase": str(_run_state()["phase"]),
             "elapsed_s": (time.time() - started) if started else 0.0,
-            "reason": str(_state["last_reason"]),
-            "stopping": _stop.is_set(),
+            "reason": str(_run_state()["last_reason"]),
+            "stopping": _run_stop().is_set(),
         }
 
 
@@ -357,20 +392,20 @@ def needs_verification() -> bool:
     has not yet been asked to check its own deliverables. Exactly one
     verify pass per run — a second would just re-read the same files."""
     with _lock:
-        return bool(_state["active"]) and not bool(_state["verified"]) \
-            and bool(_state["objective"])
+        return bool(_run_state()["active"]) and not bool(_run_state()["verified"]) \
+            and bool(_run_state()["objective"])
 
 
 def mark_verified() -> None:
     with _lock:
-        _state["verified"] = True
+        _run_state()["verified"] = True
 
 
 def set_phase(phase: str) -> None:
     """Move the breadcrumb (``plan`` → ``executing`` → ``verifying`` →
     ``done``) without spending a step."""
     with _lock:
-        _state["phase"] = phase
+        _run_state()["phase"] = phase
 
 
 # ── stop ────────────────────────────────────────────────────────────
@@ -378,22 +413,22 @@ def set_phase(phase: str) -> None:
 
 def request_stop(reason: str = "user stop") -> None:
     """Ask a running autonomous loop to halt at the next turn boundary."""
-    _stop.set()
+    _run_stop().set()
     with _lock:
-        _state["last_reason"] = reason
+        _run_state()["last_reason"] = reason
 
 
 def stop_requested() -> bool:
-    return _stop.is_set()
+    return _run_stop().is_set()
 
 
 def clear_stop() -> None:
-    _stop.clear()
+    _run_stop().clear()
 
 
 def stop_event() -> threading.Event:
     """The raw event, for callers that want to wait on it."""
-    return _stop
+    return _run_stop()
 
 
 def reset() -> None:

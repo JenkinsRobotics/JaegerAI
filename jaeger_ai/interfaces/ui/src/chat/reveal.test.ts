@@ -10,13 +10,13 @@ const run = (text: string, params: StreamStyleParams, ticks: number, live = true
 };
 
 describe("stream styles", () => {
-  it("has the five presets, defaults to grok, and keeps the measured grok numbers", () => {
+  it("has the five presets, defaults to grok, and keeps the live grok streaming numbers", () => {
     expect(STREAM_STYLE_IDS.sort()).toEqual(["chatgpt", "claude", "grok", "instant", "vscode"]);
     expect(resolveStreamStyle(undefined).id).toBe("grok");
     expect(resolveStreamStyle("nope").id).toBe("grok");
-    expect(grok.reveal).toMatchObject({ mode: "words", ratePerSec: 20, tickMs: 50, catchUp: "snap", adaptive: true });
+    expect(grok.reveal).toMatchObject({ mode: "words", ratePerSec: 80, tickMs: 16, maxLagChars: 80, catchUp: "accelerate", adaptive: true });
     expect(grok.enter).toEqual({ kind: "fade", durationMs: 200, easing: "ease-out", blurPx: 4 });
-    expect(grok.scroll).toEqual({ follow: "whenAtBottom", thresholdPx: 4, smooth: true });
+    expect(grok.scroll).toEqual({ follow: "whenAtBottom", thresholdPx: 80, smooth: false });
     expect(grok.markdown.partialFence).toBe("live");
   });
 });
@@ -41,10 +41,15 @@ describe("reveal engine", () => {
     const after = step(s, text, 150, grok, true);
     expect(after.shown - s.shown).toBeGreaterThan(2);
   });
-  it("snaps when the backlog passes maxLagChars, and shows everything when the turn ends", () => {
+  it("handles backlog catch-up (snap and accelerate) when lag passes maxLagChars, and shows everything when the turn ends", () => {
     const big = "x ".repeat(1000);
-    const snapped = step(initialReveal(0, 0), big, 50, grok, true);
-    expect(big.length - snapped.shown).toBeLessThanOrEqual(grok.reveal.maxLagChars);
+    const snapStyle: StreamStyleParams = { ...grok, reveal: { ...grok.reveal, catchUp: "snap" } };
+    const snapped = step(initialReveal(0, 0), big, 50, snapStyle, true);
+    expect(big.length - snapped.shown).toBeLessThanOrEqual(snapStyle.reveal.maxLagChars);
+    const floorOnly: StreamStyleParams = { ...grok, reveal: { ...grok.reveal, adaptive: false } };
+    const accelerated = step(initialReveal(0, 0), big, 50, floorOnly, true);
+    const normal = step(initialReveal(0, 0), "x ".repeat(10), 50, floorOnly, true);
+    expect(accelerated.shown).toBeGreaterThan(normal.shown);
     expect(step(initialReveal(0, 0), "hello world", 50, grok, false).shown).toBe(11);
   });
   it("instant shows text exactly as it arrives", () => {

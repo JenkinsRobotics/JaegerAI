@@ -181,11 +181,14 @@ def test_stream_ignores_reasoning_final_and_nested_agent_output():
     assert text_delta(b'not json')==''
 
 
-def test_stream_timeout_stops_owned_process(tmp_path):
+def test_stream_timeout_stops_owned_process(tmp_path, monkeypatch):
     import sys, threading, pytest
+    from jaeger_ai.core.models.request_policy import ModelPolicyError
+    monkeypatch.setenv("JAEGER_CLI_IDLE_TIMEOUT_S", "0.1")
+    monkeypatch.setenv("JAEGER_CLI_TURN_TIMEOUT_S", "0.5")
     script=tmp_path/'provider.py';script.write_text('import time; time.sleep(10)')
     adapter=CliBackendAdapter('grok',executable=sys.executable,spec=SimpleNamespace(args=(str(script),),prompt_mode='placeholder'),timeout_s=.1)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(ModelPolicyError, match="took too long"):
         adapter.call({},threading.Event(),on_delta=lambda _:None)
     assert adapter._proc.poll() is not None
 

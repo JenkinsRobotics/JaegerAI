@@ -52,6 +52,20 @@ def route_for(client: Any, *, reason: str = "selected") -> ModelRoute:
     return ModelRoute(selected_lane, ext.model, endpoint, local, reason)
 
 
+def _encoded_image_preview(value: Any) -> bool:
+    """Recognize bounded image bytes; an arbitrary string under this key is text."""
+    if not isinstance(value, str) or len(value) > 128_000:
+        return False
+    import base64
+    import binascii
+    try:
+        header = base64.b64decode(value, validate=True)[:12]
+    except (ValueError, binascii.Error):
+        return False
+    return (header.startswith((b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"GIF87a", b"GIF89a"))
+            or (header.startswith(b"RIFF") and header[8:12] == b"WEBP"))
+
+
 def payload_text(payload: Any) -> str:
     """Extract text without copying image bytes into policy logs/classification.
 
@@ -60,12 +74,20 @@ def payload_text(payload: Any) -> str:
     must not classify a public user turn as private.
     """
     if isinstance(payload, str):
+        if payload.lstrip().startswith(("{", "[")):
+            try:
+                return payload_text(json.loads(payload))
+            except (ValueError, RecursionError):
+                pass
         return "" if payload.startswith("data:image/") else payload
     if isinstance(payload, list):
         return "\n".join(payload_text(item) for item in payload)
     if isinstance(payload, dict):
-        return "\n".join(payload_text(v) for k, v in payload.items()
-                         if k not in {"images", "image_url", "data", "tools", "tool_choice", "system"})
+        # Keep field names: {"password": "short-value"} is private even when
+        # the value alone has no recognizable credential prefix.
+        return "\n".join(f"{k}: {payload_text(v)}" for k, v in payload.items()
+                         if k not in {"images", "image_url", "data", "tools", "tool_choice", "system"}
+                         and not (k == "preview_base64" and _encoded_image_preview(v)))
     return ""
 
 

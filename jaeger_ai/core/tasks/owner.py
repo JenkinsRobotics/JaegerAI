@@ -755,6 +755,7 @@ class GatewayTaskOwner:
 
     @staticmethod
     def verify(task, result):
+        from jaeger_ai.core.entity.verification import artifact_format_error
         paths = task.payload.get('artifacts') or []
         if paths:
             receipts = []
@@ -765,6 +766,8 @@ class GatewayTaskOwner:
                     return False, f'Required artifact missing or empty: {raw}'
                 if path.stat().st_mtime + 1 < task.created_at:
                     return False, f'Artifact predates this task: {raw}'
+                if error := artifact_format_error(path):
+                    return False, error
                 receipts.append({'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
             return True, receipts
         completion = result.get('task_completion') or {}
@@ -783,6 +786,8 @@ class GatewayTaskOwner:
                     return False, f'Verification artifact is stale or empty: {raw}'
                 if hashlib.sha256(path.read_bytes()).hexdigest() != receipt.get('sha256'):
                     return False, f'Verification artifact changed after the receipt: {raw}'
+                if error := artifact_format_error(path):
+                    return False, error
             return True, receipts
         named = GatewayTaskOwner._named_path_receipts(task)
         if named is not None:
@@ -813,6 +818,7 @@ class GatewayTaskOwner:
         it). Each is hashed. ``None`` means the request names no checkable file.
         """
         from jaeger_ai.core.runtime.autonomous_runner import _required_paths
+        from jaeger_ai.core.entity.verification import artifact_format_error
         names = _required_paths(task.goal or '')
         root = GatewayTaskOwner._verify_root(task)
         if not names or root is None:
@@ -829,6 +835,8 @@ class GatewayTaskOwner:
                 return None  # outside what the owner may vouch for: not checkable here
             if not path.is_file() or not path.stat().st_size:
                 return False, f'Named file missing or empty: {raw}'
+            if error := artifact_format_error(path):
+                return False, error
             fresh = fresh or path.stat().st_mtime + 1 >= task.created_at
             receipts.append({'kind': 'owner_file_sha256', 'path': str(path),
                              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})

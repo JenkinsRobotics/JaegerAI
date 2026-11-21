@@ -10,9 +10,9 @@ const row = (id: string, at: number, extra: Partial<SessionRow> = {}): SessionRo
 
 describe("an agent's chats", () => {
   it("keeps every chat with messages, newest first; empty ones only while open; never archived ones", () => {
-    const rows = [row("old", 10), row("empty", 30, { message_count: 0 }), row("new", 20), row("gone", 40, { archived: true })];
-    expect(visibleChats(rows).map((r) => r.session_id)).toEqual(["new", "old"]);
-    expect(visibleChats(rows, "empty").map((r) => r.session_id)).toEqual(["empty", "new", "old"]);
+    const rows = [row("old", 10), row("empty", 30, { message_count: 0 }), row("unread", 25, { message_count: 0, unread: { request_id: "r1", role: "assistant" } }), row("new", 20), row("gone", 40, { archived: true })];
+    expect(visibleChats(rows).map((r) => r.session_id)).toEqual(["unread", "new", "old"]);
+    expect(visibleChats(rows, "empty").map((r) => r.session_id)).toEqual(["empty", "unread", "new", "old"]);
   });
 
   it("titles a generic chat from its last message", () => {

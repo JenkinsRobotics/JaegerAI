@@ -44,6 +44,7 @@ declines there rather than pretending.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import socket
@@ -195,6 +196,9 @@ class _BridgeServer:
         self._caller = caller
         self._allowed_tools = allowed_tools
         self._policy_ctx = policy_ctx
+        # Threads do not inherit ContextVars: carry the admitted workspace,
+        # task owner, model and discovery context along with the caller grant.
+        self._context = contextvars.copy_context()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -240,7 +244,7 @@ class _BridgeServer:
             except OSError:
                 break
             thread = threading.Thread(
-                target=self._serve, args=(conn,),
+                target=self._context.copy().run, args=(self._serve, conn),
                 name="tool-bridge-conn", daemon=True,
             )
             self._threads.append(thread)
@@ -332,17 +336,16 @@ class _BridgeServer:
                     result = self._executor.execute(tool_def, args)
                 else:
                     result = tool_def.dispatch(args)
-            if isinstance(result, dict) and result.get("ok") is False and result.get("error_type") in {
-                "blocked_by_authority",
-                "blocked_by_hook",
-                "permission_denied",
-            }:
+            from jaeger_os.core.tools.tool_schema import tool_result_failed
+            if tool_result_failed(result):
+                error_type = result.get("error_type") or "tool_failed"
                 with self._lock:
-                    self.errors.append(f"{name}: {result.get('error_type')}")
+                    self.errors.append(f"{name}: {error_type}")
                 return {
                     "ok": False,
-                    "error": str(result.get("error") or "tool blocked"),
-                    "error_type": result.get("error_type"),
+                    "error": str(result.get("error") or result.get("text")
+                                 or result.get("reason") or "tool failed"),
+                    "error_type": error_type,
                 }
         except Exception as exc:  # noqa: BLE001 — becomes ToolError in the child
             with self._lock:

@@ -90,6 +90,15 @@ run_backend() {
   echo "[back-end:tools] Checking discovery isolation, ranking, MCP inventory and policy..."
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
     dev/tests/jaeger_ai/core/test_tool_discovery.py \
+    dev/tests/jaeger_ai/core/test_framework_audit_regressions.py \
+    dev/tests/jaeger_ai/core/test_tool_qualification_repairs.py \
+    dev/tests/jaeger_ai/core/test_code_bridge.py \
+    dev/tests/jaeger_ai/core/test_autonomous_runner.py \
+    dev/tests/jaeger_ai/core/test_destructive_action_gate.py \
+    dev/tests/jaeger_ai/core/test_workspace_dir.py \
+    dev/tests/jaeger_ai/personality/test_character_binding.py \
+    dev/tests/jaeger_ai/plugins/test_ai_gen.py \
+    dev/tests/jaeger_ai/core/test_gateway_turn_card.py::test_owner_verification_resolves_in_admitted_workspace \
     dev/tests/jaeger_ai/core/test_mcp_discovery.py \
     dev/tests/jaeger_ai/core/test_toolsets.py \
     dev/tests/jaeger_ai/agent/test_agent_toolsets.py \

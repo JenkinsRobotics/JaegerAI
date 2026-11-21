@@ -95,7 +95,7 @@ def describe(image: bytes, question: str = "", *, model: str | None = None,
         or DEFAULT_MODEL
     )
     q = (question or "").strip() or "Describe this image in two short sentences. Read any visible text."
-    opts: dict[str, Any] = {"temperature": 0, "num_predict": 400}
+    opts: dict[str, Any] = {"temperature": 0, "num_predict": 400, "num_ctx": 8192}
     raw_ctx = (os.environ.get("JAEGER_VISION_CTX") or "").strip()
     if raw_ctx.isdigit() and int(raw_ctx) > 0:
         opts["num_ctx"] = int(raw_ctx)
@@ -115,7 +115,12 @@ def describe(image: bytes, question: str = "", *, model: str | None = None,
                 timeout=timeout) as resp:
             data = json.loads(resp.read())
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"local vision failed: {type(exc).__name__}: {exc}"[:300], "model": model}
+        return {
+            "ok": False,
+            "error": f"local vision failed: {type(exc).__name__}: {exc}"[:300],
+            "model": model,
+            "elapsed_s": round(time.perf_counter() - started, 2),
+        }
     answer = str(((data or {}).get("message") or {}).get("content") or "").strip()
     answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.S).strip()
     return {"ok": bool(answer), "answer": answer, "model": model, "local": True,

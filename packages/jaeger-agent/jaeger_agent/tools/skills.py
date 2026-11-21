@@ -388,13 +388,19 @@ def _t_record_skill_revision(skill: str, version: str, summary: str = "",
 # (build_skill_index → a one-line pointer). use_skill(name) returns the
 # playbook recipe to follow (delegates to the skill(view) reader).
 def _register_use_skill() -> None:
-    import typing
-    from jaeger_os.core.tools.tool_registry import register_tool_from_function
-    skills = _pb.available_playbooks()
-    names = [s.name for s in skills]
-    if not names:
-        return
-    skill_name_enum = typing.Literal[tuple(names)]  # dynamic enum of names
+    from pydantic import BaseModel
+    from jaeger_os.core.tools.tool_registry import register_tool
+
+    class UseSkillArgs(BaseModel):
+        name: str
+
+        @classmethod
+        def model_json_schema(cls, **kwargs):
+            schema = super().model_json_schema(**kwargs)
+            names = sorted({s.name for s in _pb.callable_playbooks()})
+            if names:
+                schema["properties"]["name"]["enum"] = names
+            return schema
 
     def use_skill(name) -> str:
         r = skill(action="view", name=str(name))
@@ -446,8 +452,10 @@ def _register_use_skill() -> None:
         "Returns the playbook's step-by-step recipe; execute it with your normal "
         "tools. `name` must be one of the available skills."
     )
-    use_skill.__annotations__ = {"name": skill_name_enum, "return": str}
-    register_tool_from_function(side_effect="read")(use_skill)
+    # Validate names against the live catalog in skill(view), not an enum
+    # frozen when this module was imported before instance skills existed.
+    register_tool(name="use_skill", description=use_skill.__doc__,
+                  args_model=UseSkillArgs, side_effect="read")(use_skill)
 
 
 _register_use_skill()

@@ -22,15 +22,15 @@ from jaeger_ai.core.runtime.code_bridge import BridgeRefused, run_bridged_script
 
 
 def _workspace() -> Any:
-    """The instance ``skills/`` dir, so a script sees files just written.
+    """Use the admitted project, or the bound instance's skills workspace.
 
     Same contract as ``run_python``: falls back to the process cwd when
     no instance is bound (bench / tests), rather than refusing to run.
     """
     try:
-        from jaeger_agent.core.workspace import _require_layout
+        from jaeger_agent.core.workspace import _require_layout, get_project_root
 
-        workdir = _require_layout().skills_dir
+        workdir = get_project_root() or _require_layout().skills_dir
         workdir.mkdir(parents=True, exist_ok=True)
         return workdir
     except Exception:  # noqa: BLE001 — standalone / unbound
@@ -63,8 +63,8 @@ def _t_execute_with_tools(code: str, timeout_s: float = 60.0) -> dict:
 
     A failing tool raises ``jt.ToolError`` — catch it and keep going if
     the batch should survive one bad item. PRINT what you need back:
-    stdout is the only thing that returns to you. Runs in the skills/
-    workspace. 60s default timeout, 120 tool calls max.
+    stdout is the only thing that returns to you. Runs in the admitted project
+    or instance skills workspace. 60s default timeout, 120 tool calls max.
 
     Not for: a single tool call (just call it), anything needing a
     question answered mid-run, or starting sub-agents.

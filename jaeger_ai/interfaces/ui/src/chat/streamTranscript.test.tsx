@@ -7,11 +7,11 @@ import type {ChatPart,ChatTurn} from './host';
 import {applyPart} from './host';
 import {mapEvent} from './eventMap';
 const tool=(id:string):ChatPart=>({kind:'toolInvocation',callId:id,toolName:'shell',input:{command:'npm test'},state:'completed',output:'2 tests passed'});
-it('keeps commentary and separate tool groups in chronological order after replay',()=>{
+it('keeps commentary and tool steps in chronological order inside one work disclosure after replay',()=>{
  const parts:ChatPart[]=[{kind:'markdownContent',text:'Inspecting the app'},tool('a'),tool('b'),{kind:'markdownContent',text:'Found the cause'},tool('c'),{kind:'confirmation',callId:'c',title:'Approve',message:'Continue?'},{kind:'markdownContent',text:'Done'}];
  for(const state of ['pending','complete'] as const){
   const rows=segments(parts,state);
-  expect(rows.map(r=>'bubble'in r?'text':'activity'in r?'tools':'card'in r?'card':'marker')).toEqual(['text','tools','text','tools','card','text']);
+  expect(rows.map(r=>'bubble'in r?'text':'activity'in r?'tools':'card'in r?'card':'marker')).toEqual(['tools','card','text']);
   expect(rows.flatMap(r=>'bubble'in r?r.bubble:'activity'in r?r.activity:'card'in r?[r.card]:'diagnostic'in r?r.diagnostic:['guidance' in r?r.guidance:r.marker])).toEqual(parts);
  }
 });
@@ -30,11 +30,13 @@ it('reconciles live provisional text into commentary and one explicit final resu
   {kind:'markdownContent',text:'The dependency is current.',role:'final',itemId:'final'},
  ]);
  expect(parts.find(p=>p.kind==='toolInvocation')).toMatchObject({summary:'Read package.json',state:'completed'});
- expect(segments(parts,'complete').map(row=>'bubble'in row?'text':'activity'in row?'activity':'other')).toEqual(['text','activity','text']);
+ const rows=segments(parts,'complete');
+ expect(rows.map(row=>'bubble'in row?'text':'activity'in row?'activity':'other')).toEqual(['activity','text']);
+ expect('activity' in rows[0] && rows[0].activity.some(p=>p.kind==='markdownContent' && p.text==='I’ll inspect it.')).toBe(true);
 });
 it('expands grouped activity and the retained tool result without hiding commentary',()=>{
  render(<ActivityFold parts={[tool('a')]} live={false} links={{onCopy:()=>{},onOpen:()=>{}}} style={STREAM_STYLES.instant}/>);
- fireEvent.click(screen.getByRole('button',{name:/Show activity/}));
+ fireEvent.click(screen.getByRole('button',{name:/Show work/}));
  expect(screen.getByText('2 tests passed')).toBeTruthy();
  expect(screen.getByText('2 tests passed').closest('details')?.open).toBe(false);
  const command = screen.getByText('npm test', {selector: '.jg-tool-activity__target'});
@@ -47,13 +49,13 @@ it('retains unknown terminal tool states instead of declaring success',()=>{
  const parts:ChatPart[]=[{...tool('a'),state:'executing'} as ChatPart];
  expect(segments(parts,'complete')[0]).toMatchObject({activity:[{state:'unknown'}]});
 });
-it('shows retained reasoning as its own expandable thought row',()=>{
+it('shows retained reasoning inside the collapsible work row and expands on demand',()=>{
  const rows=segments([{kind:'thinking',text:'private diagnostic',durationMs:2400},tool('a')],'complete');
- expect(rows.map(row=>'activity'in row?row.activity.map(part=>part.kind):[])).toEqual([['thinking'],['toolInvocation']]);
+ expect(rows.map(row=>'activity'in row?row.activity.map(part=>part.kind):[])).toEqual([['thinking','toolInvocation']]);
  render(<ActivityFold parts={[{kind:'thinking',text:'private diagnostic',durationMs:2400}]} live={false} links={{onCopy:()=>{},onOpen:()=>{}}} style={STREAM_STYLES.instant}/>);
- expect(screen.getByText('Thought for 2 s')).toBeTruthy();
+ expect(screen.getByText('Thought for 2s')).toBeTruthy();
  expect(screen.queryByText('private diagnostic')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:/Show activity/}));
+ fireEvent.click(screen.getByRole('button',{name:/Show work/}));
  expect(screen.getByText('private diagnostic')).toBeTruthy();
 });
 it('keeps model receipts outside assistant answer bubbles',()=>{
@@ -83,5 +85,5 @@ it('renders repeated steering messages in order and deduplicates by steering ide
   parts=mapped.parts.reduce(applyPart,parts);
  }
  parts=applyPart(parts,{kind:'markdownContent',text:'Done',role:'final'});
- const rows=segments(parts,'complete');expect(rows.map(row=>'guidance' in row?row.guidance.steeringId:'assistant')).toEqual(['assistant','one','two','assistant']);
+ const rows=segments(parts,'complete');expect(rows.map(row=>'guidance' in row?row.guidance.steeringId:'activity' in row?'work':'assistant')).toEqual(['one','two','work','assistant']);
 });

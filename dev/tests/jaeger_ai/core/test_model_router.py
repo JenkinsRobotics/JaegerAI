@@ -29,7 +29,7 @@ def test_router_apply_sensitivity_routing(tmp_path, monkeypatch):
     )
     assert decision.classification == "public"
     assert model == "glm-5.3-flash:cloud"
-    assert provider == "ollama"
+    assert provider == "ollama-cloud"
 
     from jaeger_ai.core.models.request_policy import ModelPolicyError
     with pytest.raises(ModelPolicyError, match="configured on-device model"):

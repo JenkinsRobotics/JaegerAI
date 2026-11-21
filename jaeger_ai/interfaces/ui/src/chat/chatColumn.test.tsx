@@ -8,17 +8,18 @@ const tool = (callId: string, toolName: string, state: "completed" | "executing"
 const turn = (parts: ChatPart[], state: ChatTurn["state"] = "pending"): ChatTurn => ({ turnId: "t1", message: "hi", parts, state });
 
 describe("chat column", () => {
-  it("keeps commentary between chronological reasoning and tool groups", () => {
+  it("keeps reasoning, commentary, and tool steps chronologically inside one work block above the answer", () => {
     const parts: ChatPart[] = [
       { kind: "thinking", text: "plan" }, tool("a", "shell"), { kind: "markdownContent", text: "Looking" }, tool("b", "read_file"), tool("c", "bash"),
       { kind: "progress", message: "Checking" }, { kind: "markdownContent", text: "done" },
     ];
     const segs = segments(parts, "complete");
-    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "activity", "bubble", "activity", "bubble"]);
-    expect("activity" in segs[0] && segs[0].activity.every(p=>p.kind==="thinking")).toBe(true);
-    expect("activity" in segs[1] && segs[1].activity.filter(p=>p.kind==="toolInvocation").map(t=>t.callId)).toEqual(["a"]);
-    expect(segs[2]).toEqual({bubble:[{kind:"markdownContent",text:"Looking"}]});
-    expect(segs[4]).toEqual({bubble:[{kind:"markdownContent",text:"done"}]});
+    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "bubble"]);
+    expect("activity" in segs[0] && segs[0].activity.map(p => p.kind)).toEqual([
+      "thinking", "toolInvocation", "markdownContent", "toolInvocation", "toolInvocation", "progress",
+    ]);
+    expect("activity" in segs[0] && segs[0].activity.filter(p => p.kind === "toolInvocation").map(t => t.callId)).toEqual(["a", "b", "c"]);
+    expect(segs[1]).toEqual({ bubble: [{ kind: "markdownContent", text: "done" }] });
     // The same grouping is available while streaming and after completion.
     expect(segments(parts, "pending")).toEqual(segs);
     // A tool left running in an ended turn reads as stopped.
@@ -52,11 +53,11 @@ describe("chat column", () => {
     expect(open.match(/<li>/g)).toHaveLength(3);
   });
 
-  it("shows activity before text and during tools, but not a redundant line while text streams", () => {
-    expect(showsProgress(turn([]))).toBe(true);
-    expect(showsProgress(turn([tool("a", "web_search", "executing")]))).toBe(true);
+  it("keeps legacy separate ProgressLine disabled in favor of unified ActivityFold and preserves accessible ProgressLine markup", () => {
+    expect(showsProgress(turn([]))).toBe(false);
+    expect(showsProgress(turn([tool("a", "web_search", "executing")]))).toBe(false);
     expect(showsProgress(turn([{ kind: "markdownContent", text: "Hel" }]))).toBe(false);
-    expect(showsProgress(turn([{ kind: "markdownContent", text: "Let me check" }, tool("a", "shell", "executing")]))).toBe(true);
+    expect(showsProgress(turn([{ kind: "markdownContent", text: "Let me check" }, tool("a", "shell", "executing")]))).toBe(false);
     expect(showsProgress(turn([], "complete"))).toBe(false);
     expect(showsProgress(turn([], "cancelled"))).toBe(false);
     const html = renderToStaticMarkup(<ProgressLine phrase="Searching the web…" />);

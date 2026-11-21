@@ -32,6 +32,14 @@ from typing import Any, Callable
 from pydantic import BaseModel
 
 
+def tool_result_failed(result: Any) -> bool:
+    """Recognize native and MCP failure envelopes before result truncation."""
+    return isinstance(result, dict) and (
+        result.get("ok") is False or result.get("success") is False
+        or result.get("isError") is True or bool(result.get("error"))
+    )
+
+
 def dev_mode_enabled() -> bool:
     """Whether this process runs in dev mode (``JAEGER_DEV_MODE`` set
     to ``1`` / ``true`` / ``yes`` / ``on``).

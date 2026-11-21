@@ -213,6 +213,8 @@ async def test_idle_stream_keepalive_is_not_a_durable_event(tmp_path):
     before = len(_events(app))
     async with TestClient(TestServer(app.app), headers=client_headers('webui')) as client:
         response = await client.get('/v1/sessions/s1/stream')
+        assert await response.content.readline() == b'retry: 2000\n'
+        assert await response.content.readline() == b'\n'
         assert await response.content.readline() == b': keepalive\n'
         assert len(_events(app)) == before
         response.close()

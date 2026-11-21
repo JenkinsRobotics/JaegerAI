@@ -5940,6 +5940,13 @@ def _main_dispatch() -> int:
         layout.ensure_dirs()
         return self_test(layout)
 
+    # A one-shot client belongs to the resident Gateway. It must not boot or
+    # validate an unrelated legacy runtime before submitting the request.
+    from jaeger_ai.contract.legacy_paths import legacy_paths_enabled
+    oneshot = " ".join(args.prompt).strip()
+    if oneshot and not legacy_paths_enabled():
+        return _forward_oneshot_to_gateway(oneshot, instance_name=instance_name)
+
     # First-run / missing-instance: the Swift app's onboarding owns
     # first-run whenever the app is available (0.7.1 — GUI-first; the
     # bridge reports ``no_instance`` and the app presents the setup
