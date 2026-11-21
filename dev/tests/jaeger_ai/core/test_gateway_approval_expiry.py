@@ -13,7 +13,10 @@ from types import SimpleNamespace
 import pytest
 
 from jaeger_ai.core.gateway import server as gateway_server
-from jaeger_ai.core.gateway.server import JaegerGatewayApp, _GatewayToolConfirmationProvider
+from jaeger_ai.core.gateway.server import (
+    JaegerGatewayApp, _GatewayLocalReadAccessProvider,
+    _GatewayToolConfirmationProvider,
+)
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
 
@@ -189,7 +192,7 @@ def test_session_grant_expires_on_gateway_restart_without_losing_metadata(tmp_pa
     provider = _GatewayToolConfirmationProvider(restarted, "s", "r2")
     assert restarted.store.get_session("s")["metadata"]["resume_marker"] == "kept"
     assert provider._session_grants() == set()
-    monkeypatch.setattr(provider, "_prompt", lambda request: False)
+    monkeypatch.setattr(provider, "_prompt", lambda request, **kwargs: False)
     assert provider.confirm(_write_request()) is False
     assert not (tmp_path / "permissions.json").exists()
 
@@ -223,10 +226,114 @@ def test_other_approval_scopes_keep_their_behavior(
     request = SimpleNamespace(tier=PermissionTier.EXTERNAL_EFFECT, skill="calendar",
                               operation="create_event", summary="create event", arguments={})
     assert provider.confirm(request) is True
-    monkeypatch.setattr(provider, "_prompt", lambda request: False)
+    monkeypatch.setattr(provider, "_prompt", lambda request, **kwargs: False)
     assert provider.confirm(request) is second_allowed
     restarted = JaegerGatewayApp(store=GatewaySessionStore(running_app.store.path))
     after_restart = _GatewayToolConfirmationProvider(restarted, "s", "r2")
-    monkeypatch.setattr(after_restart, "_prompt", lambda request: False)
+    monkeypatch.setattr(after_restart, "_prompt", lambda request, **kwargs: False)
     assert after_restart.confirm(request) is second_allowed
     assert (tmp_path / "permissions.json").exists() is second_allowed
+
+
+def test_local_read_once_expands_only_the_current_turn(running_app, monkeypatch, tmp_path):
+    running_app.store.ensure_session("s")
+    target = tmp_path / "outside.txt"
+    target.write_text("ok")
+    provider = _GatewayLocalReadAccessProvider(running_app, "s", "r")
+    monkeypatch.setattr(provider.confirmation, "_prompt_decision", lambda request: (True, "once"))
+
+    assert provider(target) == str(target.resolve())
+    assert provider(target) == str(target.resolve())
+    assert "local_read_roots" not in running_app.store.get_session("s")["metadata"]
+
+    later = _GatewayLocalReadAccessProvider(running_app, "s", "r2")
+    monkeypatch.setattr(later.confirmation, "_prompt_decision", lambda request: (False, "deny"))
+    assert later(target) is None
+
+
+def test_local_read_session_grant_is_durable_and_path_scoped(running_app, monkeypatch, tmp_path):
+    running_app.store.ensure_session("s")
+    target = tmp_path / "allowed.txt"
+    other = tmp_path / "other.txt"
+    target.write_text("yes")
+    other.write_text("no")
+    provider = _GatewayLocalReadAccessProvider(running_app, "s", "r")
+    monkeypatch.setattr(provider.confirmation, "_prompt_decision", lambda request: (True, "session"))
+    assert provider(target) == str(target.resolve())
+
+    later = _GatewayLocalReadAccessProvider(running_app, "s", "r2")
+    monkeypatch.setattr(
+        later.confirmation, "_prompt_decision",
+        lambda request: (_ for _ in ()).throw(AssertionError("saved grant prompted again")),
+    )
+    assert later(target) == str(target.resolve())
+    monkeypatch.setattr(later.confirmation, "_prompt_decision", lambda request: (False, "deny"))
+    assert later(other) is None
+
+
+def test_local_read_groups_checkout_files_under_one_repo_grant(running_app, monkeypatch, tmp_path):
+    running_app.store.ensure_session("s")
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    first = repo / "src" / "one.py"
+    second = repo / "pkg" / "two.py"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text("1")
+    second.write_text("2")
+    provider = _GatewayLocalReadAccessProvider(running_app, "s", "r")
+    prompts = []
+
+    def approve(request):
+        prompts.append(request)
+        return True, "once"
+
+    monkeypatch.setattr(provider.confirmation, "_prompt_decision", approve)
+    assert provider(first) == str(repo)
+    assert provider(second) == str(repo)
+    assert len(prompts) == 1
+    assert prompts[0].arguments["path"] == str(repo)
+    assert prompts[0].arguments["requested_path"] == str(first)
+
+
+def test_local_read_never_offers_root_or_home(running_app, monkeypatch):
+    running_app.store.ensure_session("s")
+    provider = _GatewayLocalReadAccessProvider(running_app, "s", "r")
+    monkeypatch.setattr(
+        provider.confirmation, "_prompt_decision",
+        lambda request: (_ for _ in ()).throw(AssertionError("broad root must not prompt")),
+    )
+    from pathlib import Path
+    assert provider(Path.home()) is None
+    assert provider(Path("/")) is None
+
+
+def test_local_read_approval_resumes_the_same_resolver_call(running_app, monkeypatch, tmp_path):
+    from jaeger_agent.core.workspace import _resolve_read, read_confinement
+
+    running_app.store.ensure_session("s")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = tmp_path / "outside" / "answer.txt"
+    target.parent.mkdir()
+    target.write_text("approved")
+    original = running_app.store.create_approval
+
+    def answer(**kwargs):
+        row = original(**kwargs)
+        assert kwargs["metadata"]["tool"] == "local_files.read_file"
+        assert str(target) in kwargs["prompt"]
+
+        def resolve():
+            running_app.store.resolve_approval(
+                kwargs["approval_id"], approved=True, decision="session",
+            )
+            running_app.pending_approvals.pop(kwargs["approval_id"]).set_result(True)
+        running_app._loop.call_soon(resolve)
+        return row
+
+    monkeypatch.setattr(running_app.store, "create_approval", answer)
+    provider = _GatewayLocalReadAccessProvider(running_app, "s", "r")
+    with read_confinement([workspace], request_access=provider):
+        assert _resolve_read(str(target)).read_text() == "approved"
+    assert running_app.store.get_session("s")["metadata"]["local_read_roots"] == [str(target)]

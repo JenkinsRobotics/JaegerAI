@@ -4,6 +4,41 @@ from __future__ import annotations
 from jaeger_agent.loop import jaeger_agent as ja
 
 
+def test_read_authority_denial_is_definitive(tmp_path):
+    from pydantic import BaseModel
+
+    from jaeger_agent import JaegerAgent
+    from jaeger_agent.core.workspace import ReadAccessDenied
+    from jaeger_os.core.tools.tool_schema import ToolDef
+
+    class Args(BaseModel):
+        path: str
+
+    class Executor:
+        def execute(self, tool, args):
+            raise ReadAccessDenied("owner denied local read access")
+
+    tool = ToolDef("read_file", "fixture", Args, lambda path: path, side_effect="read")
+    agent = JaegerAgent(adapter=object(), tools=[tool], tool_executor=Executor())
+    prep = {
+        "name": "read_file",
+        "args": {"path": str(tmp_path / "outside.txt")},
+        "call_id": "read-1",
+        "live_call": "read-1",
+        "sig": "read-file-sig",
+        "tool_def": tool,
+        "is_read": True,
+        "guidance": None,
+        "started": 0.0,
+    }
+
+    result = agent._execute_prepared(prep)
+
+    assert result["error_type"] == "permission_denied"
+    assert result["retryable"] is False
+    assert "ReadAccessDenied" in result["error"]
+
+
 def test_generic_failure_asks_for_cause_and_a_change():
     hint = ja._recovery_hint("terminal", {"command": "make"}, "exit 2")
     assert "state the cause" in hint and "Do not repeat the identical call" in hint

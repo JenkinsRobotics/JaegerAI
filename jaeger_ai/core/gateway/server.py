@@ -823,10 +823,18 @@ class _GatewayToolConfirmationProvider:
 
     def _prompt(self, request: Any, reviewer_verdict: str | None = None,
                 reviewer_reason: str | None = None) -> bool:
-        """Park an approval card and wait for the owner's decision."""
+        """Park an approval card and return the owner's boolean decision."""
+        return self._prompt_decision(
+            request, reviewer_verdict=reviewer_verdict,
+            reviewer_reason=reviewer_reason,
+        )[0]
+
+    def _prompt_decision(self, request: Any, reviewer_verdict: str | None = None,
+                         reviewer_reason: str | None = None) -> tuple[bool, str]:
+        """Park one approval and retain its scope for resource grants."""
         loop = getattr(self.app, "_loop", None)
         if loop is None or not loop.is_running():
-            return False
+            return False, "unavailable"
         skill = str(getattr(request, "skill", "") or "")
         op = str(getattr(request, "operation", "") or "")
         summary = str(getattr(request, "summary", "") or "")
@@ -890,11 +898,14 @@ class _GatewayToolConfirmationProvider:
         self.app._run_interrupted(self.session_id, self.request_id, aid, {
             "tool": f"{skill}.{op}" if skill else op, "target": target,
             "call_id": call_id, "expires_in_s": APPROVAL_WAIT_S})
+        approved = False
         try:
-            return self._await_decision(box, aid, scope, deadline, skill, request)
+            approved = self._await_decision(box, aid, scope, deadline, skill, request)
         finally:
             row = self.app.store.get_approval(aid) or {}
             self.app._run_resumed(self.session_id, self.request_id, aid, row.get("decision") or "expired")
+        row = self.app.store.get_approval(aid) or {}
+        return approved, str(row.get("decision") or "deny")
 
     def _await_decision(self, box: dict[str, Any], aid: str, scope: Any, deadline: float,
                         skill: str, request: Any) -> bool:
@@ -934,6 +945,113 @@ class _GatewayToolConfirmationProvider:
             return False
         row = self.app.store.get_approval(aid) or {}
         return row.get("decision") not in {None, "deny", "expired"}
+
+
+class _GatewayLocalReadAccessProvider:
+    """Codex-style expansion of a Gateway turn's local read boundary.
+
+    The model can request a path but cannot grant it. The existing Gateway
+    approval bus supplies the human decision; ``session`` decisions persist as
+    exact realpath roots in session metadata. Writes and code execution never
+    inherit these read grants.
+    """
+
+    _META_KEY = "local_read_roots"
+
+    def __init__(self, app: "JaegerGatewayApp", session_id: str, request_id: str) -> None:
+        self.app = app
+        self.session_id = session_id
+        self.request_id = request_id
+        self.confirmation = _GatewayToolConfirmationProvider(app, session_id, request_id)
+        self._turn_roots: set[str] = set()
+        self._denied: set[str] = set()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _real(value: Any) -> str:
+        return os.path.realpath(os.path.expanduser(str(value)))
+
+    def _saved_roots(self) -> set[str]:
+        try:
+            meta = (self.app.store.get_session(self.session_id) or {}).get("metadata") or {}
+            return {self._real(root) for root in meta.get(self._META_KEY) or [] if root}
+        except Exception:  # noqa: BLE001 — unreadable authority means ask
+            return set()
+
+    @staticmethod
+    def _contains(root: str, target: str) -> bool:
+        try:
+            return os.path.commonpath((root, target)) == root
+        except (ValueError, OSError):
+            return False
+
+    def _existing_grant(self, target: str) -> str | None:
+        for root in self._turn_roots | self._saved_roots():
+            if self._contains(root, target):
+                return root
+        return None
+
+    def _grant_root(self, target: str) -> str:
+        """Group files in one repository into one intelligible approval.
+
+        Codex-style project work should not require a card per file. A trusted
+        host may inspect ancestors to find the nearest checkout boundary; the
+        model still cannot select or widen the returned scope. Non-repository
+        files remain exact-file grants.
+        """
+        candidate = Path(target)
+        current = candidate if candidate.is_dir() else candidate.parent
+        home = Path.home().resolve()
+        for parent in (current, *current.parents):
+            resolved = parent.resolve()
+            if resolved in {Path(os.path.sep), home}:
+                break
+            if (resolved / ".git").exists():
+                return str(resolved)
+        return target
+
+    def _persist(self, root: str) -> None:
+        roots = sorted(self._saved_roots() | {root})
+        self.app.store.update_metadata(self.session_id, {self._META_KEY: roots})
+
+    def __call__(self, target: Path) -> str | None:
+        from jaeger_os.core.safety.permissions import PermissionRequest, PermissionTier
+
+        resolved = self._real(target)
+        existing = self._existing_grant(resolved)
+        if existing:
+            return existing
+        # Never offer dangerously broad roots. Sensitive-path policy is
+        # evaluated by workspace._resolve_read before this callback.
+        if resolved in {os.path.sep, self._real(Path.home())}:
+            return None
+        grant_root = self._grant_root(resolved)
+        with self._lock:
+            existing = self._existing_grant(resolved)
+            if existing:
+                return existing
+            if grant_root in self._denied:
+                return None
+            request = PermissionRequest(
+                tier=PermissionTier.READ_ONLY,
+                skill="local_files",
+                operation="read_file",
+                summary=(f"Read {resolved} outside this chat's workspace "
+                         f"with read-only scope {grant_root}"),
+                arguments={
+                    "path": grant_root, "requested_path": resolved,
+                    "access": "read_only",
+                },
+                force_prompt=True,
+            )
+            approved, decision = self.confirmation._prompt_decision(request)
+            if not approved:
+                self._denied.add(grant_root)
+                return None
+            self._turn_roots.add(grant_root)
+            if decision == "session":
+                self._persist(grant_root)
+            return grant_root
 
 
 def _with_transcript_fallback(text: str, session: dict[str, Any] | None) -> str:
@@ -6128,7 +6246,10 @@ class JaegerGatewayApp:
                             execution=selection, user_text=request_row.get("input_text", prompt), source=source), \
                     interaction_request_sink(self._clarify_sink(session_key, request_id)), \
                     tool_allowlist(list(grant) if grant is not None else None), \
-                    read_confinement(self._read_roots(runtime, safe_selection, self._staged_upload_dir(session_key))):
+                    read_confinement(
+                        self._read_roots(runtime, safe_selection, self._staged_upload_dir(session_key)),
+                        request_access=_GatewayLocalReadAccessProvider(self, session_key, request_id),
+                    ):
                 _live.emit("route.selected", {
                     "model": selected_model or None, "lane": lane or None,
                     "provider": str(selection.get("provider") or lane or "") or None,
