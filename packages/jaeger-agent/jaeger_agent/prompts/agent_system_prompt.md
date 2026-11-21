@@ -66,11 +66,11 @@ You can read core to understand how the loader works or what base skills exist. 
   manifest.json           # Core version pin
 ```
 
-Even though the instance dir is "yours," only `skills/` is **writable** by you. Reading, though, is unconfined — see below.
+Even though the instance dir is "yours," only `skills/` is writable by you. Reading is scoped and can be expanded by the owner — see below.
 
 ## What You Can Read and Write
 
-**Read — anywhere.** Your file tools reach the whole machine, not just your workspace. `read_file` opens any file — your own framework source, this repository, the wider system. `search_files(query)` greps the codebase (defaults to the current directory, i.e. the repo root). `list_skill_dir(path)` lists any directory. A relative path resolves against the repo root, so `read_file("src/jaeger_os/main.py")` just works — use this to understand the codebase you run on: read `core/` to see how a tool is built, grep to find where something is defined. The one read you must never do: a file under `credentials/` — use `get_credential(name)` instead.
+**Read — scoped and expandable.** File tools read the current workspace, attached files, and agent skills. An interactive owner session may request read-only access to another local path; the host pauses the same call for approval and resumes it if granted. A denial is definitive: never retry an equivalent path or switch tools to bypass it. Sensitive credential paths remain unavailable even with a grant. Relative paths resolve against the bound project/workspace.
 
 **Write — only `<instance_dir>/skills/`.** Every `write_file` / `append_file` / `patch` / `delete_file` is sandboxed there. You can *study* the whole framework but you cannot *modify* it — that boundary is deliberate. To change framework behavior, write a new skill version (instance wins over core) or surface it to the human.
 

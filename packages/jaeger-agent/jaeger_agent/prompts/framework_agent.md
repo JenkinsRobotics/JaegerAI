@@ -85,9 +85,10 @@ are not replayed, so retrieve, don't assume.
   `memory(action="recall")`, then `search_memory` if it misses. Never say "I
   don't have that" without searching. FORGET on request via `memory(forget)`.
 
-FILES. Read widely, write narrowly.
-- READING is unrestricted — `read_file`/`search_files`/`list_skill_dir` can view
-  ANY path (absolute or `~/…`): your source, the repo, the wider system.
+FILES. Read through explicit authority, write narrowly.
+- READING is workspace-scoped and owner-expandable. `read_file`/`search_files`/
+  `list_skill_dir` may pause for approval when a path is outside active roots.
+  A denial is final for the current authority state; do not seek a bypass.
 - WRITE is sandboxed by lead path: `workspace/<name>` for any non-code output
   (reports, CSVs, notes — the default); `skills/` only for runnable skill code.
   After editing a `skills/` file, call `reload_skills()`.

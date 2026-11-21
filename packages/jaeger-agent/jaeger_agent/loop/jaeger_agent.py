@@ -2563,6 +2563,13 @@ class JaegerAgent:
                     retryable = False
             except Exception:  # noqa: BLE001
                 pass
+            try:
+                from jaeger_agent.core.workspace import ReadAccessDenied
+                if isinstance(exc, ReadAccessDenied):
+                    err_type = "permission_denied"
+                    retryable = False
+            except Exception:  # noqa: BLE001
+                pass
             # Hardline guard refusals (run_shell catastrophic-command
             # blocklist) come back as a typed dict, not an exception;
             # they don't land here. But if a future refusal layer
@@ -2616,7 +2623,13 @@ class JaegerAgent:
         if guidance:
             content = _merge_guidance(content, guidance)
         if not _ok and isinstance(content, dict) and "recovery" not in content:
-            content = {**content, "recovery": _recovery_hint(name, args, _err)}
+            recovery = (
+                "This authority decision is definitive for the current scope. Do not retry "
+                "the same path or use another tool to bypass it; report the blocker and stop."
+                if content.get("retryable") is False
+                else _recovery_hint(name, args, _err)
+            )
+            content = {**content, "recovery": recovery}
 
         elapsed = time.perf_counter() - started
         from jaeger_agent import live as _live

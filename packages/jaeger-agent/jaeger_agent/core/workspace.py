@@ -106,16 +106,23 @@ def set_project_root(path: Path | str | None) -> None:
 # (CLI/TUI, the historical behaviour). When set, every ``_resolve_read`` target
 # must realpath inside one of these roots (symlinks resolved first).
 _read_roots_var: ContextVar[tuple[Path, ...] | None] = ContextVar("read_roots", default=None)
+_read_access_requester_var: ContextVar[Any] = ContextVar("read_access_requester", default=None)
 
 
 @contextlib.contextmanager
-def read_confinement(roots: Any):
-    """Confine read/list/search tools to ``roots`` for this context."""
+def read_confinement(roots: Any, *, request_access: Any = None):
+    """Confine reads to ``roots`` while permitting host-owned expansion.
+
+    ``request_access`` is a host callback, never model data. It receives the
+    resolved target and returns an approved file/folder root or ``None``.
+    """
     clean = tuple(Path(os.path.realpath(str(r))) for r in (roots or []) if r) or None
     token = _read_roots_var.set(clean)
+    requester_token = _read_access_requester_var.set(request_access)
     try:
         yield clean
     finally:
+        _read_access_requester_var.reset(requester_token)
         _read_roots_var.reset(token)
 
 
@@ -306,6 +313,10 @@ def _audit(event: str, payload: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 class SandboxError(ValueError):
     """Raised when a path argument escapes the allowed zone."""
+
+
+class ReadAccessDenied(SandboxError):
+    """A host refused or could not obtain additional read authority."""
 
 
 def _resolve_under(root: Path, path: str) -> Path:
@@ -602,21 +613,32 @@ def _resolve_read(path: str) -> Path:
             "credentials/ is off-limits to direct reads — "
             "use get_credential(name) instead"
         )
-    roots = _read_roots_var.get()
-    if roots is not None:
-        full = Path(os.path.realpath(str(full)))
-        if not path_within(full, roots):
-            raise SandboxError(
-                f"refused — {full} is outside this session's workspace ({roots[0]}). "
-                "Reads are confined to the session folder; ask the operator to open "
-                "that folder as the workspace instead."
-            )
-    # Reads are unconfined, but never an OS-level secret store —
-    # ~/.ssh, .aws/credentials, a .env, … (audit A5).
+    # Secret-store policy is stronger than an interactive grant. Check it
+    # before asking so the UI never offers an approval that cannot take effect.
     from jaeger_os.core.safety.file_safety import is_sensitive_path
     _sensitive = is_sensitive_path(full)
     if _sensitive:
         raise SandboxError(f"refused — {_sensitive}")
+
+    roots = _read_roots_var.get()
+    if roots is not None:
+        full = Path(os.path.realpath(str(full)))
+        if not path_within(full, roots):
+            requester = _read_access_requester_var.get()
+            if not callable(requester):
+                raise SandboxError(
+                    f"refused — {full} is outside this session's workspace ({roots[0]}). "
+                    "Reads are confined to the session folder; ask the operator to open "
+                    "that folder as the workspace instead."
+                )
+            granted = requester(full) if callable(requester) else None
+            approved_root = Path(os.path.realpath(str(granted))) if granted else None
+            if approved_root is None or not path_within(full, (approved_root,)):
+                raise ReadAccessDenied(
+                    f"local read access denied for {full}; this decision is definitive "
+                    "until the owner changes the session's file authority. Do not retry "
+                    "the path or seek another tool to bypass it."
+                )
     return full
 
 

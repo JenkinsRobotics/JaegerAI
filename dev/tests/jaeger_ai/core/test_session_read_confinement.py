@@ -6,7 +6,8 @@ import os
 import pytest
 
 from jaeger_agent.core.workspace import (
-    SandboxError, _resolve_read, active_read_roots, project_scope, read_confinement,
+    ReadAccessDenied, SandboxError, _resolve_read, active_read_roots,
+    project_scope, read_confinement,
 )
 
 
@@ -34,6 +35,24 @@ def test_reads_confined_to_workspace(tree):
                 _resolve_read(bad)
     assert active_read_roots() is None
     assert _resolve_read(str(outside / "secret.txt")).read_text() == "s"  # unconfined outside a turn
+
+
+def test_read_confinement_can_expand_only_through_host_authority(tree):
+    ws, outside = tree
+    target = outside / "secret.txt"
+    requests = []
+
+    def approve(path):
+        requests.append(path)
+        return target
+
+    with project_scope(ws), read_confinement([ws], request_access=approve):
+        assert _resolve_read(str(target)).read_text() == "s"
+    assert requests == [target.resolve()]
+
+    with project_scope(ws), read_confinement([ws], request_access=lambda path: None):
+        with pytest.raises(ReadAccessDenied, match="definitive"):
+            _resolve_read(str(target))
 
 
 def test_search_and_list_tools_refuse_outside(tree, tmp_path, monkeypatch):
