@@ -437,15 +437,9 @@ def bind_character(instance_root: Path, cid: str) -> None:
     manifest.json's bound_character (the canonical identity) AND sets it active.
     A plain :func:`set_active_character` is only a session-level override; this
     moves the binding. Memory + skill XP live in the instance, so they survive."""
-    import json
-    import os
+    from jaeger_ai.core.instance.instance import InstanceLayout, update_manifest
     root = Path(instance_root)
-    f = root / "manifest.json"
-    doc = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
-    doc["bound_character"] = cid.strip()
-    tmp = f.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(doc, indent=2), encoding="utf-8")
-    os.replace(tmp, f)
+    update_manifest(InstanceLayout(root=root), bound_character=cid.strip())
     set_active_character(root, cid)
 
 

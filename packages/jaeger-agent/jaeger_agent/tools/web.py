@@ -483,12 +483,16 @@ class _ReadableText(HTMLParser):
     def handle_starttag(self, tag: str, attrs: Any) -> None:
         if tag in self._SKIP:
             self._depth_skip += 1
+        elif tag in {"del", "s", "strike"} and self._depth_skip == 0:
+            self._chunks.append(" [DELETED/SUPERSEDED: ")
         elif tag in self._BLOCK:
             self._chunks.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in self._SKIP and self._depth_skip > 0:
             self._depth_skip -= 1
+        elif tag in {"del", "s", "strike"} and self._depth_skip == 0:
+            self._chunks.append(" ] ")
         elif tag in self._BLOCK:
             self._chunks.append("\n")
 
@@ -528,10 +532,6 @@ def web_fetch(url: str, max_chars: int = 8000) -> dict[str, Any]:
     if not target.lower().startswith(("http://", "https://")):
         target = "https://" + target
     cap = max(500, min(int(max_chars or 8000), 40000))
-
-    hosted = _ollama_web_fetch(target, cap)
-    if hosted:
-        return hosted
 
     try:
         import requests
@@ -577,6 +577,9 @@ def web_fetch(url: str, max_chars: int = 8000) -> dict[str, Any]:
                 if len(body) >= RAW_CAP:
                     break
     except Exception as exc:  # noqa: BLE001
+        hosted = None if is_interrupted() else _ollama_web_fetch(target, cap)
+        if hosted:
+            return {**hosted, "formatting_notice": "Hosted extraction may omit deletion/strike-through formatting; reconcile conflicting or superseded claims."}
         return {"ok": False, "url": target,
                 "error": f"{type(exc).__name__}: {exc}"}
     finally:

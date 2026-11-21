@@ -59,6 +59,13 @@ CONTINUE_NUDGE = (
 # execution, it does not get to ignore someone it just asked.
 _QUESTION = re.compile(r"\?\s*(?:\[[^\]]*\]\s*)*$")
 
+# Reporting unfinished verification is progress, not an external blocker.
+# Strip only the qualifier; genuine blockers later in the sentence still win.
+_PENDING_VERIFICATION = re.compile(
+    r"\bi (?:cannot|can't) (?:yet |honestly )*(?:claim|say|report|confirm)\b"
+    r"(?=[^.!?\n]{0,100}\b(?:tests?|suite|complete|completed|done|green|verified|verification|success)\b)", re.I
+)
+
 _BLOCKED = re.compile(
     r"\b(?:i (?:can'?t|cannot|am unable to|couldn'?t)|"
     r"needs? your (?:approval|confirmation|permission)|"
@@ -154,7 +161,7 @@ def enabled() -> bool:
     return True
 
 
-def classify(text: str) -> str:
+def classify(text: str, *, at_inner_cap: bool = False) -> str:
     """Why the run should stop, or ``"continue"``.
 
     Returns one of ``question`` · ``blocked`` · ``complete`` · ``empty``
@@ -166,8 +173,20 @@ def classify(text: str) -> str:
         return "empty"
     if _QUESTION.search(body):
         return "question"
-    if _BLOCKED.search(body) or _LOOP_BREAKER_TEXT.search(body):
+    pending_verification = bool(_PENDING_VERIFICATION.search(body))
+    blocker_text = _PENDING_VERIFICATION.sub("", body)
+    if at_inner_cap and _REMAINING.search(body):
+        # A tool budget boundary often ends with an honest account of what
+        # has not been established yet. Only remove epistemic qualifiers;
+        # access, authorization and provider blockers still stop execution.
+        blocker_text = re.sub(
+            r"\bi (?:cannot|can't) yet (?:identify|determine|conclude|infer|assess)\b",
+            "", blocker_text, flags=re.I,
+        )
+    if _BLOCKED.search(blocker_text) or _LOOP_BREAKER_TEXT.search(body):
         return "blocked"
+    if pending_verification:
+        return "continue"
     if _COMPLETE.search(body) and not _PARTIAL_COMPLETE.search(body):
         return "complete"
     if _PROMISE.search(body) or _GERUND_OPENER.search(body) \

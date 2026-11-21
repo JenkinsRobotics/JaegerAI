@@ -56,10 +56,10 @@ it("opens the page the URL names, redirects retired paths to sub-tabs and follow
 
 it("switches sub-tabs through the URL and keeps the sub-tab bar consistent", async () => {
   await mount("/work");
-  expect(subtab()).toBe("Pipeline");
+  expect(subtab()).toBe("Tasks");
   const tabs = [...document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")].map((t) => t.textContent);
-  expect(tabs).toEqual(["Pipeline", "Process", "Backlog", "Tasks", "Production", "Calendar", "YouTube"]);
-  await flush(() => (document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")[5] as HTMLButtonElement).click());
+  expect(tabs).toEqual(["Tasks", "Process", "Calendar", "YouTube"]);
+  await flush(() => (document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")[2] as HTMLButtonElement).click());
   await settle();
   expect(location.pathname).toBe("/work/calendar");
   expect(document.title).toBe("Calendar · Work · Jaeger");
@@ -105,11 +105,11 @@ it("the app bar follows the layout preset and its ⌘K field opens the palette",
   await flush(() => applyPreset("glass"));
 });
 
-it("Work retains the former Home approvals section and the ⌘K palette offers pages and characters", async () => {
+it("Work retains the former Home approvals and status strip and the ⌘K palette offers pages and characters", async () => {
   await mount("/home");
   expect(front()).toBe("Work");
   expect(document.querySelector('[aria-label="Approvals"]')).not.toBeNull();
-  expect(document.querySelector('[aria-label="Control Center"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="Status"]')).not.toBeNull();
   await flush(() => dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })));
   const rows = [...document.querySelectorAll(".jg-palette__label")].map((r) => r.textContent);
   expect(rows).toContain("Go to Characters");
@@ -132,8 +132,9 @@ it("relocates knowledge, workspace and Settings destinations without duplicate t
   for (const [old, current, label] of [
     ["/work/workspace", "/research/workspace", "Research"],
     ["/work/checkpoints", "/settings/checkpoints", "Settings"],
-    ["/home/widgets", "/settings/widgets", "Settings"],
-    ["/agents/hermes", "/settings/integrations/hermes", "Settings"],
+    ["/home/widgets", "/settings", "Settings"],
+    ["/agents/hermes", "/settings", "Settings"],
+    ["/agents/openclaw", "/settings/integrations", "Settings"],
     ["/research/sharepoint", "/settings/integrations/sharepoint", "Settings"],
   ]) {
     await flush(() => navigate(old)); await settle();

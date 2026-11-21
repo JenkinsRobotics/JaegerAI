@@ -26,6 +26,7 @@ class LocalAdapter(ProviderAdapter):
 
 def prepared_fixture(tmp_path, *, budget=1000):
     runtime = object.__new__(EntityRuntime)
+    runtime._cognition_handlers = []
     runtime.context_compiler = ContextCompiler()
     semantic = SemanticMemory(tmp_path)
     short = semantic.record_claim('owned','short','PRIVATE-SHORT',confidence=0.0,source_id='PRIVATE-SOURCE')
@@ -119,14 +120,24 @@ import pytest
 @pytest.mark.asyncio
 async def test_normal_authenticated_gateway_turn_keeps_exact_item_receipt(tmp_path, monkeypatch):
     from aiohttp.test_utils import TestClient,TestServer
+    from jaeger_ai.core.entity.ownership import EntityRuntimeMode
     from jaeger_ai.core.gateway.server import JaegerGatewayApp
     from jaeger_ai.core.gateway.session_store import GatewaySessionStore
     from jaeger_ai.core.gateway.caller_auth import client_headers
+    from jaeger_ai.core.instance.schemas import Config
     _, short, _, _, runtime=prepared_fixture(tmp_path)
     runtime.layout=None
+    runtime.identity=SimpleNamespace(entity_id='owned-fixture')
+    runtime.mode=EntityRuntimeMode.OWNER
+    runtime.is_resident=False
     runtime.finish_turn=lambda *a:None
     monkeypatch.setattr(EntityRuntime,'get_singleton',classmethod(lambda cls,*a,**k:runtime))
     monkeypatch.setenv('OLLAMA_API_KEY','owned-fixture-placeholder')
+    config=Config(instance_name='owned',model={'model_path':'unused'},external_model={
+        'enabled':True,'provider':'ollama','model':'fixture','base_url':'http://127.0.0.1:11434/v1'})
+    monkeypatch.setattr('jaeger_ai.core.entity.runtime.load_instance_config_or_default',lambda _:config)
+    monkeypatch.setattr('jaeger_ai.core.models.router.ensure_local_ollama',lambda *a,**k:True)
+    monkeypatch.setattr('jaeger_ai.core.models.request_policy.require_inference_headroom',lambda *a,**k:None)
     gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
     gateway.store.ensure_session('owned-gateway',metadata={'execution_mode':'text_only'})
     monkeypatch.setattr(gateway,'_resolve_session_agent',lambda sid:None)

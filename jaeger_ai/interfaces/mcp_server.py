@@ -290,12 +290,20 @@ def _tool_names(payload: Any) -> list[str]:
     return names
 
 
-def capability_inventory(bridge: Any | None = None) -> dict[str, Any]:
+def capability_inventory(bridge: Any | None = None, gateway: Any | None = None) -> dict[str, Any]:
     """Return Jaeger's live tool inventory and shared protocol endpoints."""
     names: list[str] = []
     runtime_initialized = False
     inventory_error = None
-    if bridge is not None:
+    if gateway is not None:
+        try:
+            payload = gateway._call("GET", "/v1/runtime/tools")
+            names = [str(row["name"]) for row in payload.get("tools", [])
+                     if row.get("source") == "mcp"]
+            runtime_initialized = bool(payload.get("mcp_initialized"))
+        except Exception as exc:  # noqa: BLE001
+            inventory_error = str(exc)
+    elif bridge is not None:
         try:
             payload = bridge.query("list_tools")
             names = _tool_names(payload)
@@ -530,7 +538,7 @@ def build_server(client: Any, instance: str, model: str | None,
     def capability_inventory_tool(ctx: Context | None = None) -> dict:
         """Return Jaeger's live tool inventory and shared protocol endpoints."""
         refuse_muse(ctx, "capability_inventory_tool")
-        return capability_inventory(bridge=bridge)
+        return capability_inventory(bridge=bridge, gateway=gateway)
 
     if bridge is not None:
         @mcp.tool()

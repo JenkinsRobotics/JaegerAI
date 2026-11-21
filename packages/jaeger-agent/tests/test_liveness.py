@@ -350,25 +350,31 @@ def test_stale_timeout_sets_stalled_halt_reason_when_chain_exhausted():
     assert agent.last_halt_reason == "stalled"
 
 
-def test_stalled_message_mentions_recovery_path():
-    """The thinking callback emitted on stall must reference the
-    ``jaeger kill`` recovery instructions so a non-expert user knows
-    what to do when the model hangs."""
+def test_stalled_diagnostics_emit_reliability_events_not_chat_thinking():
+    """Stall/retry/fallback diagnostics emit structured live reliability
+    events and stay out of the user-visible thinking channel."""
+    from jaeger_agent import live
+
     seen_thoughts: list[str] = []
+    live_events: list[tuple[str, dict]] = []
     cb = AgentCallbacks(thinking=lambda s: seen_thoughts.append(s))
-    # Primary stalls, backup returns ok — the loop continues past
-    # the primary, but the thinking callback still emits the stall
-    # notice. That's the visible signal in the TUI.
     primary = _StallingAdapter()
     backup = _StallingAdapter(returns={"role": "assistant", "content": "ok"})
     agent = JaegerAgent(adapter=primary, fallback_adapters=[backup],
                        callbacks=cb)
     agent.stale_call_timeout_s = 0.1
-    result = agent.run_turn("hi")
+    with live.bind(lambda event, data: live_events.append((event, data))):
+        result = agent.run_turn("hi")
     assert result == "ok"
-    stall_messages = [s for s in seen_thoughts if "stalled" in s.lower()]
-    assert stall_messages, "expected a 'stalled' notice in the thinking stream"
-    assert "jaeger kill" in stall_messages[0]
+    assert not [s for s in seen_thoughts if "stalled" in s.lower()]
+    event_names = [name for name, _ in live_events]
+    assert "reliability.timeout" in event_names
+    assert "reliability.retry" in event_names
+    assert "reliability.fallback" in event_names
+    retry_data = next(data for name, data in live_events if name == "reliability.retry")
+    assert retry_data["kind"] == "stalled"
+    fallback_data = next(data for name, data in live_events if name == "reliability.fallback")
+    assert fallback_data["reason"] == "stalled"
 
 
 # ── progress-aware stale detection ─────────────────────────────────

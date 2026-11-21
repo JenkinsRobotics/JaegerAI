@@ -418,7 +418,7 @@ def _resolve_write(path: str) -> Path:
         candidate = (project / p).resolve()
         if not candidate.is_relative_to(project):
             raise SandboxError("path escapes the selected project")
-        return candidate
+        return _resolve_absolute_write(candidate)
     if p.parts and p.parts[0] == "workspace":
         # Strip the ``workspace/`` prefix BEFORE passing to
         # ``_resolve_under``. The leading-strip inside that helper
@@ -428,7 +428,7 @@ def _resolve_write(path: str) -> Path:
         # pointed ``workspace.location`` at ``~/Documents/Outputs``
         # or similar. Explicit strip keeps the routing predictable.
         rest = Path(*p.parts[1:]) if len(p.parts) > 1 else Path(".")
-        return _resolve_under(get_effective_workspace_dir(), str(rest))
+        return _resolve_absolute_write(_resolve_under(get_effective_workspace_dir(), str(rest)))
     # Option A (validated): a bare path that ALREADY exists in the
     # workspace is a workspace write. New bare names still land in
     # skills/ so authored skills keep working. The stricter
@@ -441,7 +441,7 @@ def _resolve_write(path: str) -> Path:
         except SandboxError:
             existing = None
         if existing is not None and existing.exists():
-            return existing
+            return _resolve_absolute_write(existing)
     target = _resolve_under(layout.skills_dir, path)
     if not target.exists():
         # The path doesn't exist as a new-skill-file candidate under
@@ -470,7 +470,7 @@ def _resolve_write(path: str) -> Path:
                 "(this looks like framework/repo code; edit it with "
                 "terminal/execute_code instead)"
             )
-    return target
+    return _resolve_absolute_write(target)
 
 
 

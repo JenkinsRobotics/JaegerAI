@@ -715,17 +715,28 @@ class MCPRegistry:
 
 def _result_to_dict(result: Any) -> dict[str, Any]:
     """Flatten MCP CallToolResult into plain JSON-serializable dict."""
-    out: dict[str, Any] = {"isError": bool(getattr(result, "isError", False))}
-    content_items: list[dict[str, Any]] = []
-    for item in getattr(result, "content", []) or []:
-        kind = getattr(item, "type", None)
-        if kind == "text" or hasattr(item, "text"):
-            content_items.append({"type": "text", "text": getattr(item, "text", "")})
-        else:
-            content_items.append({"type": kind or "unknown"})
+    def plain(value: Any) -> Any:
+        if hasattr(value, "model_dump"):
+            return value.model_dump(mode="json", by_alias=True, exclude_none=True)
+        if isinstance(value, dict):
+            return {key: plain(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [plain(item) for item in value]
+        if hasattr(value, "__dict__"):
+            return plain(vars(value))
+        return value
+
+    out = plain(result)
+    out["isError"] = bool(out.get("isError", False))
+    content_items = out.get("content") or []
     out["content"] = content_items
-    # Convenience: concatenated text for the common case
-    texts = [c["text"] for c in content_items if c.get("type") == "text"]
+    # Keep every MCP block and structured payload. Embedded resources (for
+    # example GitHub file contents) also participate in the text convenience.
+    texts = []
+    for item in content_items:
+        value = item.get("resource", {}) if item.get("type") == "resource" else item
+        if isinstance(value.get("text"), str):
+            texts.append(value["text"])
     if texts:
         out["text"] = "\n".join(texts)
     return out

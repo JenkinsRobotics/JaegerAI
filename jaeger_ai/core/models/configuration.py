@@ -146,10 +146,9 @@ def selected_model_config(
         raise ValueError("model is required")
     if selected_provider in {"huggingface", "hf", "in-process"}:
         selected_provider = "local"
-    # Product lanes (WebUI / ARES) split the Mac Ollama daemon into
-    # ollama-local vs ollama-cloud. Both still execute through that one
-    # daemon — :cloud tags ride the Ollama subscription, not a second
-    # https://ollama.com connection that demands an API key in-repo.
+    # Normalize local Ollama aliases (ollama-local -> ollama) while keeping
+    # ollama-cloud as a distinct cloud lane in config and policy (request_policy
+    # decides at runtime between the signed-in local Ollama app and direct API).
     from jaeger_ai.core.models.router import normalize_ollama_provider
     selected_provider = normalize_ollama_provider(selected_provider)
     try:

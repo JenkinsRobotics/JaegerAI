@@ -162,8 +162,10 @@ def _drive_one(
 
     if session_key not in agent_cache:
         _get_agent(client)  # mirror tools onto the registry
-        _cfg = _pipeline.get("config")
-        _ctx = getattr(getattr(_cfg, "model", None), "ctx", None)
+        from jaeger_ai.core.models.model_resolver import serving_runtime
+        from jaeger_ai.main import _context_budget_for
+        _, _cfg = serving_runtime()
+        _ctx, _reserve = _context_budget_for(_cfg) if _cfg is not None else (None, None)
         _layout = _pipeline.get("layout")
         _artifact_dir = (
             (_layout.logs_dir / "tool_results") if _layout is not None else None
@@ -189,6 +191,7 @@ def _drive_one(
             toolsets=_pipeline.get("toolsets"),
             skip_final_tools=SKIP_FINAL_TOOLS,
             ctx_window=_ctx,
+            completion_reserve=_reserve,
             artifact_dir=_artifact_dir,
             stale_call_timeout_s=_stall_s,
         )

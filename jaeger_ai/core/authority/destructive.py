@@ -28,7 +28,10 @@ _WRAPPERS = {"sudo", "doas", "command", "builtin", "exec", "nohup", "time", "nic
              "ionice", "env", "xargs", "caffeinate", "stdbuf", "chronic", "unbuffer"}
 _WRAPPER_ARG_OPTS = {"-u", "-g", "-n", "-C", "-p", "-I", "-L", "-P", "-s", "-c"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish"}
-_SQL_DROP = re.compile(r"(?i)\b(drop\s+(database|schema|table)|truncate\s+(table\s+)?\w)")
+_SQL_DROP = re.compile(
+    r"(?i)\b(?:drop\s+(?:database|schema|table)|truncate\s+table\b|"
+    r"truncate\s+[\w.]+\s*(?:;|[\"']|$|\b(?:cascade|restrict|restart|continue)\b))"
+)
 _DISK = {"mkfs", "wipefs", "shred", "srm", "fdisk", "sfdisk", "parted"}
 _PY_DELETE = re.compile(
     r"\b(shutil\s*\.\s*rmtree|os\s*\.\s*(remove|unlink|rmdir|removedirs)|"

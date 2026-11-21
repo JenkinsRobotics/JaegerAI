@@ -18,6 +18,10 @@ Used by:
 from __future__ import annotations
 
 import re
+import os
+import sys
+import threading
+import tempfile
 import subprocess
 import venv as _stdlib_venv
 from pathlib import Path
@@ -35,6 +39,8 @@ _REQUIREMENT_RE = re.compile(
     r"(?:\[[A-Za-z0-9,_-]+\])?"             # optional extras
     r"(?:\s*(?:==|>=|<=|~=|!=|<|>)\s*[A-Za-z0-9.*+!_-]+)?$"  # optional version
 )
+
+_VENV_LOCK = threading.RLock()
 
 _INSTALL_TIMEOUT_S = 300  # pip can be slow on a big wheel; cap at 5 min.
 
@@ -58,26 +64,53 @@ def venv_pip(layout: Any) -> Path:
 
 
 def venv_exists(layout: Any) -> bool:
-    """True when the instance venv is present and has a usable python."""
-    return venv_python(layout).is_file()
+    """An interpreter file is insufficient: copied macOS binaries can lack dylibs."""
+    py = venv_python(layout)
+    if not py.is_file():
+        return False
+    try:
+        check = subprocess.run([str(py), "-I", "-B", "-c", "import sys; print(sys.prefix)"],
+                               capture_output=True, text=True, timeout=10)
+        return check.returncode == 0 and Path(check.stdout.strip()).resolve() == instance_venv_dir(layout).resolve()
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
 
 
 def ensure_venv(layout: Any) -> Path:
-    """Create the instance venv if it doesn't exist. Returns the venv dir.
+    """Create or repair the interpreter while retaining installed packages.
 
-    Uses the stdlib ``venv`` module with ``with_pip=True`` so pip is
-    available immediately. Idempotent — a no-op when the venv already
-    exists."""
-    vdir = instance_venv_dir(layout)
-    if venv_exists(layout):
+    Symlinks preserve the base interpreter's shared-library location on macOS.
+    A broken existing interpreter is backed up before repair; a Python minor
+    version change requires explicit migration rather than losing packages.
+    """
+    with _VENV_LOCK:
+        vdir = instance_venv_dir(layout)
+        if venv_exists(layout):
+            return vdir
+        existing = vdir.exists()
+        cfg = vdir / "pyvenv.cfg"
+        if existing and cfg.exists():
+            match = re.search(r"^version\s*=\s*(\d+)\.(\d+)", cfg.read_text(), re.M)
+            if match and tuple(map(int, match.groups())) != sys.version_info[:2]:
+                raise RuntimeError("instance venv uses another Python version; migrate it explicitly to retain packages")
+        if existing:
+            backup = Path(tempfile.mkdtemp(prefix="interpreter-backup-", dir=str(vdir)))
+            # Keep the old binaries/config for recovery, never delete site-packages.
+            for name in ("python", "python3", f"python{sys.version_info.major}.{sys.version_info.minor}"):
+                path = vdir / "bin" / name
+                if path.exists() or path.is_symlink():
+                    os.replace(path, backup / name)
+            if cfg.exists():
+                import shutil
+                shutil.copy2(cfg, backup / cfg.name)
+        builder = _stdlib_venv.EnvBuilder(
+            system_site_packages=False, with_pip=not venv_pip(layout).exists(),
+            symlinks=True, upgrade_deps=False,
+        )
+        builder.create(str(vdir))
+        if not venv_exists(layout):
+            raise RuntimeError("instance venv interpreter failed its startup probe")
         return vdir
-    builder = _stdlib_venv.EnvBuilder(
-        system_site_packages=False,   # isolated — agent installs don't leak
-        with_pip=True,
-        upgrade_deps=False,
-    )
-    builder.create(str(vdir))
-    return vdir
 
 
 def is_valid_requirement(spec: str) -> bool:

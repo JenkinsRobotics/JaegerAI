@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_read, _resolve_under
+from jaeger_agent.core.workspace import SandboxError, _display_path, _require_layout, _resolve_read, _resolve_under, _resolve_write
 from jaeger_agent.util.tool_interrupt import is_interrupted
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
@@ -123,12 +123,15 @@ def _resolve_image_out(out_path: str) -> tuple[Any, Path] | dict[str, Any]:
     layout = _require_layout()
     clean = (out_path or "generated/image.png").strip() or "generated/image.png"
     try:
-        target = _resolve_under(layout.workspace_dir, clean)
-    except SandboxError:
-        try:
-            target = _resolve_under(layout.skills_dir, clean)
-        except SandboxError as exc:
-            return {"generated": False, "error": str(exc)}
+        # Match file tools: an admitted project accepts both relative paths
+        # and absolute paths within that same writable boundary.
+        from jaeger_agent.core.workspace import get_project_root
+        routed = clean if get_project_root() is not None or Path(clean).is_absolute() else (
+            clean if clean.startswith(("workspace/", "skills/")) else "workspace/" + clean
+        )
+        target = _resolve_write(routed)
+    except SandboxError as exc:
+        return {"generated": False, "error": str(exc)}
     if target.suffix.lower() not in _RASTER_SUFFIXES:
         target = target.with_suffix(".png")
     return layout, target
@@ -274,8 +277,19 @@ def _run_grok_imagine(prompt: str, *, source: Path | None = None) -> dict[str, A
                         except subprocess.TimeoutExpired:
                             proc.kill()
                         return {"generated": False, "error": "Grok Imagine timed out"}
-        if proc.returncode not in (0, None) and not list(work.rglob("*")):
-            return {"generated": False, "error": f"grok CLI exited {proc.returncode}"}
+        if proc.returncode not in (0, None):
+            # stdout/stderr files always exist, so directory non-emptiness can
+            # never establish successful generation. Classify without exposing
+            # provider stderr (which may contain credentials or private paths).
+            diagnostic = stderr_path.read_text(errors="replace") if stderr_path.exists() else ""
+            if "402" in diagnostic or "spending-limit" in diagnostic:
+                return {"generated": False, "error_type": "provider_billing_required",
+                        "error": "Grok Imagine requires available credits or an active subscription (HTTP 402)."}
+            if "401" in diagnostic or "403" in diagnostic:
+                return {"generated": False, "error_type": "provider_authentication",
+                        "error": "Grok Imagine rejected authentication or access; sign in to the existing Grok account."}
+            return {"generated": False, "error_type": "provider_error",
+                    "error": f"Grok Imagine CLI exited {proc.returncode}; no image was delivered."}
         found = _collect_grok_image(work, session_id, wall_start)
         # Also honour a relative path in the JSON text field, without logging the payload.
         if found is None and stdout_path.is_file():
@@ -367,7 +381,7 @@ def generate_image(
             meta = _image_meta(saved)
             return {
                 "generated": True,
-                "path": str(saved.relative_to(layout.root)),
+                "path": _display_path(saved, layout),
                 "absolute_path": str(saved),
                 "backend": grok["backend"],
                 "model_id": grok["model_id"],
@@ -379,7 +393,7 @@ def generate_image(
         if grok.get("interrupted"):
             return {"generated": False, "interrupted": True, "error": grok["error"]}
         if wanted != "auto":
-            return {"generated": False, "error": errors[-1]}
+            return grok
 
     if wanted in {"auto", "local", "sdxl", "sdxl-turbo"}:
         local = _local_sdxl(
@@ -394,7 +408,7 @@ def generate_image(
             meta = _image_meta(target)
             return {
                 "generated": True,
-                "path": str(target.relative_to(layout.root)),
+                "path": _display_path(target, layout),
                 "absolute_path": str(target),
                 "backend": local["backend"],
                 "model_id": local["model_id"],
@@ -435,7 +449,7 @@ def edit_image(prompt: str, source_path: str, out_path: str = "generated/edited.
     meta = _image_meta(saved)
     return {
         "generated": True,
-        "path": str(saved.relative_to(layout.root)),
+        "path": _display_path(saved, layout),
         "absolute_path": str(saved),
         "backend": grok["backend"],
         "model_id": grok["model_id"],
@@ -708,6 +722,10 @@ def view_image(path: str, max_edge: int = 1024, question: str = "", describe: bo
             result["vision_elapsed_s"] = seen.get("elapsed_s")
         else:
             result["description_error"] = seen.get("error")
+            if seen.get("model"):
+                result["vision_model"] = seen["model"]
+            if seen.get("elapsed_s") is not None:
+                result["vision_elapsed_s"] = seen["elapsed_s"]
     return result
 
 

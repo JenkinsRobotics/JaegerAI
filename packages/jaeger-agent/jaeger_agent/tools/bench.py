@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any, Iterator
@@ -105,12 +106,13 @@ def run_benchmark(
     save: bool = True,
     hermetic: bool = True,
 ) -> dict[str, Any]:
-    """Run the flat self-benchmark suite against the live agent.
+    """Run the flat self-benchmark suite with the current model provider.
 
-    Every case fires through the SAME pipeline you're using right
-    now — same system prompt, same lean surface, same drift parser,
-    same dispatch. That's what makes this trustworthy: a regression
-    here is a regression in the surface the user actually talks to.
+    Gateway requests use a disposable worker running JaegerAgent with the
+    current provider/configuration and inherited tool grant. Its memory and
+    files are isolated; outward actions requiring confirmation are refused.
+    This keeps benchmark restore operations away from live conversations.
+    Standalone runs retain the existing in-process benchmark behavior.
 
     Args:
       tags:  comma-separated subset of bench categories (e.g.
@@ -125,21 +127,22 @@ def run_benchmark(
       save:  when True (default), the per-row jsonl + a summary
              markdown are written under
              ``<instance>/logs/bench/<timestamp>/``.
-      hermetic: when True (default), snapshots the live instance's
+      hermetic: for standalone runs, when True (default), snapshots the instance's
              mutable memory files (facts, board, schedules,
              episodic) before the run and restores them after, so
              bench writes don't pollute the user's state and
              prior state doesn't pollute the bench. Pass False to
-             let bench writes persist (rarely useful).
+             let bench writes persist (rarely useful). Gateway benchmarks
+             always use disposable state, regardless of this option.
 
     Returns a summary dict with topline counts plus per-tag breakdown
     and the failure list. Run individual rows by passing ``ids`` —
     handy for re-running a single flaky case after a fix.
     """
     from jaeger_ai.core.bench import run_bench, summarise
-    from jaeger_ai.main import _pipeline
+    from jaeger_ai.core.models.model_resolver import serving_runtime
 
-    client = _pipeline.get("client")
+    client, config = serving_runtime()
     if client is None:
         return {"ok": False, "error": "no live client — bench can only run "
                                        "inside a booted instance"}
@@ -154,10 +157,21 @@ def run_benchmark(
     # user isn't prompted for every single case. Higher tiers still
     # defer to the outer provider — a recovery case that tries to
     # reach the network or fire computer_use still has to ask.
-    with _bench_permission_scope():
-        rows = run_bench(client, tags=tag_list or None, ids=id_list or None,
-                         limit=cap, hermetic=bool(hermetic))
+    from jaeger_agent.task_port import current_task_context
+    isolated = current_task_context() is not None
+    if isolated:
+        from jaeger_ai.core.bench.isolated import run_isolated
+        try:
+            rows = run_isolated(client, config, tags=tag_list or None,
+                                ids=id_list or None, limit=cap)
+        except (ValueError, RuntimeError) as exc:
+            return {"ok": False, "error": str(exc), "isolation": "disposable_worker"}
+    else:
+        with _bench_permission_scope():
+            rows = run_bench(client, tags=tag_list or None, ids=id_list or None,
+                             limit=cap, hermetic=bool(hermetic))
     summary = summarise(rows)
+    summary["isolation"] = "disposable_worker" if isolated else "in_process"
     summary["wall_s"] = round(time.perf_counter() - started, 2)
 
     if save and rows:
@@ -170,13 +184,12 @@ def run_benchmark(
             # ``ls``, not a parse-summary-jsons exercise.
             model_name = "unknown"
             try:
-                from jaeger_ai.main import _pipeline as _pl
-                _cfg = _pl.get("config")
-                _mp = getattr(getattr(_cfg, "model", None), "model_path", None)
-                if _mp:
-                    summary["model_path"] = str(_mp)
-                    model_name = Path(str(_mp)).stem
-                    summary["model_name"] = model_name
+                from jaeger_ai.core.models.model_resolver import serving_model
+                serving = serving_model() or {}
+                actual = str(serving.get("model") or "unknown")
+                summary["model_name"] = actual
+                summary["provider"] = serving.get("provider")
+                model_name = re.sub(r"[^A-Za-z0-9._-]+", "_", actual).strip("._") or "unknown"
             except Exception:  # noqa: BLE001
                 pass
             ts = time.strftime("%Y%m%d-%H%M%S")

@@ -14,11 +14,11 @@ describe("router", () => {
     expect(parseRoute("/chat", "?agent=native:jaeger").params.get("agent")).toBe("native:jaeger");
   });
   it("resolves sub-tabs, defaulting to the first", () => {
-    expect(parseRoute("/work")).toMatchObject({ page: "work", sub: "pipeline", rest: "" });
+    expect(parseRoute("/work")).toMatchObject({ page: "work", sub: "tasks", rest: "" });
     expect(parseRoute("/work/tasks/gallery")).toMatchObject({ page: "work", sub: "tasks", rest: "gallery" });
     expect(parseRoute("/research/knowledge").sub).toBe("knowledge");
-    expect(parseRoute("/home").sub).toBe("pipeline");
-    expect(parseRoute("/home/widgets")).toMatchObject({ page: "settings", rest: "widgets" });
+    expect(parseRoute("/home").sub).toBe("tasks");
+    expect(parseRoute("/home/widgets")).toMatchObject({ page: "settings", rest: "" });
   });
   it("maps every page and sub-tab to a path", () => {
     expect(pathOf("chat")).toBe("/");
@@ -60,12 +60,13 @@ describe("router", () => {
 
 describe("Rev 3 complete destination migration", () => {
   it.each([
-    ["/home", "/work"], ["/home/overview", "/work"], ["/home/widgets", "/settings/widgets"],
-    ["/agents/hermes", "/settings/integrations/hermes"], ["/agents/openclaw", "/settings/integrations/openclaw"],
+    ["/home", "/work"], ["/home/overview", "/work"], ["/home/widgets", "/settings"],
+    ["/agents/hermes", "/settings"], ["/agents/openclaw", "/settings/integrations"],
+    ["/work/pipeline", "/work"], ["/work/backlog", "/work"], ["/work/production", "/work"],
     ["/work/workspace", "/research/workspace"], ["/work/checkpoints", "/settings/checkpoints"],
     ["/research/youtube", "/work/youtube"], ["/research/knowledge", "/agents/knowledge"], ["/research/sharepoint", "/settings/integrations/sharepoint"],
     ["/models", "/settings/models/library"], ["/models/library", "/settings/models/library"], ["/models/compare", "/settings/models/compare"], ["/models/usage", "/settings/models/usage"],
-    ["/knowledge", "/agents/knowledge"], ["/sharepoint", "/settings/integrations/sharepoint"], ["/compare", "/settings/models/compare"], ["/workspace", "/settings/widgets"],
+    ["/knowledge", "/agents/knowledge"], ["/sharepoint", "/settings/integrations/sharepoint"], ["/compare", "/settings/models/compare"], ["/workspace", "/research/workspace"],
   ])("moves %s to %s without losing queries or tails", (old, target) => {
     expect(canonicalPath(old, "?task=real-id")).toBe(`${target}?task=real-id`);
     expect(canonicalPath(`${old}/detail`, "?x=1")).toBe(`${target}/detail?x=1`);

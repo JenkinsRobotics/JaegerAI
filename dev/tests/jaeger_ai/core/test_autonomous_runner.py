@@ -156,7 +156,7 @@ def test_actionable_multimodal_request_keeps_media_and_output_policy(monkeypatch
 
     monkeypatch.setattr(agent_controller, "JaegerAgentController", Controller)
     monkeypatch.setattr(main, "_run_turn_via_jaeger_agent", run)
-    result = main._run_turn(
+    result = main._run_actionable_turn(
         None, "Create a summary document from this diagram and verify it exists.",
         session_key="media-task", allow_persona=False, content=media,
         system_prompt_addon="Use spoken output.",
@@ -492,3 +492,147 @@ def test_run_continued_turn_kill_switch_stops_stall_refire(monkeypatch):
     result = run_continued_turn(turn, "process every folder", max_steps=4)
     assert prompts == ["process every folder"]
     assert result["continuation_steps"] == 0
+
+
+def test_requests_never_reuse_a_previous_continuation_objective():
+    for objective in ('AUDIT_ALPHA', 'AUDIT_BETA'):
+        prompts = []
+        def turn(prompt):
+            prompts.append(prompt)
+            return {'text': 'More work remains.' if len(prompts) == 1 else 'Finished.',
+                    'halt_reason': 'made 8 tool calls in a single turn' if len(prompts) == 1 else None}
+        run_continued_turn(turn, objective, max_steps=2)
+        assert len(prompts) == 2
+        assert objective in prompts[1]
+        assert ('AUDIT_BETA' if objective == 'AUDIT_ALPHA' else 'AUDIT_ALPHA') not in prompts[1]
+        assert not execution.run_active()
+
+
+def test_concurrent_request_objectives_and_stops_are_isolated():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    barrier = Barrier(2)
+    def run(name):
+        prompts = []
+        def turn(prompt):
+            prompts.append(prompt)
+            if len(prompts) == 1:
+                if name == 'STOP_THIS':
+                    execution.request_stop('test cancellation')
+                barrier.wait(timeout=5)
+                assert execution.run_progress()['objective'] == name
+                assert execution.stop_requested() == (name == 'STOP_THIS')
+                return {'text': 'More work remains.', 'halt_reason': 'made 8 tool calls in a single turn'}
+            assert name in prompt and 'STOP_THIS' not in prompt
+            return {'text': 'Finished.'}
+        result = run_continued_turn(turn, name, max_steps=2)
+        return len(prompts), result
+    with ThreadPoolExecutor(2) as pool:
+        stopped = pool.submit(run, 'STOP_THIS')
+        continued = pool.submit(run, 'KEEP_THIS')
+        assert stopped.result()[0] == 1
+        assert continued.result()[0] == 2
+    assert not execution.run_active() and not execution.stop_requested()
+
+
+def test_request_scope_is_restored_after_exception():
+    execution.begin_run('outer interactive objective')
+    def fail(_):
+        execution.request_stop('inner')
+        raise RuntimeError('provider failed')
+    with pytest.raises(RuntimeError, match='provider failed'):
+        run_continued_turn(fail, 'inner request')
+    assert execution.run_progress()['objective'] == 'outer interactive objective'
+    assert execution.run_active() and not execution.stop_requested()
+
+
+def test_exhausted_continuation_is_failed_with_partial_output():
+    result = run_continued_turn(lambda p: {'text': 'partial work', 'halt_reason': 'max_iterations'},
+                                'finish this task', max_steps=1)
+    assert result['status'] == 'failed'
+    assert result['halt_reason'] == 'continuation_budget_exhausted'
+    assert result['text'] == 'partial work'
+    assert result['error'] and result['continuation_steps'] == 1
+
+
+def test_durable_budget_exhaustion_yields_for_existing_owner():
+    result = run_continued_turn(lambda p: {'text': 'partial work', 'halt_reason': 'max_iterations'},
+                                'finish this task', max_steps=1, durable=True)
+    assert result['halt_reason'] == 'yielded'
+    assert not result.get('error')
+
+
+@pytest.mark.parametrize('name', ['brief.docx', 'slides.pptx', 'meeting.ics', 'art.png', 'clip.mp4'])
+def test_multimodal_deliverables_are_checked_in_current_project(tmp_path, name):
+    from jaeger_agent.core.workspace import project_scope
+    from jaeger_ai.core.runtime.autonomous_runner import missing_deliverable_paths
+    with project_scope(tmp_path):
+        assert missing_deliverable_paths(f'Deliver {name}.') == [name]
+        (tmp_path / name).write_bytes(b'fixture')
+        assert missing_deliverable_paths(f'Deliver {name}.') == []
+
+
+def test_blocked_explanation_at_inner_cap_is_not_success():
+    result = run_continued_turn(lambda p: {'text': 'I cannot read the image; work remains incomplete.',
+                                          'halt_reason': 'made 8 tool calls in a single turn'},
+                                'Inspect the image and save observations.json', max_steps=10)
+    assert result['status'] == 'failed' and result['error']
+    assert result['continuation_steps'] == 0
+
+
+def test_unverified_progress_at_tool_cap_continues_to_actual_tests():
+    calls = []
+    def turn(prompt):
+        calls.append(prompt)
+        return ({'text': 'The fix is written. I cannot yet claim the suite is green. What remains undone: running tests.',
+                 'halt_reason': 'made 8 tool calls in a single turn'} if len(calls)==1 else
+                {'text': 'All tests passed and the work is complete.'})
+    result = run_continued_turn(turn, 'Repair the module and run the tests', max_steps=2)
+    assert len(calls) == 2 and not result.get('error')
+    assert 'Repair the module' in calls[1]
+
+
+def test_unverified_claim_does_not_override_real_blocker():
+    from jaeger_ai.core.runtime.continuation import classify
+    assert classify('I cannot yet claim success because I cannot access the required provider.') == 'blocked'
+
+
+def test_remaining_observations_at_tool_cap_continue_but_access_blockers_stop():
+    calls = []
+    def turn(prompt):
+        calls.append(prompt)
+        return ({'text': 'I cannot yet identify all scenes. The remaining frames need inspection.',
+                 'halt_reason': 'made 8 tool calls in a single turn'} if len(calls) == 1 else
+                {'text': 'The analysis is complete.'})
+    assert not run_continued_turn(turn, 'Inspect the video', max_steps=2).get('error')
+    assert len(calls) == 2
+    from jaeger_ai.core.runtime.continuation import classify
+    assert classify('I cannot yet identify the remaining scenes because permission denied.',
+                    at_inner_cap=True) == 'blocked'
+    assert classify('I cannot yet identify the remaining scenes.') == 'blocked'
+
+
+@pytest.mark.parametrize('durable', [False, True])
+def test_budget_failure_detaches_ledger_but_durable_yield_preserves_it(durable):
+    ledger_tool(action='create', task_name='unfinished audit', total_items=8)
+    ledger = work_ledger.active_ledger()
+    result = run_continued_turn(lambda _: {'text': 'More remains.', 'halt_reason': 'max_iterations'},
+                                'Finish audit', max_steps=1, durable=durable)
+    if durable:
+        assert result['halt_reason'] == 'yielded'
+        assert work_ledger.active_ledger() is ledger
+    else:
+        assert result['status'] == 'failed'
+        assert work_ledger.active_ledger() is None
+        assert work_ledger.get_ledger(ledger.task_id) is not None
+
+
+def test_provider_error_at_durable_budget_is_not_a_resumable_yield():
+    calls = []
+    def turn(prompt):
+        calls.append(prompt)
+        return ({'text': 'More remains.', 'halt_reason': 'max_iterations'} if len(calls) == 1 else
+                {'text': '', 'error': 'Provider access denied', 'halt_reason': 'provider_error'})
+    result = run_continued_turn(turn, 'Finish audit', max_steps=1, durable=True)
+    assert result['error'] == 'Provider access denied'
+    assert result['halt_reason'] == 'provider_error'

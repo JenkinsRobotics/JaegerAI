@@ -192,3 +192,24 @@ def test_model_swap_carries_the_conversation_across_the_rebuild(monkeypatch):
 
     assert rebuilt.messages == turns
     assert main._carried_session_messages == {}, "carry-over must not leak"
+
+
+def test_binding_creates_valid_manifest_and_preserves_existing_metadata(tmp_path):
+    from jaeger_ai.core.instance.schemas import Manifest
+    from jaeger_ai.features.personality.character import bind_character
+    root = tmp_path / 'new-instance'
+    bind_character(root, 'truth')
+    first = Manifest.model_validate_json((root/'manifest.json').read_text())
+    assert first.instance_name == 'new-instance'
+    bind_character(root, 'assistant')
+    second = Manifest.model_validate_json((root/'manifest.json').read_text())
+    assert second.created_at == first.created_at
+    assert second.bound_character == 'assistant'
+
+
+def test_binding_repairs_old_character_only_manifest(tmp_path):
+    from jaeger_ai.core.instance.schemas import Manifest
+    from jaeger_ai.features.personality.character import bind_character
+    (tmp_path/'manifest.json').write_text('{"bound_character":"truth"}')
+    bind_character(tmp_path,'truth')
+    assert Manifest.model_validate_json((tmp_path/'manifest.json').read_text()).instance_name == tmp_path.name

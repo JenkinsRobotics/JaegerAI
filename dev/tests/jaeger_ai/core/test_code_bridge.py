@@ -333,3 +333,53 @@ def test_bridge_dir_is_private(tool_registry):
         timeout_s=30,
     )
     assert result["stdout"].strip() == "0o700"
+
+
+@pytest.mark.parametrize("payload", [
+    {"ok": False, "error": "refused fixture"},
+    {"written": False, "error": "refused fixture"},
+    {"success": False, "reason": "refused fixture"},
+    {"isError": True, "text": "refused fixture"},
+])
+def test_returned_failure_is_catchable_and_recorded(tool_registry, payload):
+    def failure() -> dict:
+        """Returns an ordinary structured failure."""
+        return payload
+    _register(tool_registry, "failure", failure)
+    result = run_bridged_script(
+        "import jaeger_tools as jt\n"
+        "try: jt.failure()\n"
+        "except jt.ToolError as exc: print(str(exc))\n",
+        timeout_s=30,
+    )
+    assert result["ok"], result
+    assert "refused fixture" in result["stdout"]
+    assert result["tool_errors"] == ["failure: tool_failed"]
+
+
+def test_connection_inherits_admission_context_without_leaking_back(tool_registry, tmp_path):
+    from contextvars import ContextVar
+    from jaeger_agent.core.workspace import project_scope, get_project_root
+    marker = ContextVar("bridge_test_marker", default="outside")
+    def context_probe(value: str = "") -> dict:
+        """Read inherited context, optionally change only this connection."""
+        before = marker.get()
+        if value:
+            marker.set(value)
+        return {"marker": before, "project": str(get_project_root())}
+    _register(tool_registry, "context_probe", context_probe)
+    token = marker.set("admitted")
+    try:
+        with project_scope(tmp_path):
+            result = run_bridged_script(
+                "import jaeger_tools as jt\n"
+                "print(jt.context_probe(value='changed'))\n"
+                "print(jt.context_probe())\n", timeout_s=30,
+                workspace=tmp_path,
+            )
+        assert result["ok"], result
+        assert "admitted" in result["stdout"] and "changed" in result["stdout"]
+        assert str(tmp_path) in result["stdout"]
+        assert marker.get() == "admitted"
+    finally:
+        marker.reset(token)

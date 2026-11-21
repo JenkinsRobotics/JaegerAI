@@ -93,3 +93,65 @@ it('defaults companion to Truth and submits full personalized onboarding prefere
     initial_goals: [{ title: 'Stay focused and healthy', dimension: 'self_actualization', priority: 2 }],
   }));
 });
+it('lists uncertified completion models for Ollama/Ollama Cloud and hides embedding, speech, unavailable, and empty providers', async () => {
+  const client: FirstRunApi = {
+    ...api(),
+    models: vi.fn(async () => ({
+      providers: [
+        {
+          id: 'ollama',
+          display_name: 'Ollama',
+          configured: true,
+          reachable: true,
+          models: [
+            { id: 'qwen3:8b', available: true, usable_for_react: false, capabilities: ['completion', 'tools'] },
+            { id: 'qwen3-embedding:0.6b', available: true, usable_for_react: false, capabilities: ['embedding'] },
+            { id: 'kokoro-tts', available: true, usable_for_react: false, capabilities: ['speech'] },
+            { id: 'offline-model', available: false, usable_for_react: true, capabilities: ['completion'] },
+          ],
+        },
+        {
+          id: 'ollama-cloud',
+          display_name: 'Ollama Cloud',
+          configured: true,
+          reachable: true,
+          models: [
+            { id: 'mistral-large-4:cloud', available: true, usable_for_react: false, capabilities: ['completion', 'tools'] },
+          ],
+        },
+        {
+          id: 'embed-only',
+          display_name: 'Embeddings Only',
+          configured: true,
+          reachable: true,
+          models: [
+            { id: 'nomic-embed-text', available: true, usable_for_react: false, capabilities: ['embedding'] },
+            { id: 'whisper-speech', available: true, usable_for_react: false, capabilities: ['speech'] },
+          ],
+        },
+      ],
+    })),
+  };
+  await mount(<FirstRunPage api={client} onDone={vi.fn()} />);
+  await click(button('Get started'));
+  await click(button('Choose character'));
+  const selects = el!.querySelectorAll('select');
+  const providerValues = [...selects[0].querySelectorAll('option')].map((o) => o.value).filter(Boolean);
+  expect(providerValues).toEqual(['ollama', 'ollama-cloud']);
+
+  await act(async () => { selects[0].value = 'ollama'; selects[0].dispatchEvent(new Event('change', { bubbles: true })); });
+  const ollamaModels = [...selects[1].querySelectorAll('option')].map((o) => o.value).filter(Boolean);
+  expect(ollamaModels).toEqual(['qwen3:8b']);
+
+  await act(async () => { selects[0].value = 'ollama-cloud'; selects[0].dispatchEvent(new Event('change', { bubbles: true })); });
+  const cloudModels = [...selects[1].querySelectorAll('option')].map((o) => o.value).filter(Boolean);
+  expect(cloudModels).toEqual(['mistral-large-4:cloud']);
+
+  await act(async () => { selects[1].value = 'mistral-large-4:cloud'; selects[1].dispatchEvent(new Event('change', { bubbles: true })); });
+  await click(button('Connect models'));
+  expect(client.setup).toHaveBeenCalledExactlyOnceWith({
+    character_id: 'truth',
+    awake_provider: 'ollama-cloud',
+    awake_model: 'mistral-large-4:cloud',
+  });
+});

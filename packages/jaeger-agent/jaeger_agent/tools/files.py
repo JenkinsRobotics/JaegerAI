@@ -1012,8 +1012,11 @@ def notebook_edit(
         target.write_text(json_lib.dumps(notebook, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     except OSError as exc:
         return {"ok": False, "error": str(exc), "path": path}
-    git_autocommit(target, f"notebook_edit {path}")
-    return {"ok": True, "path": _display_path(target, _require_layout()), "edit_mode": edit_mode, "cell_number": index, "cell_count": len(cells)}
+    layout = _require_layout()
+    rel = _display_path(target, layout)
+    _audit("notebook_edit", {"path": rel, "edit_mode": edit_mode, "cell_number": index})
+    git_autocommit(layout, rel, f"agent: notebook_edit {rel}")
+    return {"ok": True, "path": rel, "edit_mode": edit_mode, "cell_number": index, "cell_count": len(cells)}
 
 
 

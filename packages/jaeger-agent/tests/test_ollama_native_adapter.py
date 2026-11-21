@@ -71,13 +71,27 @@ def test_native_stream_preserves_text_reasoning_tools_usage(monkeypatch):
 
 
 def test_hosted_model_preserves_existing_transport(monkeypatch):
-    a = OllamaAdapter(provider="ollama", model="kimi-k2.7-code:cloud")
+    # 1. Direct ollama.com cloud route skips /api/show metadata probes and strips :cloud for /api/chat.
+    direct = OllamaAdapter(
+        provider="ollama-cloud", model="kimi-k2.7-code:cloud", base_url="https://ollama.com/api",
+    )
+    monkeypatch.setattr("httpx.post", lambda *args, **kwargs: pytest.fail("Direct ollama.com must not probe /api/show"))
+    assert direct._metadata() == {}
+    body = direct._native_body(direct.format_messages([], [], ""), direct._metadata())
+    assert body["model"] == "kimi-k2.7-code"
+
+    # 2. Local Ollama proxying a remote_host model falls back to OpenAIAdapter._call_once without extra_body.
+    proxied = OllamaAdapter(
+        provider="ollama", model="kimi-k2.7-code:cloud",
+        metadata={"remote_host": "https://ollama.com"},
+    )
     captured = []
     monkeypatch.setattr(OpenAIAdapter, "_call_once", lambda self, formatted, *args, **kwargs: captured.append(formatted) or {})
-    monkeypatch.setattr(a, "_metadata", lambda: pytest.fail("Hosted route must not probe local controls"))
-    wire = a.format_messages([], [], "")
-    a.call(wire, threading.Event())
-    assert captured == [wire]
+    wire = proxied.format_messages([], [], "")
+    proxied.call(wire, threading.Event())
+    expected = {k: v for k, v in wire.items() if k != "extra_body"}
+    expected.pop("reasoning_effort", None)
+    assert captured == [expected]
 
 
 def test_inline_images_use_native_images_array():

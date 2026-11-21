@@ -66,7 +66,7 @@ def test_every_intent_category_resolves_and_code_is_selected_in_actual_turn():
 
 
 def test_parallel_agents_do_not_share_loaded_tools():
-    add('terminal'); add('get_weather')
+    add('run_in_venv'); add('vision_analyze')
     a, b = (JaegerAgent(adapter=Adapter(), scope_tools=True) for _ in range(2))
     barrier = threading.Barrier(2)
     def select(agent, name):
@@ -75,9 +75,9 @@ def test_parallel_agents_do_not_share_loaded_tools():
             barrier.wait(timeout=2)
             return {t.name for t in agent.tools}
     with ThreadPoolExecutor(2) as pool:
-        fa, fb = pool.submit(select,a,'terminal'), pool.submit(select,b,'get_weather')
-        assert fa.result() == {'terminal'}
-        assert fb.result() == {'get_weather'}
+        fa, fb = pool.submit(select,a,'run_in_venv'), pool.submit(select,b,'vision_analyze')
+        assert fa.result() == {'run_in_venv'}
+        assert fb.result() == {'vision_analyze'}
     assert JaegerAgent(adapter=Adapter(), scope_tools=True).tools == []
 
 
@@ -135,40 +135,40 @@ def test_gated_mcp_exact_load_retains_other_tools_hidden():
 def test_loading_exact_tool_changes_next_actual_model_step_and_receipt():
     from jaeger_agent.loop.callbacks import AgentCallbacks
     registry.register_tool_from_function(load_tools)
-    add('terminal')
+    add('run_in_venv')
     seen, receipts = [], []
     class LoadingAdapter(Adapter):
         def call(self, formatted, interrupt_event, **kwargs):
             seen.append({t.name for t in self.tools})
             if len(seen) == 1:
                 return {'role':'assistant','content':None,'tool_calls':[
-                    {'id':'load','name':'load_tools','arguments':{'tools':['terminal']}}]}
+                    {'id':'load','name':'load_tools','arguments':{'tools':['run_in_venv']}}]}
             return {'role':'assistant','content':'done'}
     agent=JaegerAgent(adapter=LoadingAdapter(), scope_tools=True,
                       callbacks=AgentCallbacks(tool_selection=receipts.append))
     agent.run_turn('Find the needed capability')
-    assert 'terminal' not in seen[0] and 'terminal' in seen[1]
+    assert 'run_in_venv' not in seen[0] and 'run_in_venv' in seen[1]
     assert receipts[1]['selected_count'] == 2
-    assert next(t for t in receipts[1]['tools'] if t['tool']=='terminal')['selection_reason']=='Explicitly loaded'
+    assert next(t for t in receipts[1]['tools'] if t['tool']=='run_in_venv')['selection_reason']=='Explicitly loaded'
 
 
 def test_exact_loading_survives_emergency_core_reduction():
-    add('get_time');add('terminal')
+    add('get_time');add('run_in_venv')
     agent=JaegerAgent(adapter=Adapter(), scope_tools=False)
     with selection_scope(agent._tool_selection):
         assert agent._slim_tools_to_core_for_overflow()
         agent._refresh_tool_catalog()
         assert agent.tool_names()==['get_time']
-        assert load_tools(tools=['terminal'])['ok']
-        assert set(agent.tool_names())=={'get_time','terminal'}
+        assert load_tools(tools=['run_in_venv'])['ok']
+        assert set(agent.tool_names())=={'get_time','run_in_venv'}
 
 
 def test_intent_selection_matches_discovery_metadata():
-    add('terminal')
+    add('run_in_venv')
     agent=JaegerAgent(adapter=Adapter(), scope_tools=True)
     agent.run_turn('Run a terminal command')
     with selection_scope(agent._tool_selection):
-        row=list_tools('terminal')['tools'][0]
+        row=list_tools('run_in_venv')['tools'][0]
         assert row['selected'] is True
         assert row['selection_reason']=='Matched this task'
 
@@ -236,3 +236,36 @@ def test_named_tool_is_not_selected_for_untrusted_content():
     finally:
         scopes._untrusted.reset(token)
         scopes.unregister_mcp_server_toolset('fixture')
+
+
+def test_discovery_survives_large_intent_and_exact_load_survives_budget():
+    from jaeger_agent.skill_registry.tool_selection import budget_visible_tools
+    from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
+    from jaeger_os.core.tools.tool_registry import _synthesize_args_model
+    from jaeger_os.core.tools.arg_coercion import coerce_args
+    from pydantic import ValidationError
+    guard = ContextGuard(ContextBudget(ctx_window=4096, reserve_for_completion=1024))
+    discovery = [add(n) for n in ('list_tools','describe_tool','load_tools')]
+    large = add('run_in_venv', 'large schema ' * 3000)
+    state = ToolSelection(scoped=True, inferred={'run_in_venv'})
+    visible = budget_visible_tools([*discovery,large],state,guard,'identity','code')
+    assert {t.name for t in discovery} <= {t.name for t in visible}
+    state.names.add('run_in_venv')
+    assert large in budget_visible_tools([*discovery,large],state,guard,'identity','code')
+    model = _synthesize_args_model(list_tools,'list_tools')
+    repaired = coerce_args({'keyword':'image'},model.model_json_schema())
+    assert model.model_validate(repaired).query == 'image'
+    with pytest.raises(ValidationError):
+        model.model_validate({'image generation tools': ''})
+
+
+def test_negative_constraints_do_not_select_prohibited_toolsets():
+    selected = scopes.infer_toolsets('Do not download model weights or send messages to people. Read the CSV and calculate totals.')
+    assert 'files' in selected
+    assert not {'models','plugins','people'} & selected
+
+
+@pytest.mark.parametrize('query', ['Inspect this using vision tools', 'Read the code in this photo', 'Describe the screenshot'])
+def test_visual_understanding_selects_media_tools(query):
+    from jaeger_agent.skill_registry.toolset_scoping import infer_toolsets
+    assert 'media' in infer_toolsets(query)

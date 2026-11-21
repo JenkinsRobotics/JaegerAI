@@ -39,9 +39,9 @@ describe("Settings (TAB-01)", () => {
     await act(async () => { dark.click(); });
     expect(localStorage.getItem("aether-appearance")).toBe("dark");
   });
-  it("feel and icon pickers persist, keyboard arrows move the selection", async () => {
+  it("accent color and icon pickers persist, keyboard arrows move the selection", async () => {
     await mount(<SettingsDialog open onClose={() => {}} />);
-    const feel = document.querySelector<HTMLButtonElement>('[aria-label="Feel"] [aria-checked="true"]')!;
+    const feel = document.querySelector<HTMLButtonElement>('[aria-label="Accent color"] [aria-checked="true"]')!;
     await act(async () => { feel.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
     expect(localStorage.getItem("appearance.feel")).toBe("shield-mono");
     expect(document.documentElement.dataset.feel).toBe("shield-mono");
@@ -70,7 +70,9 @@ describe("Settings (TAB-01)", () => {
     const { parseSettingsRest } = await import("./SettingsDialog");
     expect(parseSettingsRest("providers")).toEqual({ tab: "models", segment: undefined });
     expect(parseSettingsRest("tools")).toEqual({ tab: "integrations", segment: "tools" });
-    expect(parseSettingsRest("finance").tab).toBe("limits");
+    expect(parseSettingsRest("finance").tab).toBe("privacy");
+    expect(parseSettingsRest("limits").tab).toBe("privacy");
+    expect(parseSettingsRest("widgets").tab).toBe("appearance");
     expect(parseSettingsRest("reset").tab).toBe("about");
     expect(parseSettingsRest("nope")).toEqual({});
   });

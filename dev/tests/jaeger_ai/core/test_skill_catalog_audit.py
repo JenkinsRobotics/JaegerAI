@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import yaml
+
 from jaeger_agent.skill_registry import playbook_skills as pb
 from jaeger_agent.skill_registry.skill_audit import audit_catalog
 
@@ -8,8 +10,10 @@ def test_distribution_catalog_is_lean_and_complete() -> None:
     discovered = pb.discover_playbooks()
     callable_skills = pb.callable_playbooks()
     prompt_visible = pb.available_playbooks()
-    assert len(discovered) >= 100
-    assert len(callable_skills) >= 100
+    policy = yaml.safe_load(pb._CATALOG_PATH.read_text())
+    expected = {name for state in ("core", "optional", "plugin", "explicit") for name in policy[state]}
+    assert {s.name for s in discovered} == expected
+    assert {s.name for s in callable_skills} == expected
     assert 25 <= len(prompt_visible) <= 45
     assert all(s.lifecycle == "core" for s in prompt_visible)
     assert any(s.lifecycle == "optional" for s in discovered)
@@ -24,30 +28,23 @@ def test_every_core_skill_meets_the_first_class_entrypoint_contract() -> None:
         assert lines <= 130, (skill.name, lines)
 
 
-def test_migrated_large_entrypoints_are_concise() -> None:
-    migrated = {
-        "audiocraft-audio-generation", "claude-code", "claude-design",
-        "comfyui", "dspy", "evaluating-llms-harness", "github-code-review",
-        "github-repo-management", "humanizer", "llm-wiki",
-        "p5js", "segment-anything-model", "weights-and-biases", "xurl",
-        "github-pr-workflow", "github-issues",
-    }
-    by_name = {s.name: s for s in pb.discover_playbooks()}
-    for name in migrated:
-        skill = by_name[name]
+def test_bundled_imported_entrypoints_are_concise() -> None:
+    imported = [s for s in pb.discover_playbooks()
+                if (s.path.parent / "references" / "imported-guide.md").is_file()]
+    assert imported, "bundled imported guides must remain discoverable"
+    for skill in imported:
         assert len(skill.path.read_text(encoding="utf-8").splitlines()) <= 130
-        assert (skill.path.parent / "references" / "imported-guide.md").is_file()
-
-    # Red-team material is explicit-only: preserved and callable, but never
-    # part of the automatic prompt-routing surface.
-    assert pb.find_playbook("godmode") is not None
-    assert "godmode" not in {skill.name for skill in pb.available_playbooks()}
+    # Every explicit-only recipe stays callable without competing in auto-routing.
+    explicit = {s.name for s in pb.discover_playbooks() if s.lifecycle == "explicit"}
+    assert explicit
+    assert explicit <= {s.name for s in pb.callable_playbooks()}
+    assert explicit.isdisjoint({s.name for s in pb.available_playbooks()})
 
 
 def test_audit_reports_catalog_shape() -> None:
     result = audit_catalog(available_tools=set())
-    assert result["skill_count"] >= 100
-    assert result["callable_count"] >= 100
+    assert result["skill_count"] == len(pb.discover_playbooks())
+    assert result["callable_count"] == len(pb.callable_playbooks())
     assert result["prompt_visible_count"] <= 45
     assert result["active_count"] == result["prompt_visible_count"]
     assert "lifecycle_counts" in result

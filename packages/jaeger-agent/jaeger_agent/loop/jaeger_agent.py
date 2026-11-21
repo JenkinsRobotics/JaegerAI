@@ -51,7 +51,7 @@ from jaeger_agent.schemas.message_types import Message, ToolCall
 from jaeger_agent.tool_executor import ToolExecutor
 from jaeger_agent.skill_registry.tool_selection import ToolSelection, in_agent_selection, tool_permitted
 from jaeger_os.core.tools.tool_registry import get_tools
-from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled
+from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled, tool_result_failed
 from jaeger_agent.util.context_guard import ContextGuard, ContextOverflow
 
 
@@ -2592,10 +2592,7 @@ class JaegerAgent:
 
         # Determine outcome before truncation/hooks can replace a structured
         # error with an artifact pointer. An error-only envelope is a failure.
-        _ok = not (isinstance(content, dict) and (
-            content.get("ok") is False or content.get("success") is False
-            or bool(content.get("error"))
-        ))
+        _ok = not tool_result_failed(content)
         _err = str(content.get("error") or content.get("reason") or _stderr_tail(content)
                    or "tool failed") if not _ok else None
 
@@ -2635,9 +2632,7 @@ class JaegerAgent:
         # ok/error from the final content shape: dispatch-raised paths
         # built a ``{"ok": False, "error": ...}`` dict above; a tool
         # returning a successful payload won't carry ``"ok": False``.
-        if isinstance(content, dict) and (
-            content.get("ok") is False or content.get("success") is False or bool(content.get("error"))
-        ):
+        if tool_result_failed(content):
             _ok = False
             _err = str(content.get("error") or "") or None
         if _ok and name in self._CACHEABLE_READ_TOOLS:

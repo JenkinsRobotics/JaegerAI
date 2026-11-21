@@ -98,7 +98,7 @@ def semantic_failure_signature(
 
     Exact (tool, args) matching misses loops where the model varies
     irrelevant args while hitting the same underlying error. This
-    normalizes the action to ``tool | target | first error line``.
+    normalizes the action to ``tool | target | diagnostic line``.
     """
     if not isinstance(content, dict):
         return None
@@ -124,7 +124,15 @@ def semantic_failure_signature(
         return f"{tool_name}|timeout|timed out"
     if not error:
         return None
-    first_line = str(error).strip().splitlines()[0][:160]
+    lines = str(error).strip().splitlines()
+    first_line = lines[0][:160]
+    if first_line.startswith("Traceback (most recent call last):"):
+        # Every Python traceback starts identically. Use the final exception
+        # diagnostic so fixing an ImportError and then reaching a NameError
+        # is progress, while the same exception still trips the backstop.
+        diagnostics = [line.strip() for line in lines
+                       if re.match(r"^[\w.]+(?:Error|Exception|Interrupt|Exit|Iteration)(?::|$)", line)]
+        first_line = (diagnostics[-1] if diagnostics else lines[-1].strip())[:160]
     if tool_name in MAIL_TOOLS:
         account = str(args.get("account") or "") if isinstance(args, dict) else ""
         err_l = first_line.lower()

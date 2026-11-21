@@ -495,7 +495,8 @@ def serving_model_scope(client: Any, config: Any):
         _serving_context.reset(token)
 
 
-def _serving_runtime() -> tuple[Any, Any]:
+def serving_runtime() -> tuple[Any, Any]:
+    """Resolve this request's execution client/config before legacy boot state."""
     scoped = _serving_context.get()
     if scoped is not None:
         return scoped
@@ -514,7 +515,7 @@ def serving_model() -> dict[str, Any] | None:
     not serving.
     """
     try:
-        client, cfg = _serving_runtime()
+        client, cfg = serving_runtime()
     except Exception:  # noqa: BLE001 — pre-boot / import cycle
         return None
     if client is None:
@@ -625,7 +626,7 @@ def _omit_local_catalog_rows() -> bool:
     while a cloud provider is enabled.
     """
     try:
-        _client, cfg = _serving_runtime()
+        _client, cfg = serving_runtime()
         ext = getattr(cfg, "external_model", None)
         if ext is not None and getattr(ext, "enabled", False):
             provider = str(getattr(ext, "provider", "") or "").strip().lower()

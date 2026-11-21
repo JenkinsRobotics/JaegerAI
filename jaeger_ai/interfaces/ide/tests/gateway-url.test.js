@@ -35,7 +35,13 @@ test('the shipped entry activates with a /v1 gatewayUrl (no "must not contain a 
     Uri: { joinPath: () => ({}), parse: s => ({ toString: () => s }), file: s => ({ fsPath: s }) },
   });
   const original = Module._load;
-  Module._load = function (r, p, m) { return r === 'vscode' ? vscode : original.call(this, r, p, m); };
+  Module._load = function (r, p, m) {
+    if (r === 'vscode') return vscode;
+    // Keep the activation test from publishing a real host-model bridge.
+    if (r === 'node:http' && p?.filename.endsWith('host-lm-bridge.js'))
+      return { createServer: () => ({ listen() {}, close() {} }) };
+    return original.call(this, r, p, m);
+  };
   for (const k of Object.keys(require.cache)) if (k.startsWith(root + path.sep) && !k.includes(`${path.sep}tests${path.sep}`)) delete require.cache[k];
   try {
     const ext = require(path.join(root, 'extension.js'));

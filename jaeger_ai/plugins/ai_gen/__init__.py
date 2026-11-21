@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_under
+from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_write, _display_path
 from jaeger_agent.util.tool_interrupt import is_interrupted
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
@@ -53,8 +53,7 @@ _SETUP_HELP = (
     "fal.ai is not configured — no FAL_KEY found. To set it up: "
     "get an API key at https://fal.ai/dashboard/keys, then store it with "
     "set_credential('FAL_KEY', '<your-key>') (or export FAL_KEY in the "
-    "environment) and retry. For local/offline generation that needs no "
-    "key, use the image_generate tool instead."
+    "environment) and retry. No media was generated."
 )
 
 
@@ -209,7 +208,7 @@ def _generate(kind: str, prompt: str, model: str, output_path: str) -> dict[str,
     name = (output_path or "").strip() or time.strftime(
         f"fal_{kind}_%Y%m%d_%H%M%S{default_ext}")
     try:
-        target = _resolve_under(layout.skills_dir, name)
+        target = _resolve_write(name)
     except SandboxError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -229,7 +228,7 @@ def _generate(kind: str, prompt: str, model: str, output_path: str) -> dict[str,
     return {
         "ok": True,
         "generated": True,
-        "path": str(target.relative_to(layout.root)),
+        "path": _display_path(target, layout),
         "absolute_path": str(target),
         "model": model_id,
         "url": url,

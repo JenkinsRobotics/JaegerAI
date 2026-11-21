@@ -92,20 +92,18 @@ def budget_visible_tools(tools, selection, guard, system_prompt: str, query: str
     import re
     discovery = {'list_tools', 'describe_tool', 'load_tools', 'tool_search'}
     from .toolset_scoping import CORE, resolve_groups
-    # Intent-matched and explicitly loaded tools win. CORE is a preference,
-    # not an exemption from the model's hard context window: forcing every
-    # CORE schema into an 8K lane used 7.5K tokens after a 5K system prompt
-    # and made ordinary chat fail before its first token. Keep at least one
-    # discovery path when it fits, then use remaining room for CORE.
-    intent = selection.names | resolve_groups(selection.groups) | set(selection.inferred)
-    limit = max(0, min(2048, guard.budget.prompt_budget
-                       - guard.estimate_text_tokens(system_prompt) - 1536))
+    # The actual context budget, not a fixed 2K schema ceiling, determines
+    # automatic presentation. Discovery and explicit loads survive narrowing.
+    explicit = selection.names | resolve_groups(selection.groups)
+    intent = set(selection.inferred)
+    limit = max(0, guard.budget.prompt_budget
+                - guard.estimate_text_tokens(system_prompt) - 1536)
     costs = {t.name: guard.estimate_text_tokens(json.dumps(t.to_openai_schema())) + 2
              for t in tools}
     if sum(costs.values()) <= limit:
         return tools
-    selected = set()
-    used = 0
+    selected = (explicit | discovery) & costs.keys()
+    used = sum(costs[name] for name in selected)
 
     def add_ranked(names):
         nonlocal used
@@ -117,7 +115,6 @@ def budget_visible_tools(tools, selection, guard, system_prompt: str, query: str
                 used += costs[name]
 
     add_ranked(intent)
-    add_ranked(discovery)
     add_ranked(CORE)
     mentioned = set(re.findall(r'[A-Za-z_][A-Za-z_0-9]*', query))
     ranked = sorted(tools, key=lambda t: (

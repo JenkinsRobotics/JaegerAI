@@ -106,9 +106,11 @@ def collect_stream(proc: subprocess.Popen, stdin: bytes | None, timeout: float,
             proc.stdin.write(stdin)
             proc.stdin.close()
         tool_seen = _ACTIVITY["last"]
+        limits = [x for x in (timeout, idle_timeout) if x and x > 0]
+        wait_step = max(0.02, min(1.0, *limits)) if limits else 1.0
         while True:
             try:
-                proc.wait(timeout=1.0)
+                proc.wait(timeout=wait_step)
                 break
             except subprocess.TimeoutExpired:
                 now = time.monotonic()

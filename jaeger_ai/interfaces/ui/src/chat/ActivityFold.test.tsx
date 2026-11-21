@@ -11,11 +11,11 @@ it('keeps intermediate commentary readable on demand and collapses when work fin
  const props={parts,links:{onCopy:()=>{},onOpen:()=>{}},style:STREAM_STYLES.instant};
  const {rerender}=render(<ActivityFold {...props} live/>);
  expect(screen.queryByText('Checking the install path')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:/Show activity/}));
+ fireEvent.click(screen.getByRole('button',{name:/Show work/}));
  expect(screen.getByText('Checking the install path')).toBeTruthy();
  expect(screen.getByText('package.json')).toBeTruthy();
  expect(screen.getByText('Inspecting')).toBeTruthy();
  rerender(<ActivityFold {...props} live={false}/>);
  expect(screen.queryByText('Checking the install path')).toBeNull();
- expect(screen.getByRole('button',{name:/Show activity/}).getAttribute('aria-expanded')).toBe('false');
+ expect(screen.getByRole('button',{name:/Show work/}).getAttribute('aria-expanded')).toBe('false');
 });

@@ -32,7 +32,7 @@ describe("task pipeline", () => {
     expect(nextStage("done")).toBeNull();
     expect(stagePath("research", "t 1")).toBe("/research?task=t%201");
     expect(stagePath("studio", "t")).toBe("/studio?task=t");
-    expect(stagePath("production", "t")).toBe("/work/production?task=t");
+    expect(stagePath("production", "t")).toBe("/work?task=t");
     expect(stagePath("review", "t")).toBe("/work?task=t");
   });
   it("stepper marks done, current and upcoming stages", () => {
