@@ -7,6 +7,7 @@ import { requestOutcome, settleUnanswered } from "./requestOutcome";
  * same-origin /v1 and /api fetches; mock = dev-only sample data). Failures
  * surface to the caller; there is no silent fallback. */
 import type { JaegerSource } from "../api/source";
+import { GatewayError } from "../api/gateway";
 import type { PersistedPart, SessionMessage } from "../api/types";
 import { bytesUploadEnabled, UPLOAD_MAX_BYTES, UPLOAD_TOO_LARGE, type RejectedAttachment } from "./composer";
 import { followTurn } from "./followTurn";
@@ -326,10 +327,22 @@ export class WebHost implements ChatHost {
     const local = this.pendingIntent(sessionId);
     if (local) {
       // A device intent whose request the owner already acknowledged (unknown, not replayed) is settled here.
-      const row = local.phase === "accepted" ? await this.source.requestStatus?.(sessionId, local.requestId).catch(() => undefined) : undefined;
+      let row;
+      try {
+        row = local.phase === "accepted" ? await this.source.requestStatus?.(sessionId, local.requestId) : undefined;
+      } catch (error) {
+        // A definitive 404 means this device journal points at a request the
+        // Gateway never admitted or no longer owns.  Keeping that orphan
+        // forever disables Send and cannot protect any server-side effect.
+        if (error instanceof GatewayError && error.status === 404) {
+          settleIntent(sessionId, local.requestId);
+        } else {
+          return local; // transport uncertainty still preserves the journal
+        }
+      }
       if (row && row.request_id === local.requestId && row.status === "execution_unknown" && row.result?.acknowledged) {
         settleIntent(sessionId, local.requestId);
-      } else return local;
+      } else if (row) return local;
     }
     const control = await this.source?.sessionControl?.(sessionId);
     const latest = unresolvedRequestId ? { request_id: unresolvedRequestId, status: "execution_unknown" } : control?.latest_request;

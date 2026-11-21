@@ -5,6 +5,7 @@ import type { JaegerSource } from "../api/source";
 import type { GatewayEvent } from "../api/types";
 import { MinimalChat } from "./MinimalChat";
 import { WebHost } from "./webHost";
+import { GatewayError } from "../api/gateway";
 
 vi.mock("./reveal", () => ({ useRevealedText: (text: string) => text }));
 beforeEach(() => localStorage.clear());
@@ -69,6 +70,28 @@ it("clears a failed lookup notice after a successful check without resending wor
     await act(async () => [...el.querySelectorAll("button")].find(b => b.textContent === "Check again")!.click());
     await vi.waitFor(() => expect(el.textContent).not.toContain("Request lookup unavailable"));
     expect(el.textContent).not.toContain("Previous request outcome unknown");
+    expect(send).not.toHaveBeenCalled();
+  } finally { act(() => root.unmount()); el.remove(); }
+});
+
+it("drops an accepted device journal when the Gateway definitively has no such request", async () => {
+  localStorage.setItem("jaeger.ui.send.v1.s", JSON.stringify({
+    version: 1, sessionId: "s", requestId: "orphan", text: "kept draft",
+    attachmentIds: [], phase: "accepted",
+  }));
+  const send = vi.fn();
+  const source = {
+    kind: "live", send, agents: async () => [],
+    session: async () => ({ session_id: "s", messages: [] }),
+    requestStatus: vi.fn().mockRejectedValue(new GatewayError("Request not found", 404)),
+    sessionControl: async () => ({}),
+  } as unknown as JaegerSource;
+  const el = document.createElement("div"); document.body.append(el); const root = createRoot(el);
+  try {
+    await act(async () => root.render(<MinimalChat host={new WebHost(source)} sessionId="s" />));
+    await vi.waitFor(() => expect(el.textContent).not.toContain("Previous request outcome unknown"));
+    expect(localStorage.getItem("jaeger.ui.send.v1.s")).toBeNull();
+    expect((el.querySelector("textarea") as HTMLTextAreaElement | null)?.disabled).not.toBe(true);
     expect(send).not.toHaveBeenCalled();
   } finally { act(() => root.unmount()); el.remove(); }
 });
