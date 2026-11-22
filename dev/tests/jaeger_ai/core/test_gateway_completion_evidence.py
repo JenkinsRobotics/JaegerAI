@@ -25,6 +25,7 @@ async def test_owner_identity_and_unverified_completion_survive_gateway_receipt(
     def worker(prompt, *, on_model, callbacks, **kwargs):
         on_model('configured-route')
         callbacks.on_model_call_start()
+        callbacks.on_stream_delta('Here is the proposal.')
         callbacks.on_model_call_done({'actual_model': 'provider-served-model'})
         return {'text': 'Here is the proposal.', 'status': 'completed', 'verification': {'ok': True}}
 
@@ -43,6 +44,10 @@ async def test_owner_identity_and_unverified_completion_survive_gateway_receipt(
     assert result['verification']['status'] == 'not_performed'
     assert result['verification']['worker_report'] == {'ok': True}
     assert gateway.task_owner.store.list_tasks() == []
+    events = gateway.store.replay_events('s')['events']
+    deltas = [event['data'] for event in events if event['event'] == 'turn.delta']
+    assert len(deltas) == 1
+    assert deltas[0]['delta'] == result['output'] and deltas[0]['item_id']
     message = gateway.store.get_session('s')['messages'][-1]
     identity = next(p for p in message['parts'] if p['type'] == 'model_identity')
     assert identity['actual_model'] == 'provider-served-model'
