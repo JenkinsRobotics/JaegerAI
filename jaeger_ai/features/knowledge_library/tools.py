@@ -24,12 +24,22 @@ def _library() -> KnowledgeLibrary:
     summary="register a local directory for document indexing",
 )
 def library_add(path: str, label: str = "") -> dict:
-    """Register a local notes or document folder as a read-only knowledge collection."""
+    """Idempotently register a folder and always return its collection ID."""
     library = _library()
     try:
         return {"ok": True, "collection": library.add(path, label)}
     except (LibraryError, OSError) as exc:
         return {"ok": False, "error": str(exc)}
+    finally:
+        library.close()
+
+
+@register_tool_from_function(side_effect="read")
+def library_collections() -> dict:
+    """List registered knowledge collections with IDs, roots, and index status."""
+    library = _library()
+    try:
+        return {"ok": True, "collections": library.list()}
     finally:
         library.close()
 
