@@ -54,10 +54,22 @@ def test_in_process_worker_is_local():
 
 def test_background_budget_follows_admitted_model_not_primary():
     cfg = _cfg('cli', 'grok')
-    assert owner_agent.background_budget_tokens(cfg) == 1024
+    assert owner_agent.background_budget_tokens(cfg) == (32768 - 1024) // 8
+    assert owner_agent.background_budget_tokens(cfg, model='grok', provider='cli') == (32768 - 1024) // 8
     assert owner_agent.background_budget_tokens(cfg, model='@ollama:qwen2.5:3b') == 1024
     assert owner_agent.background_budget_tokens(cfg, model='kimi:cloud', provider='ollama') == 1024
     assert owner_agent.background_budget_tokens(cfg, model='local', provider='huggingface') == 1024
+
+
+def test_background_budget_scales_with_configured_window_and_preserves_completion():
+    cfg = _cfg('ollama-cloud', 'mistral-large-4:cloud')
+    cfg.external_model.ctx = 131072
+    assert owner_agent.background_budget_tokens(cfg) == 8192
+    cfg.external_model.ctx = 4096
+    cfg.external_model.max_tokens = 2048
+    assert owner_agent.background_budget_tokens(cfg) == 256
+    cfg.external_model.max_tokens = 4096
+    assert owner_agent.background_budget_tokens(cfg) == 0
 
 
 def test_options_carry_system_prompt_budget_and_artifacts(layout, monkeypatch):

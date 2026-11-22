@@ -629,6 +629,8 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
                 yield Path(dirpath) / fn
 
     from jaeger_os.core.safety.file_safety import is_sensitive_path
+    from jaeger_agent.core.host import file_access_guard
+    check_file_access = file_access_guard()
     for child in _iter_files():
         # Credential protection MUST apply to files DISCOVERED during the
         # walk, not just the path argument — otherwise a broad grep
@@ -637,8 +639,9 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
         # check in ``_resolve_read`` never saw these (safe-credential-leak,
         # 2026-07-06).
         try:
+            check_file_access(child)
             if (not child.is_file()
-                    or is_sensitive_path(child)):
+                    or is_sensitive_path(child.resolve())):
                 continue
             if child.stat().st_size > 16_000_000:
                 skipped.append({"file": _display_path(child, layout), "reason": "size limit"})
@@ -711,6 +714,8 @@ def glob_files(pattern: str, path: str = ".", max_results: int = 200) -> dict[st
     matches: list[str] = []
     scanned = 0
     layout = _require_layout()
+    from jaeger_agent.core.host import file_access_guard
+    check_file_access = file_access_guard()
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [name for name in dirnames if name not in _SEARCH_SKIP]
         for filename in filenames:
@@ -720,10 +725,11 @@ def glob_files(pattern: str, path: str = ".", max_results: int = 200) -> dict[st
             rel = Path(dirpath, filename)
             try:
                 from jaeger_os.core.safety.file_safety import is_sensitive_path
-                if is_sensitive_path(rel):
+                check_file_access(rel)
+                if is_sensitive_path(rel.resolve()):
                     continue
-            except Exception:
-                pass
+            except PermissionError:
+                continue
             relative = str(rel.relative_to(root)) if rel.is_relative_to(root) else rel.name
             if fnmatch.fnmatch(filename, needle) or fnmatch.fnmatch(relative, needle):
                 matches.append(_display_path(rel, layout))

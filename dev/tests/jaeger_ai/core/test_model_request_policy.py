@@ -247,3 +247,15 @@ def test_selected_configured_alternative_uses_its_own_controls(configured, adapt
     assert client.ext.timeout_s == 180
     assert client.ext.base_url == 'http://127.0.0.1:11434/v1'
     assert configured.external_model.model == 'grok'
+
+
+def test_ollama_cloud_selection_reserves_room_for_reasoning(configured, adapter, monkeypatch):
+    monkeypatch.setattr("jaeger_ai.core.models.router.ensure_local_ollama", lambda: True)
+    selected = {"model": "@ollama-cloud:glm-5.3:cloud"}
+
+    client = select_request_client(configured, None, **selected)
+    assert client.ext.max_tokens == 4096
+    assert client.ext.model == "glm-5.3:cloud"
+
+    explicit = select_request_client(configured, None, controls={"max_tokens": 2048}, **selected)
+    assert explicit.ext.max_tokens == 2048

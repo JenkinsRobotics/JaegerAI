@@ -394,6 +394,11 @@ def _resolve_absolute_write(p: Path) -> Path:
             return full
     except Exception:  # noqa: BLE001
         pass
+    from jaeger_agent.core.host import check_file_access
+    try:
+        check_file_access(full, write=True)
+    except PermissionError as exc:
+        raise SandboxError(str(exc)) from exc
     roots = writable_roots()
     instance_root = getattr(_require_layout(), "root", None)
     instance_root = Path(instance_root).resolve() if instance_root else None
@@ -661,6 +666,11 @@ def _resolve_read(path: str) -> Path:
             "credentials/ is off-limits to direct reads — "
             "use get_credential(name) instead"
         )
+    from jaeger_agent.core.host import check_file_access
+    try:
+        check_file_access(full)
+    except PermissionError as exc:
+        raise SandboxError(str(exc)) from exc
     # Secret-store policy is stronger than an interactive grant. Check it
     # before asking so the UI never offers an approval that cannot take effect.
     from jaeger_os.core.safety.file_safety import is_sensitive_path

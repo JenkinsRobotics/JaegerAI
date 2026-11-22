@@ -17,6 +17,7 @@ PART_EVENTS = ("turn.delta", "turn.steer", "turn.reasoning", "turn.reasoning.don
 def project_parts(events: Iterable[dict[str, Any]], final_text: str | None = None) -> list[dict[str, Any]]:
     parts: list[dict[str, Any]] = []
     tools: dict[str, dict[str, Any]] = {}
+    text_items: dict[tuple[str, str], dict[str, Any]] = {}
     for evt in events:
         name, data, ts = evt.get("event"), evt.get("data") or {}, evt.get("timestamp")
         last = parts[-1] if parts else None
@@ -27,10 +28,15 @@ def project_parts(events: Iterable[dict[str, Any]], final_text: str | None = Non
             text = str(data.get("delta") or "")
             role = str(data.get("content_type") or data.get("channel") or "provisional")
             item_id = str(data.get("item_id") or "") or None
-            if last and last["type"] == "text" and last.get("role") == role and last.get("item_id") == item_id:
-                last["text"] += text
+            prior = text_items.get((role, item_id)) if item_id else last
+            if prior and prior["type"] == "text" and prior.get("role") == role and prior.get("item_id") == item_id:
+                prior["text"] += text
             elif text:
-                parts.append({"type": "text", "text": text, "role": role, **({"item_id": item_id} if item_id else {})})
+                part = {"type": "text", "text": text, "role": role}
+                if item_id:
+                    part["item_id"] = item_id
+                    text_items[(role, item_id)] = part
+                parts.append(part)
         elif name == "turn.reasoning":
             text = str(data.get("text") or "")
             if last and last["type"] == "reasoning" and "duration_ms" not in last:

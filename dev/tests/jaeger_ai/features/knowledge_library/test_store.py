@@ -85,3 +85,50 @@ def test_truncated_rescan_never_deletes_unvisited_documents(tmp_path, monkeypatc
     assert library.search("alpha")
     assert library.search("bravo")
     library.close()
+
+
+def test_truncated_index_resumes_until_collection_is_complete(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "notes"
+    root.mkdir()
+    for number in range(5):
+        (root / f"{number}.md").write_text(f"unique-{number}", encoding="utf-8")
+    monkeypatch.setattr(store, "MAX_FILES", 2)
+    library = KnowledgeLibrary(tmp_path / "library.db")
+    collection = library.add(str(root))
+
+    first = library.index(collection["id"])
+    second = library.index(collection["id"])
+    third = library.index(collection["id"])
+
+    assert first["truncated"] is True and first["resumed_from"] is None
+    assert second["truncated"] is True and second["resumed_from"] == first["next_cursor"]
+    assert third["complete"] is True and third["resumed_from"] == second["next_cursor"]
+    assert library.list()[0]["document_count"] == 5
+    for number in range(5):
+        assert library.search(f"unique-{number}")
+    library.close()
+
+
+def test_external_source_sync_deduplicates_updates_and_reconciles(tmp_path) -> None:
+    library = KnowledgeLibrary(tmp_path / "library.db")
+    first = library.sync_source("apple-reminders", "Apple Reminders", [
+        {"external_id": "r1", "title": "Buy milk", "content": "List: Groceries",
+         "provenance": {"source": "EventKit"}},
+        {"external_id": "r2", "title": "Call Alex", "content": "Due tomorrow"},
+    ])
+    second = library.sync_source("apple-reminders", "Apple Reminders", [
+        {"external_id": "r1", "title": "Buy oat milk", "content": "List: Groceries",
+         "provenance": {"source": "EventKit"}},
+    ])
+
+    assert first["inserted"] == 2
+    assert second["inserted"] == 0
+    assert second["updated"] == 1
+    assert second["unchanged"] == 0
+    assert second["removed"] == 1
+    assert second["document_count"] == 1
+    assert second["complete"] is True
+    assert library.search("oat milk")
+    assert library.search("Call Alex") == []
+    assert library.list()[0]["kind"] == "source"
+    library.close()

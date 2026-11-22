@@ -725,6 +725,14 @@ class PolicyKernel:
         # Check target path for protected system files or in-repo runtime state
         target = str(proposal.target_path or proposal.arguments.get("path") or proposal.arguments.get("TargetFile") or "")
         if target:
+            from .filesystem import check_path
+            # The tool resolver applies this again to the final resolved path.
+            # Absolute inputs can also produce an accurate policy preview.
+            if target.startswith(("/", "~")):
+                try:
+                    check_path(target, write=canonical_tool_id(proposal.tool_name) in {"write_file", "delete_file"})
+                except PermissionError as exc:
+                    return _deny(proposal, str(exc), "framework_grant")
             if "/.jaeger_ai/" in target or "/.jaeger_agent/" in target:
                 return AuthorityDecision(
                     decision=AuthorityDecisionType.DENY,

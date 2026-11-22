@@ -73,6 +73,32 @@ def test_project_parts_keeps_commentary_actions_and_one_final_in_order():
     assert parts[-1]["text"] == "The project uses Python 3.12."
 
 
+def test_reasoning_deltas_do_not_split_text_in_live_or_saved_turn(tmp_path):
+    from jaeger_ai.core.gateway.turn_parts import project_parts
+
+    gateway = _gateway(tmp_path)
+    callbacks, finish = gateway._turn_stream_callbacks("s1", "r1")
+    callbacks.model_call_start()
+    callbacks.stream_delta("Continu")
+    callbacks.reasoning("Checking the next step.")
+    callbacks.stream_delta("ing the indexing.")
+    callbacks.tool_progress("read_file", "start", {"path": "README.md"})
+    callbacks.tool_done("read_file", {}, {}, True, None, 0.1)
+    callbacks.model_call_start()
+    callbacks.stream_delta("Done.")
+    finish()
+
+    events = _events(gateway)
+    first, second, final = [e["data"]["item_id"] for e in events if e["event"] == "turn.delta"]
+    assert first == second
+    assert final != first
+    assert [(part["role"], part["text"]) for part in project_parts(events, "Done.")
+            if part["type"] == "text"] == [
+        ("commentary", "Continuing the indexing."),
+        ("final", "Done."),
+    ]
+
+
 def test_tool_start_has_useful_public_progress_and_stable_activity_id(tmp_path):
     gateway = _gateway(tmp_path)
     callbacks, finish = gateway._turn_stream_callbacks("s1", "r1")
