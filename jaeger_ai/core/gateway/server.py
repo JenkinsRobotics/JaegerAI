@@ -957,6 +957,8 @@ class _GatewayLocalReadAccessProvider:
     """
 
     _META_KEY = "local_read_roots"
+    _ACCESS = "read_only"
+    _OPERATION = "read_file"
 
     def __init__(self, app: "JaegerGatewayApp", session_id: str, request_id: str) -> None:
         self.app = app
@@ -1033,14 +1035,14 @@ class _GatewayLocalReadAccessProvider:
             if grant_root in self._denied:
                 return None
             request = PermissionRequest(
-                tier=PermissionTier.READ_ONLY,
+                tier=self._permission_tier(PermissionTier),
                 skill="local_files",
-                operation="read_file",
-                summary=(f"Read {resolved} outside this chat's workspace "
-                         f"with read-only scope {grant_root}"),
+                operation=self._OPERATION,
+                summary=(f"{self._ACCESS.replace('_', ' ').title()} {resolved} outside "
+                         f"this chat's workspace with scope {grant_root}"),
                 arguments={
                     "path": grant_root, "requested_path": resolved,
-                    "access": "read_only",
+                    "access": self._ACCESS,
                 },
                 force_prompt=True,
             )
@@ -1052,6 +1054,22 @@ class _GatewayLocalReadAccessProvider:
             if decision == "session":
                 self._persist(grant_root)
             return grant_root
+
+    @staticmethod
+    def _permission_tier(permission_tier: Any) -> Any:
+        return permission_tier.READ_ONLY
+
+
+class _GatewayLocalWriteAccessProvider(_GatewayLocalReadAccessProvider):
+    """Owner-approved expansion for an exact local write or repository root."""
+
+    _META_KEY = "local_write_roots"
+    _ACCESS = "write"
+    _OPERATION = "write_file"
+
+    @staticmethod
+    def _permission_tier(permission_tier: Any) -> Any:
+        return permission_tier.WRITE_LOCAL
 
 
 def _with_transcript_fallback(text: str, session: dict[str, Any] | None) -> str:
@@ -6162,6 +6180,7 @@ class JaegerGatewayApp:
                     safe_selection = {**selection, "workspace": safe["root"]}
                     agent_safety_turn[0] = True
             from jaeger_agent.task_port import task_scope
+            from jaeger_agent.core.workspace import write_authority
             request_row = self.store.get_request(request_id) or {}
             options = selection.get("options") or {}
             source = "background" if options.get("background") else "user"
@@ -6182,6 +6201,8 @@ class JaegerGatewayApp:
                     read_confinement(
                         self._read_roots(runtime, safe_selection, self._staged_upload_dir(session_key)),
                         request_access=_GatewayLocalReadAccessProvider(self, session_key, request_id),
+                    ), write_authority(
+                        request_access=_GatewayLocalWriteAccessProvider(self, session_key, request_id),
                     ):
                 _live.emit("route.selected", {
                     "model": selected_model or None, "lane": lane or None,
