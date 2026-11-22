@@ -125,6 +125,34 @@ def test_single_tool_call_then_final_answer():
     assert "12:00" in tool_msg["content"]
 
 
+def test_direct_xmlish_tool_tag_is_promoted_and_executed():
+    captured: list[str] = []
+
+    @register_tool("calculate", "Calculate.", _SmallArgs)
+    def _calculate(value: str = "x") -> dict:
+        captured.append(value)
+        return {"result": 333180}
+
+    adapter = _ScriptedAdapter([
+        {
+            "role": "assistant",
+            "content": (
+                "PROGRESS 1/3: running the calculator first. "
+                '<calculate value="2468 * 135">'
+            ),
+        },
+        {"role": "assistant", "content": "The result is 333180."},
+    ])
+    agent = JaegerAgent(adapter=adapter)
+
+    assert agent.run_turn("calculate it") == "The result is 333180."
+    assert captured == ["2468 * 135"]
+    assert adapter.call_count == 2
+    assert agent.messages[1]["content"] == "PROGRESS 1/3: running the calculator first."
+    assert agent.messages[1]["tool_calls"][0]["name"] == "calculate"
+    assert agent.messages[2]["role"] == "tool"
+
+
 def test_parallel_tool_calls_dispatched_in_one_assistant_turn():
     """Anthropic + modern OpenAI both emit multiple tool calls in one
     assistant message. The loop must dispatch each, then proceed."""
