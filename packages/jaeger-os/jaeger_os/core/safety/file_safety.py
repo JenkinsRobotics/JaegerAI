@@ -15,6 +15,7 @@ name. Ported (the idea) from hermes-agent's ``agent/file_safety.py``.
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 # Directories that exist only to hold credentials — any file inside is
@@ -31,6 +32,16 @@ _BLOCKED_NAMES = frozenset({
 # A `.env` whose suffix marks it a committed template, not a real secret
 # store — these stay readable (`cp .env.example .env` is a real workflow).
 _ENV_TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist")
+
+_PROTECTED_WRITE_ROOTS = (
+    Path("/System"), Path("/Library"), Path("/bin"), Path("/sbin"),
+    Path("/usr"), Path("/etc"), Path("/private/etc"),
+    Path("/private/var"), Path("/dev"), Path("/proc"), Path("/sys"),
+    Path("/boot"),
+)
+_ALLOWED_TEMP_WRITE_ROOTS = (
+    Path("/private/tmp"), Path("/var/tmp"), Path(tempfile.gettempdir()).resolve(),
+)
 
 
 def is_sensitive_path(path: str | Path) -> str | None:
@@ -58,4 +69,19 @@ def is_sensitive_path(path: str | Path) -> str | None:
     return None
 
 
-__all__ = ["is_sensitive_path"]
+def is_protected_write_path(path: str | Path) -> str | None:
+    """Return a reason when owner approval must not authorize ``path``."""
+    p = Path(path).resolve()
+    sensitive = is_sensitive_path(p)
+    if sensitive:
+        return sensitive
+    if any(p == root or root in p.parents for root in _ALLOWED_TEMP_WRITE_ROOTS):
+        return None
+    for root in _PROTECTED_WRITE_ROOTS:
+        resolved = root.resolve()
+        if p == resolved or resolved in p.parents:
+            return f"{resolved}/ is an operating-system path and cannot be agent-written"
+    return None
+
+
+__all__ = ["is_protected_write_path", "is_sensitive_path"]
