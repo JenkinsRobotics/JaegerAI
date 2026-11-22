@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from html import unescape
 from typing import Any, NamedTuple
 
 
@@ -109,6 +110,59 @@ def _extract_xml_function_tags(text: str) -> list[RepairedToolCall]:
 
         call_id = f"call_{uuid.uuid4().hex[:24]}"
         results.append(RepairedToolCall(id=call_id, name=name, arguments=params, raw=raw))
+
+    return results
+
+
+def _extract_direct_tool_tags(
+    text: str,
+    allowed_tool_names: set[str] | None,
+) -> list[RepairedToolCall]:
+    """Parse ``<tool_name key="value">`` calls from weak tool models.
+
+    Some OpenAI-compatible providers render a requested function call as a
+    bare XML-ish tag instead of populating ``message.tool_calls``.  Only names
+    from the live tool registry are eligible: without that allow-list this
+    grammar is disabled, so normal HTML can never be promoted to execution.
+    """
+    if not allowed_tool_names:
+        return []
+
+    results: list[RepairedToolCall] = []
+    tag_pattern = re.compile(
+        r"<([A-Za-z_][A-Za-z0-9_-]*)\s+([^<>]*?)(?:\s*/?)>",
+        flags=re.DOTALL,
+    )
+    attr_pattern = re.compile(
+        r"([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(?:\"([^\"]*)\"|'([^']*)')",
+        flags=re.DOTALL,
+    )
+
+    for match in tag_pattern.finditer(text):
+        name = match.group(1)
+        if name not in allowed_tool_names:
+            continue
+        body = match.group(2)
+        attrs = list(attr_pattern.finditer(body))
+        if not attrs:
+            continue
+        # Reject partially parsed attribute bodies rather than silently
+        # executing a call whose model-supplied arguments were lost.
+        remainder = attr_pattern.sub("", body).strip()
+        if remainder:
+            continue
+        arguments = {
+            attr.group(1): unescape(
+                attr.group(2) if attr.group(2) is not None else attr.group(3)
+            )
+            for attr in attrs
+        }
+        results.append(RepairedToolCall(
+            id=f"call_{uuid.uuid4().hex[:24]}",
+            name=name,
+            arguments=arguments,
+            raw=match.group(0),
+        ))
 
     return results
 
@@ -299,15 +353,19 @@ def repair_plain_text_tool_calls(
     if not extracted:
         extracted.extend(_extract_xml_function_tags(text))
 
-    # Priority 3: [call: name(...)] brackets
+    # Priority 3: <registered_tool key="value"> direct tags
+    if not extracted:
+        extracted.extend(_extract_direct_tool_tags(text, allowed_tool_names))
+
+    # Priority 4: [call: name(...)] brackets
     if not extracted:
         extracted.extend(_extract_bracket_tool_calls(text))
 
-    # Priority 4: Markdown JSON blocks
+    # Priority 5: Markdown JSON blocks
     if not extracted:
         extracted.extend(_extract_markdown_json_blocks(text, allowed_tool_names))
 
-    # Priority 5: Markdown bash/sh code blocks
+    # Priority 6: Markdown bash/sh code blocks
     if not extracted:
         extracted.extend(_extract_markdown_bash_blocks(text, allowed_tool_names))
 

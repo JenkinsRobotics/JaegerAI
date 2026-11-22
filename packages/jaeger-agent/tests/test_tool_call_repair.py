@@ -71,6 +71,38 @@ def test_repair_bracket_tool_call():
     assert "[call:" not in cleaned
 
 
+def test_repair_direct_registered_tool_tag_from_live_failure():
+    raw = (
+        "PROGRESS 1/3: stream test started, running the calculator first. "
+        '<calculate expression="2468 * 135">'
+    )
+    tool_calls, cleaned = repair_plain_text_tool_calls(
+        raw,
+        allowed_tool_names={"calculate", "browser"},
+    )
+    assert len(tool_calls) == 1
+    assert tool_calls[0]["function"]["name"] == "calculate"
+    assert json.loads(tool_calls[0]["function"]["arguments"]) == {
+        "expression": "2468 * 135",
+    }
+    assert cleaned == "PROGRESS 1/3: stream test started, running the calculator first."
+
+
+def test_direct_tag_requires_registered_tool_and_complete_attributes():
+    html = '<a href="https://example.com">'
+    calls, cleaned = repair_plain_text_tool_calls(html, allowed_tool_names={"calculate"})
+    assert calls == []
+    assert cleaned == html
+
+    malformed = '<calculate expression="2 + 2" stray>'
+    calls, cleaned = repair_plain_text_tool_calls(
+        malformed,
+        allowed_tool_names={"calculate"},
+    )
+    assert calls == []
+    assert cleaned == malformed
+
+
 def test_repair_json_trailing_commas_and_single_quotes():
     raw = (
         "<tool_call>\n"
