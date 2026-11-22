@@ -20,6 +20,7 @@ when sharing one across adapters / instances).
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
@@ -384,7 +385,9 @@ class LocalLlamaAdapter(OpenAIAdapter):
         # Cached tool dialect ("chatml" / "mistral" / "llama3" / …),
         # resolved lazily on first ``format_messages``.
         self._tool_family: str | None = None
-        # Rendered tool-prose cache keyed by (family, tool names).
+        # Rendered tool-prose cache keyed by the family and complete wire
+        # payload. A host may change a tool's schema or description without
+        # changing its name; a name-only key would retain stale instructions.
         # ``render_tools_for`` serialises every schema to JSON each
         # call — identical work every turn while the visible toolset
         # is stable. Tiny dict; cleared if it somehow grows.
@@ -541,7 +544,7 @@ class LocalLlamaAdapter(OpenAIAdapter):
         if not (self.inject_tools_prose and tools):
             return self._apply_thinking_toggle(kwargs)
         family = self._resolve_tool_family()
-        cache_key = (family, tuple(t.name for t in tools))
+        cache_key = (family, json.dumps(kwargs.get("tools", []), sort_keys=True))
         addition = self._tools_prose_cache.get(cache_key)
         if addition is None:
             if len(self._tools_prose_cache) > 8:
