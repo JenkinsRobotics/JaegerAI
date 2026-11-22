@@ -222,6 +222,7 @@ def _serve_rtc(handler, method: str, action: str) -> bool:
 
 _DROID_ACTIONS = {("GET", "status"), ("GET", "transcript"), ("GET", "display"), ("GET", "camera.jpg"),
                   ("GET", "screen.jpg"), ("POST", "wake"), ("POST", "sleep"), ("POST", "toggle"),
+                  ("POST", "camera/offer"),
                   ("POST", "mute"), ("POST", "stop"), ("POST", "say"), ("POST", "look"),
                   # Droid Life: presence, "what I noticed", gate log, identity (all local to this Mac)
                   ("GET", "life"), ("GET", "noticed"), ("GET", "decisions"), ("POST", "noticed-delete"),
@@ -253,8 +254,8 @@ def _serve_droid(handler, method: str, action: str) -> bool:
         conn = _Unix("droid", timeout=15)
         conn.request(method, "/" + action, body=body, headers={"Content-Type": "application/json"})
         resp = conn.getresponse()
-        payload, status = resp.read(), resp.status
         ctype = resp.getheader("Content-Type") or "application/json"
+        payload = resp.read()
         conn.close()
     except (OSError, ValueError):
         j(handler, {"state": "unavailable", "awake": False,

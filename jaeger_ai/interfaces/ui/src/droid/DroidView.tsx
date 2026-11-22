@@ -35,6 +35,52 @@ function LiveImage({ path, live, alt, empty }: { path: string; live: boolean; al
     onError={() => { setFailed(true); timer.current = window.setTimeout(() => setSrc(`${base}/${path}?t=${Date.now()}`), 2500) }} />
 }
 
+export function LiveVideo({ live, empty }: { live: boolean; empty: string }) {
+  const video = useRef<HTMLVideoElement>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    if (!live) return
+    let active = true
+    let pc: RTCPeerConnection | undefined
+    let retry: number | undefined
+    const connect = async () => {
+      if (!active) return
+      pc = new RTCPeerConnection({ iceServers: [] })
+      pc.addTransceiver('video', { direction: 'recvonly' })
+      pc.ontrack = event => {
+        if (video.current) video.current.srcObject = event.streams[0] || new MediaStream([event.track])
+        setFailed(false)
+      }
+      pc.onconnectionstatechange = () => {
+        if (active && pc && ['failed', 'disconnected'].includes(pc.connectionState)) {
+          pc.close()
+          setFailed(true)
+          retry = window.setTimeout(() => void connect(), 1500)
+        }
+      }
+      try {
+        await pc.setLocalDescription(await pc.createOffer())
+        const answer = await sendJson<RTCSessionDescriptionInit>('POST', `${base}/camera/offer`, pc.localDescription)
+        if (active) await pc.setRemoteDescription(answer)
+      } catch {
+        pc.close()
+        setFailed(true)
+        if (active) retry = window.setTimeout(() => void connect(), 1500)
+      }
+    }
+    void connect()
+    return () => {
+      active = false
+      window.clearTimeout(retry)
+      pc?.close()
+      if (video.current) video.current.srcObject = null
+    }
+  }, [live])
+  if (!live) return <div className="jg-droid__empty">{empty}</div>
+  return <video ref={video} className="jg-droid__img" autoPlay muted playsInline
+    aria-label="What the droid sees, live" data-failed={failed || undefined} />
+}
+
 export function DroidView() {
   const [status, setStatus] = useState<DroidStatus>({ state: 'off', awake: false })
   const [lines, setLines] = useState<Line[]>([])
@@ -87,7 +133,7 @@ export function DroidView() {
       <aside className="jg-droid__side">
         <section className="jg-droid__camera" aria-label="Camera">
           <h2>Camera{status.camera === 'live' ? ` · ${status.present ? `${status.faces || 1} in view` : 'nobody in view'}` : ''}</h2>
-          <LiveImage path="camera.jpg" live={awake && status.camera === 'live'} alt="What the droid sees, live"
+          <LiveVideo live={awake && status.camera === 'live'}
             empty={!awake ? 'Eyes closed (standby).' : status.camera === 'needs permission' ? 'Camera permission needed for Jaeger Droid.' : 'Opening the camera…'} />
           <p className="jg-droid__note">Camera frames stay on this Mac and are read by the local vision model.</p>
         </section>
