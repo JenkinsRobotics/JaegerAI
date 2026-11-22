@@ -65,3 +65,6 @@ def test_agent_policy_prefers_semantic_browser_for_websites():
     assert "Websites — semantic browser first" in prompt
     assert "use the DOM-aware `browser` tool" in prompt
     assert "Use `computer_use` for native applications" in prompt
+
+    from jaeger_agent.skill_registry.toolset_scoping import CORE
+    assert "browser" in CORE

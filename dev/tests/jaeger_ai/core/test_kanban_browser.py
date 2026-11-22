@@ -12,7 +12,7 @@ import pytest
 
 from jaeger_agent import tools
 from jaeger_ai.core.instance.instance import InstanceLayout
-from jaeger_agent.tools.browser import _dispatch, _element, _headless
+from jaeger_agent.tools.browser import _dispatch, _element, _headless, _snapshot
 
 
 @pytest.fixture()
@@ -83,6 +83,33 @@ def test_browser_logs_and_errors_dispatch() -> None:
     res = _dispatch(None, state, "logs", {})
     assert len(res["console_logs"]) == 1
     assert len(res["failed_requests"]) == 1
+
+
+def test_browser_snapshot_exposes_headings_and_link_destinations() -> None:
+    class _Handle:
+        def __init__(self, tag, text, href=""):
+            self.tag, self.text, self.href = tag, text, href
+        def is_visible(self): return True
+        def inner_text(self, timeout=0): return self.text
+        def get_attribute(self, name): return None
+        def evaluate(self, script):
+            if "tagName" in script: return self.tag.upper()
+            if "e.href" in script: return self.href
+            return ""
+
+    link = _Handle("a", "More information...", "https://www.iana.org/help/example-domains")
+    heading = _Handle("h1", "Example Domain")
+
+    class _Page:
+        url = "https://example.com/"
+        def title(self): return "Example Domain"
+        def query_selector_all(self, selector):
+            return [heading] if selector.startswith("h1") else [link]
+        def evaluate(self, script): return "Example Domain\nMore information..."
+
+    result = _snapshot(_Page(), {"console_logs": [], "failed_requests": []})
+    assert result["headings"] == [{"level": "h1", "text": "Example Domain"}]
+    assert result["elements"][0]["href"] == "https://www.iana.org/help/example-domains"
 
 
 def test_browser_screenshot_dispatch_mocked(tmp_path) -> None:
