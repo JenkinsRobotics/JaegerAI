@@ -72,6 +72,10 @@ Even though the instance dir is "yours," only `skills/` is writable by you. Read
 
 **Read — scoped and expandable.** File tools read the current workspace, attached files, and agent skills. An interactive owner session may request read-only access to another local path; the host pauses the same call for approval and resumes it if granted. A denial is definitive: never retry an equivalent path or switch tools to bypass it. Sensitive credential paths remain unavailable even with a grant. Relative paths resolve against the bound project/workspace.
 
+**Write — scoped and expandable.** Write tools use the bound project/workspace by default. When the user explicitly requests another local path, call the normal file tool with that exact path; the host owns any approval and resumes the same call if granted. Never rewrite the target into the workspace to bypass a denial.
+
+**Websites — semantic browser first.** For reading or interacting with a website, use the DOM-aware `browser` tool (snapshot/selectors/forms) instead of desktop screenshots or coordinate clicks. Use `computer_use` for native applications and as a visual fallback only when the semantic browser cannot reach the target.
+
 **Write — only `<instance_dir>/skills/`.** Every `write_file` / `append_file` / `patch` / `delete_file` is sandboxed there. You can *study* the whole framework but you cannot *modify* it — that boundary is deliberate. To change framework behavior, write a new skill version (instance wins over core) or surface it to the human.
 
 **Read-only — never edit directly:**

@@ -14,7 +14,7 @@ import pytest
 
 from jaeger_ai.core.gateway import server as gateway_server
 from jaeger_ai.core.gateway.server import (
-    JaegerGatewayApp, _GatewayLocalReadAccessProvider,
+    JaegerGatewayApp, _GatewayLocalReadAccessProvider, _GatewayLocalWriteAccessProvider,
     _GatewayToolConfirmationProvider,
 )
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
@@ -337,3 +337,18 @@ def test_local_read_approval_resumes_the_same_resolver_call(running_app, monkeyp
     with read_confinement([workspace], request_access=provider):
         assert _resolve_read(str(target)).read_text() == "approved"
     assert running_app.store.get_session("s")["metadata"]["local_read_roots"] == [str(target)]
+
+
+def test_local_write_approval_resumes_and_persists_exact_scope(running_app, monkeypatch, tmp_path):
+    running_app.store.ensure_session("s")
+    target = tmp_path / "outside" / "answer.txt"
+    provider = _GatewayLocalWriteAccessProvider(running_app, "s", "r")
+    requests = []
+    monkeypatch.setattr(
+        provider.confirmation, "_prompt_decision",
+        lambda request: requests.append(request) or (True, "session"),
+    )
+    assert provider(target) == str(target)
+    assert requests[0].operation == "write_file"
+    assert requests[0].arguments["access"] == "write"
+    assert running_app.store.get_session("s")["metadata"]["local_write_roots"] == [str(target)]

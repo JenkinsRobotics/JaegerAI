@@ -6,8 +6,9 @@ import os
 import pytest
 
 from jaeger_agent.core.workspace import (
-    ReadAccessDenied, SandboxError, _resolve_read, active_read_roots,
-    project_scope, read_confinement,
+    ReadAccessDenied, SandboxError, WriteAccessDenied, _resolve_absolute_write,
+    _resolve_read, active_read_roots, project_scope, read_confinement,
+    write_authority,
 )
 
 
@@ -53,6 +54,25 @@ def test_read_confinement_can_expand_only_through_host_authority(tree):
     with project_scope(ws), read_confinement([ws], request_access=lambda path: None):
         with pytest.raises(ReadAccessDenied, match="definitive"):
             _resolve_read(str(target))
+
+
+def test_write_scope_can_expand_only_through_host_authority(tmp_path, monkeypatch):
+    from jaeger_agent.core import workspace
+
+    layout = workspace.DefaultWorkspace(tmp_path / "instance")
+    for directory in (layout.workspace_dir, layout.skills_dir, layout.logs_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(workspace, "_layout", layout)
+    target = (tmp_path / "outside" / "answer.txt").resolve()
+    requests = []
+
+    with write_authority(request_access=lambda path: requests.append(path) or target):
+        assert _resolve_absolute_write(target) == target
+    assert requests == [target]
+
+    with write_authority(request_access=lambda path: None):
+        with pytest.raises(WriteAccessDenied, match="definitive"):
+            _resolve_absolute_write(target)
 
 
 def test_search_and_list_tools_refuse_outside(tree, tmp_path, monkeypatch):

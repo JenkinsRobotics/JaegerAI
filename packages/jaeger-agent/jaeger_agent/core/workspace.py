@@ -107,6 +107,7 @@ def set_project_root(path: Path | str | None) -> None:
 # must realpath inside one of these roots (symlinks resolved first).
 _read_roots_var: ContextVar[tuple[Path, ...] | None] = ContextVar("read_roots", default=None)
 _read_access_requester_var: ContextVar[Any] = ContextVar("read_access_requester", default=None)
+_write_access_requester_var: ContextVar[Any] = ContextVar("write_access_requester", default=None)
 
 
 @contextlib.contextmanager
@@ -124,6 +125,20 @@ def read_confinement(roots: Any, *, request_access: Any = None):
     finally:
         _read_access_requester_var.reset(requester_token)
         _read_roots_var.reset(token)
+
+
+@contextlib.contextmanager
+def write_authority(*, request_access: Any = None):
+    """Install a host-owned callback for expanding one turn's write scope.
+
+    The callback receives the resolved target. Model text cannot install or
+    widen it; a host approval must return a containing realpath root.
+    """
+    token = _write_access_requester_var.set(request_access)
+    try:
+        yield
+    finally:
+        _write_access_requester_var.reset(token)
 
 
 # Host resource ceilings are callbacks bound per request; no model argument
@@ -319,6 +334,10 @@ class ReadAccessDenied(SandboxError):
     """A host refused or could not obtain additional read authority."""
 
 
+class WriteAccessDenied(SandboxError):
+    """A host refused or could not obtain additional write authority."""
+
+
 def _resolve_under(root: Path, path: str) -> Path:
     """Resolve `path` relative to `root` and verify the result lives inside
     `root`. Rejects absolute paths, `..` escapes, and symlinks that point
@@ -381,6 +400,21 @@ def _resolve_absolute_write(p: Path) -> Path:
             if "credentials" in full.relative_to(root).parts:
                 break
             return full
+    from jaeger_os.core.safety.file_safety import is_sensitive_path
+    sensitive = is_sensitive_path(full)
+    if sensitive:
+        raise SandboxError(f"refused — {sensitive}")
+    requester = _write_access_requester_var.get()
+    if callable(requester):
+        granted = requester(full)
+        approved_root = Path(os.path.realpath(str(granted))) if granted else None
+        if approved_root is not None and path_within(full, (approved_root,)):
+            return full
+        raise WriteAccessDenied(
+            f"local write access denied for {full}; this decision is definitive "
+            "until the owner changes the session's file authority. Do not retry "
+            "the path or seek another tool to bypass it."
+        )
     raise SandboxError(
         f"{str(p)!r} is outside the writable roots ("
         + ", ".join(str(r) for r in roots)

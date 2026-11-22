@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from jaeger_ai.core.gateway import session_hygiene
@@ -54,3 +55,13 @@ def test_agent_turn_does_not_infer_toolsets_or_auto_inject_skills():
     source = inspect.getsource(JaegerAgent.run_turn)
     assert "infer_toolsets" not in source
     assert "_auto_route_skill" not in source
+
+
+def test_agent_policy_prefers_semantic_browser_for_websites():
+    prompt = (
+        Path(__file__).resolve().parents[4]
+        / "packages/jaeger-agent/jaeger_agent/prompts/agent_system_prompt.md"
+    ).read_text()
+    assert "Websites — semantic browser first" in prompt
+    assert "use the DOM-aware `browser` tool" in prompt
+    assert "Use `computer_use` for native applications" in prompt
