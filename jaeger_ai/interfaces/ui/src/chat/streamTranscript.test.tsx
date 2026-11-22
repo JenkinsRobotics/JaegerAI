@@ -7,11 +7,11 @@ import type {ChatPart,ChatTurn} from './host';
 import {applyPart} from './host';
 import {mapEvent} from './eventMap';
 const tool=(id:string):ChatPart=>({kind:'toolInvocation',callId:id,toolName:'shell',input:{command:'npm test'},state:'completed',output:'2 tests passed'});
-it('keeps commentary and tool steps in chronological order inside one work disclosure after replay',()=>{
+it('keeps commentary and tool steps as a chronological Codex-style transcript',()=>{
  const parts:ChatPart[]=[{kind:'markdownContent',text:'Inspecting the app'},tool('a'),tool('b'),{kind:'markdownContent',text:'Found the cause'},tool('c'),{kind:'confirmation',callId:'c',title:'Approve',message:'Continue?'},{kind:'markdownContent',text:'Done'}];
  for(const state of ['pending','complete'] as const){
   const rows=segments(parts,state);
-  expect(rows.map(r=>'bubble'in r?'text':'activity'in r?'tools':'card'in r?'card':'marker')).toEqual(['tools','card','text']);
+  expect(rows.map(r=>'bubble'in r?'text':'activity'in r?'tools':'card'in r?'card':'marker')).toEqual(['text','tools','text','tools','card','text']);
   expect(rows.flatMap(r=>'bubble'in r?r.bubble:'activity'in r?r.activity:'card'in r?[r.card]:'diagnostic'in r?r.diagnostic:['guidance' in r?r.guidance:r.marker])).toEqual(parts);
  }
 });
@@ -31,8 +31,8 @@ it('reconciles live provisional text into commentary and one explicit final resu
  ]);
  expect(parts.find(p=>p.kind==='toolInvocation')).toMatchObject({summary:'Read package.json',state:'completed'});
  const rows=segments(parts,'complete');
- expect(rows.map(row=>'bubble'in row?'text':'activity'in row?'activity':'other')).toEqual(['activity','text']);
- expect('activity' in rows[0] && rows[0].activity.some(p=>p.kind==='markdownContent' && p.text==='I’ll inspect it.')).toBe(true);
+ expect(rows.map(row=>'bubble'in row?'text':'activity'in row?'activity':'other')).toEqual(['text','activity','text']);
+ expect('bubble' in rows[0] && rows[0].bubble.some(p=>p.kind==='markdownContent' && p.text==='I’ll inspect it.')).toBe(true);
 });
 it('expands grouped activity and the retained tool result without hiding commentary',()=>{
  render(<ActivityFold parts={[tool('a')]} live={false} links={{onCopy:()=>{},onOpen:()=>{}}} style={STREAM_STYLES.instant}/>);
@@ -85,5 +85,5 @@ it('renders repeated steering messages in order and deduplicates by steering ide
   parts=mapped.parts.reduce(applyPart,parts);
  }
  parts=applyPart(parts,{kind:'markdownContent',text:'Done',role:'final'});
- const rows=segments(parts,'complete');expect(rows.map(row=>'guidance' in row?row.guidance.steeringId:'activity' in row?'work':'assistant')).toEqual(['one','two','work','assistant']);
+ const rows=segments(parts,'complete');expect(rows.map(row=>'guidance' in row?row.guidance.steeringId:'activity' in row?'work':'assistant')).toEqual(['assistant','one','two','assistant']);
 });

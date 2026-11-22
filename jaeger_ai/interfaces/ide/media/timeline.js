@@ -40,14 +40,13 @@
   // Shared presentation contract used by the IDE panel and browser/Mac chat.
   // Only structured work boundaries reclassify earlier text; never inspect prose.
   function partitionTurn(items) {
-    const workKinds = new Set(['reasoning', 'tool', 'progress', 'checkpoint', 'plan', 'commentary']);
-    let boundary = -1;
-    items.forEach((item, index) => {
-      if (['tool', 'progress', 'checkpoint'].includes(item.kind)) boundary = index;
-    });
+    // Operator-facing commentary remains in the chronological transcript.
+    // Reducers already reclassify pre-tool answer text at the real boundary;
+    // presentation must not hide it merely because a tool followed it.
+    const workKinds = new Set(['reasoning', 'tool', 'progress', 'checkpoint', 'plan']);
     const work = [], visible = [];
     items.forEach((item, index) => {
-      (workKinds.has(item.kind) || (item.kind === 'answer' && index < boundary) ? work : visible).push(item);
+      (workKinds.has(item.kind) ? work : visible).push(item);
     });
     return { work, visible };
   }

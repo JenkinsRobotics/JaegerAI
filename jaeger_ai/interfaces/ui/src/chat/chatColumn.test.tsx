@@ -8,18 +8,19 @@ const tool = (callId: string, toolName: string, state: "completed" | "executing"
 const turn = (parts: ChatPart[], state: ChatTurn["state"] = "pending"): ChatTurn => ({ turnId: "t1", message: "hi", parts, state });
 
 describe("chat column", () => {
-  it("keeps reasoning, commentary, and tool steps chronologically inside one work block above the answer", () => {
+  it("keeps commentary inline between chronological work rows and the final answer", () => {
     const parts: ChatPart[] = [
-      { kind: "thinking", text: "plan" }, tool("a", "shell"), { kind: "markdownContent", text: "Looking" }, tool("b", "read_file"), tool("c", "bash"),
+      { kind: "thinking", text: "plan" }, tool("a", "shell"), { kind: "markdownContent", text: "Looking", role: "commentary" }, tool("b", "read_file"), tool("c", "bash"),
       { kind: "progress", message: "Checking" }, { kind: "markdownContent", text: "done" },
     ];
     const segs = segments(parts, "complete");
-    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "bubble"]);
+    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "bubble", "activity", "bubble"]);
     expect("activity" in segs[0] && segs[0].activity.map(p => p.kind)).toEqual([
-      "thinking", "toolInvocation", "markdownContent", "toolInvocation", "toolInvocation", "progress",
+      "thinking", "toolInvocation",
     ]);
-    expect("activity" in segs[0] && segs[0].activity.filter(p => p.kind === "toolInvocation").map(t => t.callId)).toEqual(["a", "b", "c"]);
-    expect(segs[1]).toEqual({ bubble: [{ kind: "markdownContent", text: "done" }] });
+    expect(segs[1]).toEqual({ bubble: [{ kind: "markdownContent", text: "Looking", role: "commentary" }] });
+    expect("activity" in segs[2] && segs[2].activity.filter(p => p.kind === "toolInvocation").map(t => t.callId)).toEqual(["b", "c"]);
+    expect(segs[3]).toEqual({ bubble: [{ kind: "markdownContent", text: "done" }] });
     // The same grouping is available while streaming and after completion.
     expect(segments(parts, "pending")).toEqual(segs);
     // A tool left running in an ended turn reads as stopped.
