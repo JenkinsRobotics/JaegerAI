@@ -23,7 +23,7 @@ export type ChatPart =
   | { kind: "markdownContent"; text: string; role?: AssistantContentRole; itemId?: string }
   /** A session-bound file, usually a generated or uploaded image, rendered in the bubble. */
   | { kind: "attachment"; attachmentId: string; name: string; mime: string; size?: number; sha256?: string }
-  | { kind: "thinking"; text: string; durationMs?: number }
+  | { kind: "thinking"; text: string; durationMs?: number; itemId?: string }
   | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown; summary?: string; elapsedS?: number }
   | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny"; reviewerVerdict?: string; reviewerReason?: string }
   | { kind: "progress"; message: string }
@@ -218,22 +218,38 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
   if (part.kind === "toolInvocation") {
     parts = parts.map(p => p.kind === "markdownContent" && (p.role ?? "provisional") === "provisional" ? {...p, role:"commentary" as const} : p);
   }
-  const last = parts[parts.length - 1];
-  if (part.kind === "markdownContent" && last?.kind === "markdownContent" &&
-      (part.role ?? "provisional") === (last.role ?? "provisional") && (part.itemId ?? "") === (last.itemId ?? "")) {
-    return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text }];
+  if (part.kind === "markdownContent") {
+    // Transport frames are not visual blocks. An explicit semantic item keeps
+    // accumulating even when reasoning/status frames arrive between tokens.
+    // Providers without item ids may bridge reasoning only; a tool/progress or
+    // another text item is a real commentary boundary.
+    const explicit = part.itemId
+      ? parts.findIndex(p => p.kind === "markdownContent" && p.itemId === part.itemId && (p.role ?? "provisional") === (part.role ?? "provisional"))
+      : -1;
+    let implicit = -1;
+    if (explicit < 0 && !part.itemId) {
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const candidate = parts[i];
+        if (candidate.kind === "thinking") continue;
+        if (candidate.kind === "markdownContent" && !candidate.itemId && (candidate.role ?? "provisional") === (part.role ?? "provisional")) implicit = i;
+        break;
+      }
+    }
+    const index = explicit >= 0 ? explicit : implicit;
+    if (index >= 0) return parts.map((p, i) => i === index && p.kind === "markdownContent" ? { ...p, ...part, text: p.text + part.text } : p);
   }
   if (part.kind === "thinking") {
     // A duration-only close belongs on the open reasoning run, even if a tool
     // arrived first; never start a new empty "Thought for Ns" pill.
     if (!part.text && part.durationMs != null) {
-      const open = [...parts].map((p, i) => p.kind === "thinking" && p.durationMs == null ? i : -1).filter(i => i >= 0).at(-1);
+      const open = [...parts].map((p, i) => p.kind === "thinking" && p.durationMs == null && (!part.itemId || p.itemId === part.itemId) ? i : -1).filter(i => i >= 0).at(-1);
       if (open == null) return parts;
       return parts.map((p, i) => i === open && p.kind === "thinking" ? { ...p, durationMs: part.durationMs } : p);
     }
-    if (last?.kind === "thinking" && last.durationMs == null) {
-      return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];
-    }
+    const open = part.itemId
+      ? parts.findIndex(p => p.kind === "thinking" && p.itemId === part.itemId && p.durationMs == null)
+      : [...parts].map((p, i) => p.kind === "thinking" && !p.itemId && p.durationMs == null ? i : -1).filter(i => i >= 0).at(-1) ?? -1;
+    if (open >= 0) return parts.map((p, i) => i === open && p.kind === "thinking" ? { ...p, ...part, text: p.text + part.text } : p);
   }
   if (part.kind === "attachment") {
     const existing = parts.findIndex(p => p.kind === "attachment" && p.attachmentId === part.attachmentId);
