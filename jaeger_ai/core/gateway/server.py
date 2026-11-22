@@ -6719,31 +6719,6 @@ class JaegerGatewayApp:
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
                 return
 
-            from jaeger_ai.core.gateway.turn_audit import (
-                is_previous_turn_audit, previous_turn_audit,
-            )
-            if is_previous_turn_audit(request_text):
-                response_text = previous_turn_audit(self.store, session_id, rid)
-                if timing is not None:
-                    timing.turn_finish_ms = timing.now()
-                result = {
-                    "output": response_text,
-                    "status": "completed",
-                    "backend": "gateway_receipt_audit",
-                    "model": None,
-                    "turn_id": turn_id,
-                    "execution_mode": "read_only",
-                    "capabilities": {"native_tools": False, "native_memory": False},
-                    "timing": timing.snapshot() if timing is not None else None,
-                    **agent_fields,
-                }
-                self._present(session_id, "done", intent="conversation", status="completed")
-                self._persist_terminal(
-                    rid, session_id, "completed", result,
-                    assistant_text=response_text, record_entity_event=False,
-                )
-                return
-
             if agent is not None and (getattr(agent, 'metadata', None) or {}).get('knowledge_documents'):
                 from jaeger_ai.features.knowledge_library.agent_context import materialize
                 knowledge = materialize(agent, actor=(execution or {}).get('caller'))
