@@ -362,6 +362,9 @@ class Droid:
         if not device:
             current = coreaudio.device_name(coreaudio.default_device(True)) or "unknown"
             raise RuntimeError(f"No real speaker is available (default output is {current})")
+        input_device, input_name, input_note = coreaudio.pick_input(self.cfg["microphone"])
+        if ears and not input_device:
+            raise RuntimeError(input_note or "No microphone is available")
         candidates = []
         seen = set()
         for row in [{"id": device, "name": name, "note": note}, *coreaudio.real_outputs()]:
@@ -373,13 +376,15 @@ class Droid:
         for row in candidates:
             audio = DuplexAudio(self._mic, listen=ears)
             try:
-                audio.start(row["id"])
+                audio.start(row["id"], input_device if ears else 0)
                 self.audio = audio
                 if row["id"] != device:
                     fallback = f"Using {row['name']} because audio would not start on {name}"
                 else:
                     fallback = note or None
-                self.set(speaker=row["name"], audio_note=fallback)
+                notes = [value for value in (fallback, input_note or None) if value]
+                self.set(speaker=row["name"], microphone=input_name or self.cfg["microphone"],
+                         audio_note="; ".join(notes) or None)
                 return
             except Exception as exc:
                 try:
