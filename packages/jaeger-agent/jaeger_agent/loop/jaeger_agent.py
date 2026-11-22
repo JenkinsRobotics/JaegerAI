@@ -950,9 +950,10 @@ class JaegerAgent:
             self.callbacks.on_step(iteration, assistant_msg)
 
             if not tool_calls:
-                # A response with no typed tool calls is the model's final
-                # answer. Execution authority comes only from structured tool
-                # calls; prose is never reinterpreted as permission to act.
+                # A response with no provider-native or strictly repaired tool
+                # calls is final. Ordinary prose is never treated as a call;
+                # the allow-listed repair grammar above exists for providers
+                # that serialize real calls into their text channel.
                 return self._apply_mutation_footer(final_text)
 
             # 5a: skip-final short-circuit. When the FIRST iteration

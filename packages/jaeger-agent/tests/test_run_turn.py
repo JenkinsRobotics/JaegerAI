@@ -89,7 +89,7 @@ def test_no_tool_calls_returns_assistant_text_in_one_iteration():
     assert len(agent.messages) == 2  # user + assistant
 
 
-def test_final_prose_never_becomes_execution_authority():
+def test_ordinary_final_prose_never_becomes_execution_authority():
     executed: list[str] = []
 
     @register_tool("write_file", "Write.", _SmallArgs)

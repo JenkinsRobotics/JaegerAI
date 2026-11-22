@@ -94,7 +94,7 @@ coined in the source are kept as-is rather than re-branded.
 | --- | --- | --- | ---: |
 | **The Soft Loop, Hard Boundary Runner** | The four-station turn architecture: a deliberately unconstrained interior with all the discipline at the exits | `loop/` | §2 |
 | ├ **Station 1 — The Fluid Loop** | Research ⇄ execute in one context, pivots allowed, never denied mid-flow | `loop/jaeger_agent.py` | §2 |
-| ├ **Station 2 — Typed Completion Boundary** | Continues only on structured tool calls; prose cannot authorize execution | `loop/jaeger_agent.py` | §2 |
+| ├ **Station 2 — Typed Completion Boundary** | Continues only on provider-native or strictly repaired allow-listed tool calls; ordinary prose cannot authorize execution | `loop/jaeger_agent.py` | §2 |
 | ├ **Station 3 — The Persona Pass** | One bounded clean-context call that restyles the final answer | `prompts/persona_filter.py` | §6 |
 | └ **Station 4 — The Reflect Journal** | Post-turn journaling after non-trivial tasks | `prompts/reflection.py` | §2 |
 | **The Loop Backstop** | Identical-call, semantic-failure and runaway detection inside Station 1 | `loop/jaeger_agent.py` | §2 |
