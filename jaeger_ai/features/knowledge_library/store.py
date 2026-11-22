@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -11,6 +12,10 @@ from .managed import ManagedDocuments
 TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".rst", ".org", ".json", ".yaml", ".yml", ".toml", ".csv"})
 MAX_FILE_BYTES = 2_000_000
 MAX_FILES = 20_000
+IGNORED_DIR_NAMES = frozenset({
+    "__pycache__", "node_modules", "vendor", ".venv", "venv", "env",
+    "dist", "build", "target", ".cache", ".git", ".hg", ".svn",
+})
 
 
 class LibraryError(ValueError):
@@ -97,74 +102,92 @@ class KnowledgeLibrary(ManagedDocuments):
         if collection['kind'] == 'managed':
             raise LibraryError('Managed documents are already indexed; no filesystem import applies')
         root = Path(collection["root"]).resolve(strict=True)
-        indexed = unchanged = skipped = 0
+        indexed = unchanged = skipped = scanned = pruned_dirs = 0
         seen: set[str] = set()
-        for candidate in root.rglob("*"):
-            if len(seen) >= MAX_FILES:
+        truncated = False
+        candidates = os.walk(root, topdown=True, followlinks=False)
+        for directory, directories, filenames in candidates:
+            allowed = [name for name in directories
+                       if not name.startswith(".") and name not in IGNORED_DIR_NAMES]
+            pruned_dirs += len(directories) - len(allowed)
+            directories[:] = sorted(allowed)
+            for name in sorted(filenames):
+                if len(seen) >= MAX_FILES:
+                    truncated = True
+                    break
+                if name.startswith("."):
+                    continue
+                candidate = Path(directory) / name
+                scanned += 1
+                if not candidate.is_file():
+                    continue
+                try:
+                    resolved = candidate.resolve(strict=True)
+                    relative = str(resolved.relative_to(root))
+                    size = resolved.stat().st_size
+                except (OSError, ValueError):
+                    skipped += 1
+                    continue
+                if resolved.suffix.lower() not in TEXT_SUFFIXES or size > MAX_FILE_BYTES:
+                    skipped += 1
+                    continue
+                seen.add(relative)
+                try:
+                    raw = resolved.read_bytes()
+                    content = raw.decode("utf-8")
+                except (OSError, UnicodeDecodeError):
+                    skipped += 1
+                    continue
+                digest = hashlib.sha256(raw).hexdigest()
+                existing = self.conn.execute(
+                    "SELECT digest FROM library_documents WHERE collection_id=? AND relative_path=?",
+                    (collection_id, relative),
+                ).fetchone()
+                if existing and existing["digest"] == digest:
+                    unchanged += 1
+                    continue
+                doc_id = hashlib.sha256(f"{collection_id}:{relative}".encode()).hexdigest()[:24]
+                with self.conn:
+                    self.conn.execute(
+                        "INSERT INTO library_documents VALUES(?,?,?,?,?,?,?,?) "
+                        "ON CONFLICT(collection_id,relative_path) DO UPDATE SET "
+                        "title=excluded.title,content=excluded.content,digest=excluded.digest,"
+                        "modified_at=excluded.modified_at,indexed_at=excluded.indexed_at",
+                        (
+                            doc_id,
+                            collection_id,
+                            relative,
+                            resolved.stem,
+                            content,
+                            digest,
+                            resolved.stat().st_mtime,
+                            time.time(),
+                        ),
+                    )
+                indexed += 1
+            if truncated:
                 break
-            if candidate.name.startswith(".") or not candidate.is_file():
-                continue
-            try:
-                resolved = candidate.resolve(strict=True)
-                relative = str(resolved.relative_to(root))
-                size = resolved.stat().st_size
-            except (OSError, ValueError):
-                skipped += 1
-                continue
-            if resolved.suffix.lower() not in TEXT_SUFFIXES or size > MAX_FILE_BYTES:
-                skipped += 1
-                continue
-            seen.add(relative)
-            try:
-                raw = resolved.read_bytes()
-                content = raw.decode("utf-8")
-            except (OSError, UnicodeDecodeError):
-                skipped += 1
-                continue
-            digest = hashlib.sha256(raw).hexdigest()
-            existing = self.conn.execute(
-                "SELECT digest FROM library_documents WHERE collection_id=? AND relative_path=?",
-                (collection_id, relative),
-            ).fetchone()
-            if existing and existing["digest"] == digest:
-                unchanged += 1
-                continue
-            doc_id = hashlib.sha256(f"{collection_id}:{relative}".encode()).hexdigest()[:24]
+        removed: list[str] = []
+        if not truncated:
             with self.conn:
-                self.conn.execute(
-                    "INSERT INTO library_documents VALUES(?,?,?,?,?,?,?,?) "
-                    "ON CONFLICT(collection_id,relative_path) DO UPDATE SET "
-                    "title=excluded.title,content=excluded.content,digest=excluded.digest,"
-                    "modified_at=excluded.modified_at,indexed_at=excluded.indexed_at",
-                    (
-                        doc_id,
-                        collection_id,
-                        relative,
-                        resolved.stem,
-                        content,
-                        digest,
-                        resolved.stat().st_mtime,
-                        time.time(),
-                    ),
+                stale = self.conn.execute(
+                    "SELECT relative_path FROM library_documents WHERE collection_id=?",
+                    (collection_id,),
+                ).fetchall()
+                removed = [row[0] for row in stale if row[0] not in seen]
+                self.conn.executemany(
+                    "DELETE FROM library_documents WHERE collection_id=? AND relative_path=?",
+                    [(collection_id, path) for path in removed],
                 )
-            indexed += 1
-        with self.conn:
-            stale = self.conn.execute(
-                "SELECT relative_path FROM library_documents WHERE collection_id=?",
-                (collection_id,),
-            ).fetchall()
-            removed = [row[0] for row in stale if row[0] not in seen]
-            self.conn.executemany(
-                "DELETE FROM library_documents WHERE collection_id=? AND relative_path=?",
-                [(collection_id, path) for path in removed],
-            )
         return {
             "collection_id": collection_id,
             "indexed": indexed,
             "unchanged": unchanged,
             "skipped": skipped,
             "removed": len(removed),
-            "truncated": len(seen) >= MAX_FILES,
+            "truncated": truncated,
+            "scanned": scanned,
+            "pruned_directories": pruned_dirs,
         }
 
     def search(self, query: str, limit: int = 20) -> list[dict]:
