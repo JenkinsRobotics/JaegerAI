@@ -105,6 +105,34 @@ def test_full_fragment_required_escaping_unknown_and_budget_status():
     assert observe_references(('opaque',),(ref,))[0]['state'] == 'budget_dropped'
 
 
+def test_explicit_background_allowance_keeps_history_and_small_memories(tmp_path):
+    from jaeger_ai.core.entity.cognition_router import with_background
+    compiler = ContextCompiler()
+    items = compiler.rank(compiler.select('repair', claims=[
+        {'claim_id': 'clm_111111111111', 'value': 'oversized ' * 3000, 'confidence': 1.0},
+        {'claim_id': 'clm_222222222222', 'value': 'relevant small memory', 'confidence': 0.8},
+    ]))
+    history = compiler.project_conversation_history([
+        {'role': 'user', 'content': 'prior request ' * 400},
+        {'role': 'assistant', 'content': 'The prior request completed.'},
+    ], max_chars=7000)
+    refs = []
+    prompt = with_background('current repair', {
+        'conversation_history': history,
+        'context_items': items,
+        'prompt_context_max_chars': 9000,
+    }, references=refs)
+    assert 'The prior request completed.' in prompt
+    assert 'relevant small memory' in prompt
+    assert 'oversized ' not in prompt
+    assert {r.source_id: r.selected for r in refs} == {
+        'clm_111111111111': False, 'clm_222222222222': True,
+    }
+    background, _, request = prompt.rpartition('Current request — act on this and nothing else:\n')
+    assert len(background.rstrip()) <= 9000
+    assert request == 'current repair'
+
+
 async def _bounded_request(store, rid):
     import asyncio
     for _ in range(100):

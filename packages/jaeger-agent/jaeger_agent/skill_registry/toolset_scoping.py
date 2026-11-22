@@ -271,7 +271,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "human_needs_propose_opportunity", "human_needs_record_outcome",
     }),
     "knowledge_library": frozenset({
-        "library_add", "library_index", "library_search", "library_read",
+        "library_add", "library_collections", "library_index", "library_search", "library_read",
+        "library_sync_reminders", "library_sync_mail", "library_sync_apple_notes",
         "knowledge_record_claim", "knowledge_query",
         "knowledge_contradictions", "knowledge_verify_claim",
     }),

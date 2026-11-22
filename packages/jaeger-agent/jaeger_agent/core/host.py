@@ -19,10 +19,12 @@ def bind_services(services: dict[str, Any]) -> None:
     _services.update(services)
 
 
-def service(name: str) -> Any:
+def service(name: str, *, required: bool = True) -> Any:
     """Resolve an explicitly injected host service, or fail at the feature edge."""
     factory = _services.get(name)
     if factory is None:
+        if not required:
+            return None
         raise ImportError(f"Host service {name!r} is not bound")
     return factory()
 
@@ -49,4 +51,23 @@ def host_required(module: str, symbol: str = "") -> Any:
     return _unavailable
 
 
-__all__ = ["bind_services", "service", "host_required"]
+def check_file_access(path: Any, *, write: bool = False) -> None:
+    """Apply product-owned resource restrictions without importing the product."""
+    authority = service("filesystem_authority", required=False)
+    if authority is not None:
+        authority.check_path(path, write=write)
+
+
+def confine_process(command: Any) -> list[str]:
+    """Let the host install mandatory OS restrictions before a tool spawns."""
+    authority = service("filesystem_authority", required=False)
+    return list(command) if authority is None else authority.confine_command(command)
+
+
+def file_access_guard() -> Any:
+    """Snapshot host restrictions once for a bounded directory traversal."""
+    authority = service("filesystem_authority", required=False)
+    return (lambda path: None) if authority is None else authority.path_guard()
+
+
+__all__ = ["bind_services", "service", "host_required", "check_file_access", "confine_process", "file_access_guard"]

@@ -153,10 +153,10 @@ def with_background(request: str, context: Mapping[str, Any], *, lessons: str = 
 
     raw_context_limit = context.get("prompt_context_max_chars")
     try:
-        context_limit = max(
-            0,
-            min(4_000, int(4_000 if raw_context_limit is None else raw_context_limit)),
-        )
+        # The owner has already reserved space for the serving model's tools,
+        # instructions and answer. A second fixed cap here silently discarded
+        # history and memories even when the admitted budget had room for them.
+        context_limit = max(0, int(4_000 if raw_context_limit is None else raw_context_limit))
     except (TypeError, ValueError):
         context_limit = 4_000
     parts: list[str] = []

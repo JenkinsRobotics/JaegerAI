@@ -92,8 +92,9 @@ class PtySession:
         master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 200, 0, 0))
         try:
+            from jaeger_agent.core.host import confine_process
             self.proc = subprocess.Popen(
-                [sys.executable, "-S", "-E", "-c", _LAUNCHER, command],
+                confine_process([sys.executable, "-S", "-E", "-c", _LAUNCHER, command]),
                 stdin=slave, stdout=slave, stderr=slave,
                 cwd=cwd, env=env, close_fds=True,
             )

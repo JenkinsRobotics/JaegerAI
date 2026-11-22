@@ -25,6 +25,7 @@ export function isDebugThinking(text?: string): boolean {
 
 /** Plain-language headline for a failed turn; the raw text stays under Details. */
 const FRIENDLY_ERRORS: Array<[RegExp, string]> = [
+  [/thinking_exhausted/i, "The model used its output budget on reasoning before it could continue. Try a lower thinking level or a different model."],
   [/took too long|timed? ?out|no progress for/i, "This took too long, so Jaeger stopped it."],
   [/permanently BLOCKED|turn_failed/i, "Jaeger stopped after repeated failures on this request."],
   [/local-only content|on-device model/i, "This message has private content only a local model may see. Pick a local model or remove the private part."],

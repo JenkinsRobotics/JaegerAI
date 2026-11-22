@@ -80,6 +80,9 @@ run_backend() {
   echo "=================================================="
   echo "[back-end:gateway] Running Gateway durability, SQLite sessions & event store..."
   "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_gateway_durability.py -q --no-header
+  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
+    dev/tests/jaeger_ai/features/webui/test_droid_proxy.py \
+    dev/tests/jaeger_ai/features/knowledge_library/
   echo "[+] Gateway session durability tests passed."
   echo "[back-end:tiers] Running 3-Tier Interaction Contract (Chat, Agent, Jaeger)..."
   "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
@@ -95,6 +98,9 @@ run_backend() {
     dev/tests/jaeger_ai/core/test_code_bridge.py \
     dev/tests/jaeger_ai/core/test_autonomous_runner.py \
     dev/tests/jaeger_ai/core/test_destructive_action_gate.py \
+    dev/tests/jaeger_ai/core/test_framework_connectors.py \
+    dev/tests/jaeger_ai/core/test_framework_filesystem_authority.py \
+    dev/tests/jaeger_ai/core/test_linux_filesystem_authority.py \
     dev/tests/jaeger_ai/core/test_workspace_dir.py \
     dev/tests/jaeger_ai/personality/test_character_binding.py \
     dev/tests/jaeger_ai/plugins/test_ai_gen.py \
@@ -110,6 +116,9 @@ run_backend() {
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
     dev/tests/jaeger_ai/core/test_model_request_policy.py \
     dev/tests/jaeger_ai/core/test_context_item_provenance.py \
+    dev/tests/jaeger_ai/core/test_context_compiler.py \
+    dev/tests/jaeger_ai/core/test_sessions_contract.py \
+    dev/tests/jaeger_ai/core/test_gateway_completion_evidence.py \
     dev/tests/jaeger_ai/agent/test_runtime_bridge.py \
     dev/tests/jaeger_ai/core/test_gateway_turn_parts.py \
     dev/tests/jaeger_ai/core/test_gateway_session_stream_cards.py \

@@ -250,18 +250,20 @@ def _serve_droid(handler, method: str, action: str) -> bool:
             self.sock.connect(sock_path)
 
     body = json.dumps(read_body(handler) or {}).encode() if method == "POST" else None
+    conn = _Unix("droid", timeout=15)
     try:
-        conn = _Unix("droid", timeout=15)
         conn.request(method, "/" + action, body=body, headers={"Content-Type": "application/json"})
         resp = conn.getresponse()
+        status = resp.status
         ctype = resp.getheader("Content-Type") or "application/json"
         payload = resp.read()
-        conn.close()
-    except (OSError, ValueError):
+    except (OSError, ValueError, http.client.HTTPException):
         j(handler, {"state": "unavailable", "awake": False,
                     "error": "Droid service is not running (Jaeger Droid menu-bar app)"},
           status=200 if action in ("status", "transcript") else 503)
         return True
+    finally:
+        conn.close()
     handler.send_response(status)
     handler.send_header("Content-Type", ctype)
     handler.send_header("Cache-Control", "no-store")

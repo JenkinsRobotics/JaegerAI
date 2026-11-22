@@ -38,19 +38,30 @@ LOCAL_PROVIDERS = frozenset({"ollama", "lmstudio", "lm_studio", "llamacpp", "lla
 
 
 def background_budget_tokens(cfg: Any, *, model=None, provider=None) -> int:
-    """Bound optional recall before it becomes the protected user message.
+    """Reserve a bounded share of the admitted window for optional recall.
 
-    The small on-device lane must leave room for identity, directives, tool
-    schemas and the answer. The complete memories remain available via tools.
+    Unknown request overrides must not inherit another model's large window.
+    This is a recall allowance, not a limit on the model's context window;
+    the normal context guard still budgets the complete prompt and tool results.
     """
     from jaeger_ai.core.models.request_policy import split_routed_model_id
     lane, name = split_routed_model_id(model or '')
-    ext = cfg.external_model
-    owner = str(provider or lane or (ext.provider if ext.enabled else 'local')).lower()
-    name = str(name or (ext.model if ext.enabled else 'local')).lower()
-    local = owner in (LOCAL_PROVIDERS | {'ollama-local', 'huggingface', 'hf', 'in-process'})
-    # Enough for a few relevant memories; the rest stays reachable via tools.
-    return 1024
+    ext = getattr(cfg, 'external_model', None)
+    external = bool(getattr(ext, 'enabled', False))
+    configured_owner = str(getattr(ext, 'provider', '') if external else 'local').lower()
+    configured_name = str(getattr(ext, 'model', '') if external else 'local')
+    if ((provider or lane) and str(provider or lane).lower() != configured_owner
+            or name and name != configured_name):
+        return 1024
+    serving = ext if external else getattr(cfg, 'model', None)
+    try:
+        window = int(getattr(serving, 'ctx', 0) or 0)
+        completion = max(0, int(getattr(serving, 'max_tokens', 0) or 0))
+    except (TypeError, ValueError):
+        return 1024
+    if window <= 0:
+        return 1024
+    return min(8192, max(0, window - completion) // 8)
 
 
 def is_local_client(client: Any) -> bool:

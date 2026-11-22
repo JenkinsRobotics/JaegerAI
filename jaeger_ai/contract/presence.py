@@ -24,6 +24,6 @@ DISPLAY: Final = {
 
 #: Terminal task states mapped to the activity that reports them.
 ACTIVITY_FOR_TASK_STATE: Final = {
-    "completed_verified": "done", "needs_owner": "needs_owner", "blocked": "blocked",
+    "completed": "done", "completed_verified": "done", "needs_owner": "needs_owner", "blocked": "blocked",
     "failed": "failed", "cancelled": "stopped", "paused": "waiting",
 }

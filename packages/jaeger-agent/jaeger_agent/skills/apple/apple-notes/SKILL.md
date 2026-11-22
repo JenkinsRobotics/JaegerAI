@@ -41,7 +41,7 @@ terminal(command="memo notes")
 terminal(command="memo notes -s \"query\"")
 terminal(command="memo notes -f \"Folder Name\"")
 terminal(command="memo notes -a \"Title\"")
-terminal(command="memo notes --json")
+terminal(command="memo notes")
 ```
 
 ## SOP
@@ -52,7 +52,11 @@ terminal(command="memo notes --json")
 3. Create with `memo notes -a "Title"` after confirming the title.
    Interactive `-a` / `-e` / `-d` needs a real TTY — prefer flagged
    non-interactive forms from this skill.
-4. Agent-only scratch → `memory(action="remember", ...)`, not Notes.
+4. The installed memo CLI has no JSON output. Never call `memo notes --json`.
+   Use `library_sync_apple_notes` when the user asks to build searchable
+   knowledge from Notes; it pages the supported list/view interface and keeps
+   durable source provenance.
+5. Agent-only scratch → `memory(action="remember", ...)`, not Notes.
    Markdown vault → `obsidian`.
 
 ## ERROR HATCH

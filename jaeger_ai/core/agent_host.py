@@ -11,6 +11,7 @@ def bind_agent_host() -> None:
 
     modules = {
         "authority": "jaeger_ai.core.entity.authority",
+        "filesystem_authority": "jaeger_ai.core.authority.filesystem",
         "entity_events": "jaeger_ai.core.entity.events",
         "entity_runtime": "jaeger_ai.core.entity.runtime",
         "tool_repair": "jaeger_ai.core.runtime.tool_repair",

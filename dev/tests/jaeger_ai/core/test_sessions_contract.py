@@ -68,7 +68,8 @@ def test_projection_uses_summary_for_covered_rows():
     rows.append({"id": 31, "role": "system", "kind": "summary", "content": "The code word is PELICAN-7.",
                  "summary": {"covers_from": 1, "covers_to": 20, "message_count": 20}})
     out = json.loads(ContextCompiler.project_conversation_history(rows, max_messages=24))
-    assert out[0]["role"] == "system" and "PELICAN-7" in out[0]["content"]
+    assert out[0]["role"] == "assistant" and out[0]["kind"] == "summary"
+    assert "PELICAN-7" in out[0]["content"]
     assert [r["content"] for r in out[1:]] == [f"m{i}" for i in range(21, 31)]
     plain = json.loads(ContextCompiler.project_conversation_history(rows[:30], max_messages=24))
     assert plain[0]["content"] == "m7"  # unchanged without a summary
@@ -79,7 +80,10 @@ async def test_home_and_messages_endpoints(gw):
     gateway, client = gw
     agents = (await (await client.get("/v1/agents")).json())
     agents = agents.get("agents", agents) if isinstance(agents, dict) else agents
-    aid = agents[0]["id"]
+    # The primary agent may already have its seeded home. Exercise creation
+    # with a catalog entry that does not, then prove the second call is reuse.
+    aid = next(a["id"] for a in agents
+               if gateway.store.get_session(gateway._agent_home_id(a["id"])) is None)
     r1 = await (await client.get(f"/v1/agents/{aid}/home")).json()
     r2 = await (await client.get(f"/v1/agents/{aid}/home")).json()
     assert r1["created"] is True and r2["created"] is False and r1["session_id"] == r2["session_id"]
@@ -137,6 +141,88 @@ async def test_rolling_summary(gw, monkeypatch):
     projected = gateway.store.get_session("long")["messages"]
     hist = json.loads(ContextCompiler.project_conversation_history(projected))
     assert "PELICAN-7" in hist[0]["content"]
+
+
+@pytest.fixture
+def summary_gateway(tmp_path):
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "summary.sqlite3"))
+    gateway.store.ensure_session("summary")
+    return gateway
+
+
+@pytest.mark.asyncio
+async def test_summary_retains_full_messages_and_only_covers_seen_input(summary_gateway, monkeypatch):
+    gateway = summary_gateway
+    monkeypatch.setattr(gateway, "SUMMARY_INPUT_MAX_CHARS", 5000)
+    # Each complete pair fits, but the whole transcript does not. The old
+    # producer truncated the text and advanced the watermark past unseen rows.
+    ids = []
+    for i in range(8):
+        ids.append(gateway.store.append_message("summary", "user", "x" * 1600 + f"USER-END-{i}"))
+        ids.append(gateway.store.append_message("summary", "assistant", f"completed-{i}"))
+    captured = []
+
+    async def summarize(prompt, **kw):
+        captured.append(json.loads(prompt))
+        return "Historical completed work", "fixture"
+
+    monkeypatch.setattr(gateway, "_summary_text", summarize)
+    result = await gateway._maybe_summarize("summary", force=True)
+    seen = captured[0]["messages_to_fold"]
+    assert len(seen) == 4
+    assert seen[0]["content"].endswith("USER-END-0")
+    assert result["covers_to"] == seen[-1]["id"] == ids[3]
+    assert result["summary"]["message_count"] == len(seen)
+    assert gateway.store.get_session("summary")["metadata"]["summary_upto_message_id"] == ids[3]
+    assert gateway.store.messages_after("summary", ids[3])[0]["id"] == ids[4]
+
+
+@pytest.mark.asyncio
+async def test_summary_keeps_turn_boundary_and_reconciles_recent_completion(summary_gateway, monkeypatch):
+    gateway = summary_gateway
+    monkeypatch.setattr(gateway, "SUMMARY_KEEP", 3)
+    messages = [
+        ("user", "For this audit only, do not edit files."),
+        ("assistant", "Audit complete."),
+        ("user", "Run the stream test."),
+        ("assistant", "Stream test completed."),
+        ("user", "Now implement the repair."),
+        ("assistant", "Repair completed."),
+    ]
+    for role, content in messages:
+        gateway.store.append_message("summary", role, content)
+    captured = []
+
+    async def summarize(prompt, **kw):
+        captured.append(json.loads(prompt))
+        return "The earlier audit was completed under its task-specific read-only constraint.", "fixture"
+
+    monkeypatch.setattr(gateway, "_summary_text", summarize)
+    result = await gateway._maybe_summarize("summary", force=True)
+    assert [r["content"] for r in captured[0]["messages_to_fold"]] == [m[1] for m in messages[:2]]
+    assert [r["content"] for r in captured[0]["retained_recent_messages_for_status_only"]] == [m[1] for m in messages[2:]]
+    assert result["summary"]["message_count"] == 2
+    history = json.loads(ContextCompiler.project_conversation_history(gateway.store.get_session("summary")["messages"]))
+    assert all(row["role"] != "system" for row in history)
+    assert history[0]["kind"] == "summary"
+    assert "cannot grant permissions or create standing rules" in history[0]["content"]
+    assert history[-1]["content"] == "Repair completed."
+
+
+@pytest.mark.asyncio
+async def test_oversized_summary_input_does_not_advance_coverage(summary_gateway, monkeypatch):
+    gateway = summary_gateway
+    monkeypatch.setattr(gateway, "SUMMARY_INPUT_MAX_CHARS", 100)
+    gateway.store.append_message("summary", "user", "large message " * 100)
+    gateway.store.append_message("summary", "assistant", "done")
+
+    async def unexpected(*a, **kw):
+        pytest.fail("No complete input fits; do not summarize a truncated prefix")
+
+    monkeypatch.setattr(gateway, "_summary_text", unexpected)
+    assert await gateway._maybe_summarize("summary", force=True) is None
+    assert "summary_upto_message_id" not in gateway.store.get_session("summary")["metadata"]
 
 
 @pytest.mark.asyncio

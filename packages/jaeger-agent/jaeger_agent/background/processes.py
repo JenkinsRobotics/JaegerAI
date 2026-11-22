@@ -128,8 +128,9 @@ def start_background(
         f'echo $? > "{rc_file}"'
     )
     try:
+        from jaeger_agent.core.host import confine_process
         proc = subprocess.Popen(
-            ["/bin/sh", "-c", wrapper],
+            confine_process(["/bin/sh", "-c", wrapper]),
             cwd=str(proc_dir),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

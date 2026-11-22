@@ -126,7 +126,9 @@ case "reminders":
     _ = sema.wait(timeout: .now() + 30)
     finish(["ok": true, "lists": listNames, "count": found.count,
             "reminders": found.prefix(300).map { r -> [String: Any] in
-                var d: [String: Any] = ["title": r.title ?? "", "list": r.calendar.title, "completed": r.isCompleted]
+                var d: [String: Any] = ["id": r.calendarItemIdentifier,
+                                        "title": r.title ?? "", "list": r.calendar.title,
+                                        "completed": r.isCompleted, "notes": r.notes ?? ""]
                 if let due = r.dueDateComponents?.date { d["due"] = localOut.string(from: due) }
                 return d
             }])

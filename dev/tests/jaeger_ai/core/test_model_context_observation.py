@@ -68,6 +68,49 @@ def test_unsupported_and_untrusted_shapes_do_not_echo_values():
     assert seen[0]['messages'][0]['text_chars'] == 7
 
 
+@pytest.mark.parametrize('provider_model, expected', [('served-model', 'served-model'), (None, None)])
+def test_owner_stream_reports_provider_identity_not_configured_route(tmp_path, provider_model, expected):
+    store = GatewaySessionStore(tmp_path / 'model-identity.sqlite3')
+    store.ensure_session('owned')
+    store.admit_request('owned', 'hello', request_id='identity-request')
+    gateway = JaegerGatewayApp(store=store)
+    observed = []
+    callbacks, finish = gateway._turn_stream_callbacks(
+        'owned', 'identity-request', model='configured-model', on_model_identity=observed.append)
+
+    class Adapter(ProviderAdapter):
+        name = 'identity-test'
+        def format_messages(self, messages, tools, system): return {'messages': messages}
+        def call(self, formatted, interrupt_event, **kwargs):
+            return {'role': 'assistant', 'content': 'Hello', 'model': provider_model}
+        def parse_response(self, raw): return raw
+        def supports(self, feature): return False
+
+    assert JaegerAgent(adapter=Adapter(), tools=[], callbacks=callbacks).run_turn('hello') == 'Hello'
+    finish()
+    assert observed == [expected]
+    event = next(e for e in store.activity_history('owned')['events'] if e['event'] == 'model.finished')
+    assert event['data'].get('actual_model') == expected
+
+
+def test_last_successful_response_clears_previous_model_identity_when_unreported(tmp_path):
+    store = GatewaySessionStore(tmp_path / 'model-last.sqlite3')
+    store.ensure_session('owned')
+    store.admit_request('owned', 'hello', request_id='identity-request')
+    gateway = JaegerGatewayApp(store=store)
+    observed = []
+    callbacks, finish = gateway._turn_stream_callbacks(
+        'owned', 'identity-request', on_model_identity=observed.append)
+    callbacks.model_call_start()
+    callbacks.model_call_done({'actual_model': 'earlier'})
+    callbacks.model_call_start()
+    callbacks.model_call_done({'failed': 1, 'actual_model': 'failed-fallback'})
+    callbacks.model_call_start()
+    callbacks.model_call_done({'model': 'configured-only'})
+    finish()
+    assert observed == ['earlier', None]
+
+
 @pytest.mark.asyncio
 async def test_model_only_payload_is_observed_before_http_without_secrets(tmp_path, monkeypatch, model_completion):
     store = GatewaySessionStore(tmp_path / 'model-only.sqlite3')

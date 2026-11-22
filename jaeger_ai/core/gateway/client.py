@@ -50,6 +50,7 @@ class TurnResult:
 
     @property
     def ok(self) -> bool:
+        """The request finished without error; not proof of verified task success."""
         return self.status == "completed" and not self.error
 
 

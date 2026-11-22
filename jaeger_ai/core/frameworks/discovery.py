@@ -32,9 +32,9 @@ class Framework:
 
 
 KNOWN: tuple[Framework, ...] = (
-    Framework("claude-code", "Claude Code", (".claude",), sessions=("projects/*/*.jsonl",),
+    Framework("claude-code", "Claude Code", (".claude",), sessions=("projects/*/*.jsonl", "history.jsonl"),
               memory=("CLAUDE.md", "projects/*/memory/*.md"), cli="claude", apps=("Claude.app",), handoff="cli"),
-    Framework("codex", "Codex", (".codex",), sessions=("sessions/**/*.jsonl",),
+    Framework("codex", "Codex", (".codex",), sessions=("sessions/**/*.jsonl", "history.jsonl"),
               memory=("AGENTS.md", "memories/*.md"), cli="codex", apps=("ChatGPT.app",), handoff="cli"),
     Framework("gemini", "Gemini CLI / Antigravity", (".gemini",),
               sessions=("tmp/*/chats/*.jsonl",), memory=("GEMINI.md", "antigravity/knowledge/**/*.md", "antigravity/brain/**/*.md"),
@@ -75,7 +75,9 @@ def matching_files(root: Path, globs: tuple[str, ...], limit: int = 5000) -> lis
     out: list[Path] = []
     for g in globs:
         for p in root.glob(g):
-            if p.is_file() and not p.is_symlink() and not is_denied(p.relative_to(root)):
+            if (p.is_file() and not p.is_symlink()
+                    and p.resolve().is_relative_to(root.resolve())
+                    and not is_denied(p.relative_to(root))):
                 out.append(p)
                 if len(out) >= limit:
                     return out

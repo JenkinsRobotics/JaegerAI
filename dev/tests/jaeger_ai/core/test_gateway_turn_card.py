@@ -53,7 +53,9 @@ def env(tmp_path, monkeypatch):
     runtime = _Runtime(workspace)
     monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: runtime))
     app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "gateway.sqlite3"))
-    app.store.ensure_session("s", workspace=str(workspace))
+    # Card creation is an explicit host admission policy, not inferred from
+    # request prose. Exercise that branch while retaining conversational tests.
+    app.store.ensure_session("s", workspace=str(workspace), metadata={"actionable": True})
     monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: None)
     return SimpleNamespace(app=app, workspace=workspace, runtime=runtime)
 
@@ -84,10 +86,13 @@ def _evidence_for(path):
 
 @pytest.mark.asyncio
 async def test_hello_is_a_conversation_and_creates_no_task(env):
+    env.app.store.update_metadata("s", {"actionable": False})
     row = await _run(env, "hello", "r-hello", worker=lambda prompt, **kw: {"text": "Hello.", "status": "completed"})
 
     assert row["status"] == "completed"
     assert row["result"]["output"] == "Hello."
+    assert row["result"]["status_scope"] == "request_execution"
+    assert row["result"]["verification"]["status"] == "not_performed"
     assert env.app.task_owner.store.list_tasks() == []
     assert "receipt" not in row["result"] and "task_id" not in row["result"]
     assert _states(env) == ["listening", "thinking", "done"]
@@ -117,6 +122,10 @@ async def test_operational_request_becomes_one_verified_task_with_one_receipt(en
     assert result["receipt"]["verification"] == "verified"
     assert result["receipt"]["entity_id"] == "jaeger-entity-test"
     assert result["receipt"]["task_id"] == task.task_id
+    assert result["verification"] == {
+        "status": "verified", "scope": "task_owner_receipt",
+        "receipt_id": result["receipt"]["receipt_id"], "task_id": task.task_id,
+    }
 
     assert _states(env) == ["listening", "thinking", "planning", "working", "verifying", "done"]
     assert len(_events(env, "task.created")) == 1
@@ -128,9 +137,9 @@ async def test_operational_request_becomes_one_verified_task_with_one_receipt(en
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("claim,expected", [
-    # A plain answer the owner cannot check goes to the owner, unverified.
-    ({"text": "Done."}, "needs_owner"),
-    ({"text": "success"}, "needs_owner"),
+    # A finished answer remains completed but is explicitly unverified.
+    ({"text": "Done."}, "completed"),
+    ({"text": "success"}, "completed"),
     # An asserted completion with nothing checkable behind it fails.
     ({"text": "ok", "task_completion": {"ok": True, "success": True, "status": "done"}}, "failed"),
     ({"text": "", "task_completion": {"ok": True, "verification_receipts": []}}, "failed"),
@@ -142,7 +151,8 @@ async def test_a_bare_claim_never_becomes_completed_verified(env, claim, expecte
     assert task.state == TaskState(expected)
     assert row["result"]["task_state"] == expected
     assert row["result"]["receipt"]["verification"] == "unverified"
-    assert _states(env)[-1] == expected
+    assert row["result"]["verification"]["status"] == "not_verified"
+    assert _states(env)[-1] == ("done" if expected == "completed" else expected)
 
 
 @pytest.mark.asyncio
@@ -320,6 +330,7 @@ async def test_an_unverified_turn_records_a_plan_but_never_a_verified_claim(env)
 
 @pytest.mark.asyncio
 async def test_a_conversation_records_no_world_claims(env):
+    env.app.store.update_metadata("s", {"actionable": False})
     await _run(env, "hello", "r-chat", worker=lambda prompt, **kw: {"text": "Hello."})
     assert env.runtime.claims == []
 

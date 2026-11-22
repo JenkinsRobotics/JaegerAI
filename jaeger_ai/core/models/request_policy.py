@@ -285,7 +285,11 @@ def select_request_client(config, layout, *, model=None, provider=None, default_
         # An unrelated provider's output allowance is not this model's
         # configuration. In particular a CLI's 32K setting consumed half
         # a small local window before its first prompt could fit.
-        ext.max_tokens = type(ext).model_fields['max_tokens'].default
+        # Ollama Cloud counts hidden reasoning and the visible answer or tool
+        # call against the same num_predict limit. The local default can run
+        # out during reasoning before producing either.
+        ext.max_tokens = (4096 if selected_lane == "ollama-cloud"
+                          else type(ext).model_fields["max_tokens"].default)
         ext.reasoning_effort = "auto"
         ext.temperature = ext.top_p = None
         ext.verbosity = ext.thinking_budget_tokens = None

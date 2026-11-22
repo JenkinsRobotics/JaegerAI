@@ -210,8 +210,9 @@ def run_interruptible(
     child and raises :class:`ToolInterrupted` carrying the partial output.
     Interrupt latency is therefore bounded by ``poll_interval``.
     """
+    from jaeger_agent.core.host import confine_process
     proc = subprocess.Popen(  # noqa: S603 — argv list, caller-controlled
-        list(cmd),
+        confine_process(cmd),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=text,
