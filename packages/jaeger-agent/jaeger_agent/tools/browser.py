@@ -67,7 +67,7 @@ def _snapshot(page, state: dict[str, Any]) -> dict[str, Any]:
             continue
         label = ""
         for getter in (
-            lambda: h.inner_text(timeout=200),
+            lambda: h.inner_text(),
             lambda: h.get_attribute("aria-label"),
             lambda: h.get_attribute("placeholder"),
             lambda: h.get_attribute("value"),
@@ -83,11 +83,24 @@ def _snapshot(page, state: dict[str, Any]) -> dict[str, Any]:
             tag = (h.evaluate("e => e.tagName") or "").lower()
         except Exception:
             tag = ""
-        elements.append({
+        item = {
             "index": len(kept),
             "tag": tag,
             "text": " ".join(label.split())[:80],
-        })
+        }
+        if tag == "a":
+            try:
+                item["href"] = str(h.evaluate("e => e.href") or "")
+            except Exception:
+                item["href"] = ""
+        for attribute in ("role", "name", "type", "aria-label"):
+            try:
+                value = h.get_attribute(attribute)
+            except Exception:
+                value = None
+            if value:
+                item[attribute.replace("-", "_")] = str(value)
+        elements.append(item)
         kept.append(h)
     state["handles"] = kept
     try:
@@ -105,6 +118,19 @@ def _snapshot(page, state: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         text_content = ""
 
+    headings: list[dict[str, str]] = []
+    try:
+        for heading in page.query_selector_all("h1, h2, h3, h4, h5, h6"):
+            if len(headings) >= 40:
+                break
+            if not heading.is_visible():
+                continue
+            level = str(heading.evaluate("e => e.tagName") or "").lower()
+            text = " ".join(str(heading.inner_text() or "").split())
+            headings.append({"level": level, "text": text[:500]})
+    except Exception:
+        headings = []
+
     console_errors = [
         item for item in state.get("console_logs", [])
         if str(item.get("type", "")).lower() in ("error", "warning")
@@ -115,6 +141,7 @@ def _snapshot(page, state: dict[str, Any]) -> dict[str, Any]:
         "url": page.url,
         "title": title,
         "elements": elements,
+        "headings": headings,
         "count": len(elements),
         "text_content": text_content,
         "console_errors": console_errors,
@@ -329,7 +356,8 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
     """Drive a real web browser — ONE tool, action-dispatch.
 
       - ``open``       — load a URL (``url``); returns the page's elements
-      - ``snapshot``   — re-list the current page's interactive elements and rendered text
+      - ``snapshot``   — return title, headings, rendered text, and interactive
+        elements; links include their resolved ``href``
       - ``screenshot`` — capture screenshot of page to PNG and return path + base64 image data
       - ``content``    — extract visible page text and headings
       - ``errors``     — inspect console errors and failed network requests
@@ -340,8 +368,8 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
       - ``press``      — press ``key`` (Enter, Tab, …)
       - ``close``      — close the browser
 
-    Every action returns the page's interactive elements, each with an
-    ``index`` — click / type by that index. Workflow: open a page, read
+    Every page action returns semantic headings and interactive elements,
+    each with an ``index``; anchors include ``href``. Click/type by index. Workflow: open a page, read
     the elements, then click / type by index. The browser stays open
     across calls, so a multi-step task is one running session. Use this
     for the live web — searching visually, playing a video, filling a

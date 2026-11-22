@@ -62,8 +62,8 @@ CORE: frozenset[str] = frozenset({
     "read_file", "write_file", "patch", "search_files", "list_skill_dir", "glob",
     # Shell and code.
     "terminal", "execute_code",
-    # Web and X (Twitter) search.
-    "web_search", "web_extract", "x_search",
+    # Web: semantic browser is first-class; search/extract cover discovery.
+    "browser", "web_search", "web_extract", "x_search",
     # Meta: find and load everything else on demand.
     "list_tools", "load_tools", "describe_tool", "tool_search",
     # A few everyday helpers.
