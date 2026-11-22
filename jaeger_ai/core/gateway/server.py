@@ -652,7 +652,7 @@ class _GatewayToolConfirmationProvider:
         # Plan mode: write/exec tools are blocked, not offered as a card.
         if self._plan_mode() and self._write_or_exec(request):
             return False
-        from jaeger_ai.core.runtime.autonomy import effective_autonomy
+        from jaeger_ai.core.runtime.autonomy import auto_approves, effective_autonomy
         try:
             mode = effective_autonomy(self.app._config_path())
         except Exception:
@@ -661,7 +661,7 @@ class _GatewayToolConfirmationProvider:
         # skip the card, not the standing filesystem-write policy (P17).
         if self._in_saved_scope(request, standing_policy=(mode != "ask")):
             return True
-        if mode == "auto":
+        if auto_approves(mode):
             return True
         if mode == "ask" and getattr(request, "tier", None) != PermissionTier.READ_ONLY:
             return self._decided(self._prompt(request))
@@ -790,12 +790,12 @@ class _GatewayToolConfirmationProvider:
 
     @staticmethod
     def _autonomy_auto() -> bool:
-        """Owner explicitly saved autonomy "auto" (never the default)."""
+        """Owner explicitly saved an automatic approval mode (never the default)."""
         try:
             from jaeger_ai.core.entity.runtime import EntityRuntime
-            from jaeger_ai.core.runtime.autonomy import effective_autonomy
+            from jaeger_ai.core.runtime.autonomy import auto_approves, effective_autonomy
             layout = getattr(EntityRuntime.get_singleton(), "layout", None)
-            return effective_autonomy(getattr(layout, "config_path", None)) == "auto"
+            return auto_approves(effective_autonomy(getattr(layout, "config_path", None)))
         except Exception:  # noqa: BLE001
             return False
 
@@ -3073,8 +3073,8 @@ class JaegerGatewayApp:
         if not require_approval and getattr(caller, "name", None) == "jaegerd":
             # The agent asks through jaegerd's credential and cannot waive the
             # owner's approval itself; only the owner's autonomy=auto does.
-            from jaeger_ai.core.runtime.autonomy import effective_autonomy
-            require_approval = effective_autonomy(self._config_path()) != "auto"
+            from jaeger_ai.core.runtime.autonomy import auto_approves, effective_autonomy
+            require_approval = not auto_approves(effective_autonomy(self._config_path()))
         # Collaboration mode (core/runtime/collaboration.py): ``delegate`` runs the
         # target as an inner helper of the lead — fresh context from a brief, the
         # lead's tools narrowed, result returned to the lead only. ``call_agent``
@@ -3957,8 +3957,8 @@ class JaegerGatewayApp:
             agent_full_auto = False
             if agent and action in ('apply', 'undo'):
                 try:
-                    from jaeger_ai.core.runtime.autonomy import effective_autonomy
-                    agent_full_auto = effective_autonomy(self._config_path()) == 'auto'
+                    from jaeger_ai.core.runtime.autonomy import auto_approves, effective_autonomy
+                    agent_full_auto = auto_approves(effective_autonomy(self._config_path()))
                 except Exception:
                     agent_full_auto = False
             if not owner and action != 'propose' and not agent_full_auto:
@@ -8175,8 +8175,11 @@ class JaegerGatewayApp:
         from jaeger_ai.core.entity.runtime import EntityRuntime
         from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
 
-        rt = getattr(EntityRuntime, "_instance", None)
-        layout = getattr(rt, "layout", None) if rt is not None else None
+        try:
+            layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+        except Exception:  # noqa: BLE001 — fall back to the canonical path
+            rt = getattr(EntityRuntime, "_instance", None)
+            layout = getattr(rt, "layout", None) if rt is not None else None
         if layout is None:
             inst = os.environ.get("JAEGER_INSTANCE_DIR")
             layout = InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
@@ -8189,7 +8192,7 @@ class JaegerGatewayApp:
         return web.json_response({"autonomy": effective_autonomy(self._config_path()), "options": list(AUTONOMY)})
 
     async def handle_set_autonomy(self, request: web.Request) -> web.Response:
-        """POST /v1/runtime/autonomy ``{"autonomy": "auto|scoped|ask"}``: saved to the
+        """POST /v1/runtime/autonomy ``{"autonomy": "full|auto|scoped|ask"}``: saved to the
         instance config and applied immediately to the running approval provider."""
         from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
         from jaeger_ai.core.runtime.autonomy import AUTONOMY, set_autonomy

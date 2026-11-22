@@ -306,7 +306,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "smart_home": "Home Assistant — list/read smart-home devices, call services",
     "people": "person index — profiles of people you know (name/likes/access)",
     "models": "list/download models; set_mode (normal/high/deep-sleep); "
-              "set_autonomy (ask/scoped/auto)",
+              "set_autonomy (ask/scoped/auto/full)",
     "bench": "run the agent self-benchmark against the live pipeline",
     "diagnostics": "system health + cpu/disk status",
     "shortcuts": "list + run Shortcuts.app automations",

@@ -54,13 +54,13 @@ class BusConfirmationProvider:
             return False
         # Autonomy gate (admin sessions only). The plan is agreed up front; this
         # decides whether execution pauses here:
-        #   auto   → run without prompting at all
+        #   auto/full → run without routine prompts
         #   scoped → honor standing grants, prompt-once for anything new
         #   ask    → pause on every action (ignore standing grants)
         from jaeger_ai.core.runtime import autonomy
         mode = autonomy.current_autonomy()
         fresh = getattr(request, "force_prompt", False) is True
-        if mode == "auto" and not fresh:
+        if autonomy.auto_approves(mode) and not fresh:
             return True
         honor_grants = mode != "ask" and not fresh
         skill = getattr(request, "skill", "") or ""

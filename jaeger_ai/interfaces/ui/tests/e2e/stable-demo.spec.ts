@@ -187,7 +187,7 @@ test('approval selections persist through the real isolated Gateway and refresh'
   await expect(page.getByRole('button',{name:/^Approval mode:/})).toBeVisible();
  };
  try {
-  for(const [mode,label] of [['scoped','Approve for me'],['auto','Full access'],['ask','Ask for approval']]) {
+  for(const [mode,label] of [['scoped','Approve for me'],['auto','Automatic'],['full','Full access'],['ask','Ask for approval']]) {
    // The phone composer intentionally collapses secondary controls until it is
    // focused. Expand it before operating or asserting on the approval control.
    await expandComposer();

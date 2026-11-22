@@ -36,7 +36,7 @@ def onboarding_blueprint(layout: Any) -> dict[str, Any]:
             {"id": "camera_vision", "title": "Camera and vision options", "default": {"camera_device": "Insta360 Link 2", "vision_enabled": True, "vision_model": "qwen3.5:9b"}, "skippable": True},
             {"id": "models", "title": "Local and cloud model preferences", "default": {"awake_provider": "ollama", "awake_model": "mistral-large-4:cloud", "local_fallback_model": "qwen3.5:9b"}, "skippable": False},
             {"id": "memory_privacy", "title": "Memory and privacy settings", "default": {"epistemic_memory": True, "privacy_local_only": False}, "skippable": True},
-            {"id": "autonomy", "title": "Operating mode", "default": "auto", "options": ["ask", "scoped", "auto"], "labels": {"ask": "Manual", "scoped": "Smart Auto", "auto": "Full Auto"}, "skippable": True},
+            {"id": "autonomy", "title": "Operating mode", "default": "auto", "options": ["ask", "scoped", "auto", "full"], "labels": {"ask": "Ask for approval", "scoped": "Approve for me", "auto": "Automatic", "full": "Full access"}, "skippable": True},
             {"id": "computer_access", "title": "Permitted computer and application access", "default": {"computer_use": True, "filesystem_write": True, "shell_mode": "confirm"}, "skippable": True},
             {"id": "heartbeat_notifications", "title": "Heartbeat, quiet hours, and notifications", "default": {"heartbeat_interval_minutes": 30, "quiet_start_hour": 22, "quiet_end_hour": 7, "digest_enabled": True}, "skippable": True},
             {"id": "personal_goals", "title": "Personal goals and optional human needs priorities", "default": {"disabled_dimensions": [], "initial_goals": []}, "skippable": True},

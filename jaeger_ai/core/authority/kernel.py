@@ -257,6 +257,7 @@ class PolicyKernel:
 
         Evaluates:
         0. Control plane (Global Stop, lifecycle owner) and structure
+        0a. Authenticated-owner Full access bypass
         1. Security Policy & Safety Mode (PAUSED, READ_ONLY)
         2. Identity & Trust Scope
         2b. Destructive / irreversible actions -> fresh owner approval
@@ -297,6 +298,21 @@ class PolicyKernel:
             # ── 0. Structural validity: unknown tool/action/tier → DENY ─────
             if (d := step("structure", self._check_structure(proposal))) is not None:
                 return d
+            # Full access is deliberately equivalent to an unrestricted local
+            # coding-agent session. The emergency stop and structural validity
+            # above still exist; Jaeger's remaining policy layers do not.
+            if self._owner_full_access_enabled(
+                proposal, instance_root=instance_root, dry_run=dry_run
+            ):
+                steps.append({"check": "full_access", "outcome": "allow"})
+                return AuthorityDecision(
+                    decision=AuthorityDecisionType.ALLOW,
+                    authorized_arguments=current_args,
+                    reason="Authorized by owner Full access",
+                    policy_name="owner_full_access",
+                    granted_by="owner",
+                    proposal_id=proposal.proposal_id,
+                )
             # ── 1. Security Policy & Safety Mode ─────────────────────────────
             if (d := step("security_mode", self._check_security_mode(proposal))) is not None:
                 return d
@@ -636,16 +652,35 @@ class PolicyKernel:
         dry_run: bool = False,
     ) -> bool:
         """True ONLY when an authenticated owner turn runs on an instance with
-        explicitly saved Full Auto (``automation.autonomy == 'auto'``)."""
+        explicitly saved Automatic or Full access."""
         if not is_owner_actor(proposal.actor):
             return False
         try:
-            from jaeger_ai.core.runtime.autonomy import configured_autonomy
+            from jaeger_ai.core.runtime.autonomy import auto_approves, configured_autonomy
             root = _resolve_instance_root(proposal, instance_root=instance_root, allow_runtime=not dry_run)
             if root is None:
                 return False
-            return configured_autonomy(root / "config.yaml") == "auto"
+            return auto_approves(configured_autonomy(root / "config.yaml"))
         except Exception:  # noqa: BLE001 — fail closed on any unreadable config
+            return False
+
+    def _owner_full_access_enabled(
+        self,
+        proposal: ProposedAction,
+        *,
+        instance_root: Path | str | None = None,
+        dry_run: bool = False,
+    ) -> bool:
+        """True only for an authenticated owner who explicitly saved Full access."""
+        if not is_owner_actor(proposal.actor):
+            return False
+        try:
+            from jaeger_ai.core.runtime.autonomy import configured_autonomy, full_access_enabled
+            root = _resolve_instance_root(proposal, instance_root=instance_root, allow_runtime=not dry_run)
+            if root is None:
+                return False
+            return full_access_enabled(configured_autonomy(root / "config.yaml"))
+        except Exception:  # noqa: BLE001 — fail closed when the choice cannot be proven
             return False
 
     def _check_destructive(

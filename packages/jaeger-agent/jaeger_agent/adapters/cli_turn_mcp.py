@@ -47,7 +47,7 @@ ExecuteTool = Callable[[ToolDef, dict[str, Any]], Any]
 
 
 def current_autonomy() -> str:
-    """Owner approval setting: ask / scoped / auto. Fail closed to scoped."""
+    """Owner approval setting: ask / scoped / auto / full. Fail closed to scoped."""
     try:
         import os
         from pathlib import Path
@@ -70,30 +70,34 @@ def permission_argv(backend_id: str, autonomy: str) -> list[str]:
 
     Jaeger remains the approval owner. The CLI must not prompt or auto-deny
     those MCP calls in headless mode. ``auto`` also lifts the CLI's own
-    confirmation floor (bypassPermissions / always-approve). Built-in file
+    confirmation floor (bypassPermissions / always-approve). Full access also
+    lifts the delegated CLI's own sandbox. Built-in file
     tools stay disabled by ``--tools ""`` elsewhere in the argv.
     """
     mode = (autonomy or "scoped").strip().lower()
     argv: list[str] = []
+    automatic = mode in {"auto", "full"}
+    full = mode == "full"
     if backend_id == "grok":
         argv.extend(["--allow", "MCPTool(jaeger__*)", "--allow", "mcp:jaeger"])
-        if mode == "auto":
+        if automatic:
             argv.extend(["--permission-mode", "bypassPermissions"])
         else:
             argv.extend(["--permission-mode", "dontAsk"])
     elif backend_id == "claude":
         argv.extend(["--allowed-tools", "mcp__jaeger__*"])
-        if mode == "auto":
+        if automatic:
             argv.extend(["--permission-mode", "bypassPermissions"])
         else:
             argv.extend(["--permission-mode", "dontAsk"])
     elif backend_id == "codex":
-        # Jaeger owns approval; keep the CLI sandbox. Never pass
-        # --dangerously-bypass-approvals-and-sandbox.
-        argv.extend(["--ask-for-approval", "never"])
+        if full:
+            argv.append("--dangerously-bypass-approvals-and-sandbox")
+        else:
+            argv.extend(["--ask-for-approval", "never"])
     elif backend_id == "gemini":
         argv.extend(["--skip-trust", "--allowed-mcp-server-names", "jaeger"])
-        if mode == "auto":
+        if automatic:
             argv.extend(["--approval-mode", "yolo"])
     elif backend_id == "agy":
         # Jaeger still owns approvals in the MCP executor. These flags only
@@ -105,7 +109,7 @@ def permission_argv(backend_id: str, autonomy: str) -> list[str]:
         if "--mode" not in argv:
             argv.extend(["--mode", "auto"])
     elif backend_id == "hermes":
-        if mode == "auto":
+        if automatic:
             argv.append("--yolo")
     return argv
 

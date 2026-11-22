@@ -386,6 +386,14 @@ _INSTANCE_PROTECTED = frozenset({
 
 def _resolve_absolute_write(p: Path) -> Path:
     full = p.resolve()
+    # Full access intentionally bypasses Jaeger's file authority and protected
+    # path policy. The host filesystem remains the final authority.
+    try:
+        from jaeger_ai.core.runtime.autonomy import effective_autonomy, full_access_enabled
+        if full_access_enabled(effective_autonomy(_require_layout().config_path)):
+            return full
+    except Exception:  # noqa: BLE001
+        pass
     roots = writable_roots()
     instance_root = getattr(_require_layout(), "root", None)
     instance_root = Path(instance_root).resolve() if instance_root else None
@@ -642,6 +650,12 @@ def _resolve_read(path: str) -> Path:
                 if cand.exists():
                     full = cand
                     break
+    try:
+        from jaeger_ai.core.runtime.autonomy import effective_autonomy, full_access_enabled
+        if full_access_enabled(effective_autonomy(_require_layout().config_path)):
+            return full
+    except Exception:  # noqa: BLE001
+        pass
     if "credentials" in full.parts[:-1]:
         raise SandboxError(
             "credentials/ is off-limits to direct reads — "

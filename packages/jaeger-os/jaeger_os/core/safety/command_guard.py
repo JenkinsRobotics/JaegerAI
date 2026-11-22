@@ -131,6 +131,14 @@ def hardline_guard(arg_name: str = "command") -> Callable[[Callable], Callable]:
             cmd = kwargs.get(arg_name)
             if cmd is None and args:
                 cmd = args[0]
+            # Full access is the owner's explicit unrestricted-execution mode.
+            # Do not retain a hidden command veto below the authority kernel.
+            try:
+                from jaeger_ai.core.runtime.autonomy import current_autonomy, full_access_enabled
+                if full_access_enabled(current_autonomy()):
+                    return fn(*args, **kwargs)
+            except Exception:  # noqa: BLE001 — absence of app authority fails guarded
+                pass
             reason = check_hardline(str(cmd or ""))
             if reason:
                 try:
