@@ -34,6 +34,21 @@ it('reconciles live provisional text into commentary and one explicit final resu
  expect(rows.map(row=>'bubble'in row?'text':'activity'in row?'activity':'other')).toEqual(['text','activity','text']);
  expect('bubble' in rows[0] && rows[0].bubble.some(p=>p.kind==='markdownContent' && p.text==='I’ll inspect it.')).toBe(true);
 });
+it('keeps transport and reasoning boundaries out of streamed prose',()=>{
+ let parts:ChatPart[]=[];
+ for(const event of [
+  {event:'turn.delta',payload:{delta:'Continu',content_type:'commentary',item_id:'message-1'}},
+  {event:'turn.reasoning',payload:{delta:'checking',item_id:'reason-1'}},
+  {event:'turn.delta',payload:{delta:'ing the indexing now.',content_type:'commentary',item_id:'message-1'}},
+  {event:'turn.reasoning.done',payload:{duration_ms:1200,item_id:'reason-1'}},
+ ]) parts=(mapEvent(event)?.parts??[]).reduce(applyPart,parts);
+ expect(parts.filter(p=>p.kind==='markdownContent')).toEqual([
+  {kind:'markdownContent',text:'Continuing the indexing now.',role:'commentary',itemId:'message-1'},
+ ]);
+ expect(parts.filter(p=>p.kind==='thinking')).toEqual([
+  {kind:'thinking',text:'checking',durationMs:1200,itemId:'reason-1'},
+ ]);
+});
 it('expands grouped activity and the retained tool result without hiding commentary',()=>{
  render(<ActivityFold parts={[tool('a')]} live={false} links={{onCopy:()=>{},onOpen:()=>{}}} style={STREAM_STYLES.instant}/>);
  fireEvent.click(screen.getByRole('button',{name:/Show work/}));

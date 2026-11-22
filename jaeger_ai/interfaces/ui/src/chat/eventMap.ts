@@ -42,9 +42,11 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
         ...((p.content_type || p.channel) ? {role: ["commentary","final"].includes(str(p.content_type ?? p.channel)) ? str(p.content_type ?? p.channel) as "commentary"|"final" : "provisional" as const} : {}),
         ...(p.item_id ? {itemId:str(p.item_id)} : {}) }] };
     case "turn.reasoning":
-      return { parts: [{ kind: "thinking", text: str(p.text ?? p.delta), durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined }] };
+      return { parts: [{ kind: "thinking", text: str(p.text ?? p.delta), durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined,
+        ...((p.item_id ?? p.reasoning_id ?? p.span_id) ? {itemId:str(p.item_id ?? p.reasoning_id ?? p.span_id)} : {}) }] };
     case "turn.reasoning.done":
-      return { parts: [{ kind: "thinking", text: "", durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined }] };
+      return { parts: [{ kind: "thinking", text: "", durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined,
+        ...((p.item_id ?? p.reasoning_id ?? p.span_id) ? {itemId:str(p.item_id ?? p.reasoning_id ?? p.span_id)} : {}) }] };
     case "turn.plan": {
       const plan=globalThis.JaegerTimeline.parsePlan(p);
       return plan.length ? {parts:[{kind:"plan",plan,explanation:str(p.explanation)}]} : null;

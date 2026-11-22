@@ -185,7 +185,11 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
   const ended = state !== "pending";
   let activity: ChatPart[] = [];
   const flushActivity = () => {
-    if (activity.length) out.push({activity});
+    if (activity.length) {
+      const previous = out.at(-1);
+      if (previous && "activity" in previous) previous.activity.push(...activity);
+      else out.push({activity});
+    }
     activity = [];
   };
   const ordered = [...work,...visible].sort((a,b)=>a.index-b.index);
