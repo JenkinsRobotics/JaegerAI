@@ -6997,15 +6997,6 @@ class JaegerGatewayApp:
             if not card_task_id:
                 self._present(session_id, "done", intent="conversation", status="completed")
 
-            self.event_bus.publish(session_id, "turn.delta", {
-                "turn_id": turn_id,
-                "request_id": rid,
-                "delta": "",
-                "model": model,
-                "backend": backend,
-                **agent_fields,
-            })
-
             agent_lane = str(backend).startswith("mcp") or backend == "owner-react"
             options = ((execution or {}).get("options") or {})
             proactive_fields = {}
