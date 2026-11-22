@@ -130,7 +130,8 @@ class Droid:
                        "heard": "", "said": "", "latency_ms": None, "error": None,
                        "speaker": self.cfg["speaker"], "microphone": self.cfg["microphone"],
                        "audio_note": None,
-                       "voice_processing": None, "pending_approval": None, "since": time.time(),
+                       "voice_processing": None, "echo_cancellation": None,
+                       "pending_approval": None, "since": time.time(),
                        "camera": "off", "faces": 0, "present": False, "action": None, "mode": "off",
                        "presence_blocked": None, "quiet_until": 0, "slept_until": 0}
         self.write()
@@ -182,7 +183,8 @@ class Droid:
                 self.loop = asyncio.get_running_loop()
                 self.track = MicTrack()
                 await asyncio.to_thread(self._start_audio, ears)
-                self.set(voice_processing=self.audio.voice_processing, ears=ears)
+                self.set(voice_processing=self.audio.voice_processing,
+                         echo_cancellation=self.audio.echo_cancellation, ears=ears)
                 if not present:
                     self.audio.chime("wake")
                 await self._connect()

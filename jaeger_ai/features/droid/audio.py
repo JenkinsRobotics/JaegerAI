@@ -1,10 +1,10 @@
-"""The droid's ears and voice: one AVAudioEngine with optional voice processing.
+"""The droid's ears and voice: one AVAudioEngine with echo cancellation.
 
 Capture and playback share a single engine so macOS's voice-processing unit
 (the echo canceller FaceTime uses) hears exactly what the droid says and
 removes it from the microphone when one duplex device owns both directions.
-Separate physical microphone/speaker routes remain full duplex but cannot use
-Apple's hardware voice-processing AU.
+Separate physical microphone/speaker routes use WebRTC AEC3 with the exact
+audio scheduled for playback as its far-end reference.
 
 Mic audio leaves as 48 kHz mono int16 blocks of 20 ms; speech to play arrives
 as float32 mono at 48 kHz. Both run off Python's main loop: the tap and the
@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import math
 import threading
+from collections import deque
 from typing import Callable
 
 import numpy as np
 
 RATE = 48000
 BLOCK = 960  # 20 ms
+AEC_DELAY_MS = 40
 
 
 def supports_voice_processing(input_device: int, output_device: int) -> bool:
@@ -39,6 +41,10 @@ class DuplexAudio:
         self._lock = threading.Lock()
         self.level = 0.0
         self.voice_processing = False
+        self.echo_cancellation = "none"
+        self._aec = None
+        self._far: deque[np.ndarray] = deque()
+        self._far_offset = 0
 
     # lifecycle -----------------------------------------------------------
     def start(self, output_device: int = 0, input_device: int = 0) -> None:
@@ -89,6 +95,10 @@ class DuplexAudio:
                     self.voice_processing = False
             else:
                 self.voice_processing = False
+            if self.voice_processing:
+                self.echo_cancellation = "apple_voice_processing"
+            else:
+                self._start_software_aec()
             tap_fmt = node.outputFormatForBus_(0)
             rate = float(tap_fmt.sampleRate())
             if rate <= 0:
@@ -134,6 +144,51 @@ class DuplexAudio:
             engine.stop()
         except Exception:
             pass
+        self._reset_aec()
+
+    def _start_software_aec(self) -> None:
+        """Enable AEC3 for physical input/output devices that cannot share Apple's AU."""
+        try:
+            from pywebrtc_audio import EchoCanceller
+        except ImportError as exc:
+            raise RuntimeError(
+                "Split-device full duplex requires pywebrtc-audio for echo cancellation"
+            ) from exc
+        self._aec = EchoCanceller(
+            sample_rate=RATE, num_channels=1, stream_delay_ms=AEC_DELAY_MS
+        )
+        self.echo_cancellation = "webrtc_aec3"
+
+    def _reset_aec(self) -> None:
+        with self._lock:
+            self._far.clear()
+            self._far_offset = 0
+            aec = self._aec
+        if aec is not None:
+            aec.reset()
+
+    def _queue_far(self, samples: np.ndarray) -> None:
+        if self._aec is None or samples.size == 0:
+            return
+        with self._lock:
+            self._far.append(np.asarray(samples, dtype=np.float32).copy())
+
+    def _far_block(self, size: int) -> np.ndarray:
+        """Consume a real-time-aligned far-end block, padding speaker silence."""
+        result = np.zeros(size, dtype=np.float32)
+        written = 0
+        with self._lock:
+            while written < size and self._far:
+                chunk = self._far[0]
+                available = chunk.size - self._far_offset
+                take = min(size - written, available)
+                result[written:written + take] = chunk[self._far_offset:self._far_offset + take]
+                written += take
+                self._far_offset += take
+                if self._far_offset == chunk.size:
+                    self._far.popleft()
+                    self._far_offset = 0
+        return result
 
     # microphone ----------------------------------------------------------
     def _take(self, buffer, rate: float) -> None:
@@ -151,7 +206,10 @@ class DuplexAudio:
         combined = np.concatenate([self._carry, mono])
         whole = (combined.size // BLOCK) * BLOCK
         for i in range(0, whole, BLOCK):
-            block = np.clip(combined[i:i + BLOCK] * 32767, -32768, 32767).astype(np.int16)
+            near = combined[i:i + BLOCK]
+            if self._aec is not None:
+                near = np.asarray(self._aec.process(near, self._far_block(BLOCK)), dtype=np.float32)
+            block = np.clip(near * 32767, -32768, 32767).astype(np.int16)
             self.on_mic(block)
         self._carry = combined[whole:]
 
@@ -166,6 +224,8 @@ class DuplexAudio:
         if self.engine is None or samples.size == 0:
             return
         import AVFoundation as A
+
+        self._queue_far(samples)
 
         for start in range(0, samples.size, BLOCK * 10):
             chunk = samples[start:start + BLOCK * 10]
@@ -192,6 +252,7 @@ class DuplexAudio:
             with self._lock:
                 self._queued = 0
             self.player.play()
+        self._reset_aec()
 
     def chime(self, kind: str) -> None:
         """Short status tones: rising for awake, falling for sleep, a tick for heard."""

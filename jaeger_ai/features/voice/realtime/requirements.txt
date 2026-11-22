@@ -4,6 +4,7 @@ parakeet-mlx
 aiohttp
 fastapi
 pyobjc-framework-AVFoundation  # Droid mode: AVAudioEngine voice processing
+pywebrtc-audio==0.2.0  # Droid split-device software echo cancellation (WebRTC AEC3)
 pyobjc-framework-Vision  # Droid presence: on-device person/face/head-pose detection
 opencv-python  # Droid identity: YuNet + SFace face embeddings (models in ~/.jaeger/droid/models)
 onnxruntime  # Droid identity: WeSpeaker voice embeddings

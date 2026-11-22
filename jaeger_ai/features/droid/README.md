@@ -84,7 +84,7 @@ never fight over the mic.
 | File | Role |
 | :--- | :--- |
 | `service.py` | resident service, state machine, control socket, turns, approvals |
-| `audio.py` | one AVAudioEngine: voice-processed mic tap + player node, chimes |
+| `audio.py` | one AVAudioEngine: Apple AEC on duplex hardware, WebRTC AEC3 for split mic/speaker routes, player, chimes |
 | `coreaudio.py` | list devices; read/set the default output (ctypes) |
 | `persona.py` | droid framing, greetings, spoken commands, yes/no, head moves, narration |
 | `vision.py` | camera capture, presence, local vision model, gimbal head |
