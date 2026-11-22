@@ -13,7 +13,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from jaeger_ai.contract.model_ids import split_routed_model_id
-from .router import classify, normalize_ollama_provider
+from .router import normalize_ollama_provider
 
 
 class ModelPolicyError(RuntimeError):
@@ -91,11 +91,30 @@ def payload_text(payload: Any) -> str:
     return ""
 
 
+def payload_local_only(payload: Any) -> bool:
+    """Read an explicit host-owned egress label from structured payloads.
+
+    Content is never inspected for policy keywords.  Producers that handle a
+    local-only source attach ``{"_meta": {"local_only": true}}`` (or a
+    top-level ``local_only`` boolean) to that source/result.
+    """
+    if isinstance(payload, list):
+        return any(payload_local_only(item) for item in payload)
+    if not isinstance(payload, dict):
+        return False
+    meta = payload.get("_meta")
+    if isinstance(meta, dict) and meta.get("local_only") is True:
+        return True
+    if payload.get("local_only") is True:
+        return True
+    return any(payload_local_only(value) for key, value in payload.items()
+               if key not in {"_meta", "local_only"})
+
+
 def require_egress(route: ModelRoute, payload: Any, *, local_only: bool = False) -> None:
     if route.local:
         return
-    private = classify(payload_text(payload))[0] == "private"
-    if local_only or private:
+    if local_only or payload_local_only(payload):
         raise ModelPolicyError(
             "This request contains local-only content. Select a configured on-device model "
             "or remove the private content. This payload was not sent to the cloud.")
@@ -117,7 +136,7 @@ def require_inference_headroom(
     )
     if blockers:
         message = "On-device model paused because " + ", ".join(blockers) + ". Retry when the Mac has more headroom."
-        stays_local = local_only or classify(payload_text(payload))[0] == "private"
+        stays_local = local_only or payload_local_only(payload)
         recorder = getattr(manager, "record_inference_deferral", None)
         if callable(recorder):
             recorder(
@@ -156,7 +175,7 @@ def withhold_private_tool_results(messages: Any) -> tuple[Any, int]:
         return messages, 0
     out, withheld = [], 0
     for message in messages:
-        if _is_tool_message(message) and classify(payload_text(message.get("content")))[0] == "private":
+        if _is_tool_message(message) and payload_local_only(message.get("content")):
             replaced = dict(message)
             content = message.get("content")
             if isinstance(content, list):
@@ -175,7 +194,7 @@ def withhold_private_tool_results(messages: Any) -> tuple[Any, int]:
 
 def withhold_private_result(result: Any) -> Any:
     """Same rule for one tool result returned straight to a cloud CLI model."""
-    if classify(payload_text(result))[0] == "private":
+    if payload_local_only(result):
         return {"ok": False, "withheld": True, "error_type": "local_only", "message": WITHHELD_NOTE}
     return result
 
@@ -319,10 +338,10 @@ class GovernedAdapter:
         # description of private keys is not mistaken for supplied private data.
         if not self.route.local and not self.local_only:
             messages, _ = withhold_private_tool_results(messages)
-        policy_text = payload_text({"messages": messages, "system": system})
-        require_egress(self.route, policy_text, local_only=self.local_only)
+        policy_payload = {"messages": messages}
+        require_egress(self.route, policy_payload, local_only=self.local_only)
         formatted = self.adapter.format_messages(messages, tools, system)
-        self._formatted_policy = (self._fingerprint(formatted), policy_text)
+        self._formatted_policy = (self._fingerprint(formatted), policy_payload)
         return formatted
 
     def call(self, formatted, interrupt_event, **kwargs):

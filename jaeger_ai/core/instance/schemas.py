@@ -1084,11 +1084,11 @@ class HardwareConfig(BaseModel):
 
 
 class PersonaConfig(BaseModel):
-    """Station 3 of the standard runner (dev/docs/reality/agentic_runners.md):
-    workers execute vanilla (a character in the execution context costs a
-    4B ~7 bench points, measured); the character's voice is applied to the
-    FINAL answer by one bounded clean-context call at the user-facing
-    boundary. Fail-open — any filter failure returns the plain answer."""
+    """Presentation settings for the single execution agent.
+
+    Persona is prompt context and an optional final presentation transform;
+    it never owns a second agent loop or a fake delegation tool.
+    """
     model_config = ConfigDict(extra="forbid")
 
     output_filter: bool = Field(
@@ -1106,19 +1106,6 @@ class PersonaConfig(BaseModel):
                     "doubles latency where it hurts most. 0 disables "
                     "styling entirely.",
     )
-    # Mode C (dev/docs/roadmap/PERSONA_PIPELINE_ABC_DESIGN.md, operator-
-    # canonized 2026-07-10): "the id and the ego" — the persona model runs
-    # as a minimal agent with ONE tool (``perform_task``) and decides per
-    # turn whether to answer in character or delegate to the clean agent.
-    # DEFAULT as of the 2026-07-10 gate (delegation 12/12, security lane
-    # regression-checked — see PERSONA_MODE_C_BUILD_PLAN.md). Mode B
-    # ("frontend") is DEAD — superseded by C before it was ever built; the
-    # design doc keeps it for the record but no code implements it.
-    # ``JAEGER_PERSONA_MODE`` overrides this in either direction
-    # (jaeger_os/main.py:_persona_mode). Renamed from output_filter/
-    # agent_tool to persona_last/persona_first (pre-1.0, no shim — see
-    # feedback-no-back-compat-pre-1.0) so the settings page can show
-    # operator-legible names instead of internal Mode A/C jargon.
     soul_in_prompt: bool = Field(
         True,
         json_schema_extra=_setting("persona"),
@@ -1129,15 +1116,6 @@ class PersonaConfig(BaseModel):
             "directives come from AGENTS.md. Turn off to restore the "
             "pre-split prompt (no identity document at all)."
         ),
-    )
-    mode: Literal["persona_first", "persona_last"] = Field(
-        "persona_first",
-        json_schema_extra=_setting("persona"),
-        description='Pipeline: "persona_first" — your character answers '
-                    "directly and calls the task engine as its tool (fast, "
-                    "in-character conversation; recommended). "
-                    '"persona_last" — the task engine answers plainly and '
-                    "the character re-styles the result.",
     )
 
 

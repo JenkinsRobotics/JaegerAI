@@ -14,54 +14,29 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 SYSTEM_SESSIONS = frozenset({"desktop-app", "jaeger-initiative", "heartbeat", "kanban_idle"})
 
-_JUNK_ID = (
-    (re.compile(r"^sota-"), "benchmark run (sota)"),
-    (re.compile(r"^noskip-"), "eval probe (noskip)"),
-    (re.compile(r"^cap-[a-z0-9]+-[0-9a-f]{6}$"), "capability probe"),
-    (re.compile(r"^task:"), "durable-task child session"),
-    (re.compile(r"^specialist:"), "specialist child session"),
-    (re.compile(r"^jaeger-(computer-use|screenshot|mouse)-live"), "live verification probe"),
-    (re.compile(r"^jaeger-(compute|screens)"), "live verification probe"),
-    (re.compile(r"^(paste|paste-only|halt|stuck-jaeger|workspace)$"), "named harness session"),
-)
-_JUNK_TITLE = (
-    (re.compile(r"(?i)^stack-verify-probe$"), "stack verification probe"),
-    (re.compile(r"(?i)live verification$"), "live verification probe"),
-    (re.compile(r"(?i)^local-model-verify$"), "model verification probe"),
-    (re.compile(r"(?i)^(test chat|chat test \d*)$"), "test chat"),
-    (re.compile(r"(?i)^\[skill-review:"), "skill-review loop"),
-    (re.compile(r"(?i)acceptance test|^benchmark "), "benchmark/acceptance run"),
-)
-_EMPTY_TITLES = frozenset({"new conversation", "new chat", ""})
-
-
 def classify(row: dict[str, Any], *, at_creation: bool = False) -> tuple[str, str]:
-    """Return (kind, reason). kind is chat | system | agent | junk.
+    """Return the explicit host-owned session kind.
 
-    ``at_creation`` skips the empty-conversation rule: every chat starts empty.
+    Titles and identifiers are presentation data, never lifecycle authority.
+    Producers that create probes or background sessions must set
+    ``metadata.session_kind`` themselves.
     """
     sid = str(row.get("session_id") or "")
     title = str(row.get("title") or "").strip()
     meta = row.get("metadata") or {}
+    declared = str(meta.get("session_kind") or "").strip().lower()
+    if declared in {"chat", "system", "agent", "probe"}:
+        return ("junk", "explicit probe session") if declared == "probe" else (declared, "explicit session kind")
     if sid in SYSTEM_SESSIONS:
         return "system", "background producer session"
     if meta.get("home") and meta.get("agent_id"):
         return "agent", f"home session of {meta.get('agent_id')}"
-    for rx, why in _JUNK_ID:
-        if rx.search(sid):
-            return "junk", why
-    for rx, why in _JUNK_TITLE:
-        if rx.search(title):
-            return "junk", why
-    if not at_creation and int(row.get("message_count") or 0) == 0 and title.lower() in _EMPTY_TITLES:
-        return "junk", "empty conversation"
     return "chat", "conversation"
 
 

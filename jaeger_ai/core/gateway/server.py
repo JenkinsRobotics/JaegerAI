@@ -5280,73 +5280,6 @@ class JaegerGatewayApp:
             out.update(agent_pinned=True, route_checked=True)
         return out
 
-    @staticmethod
-    def _names_teammate(text: str, agents: Any) -> bool:
-        """True when the message asks the lead to delegate (``call_agent``) or
-        names a helper by display name. Such a message is
-        the lead's to hand off, so triage must not move it to a specialist
-        that cannot call anyone."""
-        low = str(text or "").lower()
-        if "call_agent" in low or "call agent" in low:
-            return True
-        for agent in agents or ():
-            meta = getattr(agent, "metadata", None) or {}
-            if not (isinstance(meta, dict) and meta.get("team")):
-                continue
-            for name in (getattr(agent, "display_name", ""), getattr(agent, "name", "")):
-                name = str(name or "").strip().lower()
-                if len(name) >= 3 and name in low:
-                    return True
-        return False
-
-    def _auto_route(self, session: dict[str, Any] | None, text: str) -> bool:
-        """Lead triage, once per conversation, before the first turn runs.
-
-        A chat still on Jaeger by default moves to the one specialist whose
-        domain clearly matches; the move is a normal session handoff with a
-        visible notice and one-click undo. Home sessions and chats the owner
-        assigned (``agent_pinned``) are never moved. True when it handed off."""
-        meta = (session or {}).get("metadata") or {}
-        if not session or meta.get("route_checked") or meta.get("home") or meta.get("agent_pinned"):
-            return False
-        from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
-
-        current = self._session_agent_id(session)
-        if current not in (None, LEAD_AGENT_ID):
-            return False
-        sid = session["session_id"]
-        try:
-            from jaeger_ai.core.agent_registry.router import suggest_specialist
-
-            try:
-                agents = self._registry().list_agents()
-            except Exception:  # noqa: BLE001
-                agents = []
-            if JaegerGatewayApp._names_teammate(text, agents):
-                self.store.update_metadata(sid, {"route_checked": True})
-                return False
-            target = suggest_specialist(text)
-            record = self._registry().get_agent(target) if target else None
-            if record is None or self._collaboration_mode() != "team":
-                # One mind: every specialist (team or internal) is Jaeger's
-                # inner helper, reached by call_agent. Moving the chat swapped
-                # the owner onto a narrow tool grant on a keyword hit
-                # ("approval", "schedule") and refused plain work (P17).
-                self.store.update_metadata(sid, {"route_checked": True})
-                return False
-            self.store.update_metadata(sid, {
-                "route_checked": True, "agent_id": target, "previous_agent_id": current or LEAD_AGENT_ID,
-                "routed_by": "auto", "handoff_reason": "matched specialty", "handed_off_at": time.time(),
-            })
-            self.event_bus.publish(sid, "session.handoff", {
-                "session_id": sid, "from_agent_id": current or LEAD_AGENT_ID, "to_agent_id": target,
-                "reason": "auto-routed", "routed_by": "auto", "keep_history": True,
-            })
-            return True
-        except Exception:  # noqa: BLE001 — triage must never fail a turn
-            logger.debug("auto-route failed", exc_info=True)
-            return False
-
     def _collaboration_prompt(self) -> str:
         """The lead's note on how it works with its specialists (by mode)."""
         mode = self._collaboration_mode()
@@ -6550,13 +6483,8 @@ class JaegerGatewayApp:
             "naming the skill and what changed."
         )
         rid = f"skill-review-{request_id}"[:120]
-        try:  # private turns are never skill material, and a cloud lane would refuse them anyway
-            from jaeger_ai.core.models.request_policy import classify as _classify
-            if _classify(review)[0] == "private":
-                logger.info("skill review %s skipped: private content", rid)
-                return
-        except Exception:  # noqa: BLE001
-            pass
+        # The review is constructed from redacted excerpts.  Egress policy is
+        # carried by source metadata at admission, never guessed from words.
 
         def run() -> None:
             time.sleep(float(os.environ.get("JAEGER_SKILL_NUDGE_DELAY_S") or 20))
@@ -6633,8 +6561,6 @@ class JaegerGatewayApp:
         Cancellation is explicit; a dropped SSE client does not stop work.
         """
         session = self.store.get_session(session_id)
-        if self._auto_route(session, text):
-            session = self.store.get_session(session_id)
         session_agent_id = self._session_agent_id(session)
         agent = self._resolve_session_agent(session_id)
         front = self._one_mind_front_door(session, session_agent_id, agent)
@@ -6739,11 +6665,9 @@ class JaegerGatewayApp:
                 system_prompt = plan_mode_system_prompt(system_prompt)
                 execution = self._plan_mode_execution(execution)
             text_only = (session or {}).get("metadata", {}).get("execution_mode") == "text_only"
-            from jaeger_ai.core.runtime.autonomous_runner import is_actionable_request
-            actionable = bool(
-                (session or {}).get("metadata", {}).get("actionable")
-                or is_actionable_request(request_text)
-            )
+            # Admission is host-owned metadata.  Prompt wording cannot grant
+            # a turn durable/actionable execution semantics.
+            actionable = bool((session or {}).get("metadata", {}).get("actionable"))
             loop = asyncio.get_running_loop()
 
             async def _run_native_coro(prompt: str) -> tuple[str, str] | None:

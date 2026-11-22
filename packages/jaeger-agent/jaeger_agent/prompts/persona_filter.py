@@ -49,6 +49,14 @@ _STYLE_RULES = (
     "REPLY TO REWRITE:\n"
 )
 
+
+def wants_verbatim_output(request: str) -> bool:
+    """An explicit output-format constraint takes precedence over styling."""
+    return bool(re.search(
+        r"\b(?:reply|respond|answer|return|output|say)\b[^\n.]{0,80}\b(?:exactly|only)\b"
+        r"|\bnothing else\b|\bverbatim\b", request, flags=re.IGNORECASE,
+    ))
+
 # Content-survival guard: stopword-stripped content-word overlap between the
 # original answer and the styled rewrite. This is the mechanical enforcement
 # of "losing voice is acceptable; losing the answer is not" — a rewrite can

@@ -9,7 +9,6 @@ from jaeger_ai.core.runtime.autonomous_runner import (
     ACCEPTANCE_GUIDANCE,
     HARNESS_PREFIX,
     ensure_autonomous_ledger,
-    is_actionable_request,
     looks_like_batch,
     next_continuation_prompt,
     run_continued_turn,
@@ -50,40 +49,11 @@ def test_prepared_continuation_keeps_original_objective_and_skips_skill_routing(
     assert work_ledger.active_ledger() is None
 
 
-def test_skill_router_consumes_only_original_request(monkeypatch):
-    from types import SimpleNamespace
-    from jaeger_agent.loop.jaeger_agent import JaegerAgent
-    from jaeger_agent.skill_registry import playbook_skills, toolset_scoping
-    seen = []
-    monkeypatch.setattr(toolset_scoping, "is_untrusted_content", lambda: False)
-    monkeypatch.setattr(playbook_skills, "match_playbook",
-                        lambda query, **kwargs: (seen.append(query) or (None, 0, "test")))
-    monkeypatch.setenv("JAEGER_AUTO_SKILLS", "1")
-    agent = SimpleNamespace(_skill_route_query="Repair chat routing", _all_tools=[])
-    prepared = "[Work ledger] kanban\nRepair chat routing"
-    assert JaegerAgent._auto_route_skill(agent, prepared) == prepared
-    assert seen == ["Repair chat routing"]
-    agent._skill_route_query = ""
-    JaegerAgent._auto_route_skill(agent, "[Autonomous Harness] kanban")
-    assert seen == ["Repair chat routing"]
-
-
-def test_batch_phrasing_is_detected():
-    positives = [
-        "process all 50 items and do not stop until done",
-        "consolidate every 20 notes",
-        "process these 300 notes",
-        "do not stop until done",
-        "keep going until every file is finished",
-        "batch-process the export",
-        "/goal finish the notes",
-        "go through all 14 folders",
-        "sync my Safari and Chrome bookmarks with no duplicates",
-        "audit and restructure the bookmarks into folders",
-    ]
-    for text in positives:
-        assert looks_like_batch(text), text
-    assert should_run_autonomous("process these 300 notes")
+def test_only_explicit_goal_phrasing_is_durable():
+    assert looks_like_batch("/goal finish the notes")
+    assert not looks_like_batch("process all 50 items and do not stop until done")
+    assert not should_run_autonomous("process these 300 notes")
+    assert should_run_autonomous("/goal process these 300 notes")
 
 
 def test_batch_phrasing_rejects_casual_chat():
@@ -107,13 +77,6 @@ def test_batch_phrasing_rejects_casual_chat():
     ]
     for text in negatives:
         assert not looks_like_batch(text), text
-
-
-def test_actionable_classifier_keeps_chat_lightweight():
-    assert not is_actionable_request("What is the capital of Egypt?")
-    assert not is_actionable_request("Explain this function.")
-    assert is_actionable_request("Create calculator.py and verify it exists.")
-    assert is_actionable_request("Use Codex to modify the repository and run tests.")
 
 
 def test_controller_step_cannot_spawn_nested_top_level_controller(monkeypatch):
@@ -157,7 +120,7 @@ def test_actionable_multimodal_request_keeps_media_and_output_policy(monkeypatch
     monkeypatch.setattr(agent_controller, "JaegerAgentController", Controller)
     monkeypatch.setattr(main, "_run_turn_via_jaeger_agent", run)
     result = main._run_actionable_turn(
-        None, "Create a summary document from this diagram and verify it exists.",
+        None, "/goal Create a summary document from this diagram and verify it exists.",
         session_key="media-task", allow_persona=False, content=media,
         system_prompt_addon="Use spoken output.",
     )
@@ -174,7 +137,7 @@ def test_actionable_multimodal_request_keeps_media_and_output_policy(monkeypatch
 
 
 def test_durable_request_opens_counted_ledger_automatically():
-    ledger = ensure_autonomous_ledger("process these 436 records")
+    ledger = ensure_autonomous_ledger("/goal process these 436 records")
     assert ledger is not None
     assert ledger.total() == 436
     assert ledger.remaining() == 436
@@ -182,7 +145,7 @@ def test_durable_request_opens_counted_ledger_automatically():
 
 def test_uncounted_durable_request_uses_acceptance_phases():
     ledger = ensure_autonomous_ledger(
-        "sync my Safari and Chrome bookmarks with no duplicates"
+        "/goal sync my Safari and Chrome bookmarks with no duplicates"
     )
     assert ledger is not None
     assert ledger.remaining_ids == ["inspect", "execute", "verify"]
@@ -193,7 +156,7 @@ def test_uncounted_durable_request_uses_acceptance_phases():
 def test_single_reply_does_not_inherit_or_destroy_unfinished_work():
     from jaeger_ai.features.dispatcher.router import prepare_turn_text
     from jaeger_ai.core.runtime.agent_controller import JaegerAgentController
-    existing = ensure_autonomous_ledger("process these 436 records")
+    existing = ensure_autonomous_ledger("/goal process these 436 records")
     class Agent:
         messages = []
         system_prompt = ""
@@ -373,12 +336,6 @@ def test_recalled_background_does_not_make_a_question_actionable(monkeypatch):
     enriched = with_background(
         request, {"durable_recall": "user: run the tests and fix the bug"}
     )
-    # The classifier itself is now background-aware; its safe result is the
-    # same as the raw request.  The regression remains pinned below because
-    # the execution path must also route on ``request``, not recalled text.
-    assert not is_actionable_request(enriched)
-    assert not is_actionable_request(request)
-
     assert main._run_actionable_turn(
         object(), enriched, session_key="test", allow_persona=False,
         request=request,

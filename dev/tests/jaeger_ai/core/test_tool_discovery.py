@@ -55,14 +55,13 @@ def test_untrusted_actual_turn_cannot_infer_terminal_or_execute_it():
     assert terminal.fn() == {'executed': True}
 
 
-def test_every_intent_category_resolves_and_code_is_selected_in_actual_turn():
-    assert scopes.resolve_groups(set(scopes._INTENT_PATTERNS))
+def test_prompt_words_do_not_silently_select_tool_groups():
     add('terminal')
     add('session_organize')
     adapter = Adapter()
     agent = JaegerAgent(adapter=adapter, scope_tools=True)
     agent.run_turn('Organize my conversation and debug python code')
-    assert {'terminal','session_organize'} <= {t.name for t in adapter.tools}
+    assert 'session_organize' not in {t.name for t in adapter.tools}
 
 
 def test_parallel_agents_do_not_share_loaded_tools():
@@ -163,14 +162,15 @@ def test_exact_loading_survives_emergency_core_reduction():
         assert set(agent.tool_names())=={'get_time','run_in_venv'}
 
 
-def test_intent_selection_matches_discovery_metadata():
+def test_explicit_loading_matches_discovery_metadata():
     add('run_in_venv')
     agent=JaegerAgent(adapter=Adapter(), scope_tools=True)
-    agent.run_turn('Run a terminal command')
     with selection_scope(agent._tool_selection):
+        assert load_tools(tools=['run_in_venv'])['ok']
+        agent._refresh_tool_catalog()
         row=list_tools('run_in_venv')['tools'][0]
         assert row['selected'] is True
-        assert row['selection_reason']=='Matched this task'
+        assert row['selection_reason']=='Explicitly loaded'
 
 
 def test_small_window_budgets_schemas_and_routes_only_admitted_request():
@@ -257,15 +257,4 @@ def test_discovery_survives_large_intent_and_exact_load_survives_budget():
     assert model.model_validate(repaired).query == 'image'
     with pytest.raises(ValidationError):
         model.model_validate({'image generation tools': ''})
-
-
-def test_negative_constraints_do_not_select_prohibited_toolsets():
-    selected = scopes.infer_toolsets('Do not download model weights or send messages to people. Read the CSV and calculate totals.')
-    assert 'files' in selected
-    assert not {'models','plugins','people'} & selected
-
-
-@pytest.mark.parametrize('query', ['Inspect this using vision tools', 'Read the code in this photo', 'Describe the screenshot'])
-def test_visual_understanding_selects_media_tools(query):
-    from jaeger_agent.skill_registry.toolset_scoping import infer_toolsets
-    assert 'media' in infer_toolsets(query)
+# End of explicit discovery contract tests.

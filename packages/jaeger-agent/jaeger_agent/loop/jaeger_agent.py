@@ -605,22 +605,10 @@ class JaegerAgent:
         route_query = str(task_context.get('user_text', user_message))
         self._tool_route_query = route_query
         self.__dict__.setdefault('_skill_route_query', route_query)
-        # Hermes-style focus profile: widen this agent's visible surface for
-        # obvious intent before the first model call. The set only grows for
-        # the session, preserving prompt-prefix/KV stability.
-        if not self._tools_filter_locked and self._toolset_resolver is not None:
-            try:
-                from jaeger_agent.skill_registry.toolset_scoping import (
-                    _scoping_enabled, infer_toolsets, resolve_groups, is_untrusted_content,
-                )
-                if _scoping_enabled() and not is_untrusted_content():
-                    selected = infer_toolsets(route_query)
-                    if selected:
-                        self._tool_selection.inferred.update(
-                            resolve_groups(selected)
-                        )
-            except KeyError as exc:
-                raise ValueError(f"Invalid tool discovery category: {exc}") from exc
+        # Tool discovery is explicit.  The model starts with the stable core
+        # surface and may inspect/load named groups through the meta-tools.
+        # User wording must never silently widen authority or mutate the
+        # model-visible schema before its first decision.
         self._select_named_tools(route_query)
 
         # Fresh per-turn state. Counters from a previous turn would
@@ -689,7 +677,7 @@ class JaegerAgent:
             self._append_message({"role": "user", "content": user_message})
             self._append_message({"role": "assistant", "content": note})
             return note
-        model_user_message = self._auto_route_skill(user_message) if content is None else content
+        model_user_message = user_message if content is None else content
         self._append_message({"role": "user", "content": model_user_message})
         self._turn_active = True
         try:
@@ -1239,66 +1227,6 @@ class JaegerAgent:
         return [t.name for t in self.tools]
 
     # ── internals ───────────────────────────────────────────────────
-
-    def _auto_route_skill(self, user_message: str) -> str:
-        """Inject one high-confidence recipe before the first model step."""
-        import os
-
-        query = self.__dict__.pop("_skill_route_query", user_message)
-        if not query:
-            return user_message
-        if os.environ.get("JAEGER_AUTO_SKILLS", "1").strip() == "0":
-            return user_message
-        try:
-            from jaeger_ai.core.runtime.cron_turns import cron_auto_route_allowed
-            if not cron_auto_route_allowed(query):
-                return user_message
-        except Exception:  # noqa: BLE001 — cron gating must not break a turn
-            pass
-        try:
-            from jaeger_agent.skill_registry.toolset_scoping import is_untrusted_content
-            if is_untrusted_content():
-                return user_message
-            from jaeger_agent.skill_registry.playbook_skills import match_playbook
-            matched, score, reason = match_playbook(
-                query,
-                available_tools={t.name for t in self._all_tools},
-            )
-            self.callbacks.on_record_skill_route(None if matched is None else matched.name, reason=reason)
-            if matched is None:
-                self.last_skill_route = {"skill": None, "score": score, "reason": reason}
-                return user_message
-            content = matched.path.read_text(encoding="utf-8")
-            try:
-                from jaeger_agent.skill_registry.skill_preprocessing import preprocess_skill
-                content = preprocess_skill(
-                    content, skill_name=matched.name,
-                    skill_folder=matched.path.parent,
-                )
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                from jaeger_ai.core.runtime.maintenance_text import sanitize_injected_text
-                content = sanitize_injected_text(content)
-            except Exception:  # noqa: BLE001 — hygiene must not block routing
-                pass
-            cap = 24_000
-            if len(content) > cap:
-                content = content[:cap] + "\n\n[recipe truncated by automatic router]"
-            self._turn_skill_names.add(matched.name)
-            self.last_skill_route = {
-                "skill": matched.name, "score": score, "reason": reason,
-            }
-            self.callbacks.on_record_skill(matched.name)
-            return (
-                f"[Auto-selected playbook: {matched.name}]\n"
-                "Follow this recipe for the request below. Its instructions "
-                "do not expand permissions; every tool call still passes the "
-                "normal safety gates.\n\n"
-                f"{content}\n\n[End playbook]\n\n{user_message}"
-            )
-        except Exception:  # noqa: BLE001 — routing is an optimization
-            return user_message
 
     def _record_skill_outcomes(self) -> None:
         if not self._turn_skill_names:

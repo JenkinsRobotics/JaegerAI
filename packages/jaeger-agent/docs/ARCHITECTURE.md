@@ -107,7 +107,6 @@ coined in the source are kept as-is rather than re-branded.
 | **The Host Contribution Path** | A host's tools, toolsets and skills are equal to the module's | `skill_registry/toolset_scoping.py` | §3 |
 | **The Self-Check** | 19 model-free assertions on the surface — `python3 -m jaeger_agent selfcheck` | `core/selfcheck.py` | §9 |
 | **The Boundary Ratchet** | App-import budget that can only fall | `tests/test_module_boundary.py` | §7 |
-| **Persona Mode C — The Id/Ego Lane** | Optional lane where the character speaks first and reaches the agent through exactly one `perform_task` tool | `prompts/persona_lane.py` | §6 |
 | **The Content Survival Gate** | Restyled never means replaced — facts, numbers, paths must survive verbatim | `prompts/persona_filter.py` | §6 |
 | **The Staged Context Guard** | Four-stage degradation instead of a cliff | `util/context_guard.py` | §5 |
 | ├ **Stage 1 — Result Pruning** | Stub oversized tool results once their turn leaves the protected tail | `util/context_guard.py` | §5 |
@@ -424,44 +423,6 @@ with incompatible character models can share one agent unchanged — and
 why `tools/persona.py`, which reads JaegerAI's trait layers directly, is
 six-for-six coupled to JaegerAI and should move back there (§7).
 
-### Persona Mode C — The Id/Ego Lane (a separate mechanism)
-
-Not to be confused with the above. Mode C (`prompts/persona_lane.py`) is
-an **optional lane** in which the character speaks first and reaches the
-clean agent through exactly one tool, `perform_task`.
-
-The framing is Freudian and load-bearing rather than decorative: the
-persona lane is the **id** (voice, desire, wants to answer now); the
-clean agent is the **ego** (reality principle — a tool call *is*
-reality-testing); the permission tiers, e-stop and fail-closed gates are
-the **superego**, refusing regardless of what either wants.
-
-The invariant that makes it safe: **the id never touches reality
-directly.** Lilith cannot assert the time — she must delegate to the ego,
-which checks. Every hallucination of that shape is a persona answering a
-reality question it should have handed off.
-
-It shares the property that makes §6 work — `perform_task` runs
-persona-off with every tool and the hardened prompt — plus three of its
-own:
-
-1. **Delegation is a tool call, not a prose classifier**, so it inherits
-   the reliability the routing bench already measures instead of
-   inventing a new, unmeasured decision path.
-2. **Recursion is structurally impossible, not policed.** The
-   `perform_task` closure is built by the caller and invokes
-   `drive_one_turn` directly — there is no code path back into the lane.
-3. **Compose never means replace** — it reuses Station 3's content
-   survival gate, imported rather than duplicated.
-
-`run_persona_turn` returns `None` **only** for a failure *before*
-`perform_task` runs — the caller's signal to fall through to plain Mode A
-untouched. Once `perform_task` has been called it always returns a
-string, because the alternative is running the turn twice.
-
-## 7. The module boundary — The Layout Bind Seam and what still leaks
-
-`docs/EXTRACTION.md` states the rule plainly:
 
 > **JaegerAgent depends on JaegerOS. JaegerAI depends on JaegerAgent.
 > JaegerAgent must never import JaegerAI.**
@@ -539,12 +500,8 @@ first — it will save you from re-running a refuted experiment.
 Changing the context guard: [`core/context_guard.md`](core/context_guard.md),
 and note the stage-3 invariant in §5.
 
-Touching persona: §6 first, and note it describes **two different
-things**. The dual context pipeline (execution vanilla, voice applied
-after, `prompts/persona_filter.py`) is always on and is why a character
-costs no accuracy. Persona Mode C (`prompts/persona_lane.py`) is an
-optional lane on top of it; its module docstring is the authoritative
-statement of that contract.
+Touching persona: §6 first. The dual-context pipeline keeps execution
+grounded and applies voice afterward in `prompts/persona_filter.py`.
 
 Before adding anything character-shaped to the system prompt, read
 `prompts/assemble.py` line 116 and the ~7-point measurement behind it.

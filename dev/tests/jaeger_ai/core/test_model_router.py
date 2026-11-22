@@ -9,14 +9,10 @@ import pytest
 from jaeger_ai.core.models import router
 
 
-def test_router_classify_public_and_private():
-    klass, reason = router.classify("what is the time")
-    assert klass == "public"
-    assert reason == "default"
-
-    klass_priv, reason_priv = router.classify("please do not reveal this api_key")
-    assert klass_priv == "private"
-    assert "keyword" in reason_priv
+def test_prompt_wording_never_changes_egress_policy():
+    decision = router.decide("my password is secret")
+    assert decision.classification == "public"
+    assert decision.reason == "provenance:standard"
 
 
 def test_router_apply_sensitivity_routing(tmp_path, monkeypatch):
@@ -33,11 +29,12 @@ def test_router_apply_sensitivity_routing(tmp_path, monkeypatch):
 
     from jaeger_ai.core.models.request_policy import ModelPolicyError
     with pytest.raises(ModelPolicyError, match="configured on-device model"):
-        router.apply_sensitivity_routing("my bank password is secret123")
+        router.apply_sensitivity_routing("ordinary content", local_only=True)
     model_p, provider_p, decision_p = router.apply_sensitivity_routing(
-        "my bank password is secret123",
+        "ordinary content",
         config=SimpleNamespace(external_model=SimpleNamespace(fallback=[
             SimpleNamespace(provider="ollama",model="configured-local:latest")])),
+        local_only=True,
     )
     assert decision_p.classification == "private"
     assert provider_p == "ollama"

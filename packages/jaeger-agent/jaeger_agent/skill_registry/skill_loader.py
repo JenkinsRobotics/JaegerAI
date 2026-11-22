@@ -395,10 +395,7 @@ _REGISTERED_KEYS: set[tuple[str, int, str]] = set()
 
 # 0.9.3 Task 5 (dependency visibility): the most recent load_and_register
 # report, process-wide. `jaeger doctor` runs in a fresh process and calls
-# load_and_register itself to populate this; the self-model
-# (persona_lane.build_self_model_block) reads it in the SAME process the
-# agent booted in, to explain a missing capability instead of silently
-# omitting it.
+# load_and_register itself to populate this for diagnostics.
 _LAST_REPORT: "SkillLoadReport | None" = None
 
 
