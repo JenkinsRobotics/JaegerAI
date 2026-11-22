@@ -28,8 +28,13 @@ Jaeger Droid.app (headless; holds mic/camera permission)
   that speaker is missing or the engine cannot start on it, the droid falls
   back to another real output and the menu status explains the switch.
 * **Talk**: Smart Turn decides when you're done; replies are spoken sentence by
-  sentence as they stream. Talking over the droid stops it (echo cancellation
-  comes from the shared voice-processing engine). Long answers are capped
+  sentence as they stream. Talking over the droid pauses the current speech
+  unit (echo cancellation comes from the shared voice-processing engine).
+  A short backchannel such as "yeah" resumes the unfinished thought; a
+  correction or question abandons unheard speech, steers the active Gateway
+  turn, and speaks the revised continuation. Emergency stop phrases still
+  halt immediately. The delivered-speech ledger distinguishes queued,
+  interrupted and actually played speech. Long answers are capped
   (`max_spoken_chars`) with "The rest is in the chat."
 * **Persona**: a short framing line makes Jaeger a courteous, gently witty
   protocol droid (C-3PO in spirit). The chat shows only what you said.

@@ -46,6 +46,7 @@ from collections import deque
 
 from . import coreaudio, life, persona, vision
 from .audio import BLOCK, RATE, DuplexAudio
+from .conversation import SpeechPlanController, SpeechUnit
 
 log = logging.getLogger("jaeger.droid")
 STATE = Path(os.environ.get("JAEGER_STATE_DIR") or Path.home() / ".jaeger")
@@ -124,6 +125,7 @@ class Droid:
         self.busy_moving = False
         self.activity_at = time.time()
         self.life = life.Life(self)
+        self.speech = SpeechPlanController(self._speak_unit, self._stop_playback)
         self.status = {"state": "off", "awake": False, "muted": False, "engine": self.cfg["engine"],
                        "heard": "", "said": "", "latency_ms": None, "error": None,
                        "speaker": self.cfg["speaker"], "microphone": self.cfg["microphone"],
@@ -322,6 +324,7 @@ class Droid:
         self.say(f"Ah, welcome back, {self.cfg['name']}." if faces == 1 else "Hello there, everyone.")
 
     async def _teardown(self):
+        self.speech.abandon()
         if self.eyes:
             eyes, self.eyes = self.eyes, None
 
@@ -513,7 +516,7 @@ class Droid:
         elif kind == "user-speaking":
             self.activity_at = time.time()
             if self.bot_speaking:
-                self._barge_in()
+                self.speech.pause_for_overlap()
             self.set(state="hearing")
         elif kind == "user-partial":
             self.set(heard=str(m.get("text") or ""))
@@ -525,13 +528,22 @@ class Droid:
                     self.mic_open, self.reply_until = True, 0.0   # a reply: this is a conversation now
                     self.set(mode="conversation")
                 self.set(heard=text)
-                asyncio.create_task(self.on_heard(text))
+                was_paused = self.speech.paused
+                decision = self.speech.resolve(text)
+                self.set(interruption=decision.kind.value)
+                if not was_paused or decision.route_to_agent:
+                    asyncio.create_task(self.on_heard(text))
             else:
                 self.set(state=self.idle_state())
         elif kind == "interrupted":
             self.audio and self.audio.flush()
         elif kind == "bot-speaking":
             self.bot_speaking = bool(m.get("on"))
+            if self.bot_speaking:
+                self.speech.playback_started()
+            else:
+                self.speech.playback_finished()
+            self.set(speech=self.speech.snapshot())
             self.activity_at = time.time()
             if not self.bot_speaking:
                 self.unprompted_speaking = False
@@ -553,9 +565,17 @@ class Droid:
             self.set(error=str(m.get("message") or "voice service error"))
 
     def _barge_in(self):
-        self.audio and self.audio.flush()
+        self.speech.abandon(source_id=self.request_id)
         self.skip_rid = self.request_id
+
+    def _stop_playback(self):
+        self.audio and self.audio.flush()
         self._send({"t": "stop"})
+
+    def _speak_unit(self, unit: SpeechUnit):
+        self._send({"t": "speak", "speech_id": unit.id, "text": unit.text[:2000]})
+        self.set(said=unit.text[-400:], speech=self.speech.snapshot())
+        self.note("assistant", unit.text)
 
     def _send(self, message: dict):
         if self.dc is not None and self.dc.readyState == "open":
@@ -571,12 +591,10 @@ class Droid:
         else:
             self.transcript.append({"role": role, "text": text[-1200:], "at": now})
 
-    def say(self, text: str):
+    def say(self, text: str, *, source_id: str | None = None):
         text = persona.speakable(text)
         if text:
-            self._send({"t": "speak", "text": text[:2000]})
-            self.set(said=text[-400:])
-            self.note("assistant", text)
+            self.speech.enqueue(text, source_id=source_id)
 
     def stop_talking(self):
         self._barge_in()
@@ -639,6 +657,8 @@ class Droid:
         if rid:
             try:
                 await asyncio.to_thread(self.gateway.steer, self.cfg["session_id"], rid, text)
+                self.skip_rid = None
+                self.speech.unblock_source(rid)
                 return
             except Exception:
                 pass
@@ -718,7 +738,7 @@ class Droid:
                 return
             spoken["chars"] += len(chunk)
             spoken["any"] = True
-            self.say(chunk)
+            self.say(chunk, source_id=rid)
 
         def on_event(name, data):
             loop.call_soon_threadsafe(handle, name, data)
