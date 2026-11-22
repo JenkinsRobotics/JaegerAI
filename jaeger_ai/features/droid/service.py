@@ -97,6 +97,36 @@ class MicTrack:
         return _Track()
 
 
+class CameraTrack:
+    """aiortc video track backed by Eyes' existing capture buffer."""
+
+    def __new__(cls, eyes):
+        from aiortc import VideoStreamTrack
+
+        class _Track(VideoStreamTrack):
+            def __init__(self):
+                super().__init__()
+                self.last_frame_id = -1
+                self.started = time.monotonic()
+
+            async def recv(self):
+                import av
+
+                while True:
+                    with eyes.lock:
+                        frame_id = eyes.frame_id
+                        frame = eyes.frame.copy() if eyes.frame is not None and frame_id != self.last_frame_id else None
+                    if frame is not None:
+                        self.last_frame_id = frame_id
+                        video = av.VideoFrame.from_ndarray(frame, format="bgr24")
+                        video.pts = max(0, int((time.monotonic() - self.started) * 90_000))
+                        video.time_base = fractions.Fraction(1, 90_000)
+                        return video
+                    await asyncio.sleep(0.005)
+
+        return _Track()
+
+
 class Droid:
     def __init__(self):
         from jaeger_ai.core.gateway.client import GatewayTurnClient
@@ -105,6 +135,7 @@ class Droid:
         self.loop: asyncio.AbstractEventLoop | None = None
         self.audio: DuplexAudio | None = None
         self.pc = self.dc = self.track = None
+        self.video_pcs: set = set()
         self.tasks: list[asyncio.Task] = []
         self.ready = asyncio.Event()
         self.lock = asyncio.Lock()
@@ -344,6 +375,12 @@ class Droid:
         if pc is not None:
             try:
                 await pc.close()
+            except Exception:
+                pass
+        video_pcs, self.video_pcs = tuple(self.video_pcs), set()
+        for video_pc in video_pcs:
+            try:
+                await video_pc.close()
             except Exception:
                 pass
         if self.audio:
@@ -934,6 +971,29 @@ def app(droid: Droid) -> web.Application:
         if not img:
             return web.json_response({"error": "camera off"}, status=404)
         return web.Response(body=img, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @routes.post("/camera/offer")
+    async def camera_offer(request):
+        if not droid.eyes or droid.status.get("camera") != "live":
+            return web.json_response({"error": "camera off"}, status=409)
+        from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
+
+        body = await request.json()
+        if not body.get("sdp") or body.get("type") != "offer":
+            return web.json_response({"error": "valid WebRTC offer required"}, status=400)
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        droid.video_pcs.add(pc)
+
+        @pc.on("connectionstatechange")
+        async def connection_state():
+            if pc.connectionState in ("failed", "closed", "disconnected"):
+                droid.video_pcs.discard(pc)
+                await pc.close()
+
+        await pc.setRemoteDescription(RTCSessionDescription(sdp=body["sdp"], type="offer"))
+        pc.addTrack(CameraTrack(droid.eyes))
+        await pc.setLocalDescription(await pc.createAnswer())
+        return web.json_response({"sdp": pc.localDescription.sdp, "type": pc.localDescription.type})
 
     @routes.get("/screen.jpg")
     async def screen(_r):

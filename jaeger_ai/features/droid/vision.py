@@ -128,6 +128,7 @@ class Eyes:
         self.head = Head()
         self.frame = None
         self.frame_at = 0.0
+        self.frame_id = 0
         self.faces = 0
         self.present = False
         self.last_seen = 0.0
@@ -169,6 +170,7 @@ class Eyes:
                 now = time.time()
                 with self.lock:
                     self.frame, self.frame_at = frame, now
+                    self.frame_id += 1
                 if now >= next_presence:
                     next_presence = now + 1.5
                     gray = cv2.cvtColor(cv2.resize(frame, (640, 360)), cv2.COLOR_BGR2GRAY)
