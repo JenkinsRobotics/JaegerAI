@@ -207,14 +207,7 @@ class EndpointResolver:
 # 2. Privacy & Sensitivity Governance Gate
 # ---------------------------------------------------------------------------
 
-_PATTERNS_PATH = Path(__file__).with_name("sensitivity_patterns.yaml")
 _DEFAULT_CLOUD = "glm-5.3-flash"
-
-# Built-in fallback sensitivity keywords if YAML is absent
-_DEFAULT_PRIVATE_KEYWORDS = [
-    "password", "secret", "api_key", "token", "ssn", "credit_card",
-    "private_key", "confidential", "internal_only", "classified"
-]
 
 
 @dataclass(frozen=True)
@@ -226,61 +219,12 @@ class SensitivityDecision:
     tokens_est: int
 
 
-def _load_rules() -> tuple[list[str], list[re.Pattern[str]]]:
-    keywords: list[str] = list(_DEFAULT_PRIVATE_KEYWORDS)
-    patterns: list[re.Pattern[str]] = []
-    if _PATTERNS_PATH.exists():
-        try:
-            import yaml  # type: ignore
-            raw = yaml.safe_load(_PATTERNS_PATH.read_text(encoding="utf-8")) or {}
-            loaded_kw = [str(k).strip().lower() for k in (raw.get("private_keywords") or []) if str(k).strip()]
-            if loaded_kw:
-                keywords = loaded_kw
-            for item in raw.get("private_patterns") or []:
-                text = str(item or "").strip()
-                if text.startswith("re:"):
-                    text = text[3:]
-                if text:
-                    try:
-                        patterns.append(re.compile(text))
-                    except re.error:
-                        continue
-        except Exception:  # noqa: BLE001
-            pass
-    return keywords, patterns
-
-
 def estimate_tokens(text: str) -> int:
     """Estimate token count for audit logging (character count heuristic)."""
     body = text or ""
     if not body:
         return 0
     return max(1, (len(body) + 3) // 4)
-
-
-def classify(text: str) -> tuple[str, str]:
-    """Classify user text as 'public' or 'private' and return the classification & reason."""
-    body = text or ""
-    lowered = body.lower()
-    # "Draft it, do NOT send" is a drafting instruction, not a privacy request
-    # (it blocked every draft-only turn, parity P16); "send" only counts when
-    # it says where the content must not go.
-    if re.search(r"\b(?:do not|don't|never) (?:reveal|share|upload)\b", lowered) or re.search(
-            r"\b(?:do not|don't|never) send (?:this |it |that |them )?(?:to|with|off to) (?:the )?"
-            r"(?:cloud|internet|server|servers|anyone|anybody|any one|third part)", lowered):
-        return "private", "keyword:explicit_privacy_request"
-    keywords, patterns = _load_rules()
-    for kw in keywords:
-        if kw in lowered:
-            # Discussing security is not the same as supplying a credential.
-            if kw in {"password", "secret", "api key", "apikey", "api_key", "token"}:
-                if not re.search(r"(?:my|our)\s+(?:password|secret|api[ _]?key|token)\s*(?:is|[=:])|(?:password|secret|api[ _]?key|token)\s*(?:is\s+|[=:])\s*\S+|(?:find saved|store|remember|rotate)\b.{0,30}\b" + re.escape(kw), lowered):
-                    continue
-            return "private", f"keyword:{kw}"
-    for pat in patterns:
-        if pat.search(body):
-            return "private", f"pattern:{pat.pattern}"
-    return "public", "default"
 
 
 def _log_path() -> Path:
@@ -339,9 +283,15 @@ def decide(
     model: str | None = None,
     provider: str | None = None,
     default_client: Any | None = None,
+    local_only: bool = False,
 ) -> SensitivityDecision:
-    """Decide model target based on privacy classification."""
-    classification, reason = classify(text)
+    """Apply an explicit host-owned egress decision.
+
+    Prompt text is data, not policy.  Callers set ``local_only`` from trusted
+    session/source provenance or a user-selected privacy control.
+    """
+    classification = "private" if local_only else "public"
+    reason = "provenance:local_only" if local_only else "provenance:standard"
     tokens = estimate_tokens(text)
     if classification == "private":
         # The in-process GGUF/MLX clients already satisfy the local-only
@@ -384,10 +334,11 @@ def apply_sensitivity_routing(
     provider: str | None = None,
     default_client: Any | None = None,
     log: bool = True,
+    local_only: bool = False,
 ) -> tuple[str | None, str | None, SensitivityDecision]:
-    """Classify input text, enforce local execution for private queries, and log decision."""
+    """Enforce the host's explicit egress decision and log it."""
     decision = decide(text, config=config, model=model, provider=provider,
-                      default_client=default_client)
+                      default_client=default_client, local_only=local_only)
     if log:
         log_decision(decision, text_preview=text)
     return decision.model, decision.provider, decision
@@ -498,11 +449,7 @@ def select_client(default: Any, config: Any, layout: Any, model: str | None = No
 # ===========================================================================
 
 class SensitivityGate:
-    """Privacy and sensitivity governance gate for prompt routing."""
-
-    @staticmethod
-    def classify(text: str) -> tuple[str, str]:
-        return classify(text)
+    """Host-owned egress policy gate."""
 
     @staticmethod
     def decide(
@@ -511,8 +458,10 @@ class SensitivityGate:
         config: Any | None = None,
         model: str | None = None,
         provider: str | None = None,
+        local_only: bool = False,
     ) -> SensitivityDecision:
-        return decide(text, config=config, model=model, provider=provider)
+        return decide(text, config=config, model=model, provider=provider,
+                      local_only=local_only)
 
     @staticmethod
     def log_decision(decision: SensitivityDecision, *, text_preview: str = "") -> Path:
@@ -548,7 +497,6 @@ __all__ = [
     "SensitivityDecision",
     "SensitivityGate",
     "apply_sensitivity_routing",
-    "classify",
     "decide",
     "estimate_tokens",
     "log_decision",

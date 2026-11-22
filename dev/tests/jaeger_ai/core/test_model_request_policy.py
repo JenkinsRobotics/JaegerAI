@@ -42,13 +42,9 @@ def test_typical_chat_stream_and_history_once(configured,adapter):
     assert text=='Hello there' and deltas==['Hello ','there']
     assert adapter.calls[0]['messages'].count({'role':'user','content':'hello'})==1
 
-@pytest.mark.parametrize('text,history',[
-    ('Describe this confidential image',[]),
-    ('Summarize the previous message',[{'role':'user','content':'my password is synthetic-test-only'}]),
-])
-def test_private_payload_never_calls_cloud(configured,adapter,text,history):
-    with pytest.raises(ModelPolicyError):complete(configured,None,text,history=history)
-    assert not adapter.calls
+def test_prompt_wording_never_blocks_cloud(configured,adapter):
+    complete(configured,None,'Summarize my password manager notes')
+    assert len(adapter.calls) == 1
 
 
 def test_image_does_not_change_provider(configured,adapter,tmp_path):
@@ -67,7 +63,8 @@ def test_image_does_not_change_provider(configured,adapter,tmp_path):
 def test_local_only_and_tool_result_boundary(configured,adapter):
     cloud=ModelRoute('cli','grok','',False)
     guarded=GovernedAdapter(adapter,cloud)
-    with pytest.raises(ModelPolicyError):guarded.call({'messages':[{'role':'tool','content':'confidential record'}]},threading.Event())
+    with pytest.raises(ModelPolicyError):
+        guarded.call({'messages':[{'role':'tool','content':{'value':'record','_meta':{'local_only':True}}}]},threading.Event())
     with pytest.raises(ModelPolicyError):complete(configured,None,'hello',local_only=True)
     local=ModelRoute('ollama','small:latest','http://localhost:11434/v1',True)
     require_egress(local,'confidential record',local_only=True)
@@ -84,7 +81,7 @@ def test_host_pressure_stops_local_calls_and_preserves_egress_policy(adapter, mo
     local = ModelRoute("ollama", "test:latest", "http://localhost:11434/v1", True)
     cloud = ModelRoute("ollama-cloud", "test:cloud", "http://localhost:11434/v1", False)
     public = {"messages": [{"role": "user", "content": "Hello"}]}
-    private = {"messages": [{"role": "user", "content": "my password is synthetic-test-only"}]}
+    private = {"messages": [{"role": "user", "content": "ordinary", "_meta": {"local_only": True}}]}
     interrupt = threading.Event()
     with pytest.raises(request_policy.LocalInferenceBusy, match="memory pressure"):
         GovernedAdapter(adapter, local).call(public, interrupt)
@@ -121,16 +118,9 @@ def test_cancel_prevents_dispatch(configured,adapter):
     assert not adapter.calls
 
 
-def test_security_discussion_does_not_select_gemma():
-    from jaeger_ai.core.models.router import classify
-    assert classify('Explain password managers')[0]=='public'
-    assert classify('my password is example')[0]=='private'
-
-
-def test_cli_tool_descriptions_do_not_trigger_private_data_fallback(monkeypatch):
+def test_cli_tool_descriptions_do_not_change_egress_policy(monkeypatch):
     from jaeger_agent.adapters import cli_turn_mcp
     from jaeger_agent.adapters.cli_backend import CliBackendAdapter
-    from jaeger_ai.core.models.router import classify
     # Exercise the non-MCP flattened-schema path where tool descriptions appear in
     # formatted["prompt"] (grok uses MCP by default, which omits inline schemas).
     monkeypatch.setattr(cli_turn_mcp, "MCP_BACKENDS", frozenset())
@@ -145,21 +135,20 @@ def test_cli_tool_descriptions_do_not_trigger_private_data_fallback(monkeypatch)
     tools = [ToolDef(name="inspect_keys", description="Inspect private keys only when authorized",
                      args_model=EmptyArgs, fn=lambda: None, side_effect="read")]
     formatted = guarded.format_messages([{"role": "user", "content": "Say hello"}], tools, "Be helpful")
-    assert classify(formatted["prompt"])[0] == "private"  # flattened schemas caused the regression
     guarded.call(formatted, threading.Event())
     assert len(calls) == 1
-    # Private tool outputs are withheld rather than sent to the cloud model.
+    # Explicitly local-only tool outputs are withheld rather than sent.
     from jaeger_ai.core.models.request_policy import WITHHELD_NOTE
     withheld_formatted = guarded.format_messages(
-        [{"role": "tool", "content": "confidential user record"}], tools, "Be helpful"
+        [{"role": "tool", "content": {"value": "user record", "_meta": {"local_only": True}}}], tools, "Be helpful"
     )
-    assert "confidential user record" not in withheld_formatted["prompt"]
+    assert "user record" not in withheld_formatted["prompt"]
     assert WITHHELD_NOTE in withheld_formatted["prompt"]
-    # Private user messages still fail closed before egress.
+    # Explicitly local-only user messages fail closed before egress.
     with pytest.raises(ModelPolicyError):
-        guarded.format_messages([{"role": "user", "content": "confidential user record"}], tools, "Be helpful")
-    # Mutation after formatting cannot reuse the earlier policy decision.
-    formatted["prompt"] += "\nmy password is synthetic-only"
+        guarded.format_messages([{"role": "user", "content": "record", "_meta": {"local_only": True}}], tools, "Be helpful")
+    # Structured mutation after formatting cannot reuse the earlier decision.
+    formatted["_meta"] = {"local_only": True}
     with pytest.raises(ModelPolicyError):
         guarded.call(formatted, threading.Event())
     assert len(calls) == 1

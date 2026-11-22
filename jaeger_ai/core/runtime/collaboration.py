@@ -131,9 +131,6 @@ def helper_prompt(*, display_name: str, specialty: str, brief: str, context: str
     parts = [
         f"You are {display_name}, an inner helper ({specialty}) of Jaeger. Jaeger is the one assistant "
         "the person talks to; you are part of its thinking, not a separate voice.",
-        # Wording note: phrases like "never send ..." read as a privacy request to
-        # the sensitivity gate (models/router.classify) and would pin the helper
-        # to a local model, so the rules are stated as what is out of scope.
         "Rules: your result goes only to Jaeger. Messaging the person, long-term memory writes, "
         "scheduling, approvals and further delegation are outside your role and not available to you.",
         f"Tools you may use: {tool_list}.",

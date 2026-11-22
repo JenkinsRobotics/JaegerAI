@@ -9,8 +9,8 @@ sheet (``assistant``) yields, and then the instance's own name
 itself in a conversational turn; "Jaeger" is what runs the agent, not
 who answers.
 
-Two things in the **jaeger-agent** dependency contradicted that rule, and
-both are re-pointed from here rather than forked downstream — the same
+The identity fragment in **jaeger-agent** contradicted that rule and is
+re-pointed from here rather than forked downstream — the same
 seam and the same reasoning as :mod:`jaeger_ai.core.prompt_documents`
 (an *instance* and its persona are JaegerAI's concepts; the dependency
 stays untouched and unpinned-to-a-fork):
@@ -25,20 +25,8 @@ stays untouched and unpinned-to-a-fork):
     position, kind, and inspector metadata are preserved, only ``build``
     changes.
 
-``persona_lane._SELF_MODEL_HEADER``
-    The Mode-C lane appends a capability digest to the character's own
-    block, and its first line opened "You are a Jaeger agent running
-    locally on this machine." A second identity, stated in the second
-    person, three paragraphs under "You are Clanker" — this is the line
-    that put "Jaeger" in the model's mouth when nothing else did. It is
-    a private module constant with no injection point, so it is
-    rewritten in place (and the per-boot cache that holds the assembled
-    digest is dropped, since a cached copy would outlive the patch).
-    Ask upstream to parameterise the header if this seam ever bites.
-
-Both patches are idempotent and fail-open: a dependency that renamed
-either target leaves the prompt exactly as the dependency built it,
-never a crash and never a half-applied identity.
+The replacement is idempotent and fail-open: a dependency that renamed
+the target leaves the prompt exactly as the dependency built it.
 """
 
 from __future__ import annotations
@@ -59,16 +47,6 @@ EPISTEMIC_INVARIANT = (
     "character perspective as verified fact; use tools and checks to verify claims "
     "whenever feasible, and surface contradictions openly."
 )
-
-# The replacement first line for the Mode-C self-model digest. Says what
-# the old line said that was TRUE (local, one tool, the capability list
-# is not a tool list) and drops the part that named a second self.
-SELF_MODEL_HEADER = (
-    "You are running on this machine. Capability areas below are "
-    "NOT tool names — you reach ALL of them through your tools. "
-    "Configured language-model providers are listed in the runtime truth block:"
-)
-
 
 def agent_display_name(layout: Any) -> str:
     """The one name this agent answers to right now.
@@ -113,7 +91,6 @@ def register_agent_identity() -> bool:
     assembly, alongside
     :func:`jaeger_ai.core.prompt_documents.register_context_documents`.
     """
-    _patch_self_model_header()
     try:
         import dataclasses
 
@@ -154,23 +131,7 @@ def register_agent_identity() -> bool:
     return found_identity
 
 
-def _patch_self_model_header() -> None:
-    """Rewrite the Mode-C self-model digest's opening line so it stops
-    naming a second identity. See the module docstring."""
-    try:
-        from jaeger_agent.prompts import persona_lane
-
-        if getattr(persona_lane, "_SELF_MODEL_HEADER", None) == SELF_MODEL_HEADER:
-            return
-        persona_lane._SELF_MODEL_HEADER = SELF_MODEL_HEADER  # noqa: SLF001
-        # The digest is assembled once per boot and cached; a copy built
-        # before this patch would keep serving the old first line.
-        persona_lane.reset_self_model_cache()
-    except Exception:  # noqa: BLE001 — the lane is optional, the turn is not
-        pass
-
-
 __all__ = [
-    "IDENTITY_FRAGMENT", "SELF_MODEL_HEADER", "agent_display_name",
+    "IDENTITY_FRAGMENT", "agent_display_name",
     "register_agent_identity",
 ]

@@ -100,7 +100,7 @@ run_backend() {
     dev/tests/jaeger_ai/plugins/test_ai_gen.py \
     dev/tests/jaeger_ai/core/test_gateway_turn_card.py::test_owner_verification_resolves_in_admitted_workspace \
     dev/tests/jaeger_ai/core/test_mcp_discovery.py \
-    dev/tests/jaeger_ai/core/test_toolsets.py \
+    dev/tests/jaeger_ai/core/test_explicit_agent_control.py \
     dev/tests/jaeger_ai/agent/test_agent_toolsets.py \
     dev/tests/jaeger_ai/agent/test_lean_tools.py \
     dev/tests/jaeger_ai/core/test_owner_agent_options.py \
@@ -122,7 +122,6 @@ run_backend() {
     dev/tests/jaeger_ai/core/test_gateway_model_history.py \
     dev/tests/jaeger_ai/core/test_gateway_single_terminal.py \
     dev/tests/jaeger_ai/core/test_model_context_observation.py \
-    dev/tests/jaeger_ai/core/test_sensitivity_gate.py \
     dev/tests/jaeger_ai/core/test_runtime_policy_isolation.py \
     dev/tests/jaeger_ai/core/test_first_boot_config.py \
     dev/tests/jaeger_ai/core/test_stack_controller.py \

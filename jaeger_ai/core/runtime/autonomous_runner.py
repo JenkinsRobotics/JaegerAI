@@ -48,45 +48,8 @@ HARNESS_PREFIX = "[Autonomous Harness]"
 # Counted batches need a process-verb AND a two-digit count; "until
 # done" needs an explicit keep-going phrase. Do not widen this without
 # adding negatives first.
-_BATCH_HINT = re.compile(
-    r"(?is)"
-    r"(?:do not stop|don't stop|keep going) until "
-    r"(?:you(?:'re| are)? )?(?:done|finished|complete|all|every)|"
-    r"(?:process(?:ing)?|consolidat(?:e|ing)|go through|work through|"
-    r"handle|finish)\b.{0,80}?\b(?:all |every |these )?\d{2,}\s+"
-    r"(?:items?|files?|rows?|entries|notes?|folders?|records)\b|"
-    r"\bbatch[- ](?:process|job|operation|run)\b|"
-    r"(?:audit|organi[sz]e|sync|deduplicat(?:e|ing)|merge|restructur(?:e|ing))"
-    r"\b.{0,120}?\b(?:bookmarks?|files|folders|records|entries|notes|"
-    r"libraries|collections)\b|"
-    r"^/goal\b"
-)
-
 _COUNTED_SCOPE = re.compile(
     r"(?i)\b(\d{1,7})\s+(?:items?|files?|rows?|entries|notes?|folders?|records|bookmarks?)\b"
-)
-_ACTION_VERB = re.compile(
-    r"(?i)\b(?:create|modify|edit|change|update|delete|remove|install|build|"
-    r"execute|run|fix|implement|write|move|copy|rename|configure|deploy|queue|schedule|"
-    r"inspect|review|commit|changed)\b"
-)
-_VERIFICATION_REQUEST = re.compile(
-    r"(?i)^(?:check|verify|confirm)\b"
-)
-_DELEGATION_REQUEST = re.compile(
-    r"(?i)\b(?:delegate|delegat(?:e|ed|ing)|use|ask|have|let)\s+"
-    r"(?:codex|hermes|openclaw|claude|gemini|grok|cursor|opencode)\b"
-)
-_DISCUSSION_PREFIX = re.compile(
-    r"(?i)^(?:what|why|how|which|should|explain|show\s+me|compare|"
-    r"summari[sz]e|give\s+me|write\s+a\s+prompt|tell\s+me)\b"
-)
-_NEGATED_REQUEST = re.compile(
-    r"(?i)^(?:do\s+not|don't|do\s+n't|i\s+am\s+not\s+asking)\b"
-)
-_DECLARATIVE_DISCUSSION = re.compile(
-    r"(?i)^(?:i\s+(?:read|heard|know|think)|the\s+docs?\s+(?:say|describe)|"
-    r"this\s+is\s+an\s+example|i\s+meant)\b"
 )
 _FILE_EXTENSIONS = r"md|txt|json|jsonl|csv|py|html|xlsx|pdf|docx|pptx|ics|png|jpe?g|webp|mp4|mov|wav|mp3|js|ts"
 _PATH_TOKEN = re.compile(
@@ -109,56 +72,7 @@ def looks_like_batch(text: str) -> bool:
     body = (text or "").strip()
     if body.startswith(HARNESS_PREFIX):
         return True
-    return bool(_BATCH_HINT.search(body))
-
-
-def is_actionable_request(text: str) -> bool:
-    """Return true for explicit state-changing or verifiable work requests.
-
-    This is intentionally a small intent seam, not a general language model
-    classifier.  Existing ledger state and explicit ``/goal``/batch signals
-    remain authoritative; the additional patterns cover the common single
-    repository/action requests that previously ran as one conversational turn.
-    """
-    body = " ".join((text or "").strip().split())
-    if not body or conversation_only(body):
-        return False
-    # Commands inside prose, documentation, or code examples are not an
-    # execution request. Remove quoted/backticked spans before intent tests.
-    unquoted = re.sub(r"`[^`]*`|\"[^\"]*\"|'[^']*'|“[^”]*”", " ", body)
-    if _DECLARATIVE_DISCUSSION.match(body):
-        return bool(re.search(r"(?i)\b(?:then|but|and)\b", unquoted)
-                    and _ACTION_VERB.search(unquoted))
-    if re.search(r"(?i)\b(?:might|could|would)\s+(?:run|execute|use|change)\b", body) and not re.match(r"(?i)^(?:please\s+)?(?:queue|schedule|run|execute|build|fix)\b", body):
-        return False
-    if re.search(r"(?i)\bno\s+changes?\b|\bjust\s+a\s+code\s+review\b", body):
-        return False
-    if re.search(r"(?i)\bnot\s+(?:a\s+)?(?:change|request|execution)\b", body):
-        return False
-    if looks_like_batch(body):
-        return True
-    # Explicit text-only and negated requests are never promoted. A mixed
-    # request may still be actionable when it contains an explicit follow-up
-    # action ("explain it, then fix it").
-    if re.search(r"(?i)\btext[- ]only\b|\bdo\s+not\s+use\s+tools\b", body):
-        return False
-    if _NEGATED_REQUEST.match(body) and not re.search(
-        r"(?i)\b(?:then|but|and)\b", body
-    ):
-        return False
-    if _DISCUSSION_PREFIX.match(body):
-        return bool(re.search(r"(?i)\b(?:then|but|and)\b", body)
-                    and _ACTION_VERB.search(unquoted))
-    if _DELEGATION_REQUEST.search(body):
-        return True
-    # Imperative/verification requests are actionable even when their target
-    # is a command ("run pytest") rather than a file or repository noun.
-    return bool(
-        _ACTION_VERB.match(unquoted)
-        or _ACTION_VERB.search(unquoted)
-        or _VERIFICATION_REQUEST.match(unquoted)
-        or re.search(r"(?i)\bdelegate\b", unquoted)
-    )
+    return body.startswith("/goal")
 
 
 def _goal_active() -> bool:
@@ -207,7 +121,11 @@ def should_run_autonomous(text: str = "") -> bool:
         return True
     if _goal_active():
         return True
-    return is_actionable_request(text)
+    # Durable execution is an explicit host/user state transition.  Natural
+    # language is never an authority signal: it cannot promote an ordinary
+    # chat turn into a long-running worker loop.  `/goal` remains the explicit
+    # textual admission command; existing ledgers/goals remain resumable.
+    return (text or "").lstrip().startswith("/goal")
 
 
 def _batch_total(text: str) -> int | None:
@@ -854,7 +772,6 @@ __all__ = [
     "WORKER_PREAMBLE",
     "AutonomousGoalRunner",
     "looks_like_batch",
-    "is_actionable_request",
     "should_run_autonomous",
     "ensure_autonomous_ledger",
     "ledger_open",

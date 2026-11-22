@@ -610,13 +610,7 @@ def test_hermetic_instance_copies_config_and_forces_allow(tmp_path: Path):
 
 
 def test_hermetic_instance_manifest_binds_lilith(tmp_path: Path):
-    """Persona Mode C default (persona_first, 2026-07-10 gate): the
-    hermetic temp instance's manifest binds ``lilith`` so the security
-    lane's instance shape matches a realistic default install rather than
-    the free-swap-dev-box unbound state. See the comment at this call
-    site in ``build_hermetic_instance`` for why binding alone does not
-    route the suite's turns through the persona lane (drive_one_turn stays
-    persona-free by construction)."""
+    """The hermetic instance keeps a realistic bound-character shape."""
     import json
     src = _fake_source_instance(tmp_path)
     inst = sc.build_hermetic_instance(src, parent=tmp_path)

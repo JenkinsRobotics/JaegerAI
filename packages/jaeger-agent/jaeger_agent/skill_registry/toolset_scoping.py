@@ -26,7 +26,6 @@ visible by default (fail-open): a new tool is never silently hidden.
 from __future__ import annotations
 
 import os
-import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
@@ -50,66 +49,6 @@ def _scoping_enabled() -> bool:
         return False
     val = os.environ.get("JAEGER_TOOLSET_SCOPING", "").strip().lower()
     return val in ("1", "true", "yes", "on")
-
-
-# Deterministic first-pass routing, equivalent to Hermes focus/toolset
-# profiles.  The model still has list_tools/describe_tool/load_tools in CORE
-# for ambiguous requests; these hints avoid spending an extra meta-tool turn
-# for clear intent.  Matching is intentionally conservative and additive.
-_INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
-    "files": (r"\b(files?|folders?|director(?:y|ies)|patch|rename|copy|move|read|write|disk|space|path|content)\b",),
-    "code": (r"\b(code|python|swift|javascript|typescript|shell|terminal|command|test suite|debug|package|disk|system|process|cpu|memory usage|df|ls|cat|ps|kill|curl|git|ping|port)\b",),
-    "containers": (r"\b(container|containers|containerized)\b",),
-    "media": (r"\b(image|vision|photo|picture|screenshot|diagram|video|audio|speech|voice|camera|microphone|listen)\b",),
-    "web": (r"\b(weather|forecast|twitter|tweets?|x\.com|x_search|x search|search x)\b",),
-    "sessions": (r"\b(conversations?|sessions?|chats?|chat history|topics?|folders?|projects?|organize)\b",),
-    "board": (r"\b(board|kanban|card)\b",),
-    "agent_notes": (r"\b(notes?|remember|preferences?|keep track)\b",),
-    "frameworks": (r"\b(claude code|claude|codex|gemini|antigravity|grok|other agents?|frameworks?)\b",),
-    "scheduling": (r"\b(schedule|cron|remind|recurring)\b",),
-    "background": (r"\b(background|long[- ]running|process|job)\b",
-                   r"\b(report back|let me know when|when (?:it'?s|you'?re) done|while i)\b"),
-    "identity": (r"\b(your name|identity|soul|persona)\b",),
-    "goals": (r"\b(goal|objective|project status|spawn task|my projects?)\b",),
-    "skills": (r"\b(skill|deep think|reflection)\b",),
-    "computer_use": (r"\b(click|screen|browser|website|open app|computer)\b",),
-    "share": (r"\b(download(?:able)?|attach(?:ed|ment)?|send me (?:the|a|that) (?:file|csv|pdf|zip)|give (?:it|them) to me as a)\b",),
-    "template": (r"\b(template|export|share)\b.*\b(setup|bot|yourself|config|skills)\b", r"\bbot template\b"),
-    "credentials": (r"\b(credential|api key|secret|password|vault|login|token)s?\b",),
-    "plugins": (r"\b(plugin|discord|telegram|slack|message)\b",),
-    "email": (r"\b(e-?mail|inbox|mailbox)\b",),
-    "smart_home": (r"\b(home assistant|smart home|light|thermostat)\b",),
-    "people": (r"\b(person|people|profile|contact notes)\b",),
-    "models": (r"\b(model|ollama|lm studio|context window|autonomy mode)\b",),
-    "bench": (r"\b(benchmark|eval|evaluation)\b",),
-    "delegates": (r"\b(delegate|delegation|external agent|agent runtime|helpers?|specialists?|inner helper|"
-                  r"design (?:&|and) style|mac app|gateway (?:&|and) webui|system engineer|ask (?:your |the )?\w+ agent)\b",),
-    "missions": (r"\b(mission|goal|plan steps?)\b",),
-    "knowledge_library": (r"\b(knowledge library|document library|index documents?)\b",),
-    "diagnostics": (r"\b(diagnostic|self[- ]check|system health|cpu|disk|uptime)\b",),
-    "shortcuts": (r"\b(shortcut|shortcuts\.app)\b",),
-    "spotlight": (r"\b(spotlight|find .* on (?:my |the )?mac)\b",),
-    "calendar": (r"\b(calendar|event|appointment|meeting)\b",),
-    "contacts": (r"\b(contacts?\.app|phone number|contact details)\b",),
-    "clipboard": (r"\b(clipboard|pasteboard|copy this)\b",),
-    "notifications": (r"\b(notification|notify me|banner)\b",),
-    "system_control": (r"\b(volume|brightness|dark mode|do not disturb|prevent sleep)\b",),
-    "media_control": (r"\b(now playing|playback|pause music|spotify|music\.app)\b",),
-    "ocr": (r"\b(ocr|extract text from|read this (?:image|pdf))\b",),
-}
-
-
-def infer_toolsets(text: str) -> set[str]:
-    """Return task-relevant toolsets without an LLM routing call."""
-    clean = (text or "").lower()
-    # Prohibited actions are not positive tool intent. Keep later affirmative
-    # clauses ("do not install packages; read the CSV") available to routing.
-    clean = re.sub(r"\b(?:do not|don['’]t|never)\b[^.;\n]*(?:[.;]|$)", " ", clean)
-    return {
-        toolset
-        for toolset, patterns in _INTENT_PATTERNS.items()
-        if any(re.search(pattern, clean) for pattern in patterns)
-    }
 
 
 # CORE — always visible when scoping is on. Umbrellas where they route
@@ -303,9 +242,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     # ``self_check`` = the agent's doctor (same engine as `jaeger
     # doctor`); ``system_status`` = host cpu/disk/uptime.
     "diagnostics": frozenset({"system_status", "self_check", "diagnostics", "mac_status"}),
-    # 0.9.3 MAC-NATIVE TOOL SUITE — one toolset per category, each also
-    # feeding a persona_lane.py SELF_MODEL group (shortcuts/spotlight/
-    # calendar) so the id knows it can reach for them.
+    # 0.9.3 MAC-NATIVE TOOL SUITE — one explicit toolset per category.
     "shortcuts": frozenset({"list_shortcuts", "run_shortcut"}),
     "spotlight": frozenset({"spotlight_search"}),
     "calendar": frozenset({"get_events", "create_event", "list_reminders",

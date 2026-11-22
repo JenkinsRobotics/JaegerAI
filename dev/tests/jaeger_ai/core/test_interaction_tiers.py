@@ -68,7 +68,6 @@ def gateway(tmp_path, monkeypatch):
     monkeypatch.setattr(EntityRuntime, 'get_singleton', lambda: runtime)
     monkeypatch.setattr(app, '_resolve_session_agent', lambda _: None)
     monkeypatch.setattr(app, '_one_mind_front_door', lambda *args: None)
-    monkeypatch.setattr(app, '_auto_route', lambda *args: False)
     monkeypatch.setattr(app, '_system_prompt_for_agent', lambda _: 'You are Jaeger.')
     monkeypatch.setattr(app, '_collaboration_prompt', lambda: '')
     monkeypatch.setattr(app, '_open_turn_card', lambda *a, **kw: (None, kw['execution']))

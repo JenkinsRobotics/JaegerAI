@@ -41,9 +41,6 @@
       "jaeger_ai.core.runtime.usage_stats",
       "jaeger_ai.main"
     ],
-    "packages/jaeger-agent/jaeger_agent/prompts/persona_lane.py": [
-      "jaeger_ai.plugins"
-    ],
     "packages/jaeger-agent/jaeger_agent/skill_registry/skill_loader.py": [
       "jaeger_ai.core.safety.skills_guard"
     ],

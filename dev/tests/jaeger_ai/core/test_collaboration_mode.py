@@ -33,9 +33,9 @@ def test_helper_tools_are_the_leads_minus_messaging_memory_schedule_and_delegati
 
 def test_call_agent_alias_follows_the_mode():
     assert collab.call_agent_is_delegate("one_mind", explicit_mention=True) is True
-    assert collab.call_agent_is_delegate("team", explicit_mention=False) is False
+    assert collab.call_agent_is_delegate("team", explicit_mention=False) is True
     assert collab.call_agent_is_delegate("auto", explicit_mention=False) is True
-    assert collab.call_agent_is_delegate("auto", explicit_mention=True) is False
+    assert collab.call_agent_is_delegate("auto", explicit_mention=True) is True
 
 
 def test_helper_prompt_is_one_mind_and_memory_is_read_only():
@@ -44,11 +44,6 @@ def test_helper_prompt_is_one_mind_and_memory_is_read_only():
     assert "inner helper" in text and "result goes only to Jaeger" in text and "Review the header" in text
     assert "read-only" in text and "favorite_color" in text and "read_file" in text
     assert "token" not in collab.scrub_excerpt("- github_token = abc\n- color = blue")
-    # The helper's own rules must not read as a privacy request to the
-    # sensitivity gate, or the helper is pinned to a local model.
-    from jaeger_ai.core.models.router import classify
-    assert classify(collab.helper_prompt(display_name="D", specialty="design", brief="Review a label",
-                                         memory_excerpt="", tools=["read_file"]))[0] == "public"
 
 
 def test_trace_draws_a_helper_node_under_the_asking_tool_call():
@@ -122,18 +117,6 @@ async def _settle(gateway, handoff_id):
 
 
 @pytest.mark.asyncio
-async def test_collaboration_setting_round_trips_through_the_gateway(collab_client):
-    client, gateway, _, cfg, _ = collab_client
-    got = await (await client.get("/v1/runtime/collaboration")).json()
-    assert got["mode"] == "one_mind" and [o["id"] for o in got["options"]] == ["one_mind", "team", "auto"]
-    resp = await client.post("/v1/runtime/collaboration", json={"mode": "team"})
-    assert resp.status == 200 and (await resp.json())["mode"] == "team"
-    assert "collaboration_mode: team" in cfg.read_text()
-    assert (await (await client.get("/v1/team/mode")).json())["mode"] == "team"
-    assert (await client.post("/v1/runtime/collaboration", json={"mode": "crew"})).status == 400
-
-
-@pytest.mark.asyncio
 async def test_one_mind_delegate_runs_an_inner_helper_and_returns_only_to_the_lead(collab_client):
     client, gateway, calls, _, _ = collab_client
     sid, rid = await _origin(gateway)
@@ -164,12 +147,6 @@ async def test_one_mind_delegate_runs_an_inner_helper_and_returns_only_to_the_le
     assert fin["data"]["tokens"]["total"] == 150 and "8px" in fin["data"]["summary"]
     kinds = [m.get("kind") for m in gateway.store.list_messages(sid, limit=50)["messages"]]
     assert "handoff_result" not in kinds and "handoff_request" not in kinds
-    team = await (await client.get("/v1/team")).json()
-    assert team["mode"] == "one_mind"
-    row = next(h for h in team["handoffs"] if h["id"] == record["id"])
-    assert row["kind"] == "delegate" and row["tokens"]["total"] == 150
-
-
 @pytest.mark.asyncio
 async def test_helpers_cannot_delegate_further(collab_client):
     client, gateway, _, _, _ = collab_client
@@ -208,7 +185,7 @@ async def test_concurrency_cap_and_stop_cancels_the_helper(collab_client):
 
 
 @pytest.mark.asyncio
-async def test_call_agent_is_a_delegate_in_one_mind_and_a_handoff_in_team(collab_client, monkeypatch):
+async def test_call_agent_is_always_a_delegate(collab_client, monkeypatch):
     client, gateway, _, _, _ = collab_client
     sid, rid = await _origin(gateway, "@Jaeger Design & Style please review")
     body = {"task": "review", "via": "call_agent", "session_id": sid, "parent_run_id": rid, "require_approval": False}
@@ -217,30 +194,9 @@ async def test_call_agent_is_a_delegate_in_one_mind_and_a_handoff_in_team(collab
     await _settle(gateway, one["id"])
     monkeypatch.setattr(gateway, "_collaboration_mode", lambda: "auto")
     auto = await (await client.post("/v1/agents/native:ds/handoff", json=body)).json()
-    assert auto["metadata"]["collaboration"] == "handoff"  # explicit @mention keeps the team hand-off
+    assert auto["metadata"]["collaboration"] == "delegate"
     await _settle(gateway, auto["id"])
     monkeypatch.setattr(gateway, "_collaboration_mode", lambda: "team")
     team = await (await client.post("/v1/agents/native:eng/handoff", json=body)).json()
-    assert team["metadata"]["collaboration"] == "handoff"
+    assert team["metadata"]["collaboration"] == "delegate"
     await _settle(gateway, team["id"])
-
-
-@pytest.mark.asyncio
-async def test_one_mind_turns_rooms_off_and_routes_chats_to_jaeger(collab_client, monkeypatch):
-    client, gateway, _, _, _ = collab_client
-    resp = await client.post("/v1/team/rooms", json={"title": "R", "members": ["native:ds", "native:eng"]})
-    assert resp.status == 409 and "One mind" in (await resp.json())["error"]
-    created = await (await client.post("/v1/sessions", json={"agent_id": "native:ds", "title": "x"})).json()
-    assert created["metadata"]["agent_id"] == "native:jaeger"
-    assert created["metadata"]["requested_agent_id"] == "native:ds"
-    session = {"session_id": "s", "metadata": {"agent_id": "native:ds"}}
-    ds = gateway._registry().get_agent("native:ds")
-    assert gateway._one_mind_front_door(session, "native:ds", ds)[0] == "native:jaeger"
-    assert gateway._one_mind_front_door({"metadata": {"handoff_child": True}}, "native:ds", ds) is None
-    # A built-in specialist the owner switched to explicitly keeps the owner's choice.
-    builtin = SimpleNamespace(id="native:gateway", metadata={})
-    assert gateway._one_mind_front_door(session, "native:gateway", builtin) is None
-    monkeypatch.setattr(gateway, "_collaboration_mode", lambda: "team")
-    assert gateway._one_mind_front_door(session, "native:ds", ds) is None
-    ok = await client.post("/v1/team/rooms", json={"title": "R", "members": ["native:ds", "native:eng"]})
-    assert ok.status == 201

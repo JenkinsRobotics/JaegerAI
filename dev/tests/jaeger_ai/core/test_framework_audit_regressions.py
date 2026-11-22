@@ -161,13 +161,12 @@ def test_encoded_preview_is_not_classified_as_private_text():
     message = {'role': 'tool', 'content': json.dumps(result)}
     _, count = withhold_private_tool_results([message])
     assert count == 0
-    # The same result must still withhold actual private text beside the preview.
+    # Wording is not authority; the producer's structured provenance is.
     result['description'] = '-----BEGIN PRIVATE KEY----- secret -----END PRIVATE KEY-----'
     _, count = withhold_private_tool_results([{'role': 'tool', 'content': json.dumps(result)}])
-    assert count == 1
-    _, count = withhold_private_tool_results([{'role': 'tool', 'content': '{"password":"short-value"}'}])
-    assert count == 1
-    _, count = withhold_private_tool_results([{'role': 'tool', 'content': '{"preview_base64":"my password is private"}'}])
+    assert count == 0
+    result['_meta'] = {'local_only': True}
+    _, count = withhold_private_tool_results([{'role': 'tool', 'content': result}])
     assert count == 1
 
 

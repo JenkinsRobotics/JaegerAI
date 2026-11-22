@@ -78,12 +78,7 @@ def test_config_schema_has_persona_section():
     from jaeger_ai.core.instance.schemas import Config, PersonaConfig
     pc = PersonaConfig()
     assert pc.output_filter is True and pc.max_chars == 1600
-    # Mode C (dev/docs/roadmap/PERSONA_PIPELINE_ABC_DESIGN.md) is now the
-    # config DEFAULT (persona_first, since the 2026-07-10 gate). This
-    # module (Station 3 / persona_last) still runs unconditionally when
-    # persona_first falls through — no character, lane error, or explicit
-    # persona_last — so its behaviour above is unchanged either way.
-    assert pc.mode == "persona_first"
+    assert "mode" not in pc.model_dump()
     assert Config.model_fields["persona"].default_factory is PersonaConfig
 
 
