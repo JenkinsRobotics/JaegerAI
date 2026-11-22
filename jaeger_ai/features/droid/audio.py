@@ -1,9 +1,10 @@
-"""The droid's ears and voice: one AVAudioEngine with Apple voice processing.
+"""The droid's ears and voice: one AVAudioEngine with optional voice processing.
 
 Capture and playback share a single engine so macOS's voice-processing unit
 (the echo canceller FaceTime uses) hears exactly what the droid says and
-removes it from the microphone. That is what lets someone talk over the droid
-in a room with open speakers.
+removes it from the microphone when one duplex device owns both directions.
+Separate physical microphone/speaker routes remain full duplex but cannot use
+Apple's hardware voice-processing AU.
 
 Mic audio leaves as 48 kHz mono int16 blocks of 20 ms; speech to play arrives
 as float32 mono at 48 kHz. Both run off Python's main loop: the tap and the
@@ -22,6 +23,11 @@ RATE = 48000
 BLOCK = 960  # 20 ms
 
 
+def supports_voice_processing(input_device: int, output_device: int) -> bool:
+    """Apple's voice-processing AU requires one real duplex device."""
+    return bool(input_device and output_device and input_device == output_device)
+
+
 class DuplexAudio:
     def __init__(self, on_mic: Callable[[np.ndarray], None], *, listen: bool = True):
         self.on_mic = on_mic
@@ -35,19 +41,53 @@ class DuplexAudio:
         self.voice_processing = False
 
     # lifecycle -----------------------------------------------------------
-    def start(self, output_device: int = 0) -> None:
+    def start(self, output_device: int = 0, input_device: int = 0) -> None:
         import AVFoundation as A
 
         from . import coreaudio
 
-        engine = A.AVAudioEngine.alloc().init()
+        previous_output = coreaudio.default_device(True)
+        previous_input = coreaudio.default_device(False)
+        changed_output = bool(output_device and output_device != previous_output)
+        changed_input = bool(input_device and input_device != previous_input)
+        if changed_output and not coreaudio.set_default_device(output_device, True):
+            raise RuntimeError("Could not bootstrap the configured speaker")
+        if changed_input and not coreaudio.set_default_device(input_device, False):
+            if changed_output:
+                coreaudio.set_default_device(previous_output, True)
+            raise RuntimeError("Could not bootstrap the configured microphone")
+        engine = None
+        try:
+            engine = A.AVAudioEngine.alloc().init()
+            self._start_engine(engine, A, coreaudio, output_device, input_device)
+        finally:
+            # Device defaults are only an AVAudioEngine bootstrap mechanism.
+            # Restore the operator's routing even when graph creation fails.
+            if changed_input:
+                coreaudio.set_default_device(previous_input, False)
+            if changed_output:
+                coreaudio.set_default_device(previous_output, True)
+
+    def _start_engine(self, engine, A, coreaudio, output_device: int, input_device: int) -> None:
+        speaker = coreaudio.device_name(output_device) if output_device else coreaudio.device_name(coreaudio.default_device(True))
+        # Defaults were scoped to the configured pair before graph creation.
+        # AVAudioEngine captures that route; rebinding either AU afterward is
+        # unsupported for separate input-only/output-only physical devices.
         node = None
         if self.listen:
             node = engine.inputNode()
-            try:
-                result = node.setVoiceProcessingEnabled_error_(True, None)
-                self.voice_processing = bool(result[0] if isinstance(result, tuple) else result)
-            except Exception:
+            # Apple's voice-processing AU only supports one duplex hardware
+            # route. Asking it to bridge a camera microphone and output-only
+            # speakers can block indefinitely inside AudioComponentInstanceNew.
+            # Keep true full-duplex I/O available and enable hardware AEC only
+            # when both sides are the same duplex device.
+            if supports_voice_processing(input_device, output_device):
+                try:
+                    result = node.setVoiceProcessingEnabled_error_(True, None)
+                    self.voice_processing = bool(result[0] if isinstance(result, tuple) else result)
+                except Exception:
+                    self.voice_processing = False
+            else:
                 self.voice_processing = False
             tap_fmt = node.outputFormatForBus_(0)
             rate = float(tap_fmt.sampleRate())
@@ -67,14 +107,6 @@ class DuplexAudio:
         engine.attachNode_(player)
         engine.connect_to_format_(player, engine.mainMixerNode(), fmt)
         engine.prepare()
-        speaker = coreaudio.device_name(output_device) if output_device else coreaudio.device_name(coreaudio.default_device(True))
-        if output_device and not coreaudio.set_engine_output(engine, output_device):
-            if node is not None:
-                try:
-                    node.removeTapOnBus_(0)
-                except Exception:
-                    pass
-            raise RuntimeError(f"Could not use speaker '{speaker or output_device}'")
         last = None
         for _ in range(3):
             ok, err = engine.startAndReturnError_(None)
@@ -83,8 +115,6 @@ class DuplexAudio:
             last = err.localizedDescription() if err else "unknown"
             engine.stop()
             engine.reset()
-            if output_device:
-                coreaudio.set_engine_output(engine, output_device)
         else:
             if node is not None:
                 node.removeTapOnBus_(0)

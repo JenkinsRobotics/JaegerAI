@@ -1,9 +1,9 @@
-"""Tiny CoreAudio helper (ctypes): list devices, pick a real speaker, bind an engine.
+"""Tiny CoreAudio helper (ctypes): enumerate and select real audio devices.
 
 Droid mode speaks through a chosen speaker (the Mac Studio's own by default)
 even when another app, such as a remote-desktop audio driver, has taken the
-system default output. The engine is pointed at that speaker directly; the
-system default is left alone.
+system default output. Droid scopes both defaults to its chosen hardware while
+AVAudioEngine creates the graph, then immediately restores the operator route.
 """
 from __future__ import annotations
 
@@ -136,17 +136,24 @@ def pick_output(preferred: str = "") -> tuple[int, str, str]:
     return chosen["id"], chosen["name"], f"Using {chosen['name']} because {wanted_name} was not available"
 
 
-def set_engine_output(engine, device: int) -> bool:
-    """Point an AVAudioEngine at a specific output without changing the system default."""
-    if not device:
-        return False
-    try:
-        unit = engine.outputNode().AUAudioUnit()
-        result = unit.setDeviceID_error_(device, None)
-        ok = bool(result[0] if isinstance(result, tuple) else result)
-        return ok and int(unit.deviceID()) == int(device)
-    except Exception:
-        return False
+def pick_input(preferred: str = "") -> tuple[int, str, str]:
+    """Return an explicit microphone, preferring the configured device then the system default."""
+    rows = [device for device in devices() if device["input"]]
+    if not rows:
+        return 0, "", "No microphone is available"
+    wanted = find(preferred, output=False) if preferred else 0
+    for device in rows:
+        if device["id"] == wanted:
+            return device["id"], device["name"], ""
+    current = default_device(False)
+    for device in rows:
+        if device["id"] == current:
+            wanted_name = (preferred or "").strip() or "the configured microphone"
+            return device["id"], device["name"], (
+                f"Using {device['name']} because {wanted_name} was not available"
+            )
+    chosen = rows[0]
+    return chosen["id"], chosen["name"], f"Using {chosen['name']} because no default microphone was available"
 
 
 if __name__ == "__main__":

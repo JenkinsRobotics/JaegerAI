@@ -1,3 +1,5 @@
+from jaeger_ai.features.droid import coreaudio
+from jaeger_ai.features.droid.audio import supports_voice_processing
 from jaeger_ai.features.droid.conversation import InterruptionKind, SpeechPlanController, classify_interruption
 
 
@@ -61,3 +63,22 @@ def test_speech_units_are_serialized():
     assert [unit.text for unit in sent] == ["First."]
     plan.playback_finished()
     assert [unit.text for unit in sent] == ["First.", "Second."]
+
+
+def test_voice_processing_requires_one_duplex_device():
+    assert supports_voice_processing(105, 105) is True
+    assert supports_voice_processing(105, 88) is False
+    assert supports_voice_processing(0, 88) is False
+
+
+def test_pick_input_prefers_configured_then_default(monkeypatch):
+    rows = [
+        {"id": 105, "name": "Insta360 Link 2", "input": True, "output": False},
+        {"id": 84, "name": "Jump Desktop Microphone", "input": True, "output": True},
+    ]
+    monkeypatch.setattr(coreaudio, "devices", lambda: rows)
+    monkeypatch.setattr(coreaudio, "default_device", lambda output=True: 84)
+    assert coreaudio.pick_input("Insta360 Link 2") == (105, "Insta360 Link 2", "")
+    assert coreaudio.pick_input("Missing Mic") == (
+        84, "Jump Desktop Microphone", "Using Jump Desktop Microphone because Missing Mic was not available",
+    )
