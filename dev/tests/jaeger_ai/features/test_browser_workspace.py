@@ -56,7 +56,7 @@ async def test_real_gateway_browser_keeps_selected_page_and_profiles_isolated(tm
     gw.store.ensure_session("browser-one")
     gw.store.ensure_session("browser-two")
     async def fixture(_):
-        return web.Response(text='<title>Shared browser proof</title><button id="count" onclick="this.textContent=Number(this.textContent)+1">0</button>', content_type="text/html")
+        return web.Response(text='<title>Shared browser proof</title><h1>Semantic heading</h1><a href="/destination">Destination</a><button id="count" onclick="this.textContent=Number(this.textContent)+1">0</button>', content_type="text/html")
     fixture_app = web.Application()
     fixture_app.router.add_get('/browser-fixture', fixture)
     headers = caller_auth.client_headers("webui")
@@ -68,12 +68,15 @@ async def test_real_gateway_browser_keeps_selected_page_and_profiles_isolated(tm
             return data
         first = await act("browser-one", action="navigate", url=str(fixture_server.make_url('/browser-fixture')), snapshot=True)
         assert first["title"] == "Shared browser proof"
-        clicked = await act("browser-one", action="click", element=0, snapshot=True)
-        assert clicked["elements"][0]["text"] == "1"
+        assert first["headings"] == [{"level": "h1", "text": "Semantic heading"}]
+        assert first["elements"][0]["text"] == "Destination"
+        assert first["elements"][0]["href"].endswith("/destination")
+        clicked = await act("browser-one", action="click", element=1, snapshot=True)
+        assert clicked["elements"][1]["text"] == "1"
         second = await act("browser-two", action="status")
         assert second["active"] != first["active"]
         assert not any(p["url"].endswith('/browser-fixture') for p in second["pages"])
-        assert (await act("browser-one", action="snapshot"))["elements"][0]["text"] == "1"
+        assert (await act("browser-one", action="snapshot"))["elements"][1]["text"] == "1"
         viewer = await client.get(f"/v1/sessions/browser-one/browser/viewer?pageId={first['active']}", headers=headers)
         html = await viewer.text()
         assert viewer.status == 200
