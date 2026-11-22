@@ -74,12 +74,22 @@ class KnowledgeLibrary(ManagedDocuments):
                     (collection_id, clean_label, str(path), kind, time.time()),
                 )
         except sqlite3.IntegrityError as exc:
-            raise LibraryError(f"collection already exists: {path}") from exc
-        return {"id": collection_id, "label": clean_label, "root": str(path), "kind": kind}
+            existing = self.conn.execute(
+                "SELECT id,label,root,kind,created_at FROM collections WHERE root=?",
+                (str(path),),
+            ).fetchone()
+            if existing is None:
+                raise LibraryError(f"could not register collection: {path}") from exc
+            return {**dict(existing), "already_exists": True}
+        return {"id": collection_id, "label": clean_label, "root": str(path), "kind": kind,
+                "already_exists": False}
 
     def list(self) -> list[dict]:
         return [dict(row) for row in self.conn.execute(
-            "SELECT id,label,root,kind,created_at FROM collections ORDER BY label"
+            "SELECT c.id,c.label,c.root,c.kind,c.created_at,COUNT(d.id) AS document_count,"
+            "MAX(d.indexed_at) AS last_indexed_at FROM collections c "
+            "LEFT JOIN library_documents d ON d.collection_id=c.id "
+            "GROUP BY c.id,c.label,c.root,c.kind,c.created_at ORDER BY c.label"
         )]
 
     def index(self, collection_id: str) -> dict:

@@ -1,4 +1,4 @@
-from jaeger_ai.features.knowledge_library import KnowledgeLibrary, LibraryError
+from jaeger_ai.features.knowledge_library import KnowledgeLibrary
 
 
 def test_collection_index_search_read_and_symlink_escape(tmp_path) -> None:
@@ -20,15 +20,29 @@ def test_collection_index_search_read_and_symlink_escape(tmp_path) -> None:
     library.close()
 
 
-def test_duplicate_collection_is_rejected(tmp_path) -> None:
+def test_duplicate_collection_returns_existing_identity(tmp_path) -> None:
     root = tmp_path / "notes"
     root.mkdir()
     library = KnowledgeLibrary(tmp_path / "library.db")
-    library.add(str(root))
-    try:
-        library.add(str(root))
-    except LibraryError:
-        pass
-    else:
-        raise AssertionError("duplicate collection was accepted")
+    created = library.add(str(root))
+    duplicate = library.add(str(root), "A label that must not replace the original")
+    assert created["already_exists"] is False
+    assert duplicate["already_exists"] is True
+    assert duplicate["id"] == created["id"]
+    assert duplicate["root"] == created["root"]
+    library.close()
+
+
+def test_collection_list_includes_index_status(tmp_path) -> None:
+    root = tmp_path / "notes"
+    root.mkdir()
+    (root / "one.md").write_text("one", encoding="utf-8")
+    library = KnowledgeLibrary(tmp_path / "library.db")
+    collection = library.add(str(root))
+    assert library.list()[0]["document_count"] == 0
+    library.index(collection["id"])
+    listed = library.list()[0]
+    assert listed["id"] == collection["id"]
+    assert listed["document_count"] == 1
+    assert listed["last_indexed_at"] is not None
     library.close()
