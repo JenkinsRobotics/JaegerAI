@@ -75,6 +75,21 @@ def test_write_scope_can_expand_only_through_host_authority(tmp_path, monkeypatc
             _resolve_absolute_write(target)
 
 
+def test_write_scope_never_prompts_for_operating_system_paths(tmp_path, monkeypatch):
+    from jaeger_agent.core import workspace
+
+    layout = workspace.DefaultWorkspace(tmp_path / "instance")
+    for directory in (layout.workspace_dir, layout.skills_dir, layout.logs_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(workspace, "_layout", layout)
+    requests = []
+
+    with write_authority(request_access=lambda path: requests.append(path) or path.parent):
+        with pytest.raises(SandboxError, match="operating-system path"):
+            _resolve_absolute_write(__import__("pathlib").Path("/System/jaeger-must-not-land.txt"))
+    assert requests == []
+
+
 def test_search_and_list_tools_refuse_outside(tree, tmp_path, monkeypatch):
     from jaeger_agent.core import workspace
     from jaeger_agent.tools import files

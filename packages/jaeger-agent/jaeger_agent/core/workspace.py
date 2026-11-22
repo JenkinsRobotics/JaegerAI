@@ -400,10 +400,10 @@ def _resolve_absolute_write(p: Path) -> Path:
             if "credentials" in full.relative_to(root).parts:
                 break
             return full
-    from jaeger_os.core.safety.file_safety import is_sensitive_path
-    sensitive = is_sensitive_path(full)
-    if sensitive:
-        raise SandboxError(f"refused — {sensitive}")
+    from jaeger_os.core.safety.file_safety import is_protected_write_path
+    protected = is_protected_write_path(full)
+    if protected:
+        raise SandboxError(f"refused — {protected}")
     requester = _write_access_requester_var.get()
     if callable(requester):
         granted = requester(full)
