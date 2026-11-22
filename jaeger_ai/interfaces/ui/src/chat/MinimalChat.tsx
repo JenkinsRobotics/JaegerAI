@@ -178,11 +178,16 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
   const out: Array<{ guidance: Extract<ChatPart,{kind:"userGuidance"}> } | { marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { activity: ChatPart[] } | { diagnostic: ChatPart[] }> = [];
   parts = parts.filter(p => p.kind !== "step"); // shown on the live progress line only
   const {work,visible} = partitionChatParts(parts);
-  // All thinking, tools, commentary and other work share one disclosure.
-  // Interactive cards, the final answer, and web citations stay outside it.
+  // Preserve real event order. Commentary is transcript text; adjacent
+  // implementation details form compact work rows between commentary and the
+  // final answer, matching Codex's commentary -> tools -> commentary rhythm.
   const workIndices = new Set(work.map(row => row.index));
   const ended = state !== "pending";
-  const activity: ChatPart[] = [];
+  let activity: ChatPart[] = [];
+  const flushActivity = () => {
+    if (activity.length) out.push({activity});
+    activity = [];
+  };
   const ordered = [...work,...visible].sort((a,b)=>a.index-b.index);
   for (const {part:original,index} of ordered) {
     const part = original.kind === "toolInvocation" && ended && (original.state === "executing" || original.state === "streaming")
@@ -191,6 +196,7 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
       if (!(part.kind === "thinking" && !part.text && part.durationMs == null)) activity.push(part);
       continue;
     }
+    flushActivity();
     const last = out.at(-1);
     if (part.kind === "userGuidance") out.push({guidance:part});
     else if (part.kind === "handoff") {
@@ -212,11 +218,8 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
       else out.push({bubble:[part]});
     }
   }
-  if (activity.length || state === "pending") {
-    const at = out.findIndex(seg => "card" in seg || "bubble" in seg || "marker" in seg);
-    if (at < 0) out.push({ activity });
-    else out.splice(at, 0, { activity });
-  }
+  flushActivity();
+  if (state === "pending" && !out.some(seg => "activity" in seg)) out.push({activity:[]});
   return out;
 }
 
@@ -320,10 +323,11 @@ export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boo
   const clock = live ? liveMs : finishedMs;
   const clockLabel = clock >= 1000 || !live ? `${seconds(clock)}s` : undefined;
   const current = live ? currentWorkLabel(parts) : undefined;
+  const completedTools = tools.length ? stepsSummary(tools) : "";
   const summary = live
-    ? (clockLabel ? `Working… ${clockLabel}` : "Working…")
+    ? (current || (clockLabel ? `Working… ${clockLabel}` : "Working…"))
     : tools.length
-      ? `Worked for ${seconds(finishedMs)}s · ${steps} step${steps === 1 ? "" : "s"}`
+      ? (completedTools || `Worked for ${seconds(finishedMs)}s · ${steps} step${steps === 1 ? "" : "s"}`)
       : finishedMs
         ? `Thought for ${seconds(finishedMs)}s`
         : "Thought";
@@ -337,7 +341,7 @@ export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boo
       <span className="jg-steps__text">{summary}</span>
       <span className="jg-steps__toggle" aria-label={open ? "Hide work" : "Show work"}><ChevronIcon/></span>
     </button>
-    {!open && live && current && <p className="jg-turn-activity__current">{current}</p>}
+    {!open && live && current && current !== summary && <p className="jg-turn-activity__current">{current}</p>}
     {open && <div className="jg-turn-activity__body">{visibleSteps.map((part,i)=>
       part.kind==="progress" ? <p key={i}>{part.message}</p> :
       part.kind==="thinking" && !isDebugThinking(part.text) ? (
@@ -1271,7 +1275,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 : "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
-                : "activity" in seg ? <ActivityFold key={`work:${turn.turnId || turn.requestId || "pending"}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
+                : "activity" in seg ? <ActivityFold key={`work:${turn.turnId || turn.requestId || "pending"}:${i}`} parts={seg.activity} live={turn.state === "pending" && i === segments(turn.parts, turn.state).length - 1} links={links} style={streamStyle} />
                 : "diagnostic" in seg ? null
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant" tabIndex={0} aria-haspopup="menu">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} sessionId={sessionId} files={host.sessionFiles} />)}</div>)}
               <SourceChips sources={webSources(turn.parts)} onOpen={links.onOpen} />

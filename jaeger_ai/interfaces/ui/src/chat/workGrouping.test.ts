@@ -15,8 +15,8 @@ describe('shared IDE/browser work grouping',()=>{
    {kind:'markdownContent',text:'The result'},
   ];
   const {work,visible}=partitionChatParts(parts);
-  expect(work.map(r=>r.index)).toEqual([0,1,3]);
-  expect(visible.map(r=>r.index)).toEqual([2,4,5,6,7]);
+  expect(work.map(r=>r.index)).toEqual([1,3]);
+  expect(visible.map(r=>r.index)).toEqual([0,2,4,5,6,7]);
   expect([...work,...visible].sort((a,b)=>a.index-b.index).map(r=>r.part)).toEqual(parts);
   expect(segments(parts).filter(s=>'card' in s)).toHaveLength(2);
  });
@@ -28,7 +28,7 @@ describe('shared IDE/browser work grouping',()=>{
   const parts:ChatPart[]=[{kind:'markdownContent',text:'First update'},{kind:'progress',message:'Checking'},
    {kind:'markdownContent',text:'Second update'},{kind:'toolInvocation',callId:'c',toolName:'read',input:{},state:'completed'},
    {kind:'markdownContent',text:'Final answer'}];
-  expect(partitionChatParts(parts).work.map(r=>r.index)).toEqual([0,1,2,3]);
-  expect(partitionChatParts(parts).visible.map(r=>r.index)).toEqual([4]);
+  expect(partitionChatParts(parts).work.map(r=>r.index)).toEqual([1,3]);
+  expect(partitionChatParts(parts).visible.map(r=>r.index)).toEqual([0,2,4]);
  });
 });
