@@ -32,7 +32,6 @@ from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.core.cancellation import bind_turn_cancellation, current_cancellation
 from jaeger_agent.loop.callbacks import AgentCallbacks
 from jaeger_agent.loop.interrupt import AgentInterrupted, StaleCallTimeout
-from jaeger_agent.loop import verify_gate
 from jaeger_agent.loop.loop_backstop import (
     MAX_TOOL_CALLS,
     call_signature,
@@ -412,16 +411,9 @@ class JaegerAgent:
         # reads. Any write/external call invalidates it. Polling/status tools
         # are deliberately absent so changing state is still observed.
         self._read_result_cache: dict[str, Any] = {}
-        # Verify gate (station 2 — see loop/verify_gate.py): tool names
-        # that SUCCEEDED this turn (feeds the claim-vs-action check) and
-        # the once-per-turn nudge latch. ``_pending_nudge_text`` is
-        # whichever synthetic nudge is currently in history awaiting
-        # removal (post-tool or verify — they share the lifecycle).
-        self._turn_tool_successes: set[str] = set()
         self._turn_skill_names: set[str] = set()
         self._turn_tool_names: list[str] = []
         self.last_skill_route: dict[str, Any] | None = None
-        self._verify_nudge_used = False
         self._tool_budget_warning_used = False
         self._pending_nudge_text: str | None = None
 
@@ -627,11 +619,9 @@ class JaegerAgent:
         self._post_tool_nudge_used = False
         self._nudge_pending = False
         self._pending_nudge_text = None
-        self._turn_tool_successes.clear()
         self._turn_skill_names.clear()
         self._turn_tool_names.clear()
         self.last_skill_route = None
-        self._verify_nudge_used = False
         self._tool_budget_warning_used = False
         self._failed_mutations.clear()
         self.last_halt_reason = None
@@ -960,30 +950,9 @@ class JaegerAgent:
             self.callbacks.on_step(iteration, assistant_msg)
 
             if not tool_calls:
-                # 5: candidate final answer. Station-2 verify gate first
-                # (see loop/verify_gate.py): catch a narrated PLAN with no
-                # call, or a claimed action no tool performed, with at most
-                # ONE soft nudge per turn. If the model still answers the
-                # same way after the nudge, its answer stands — the gate
-                # informs, it never denies.
-                if (not self._verify_nudge_used
-                        and verify_gate.gate_enabled()):
-                    nudge = verify_gate.verify_final(
-                        final_text,
-                        self._turn_tool_successes,
-                        {getattr(t, "name", "") for t in (self._all_tools or [])},
-                        user_prompt=user_message,
-                    )
-                    if nudge is not None:
-                        self._verify_nudge_used = True
-                        self._nudge_pending = True
-                        self._pending_nudge_text = nudge
-                        self._append_message({"role": "user", "content": nudge})
-                        self.callbacks.on_thinking(
-                            "[verify gate: plan/claim without action — "
-                            "nudging once]"
-                        )
-                        continue
+                # A response with no typed tool calls is the model's final
+                # answer. Execution authority comes only from structured tool
+                # calls; prose is never reinterpreted as permission to act.
                 return self._apply_mutation_footer(final_text)
 
             # 5a: skip-final short-circuit. When the FIRST iteration
@@ -1438,8 +1407,8 @@ class JaegerAgent:
         })
 
     def _discard_pending_nudge(self) -> None:
-        """Remove the synthetic nudge (post-tool OR verify-gate) from
-        history once the model has answered it (or the turn is bailing).
+        """Remove the synthetic post-tool nudge from history once the model
+        has answered it (or the turn is bailing).
         A nudge is plumbing, not user-authored content — it must never
         persist."""
         if not self._nudge_pending:
@@ -2580,9 +2549,6 @@ class JaegerAgent:
             import copy
             self._read_result_cache[sig] = copy.deepcopy(content)
         if _ok:
-            # Verify-gate bookkeeping: the claim-vs-action check compares
-            # the final answer's claims against what actually succeeded.
-            self._turn_tool_successes.add(name)
             if name == "use_skill" and isinstance(args, dict):
                 chosen = str(args.get("name") or "").strip()
                 if chosen:

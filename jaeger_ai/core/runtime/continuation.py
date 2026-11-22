@@ -29,8 +29,8 @@ Two rules, in this order:
 Why not "continue until the model says DONE": weak local models rarely
 emit a completion token reliably, so an absence-of-DONE rule re-fires
 finished work until the budget burns out. Evidence-of-stall is the rule
-that failed safe in the same situation for the loop's verify gate
-(``jaeger_agent/loop/verify_gate.py`` — nudge, don't straitjacket).
+used by this legacy autonomous-run wrapper; the inner JaegerAgent loop never
+reinterprets final prose as execution authority.
 
 Kill switch: ``JAEGER_AUTO_CONTINUE=0``.
 """
@@ -258,11 +258,9 @@ VERIFY_NUDGE = (
 def verification_prompt(objective: str = "") -> str:
     """One pass asking the agent to check its own claim of completion.
 
-    A completion claim is exactly the thing the loop's verify gate
-    exists to distrust (``jaeger_agent/loop/verify_gate.py``): a model
-    that says "saved to notes.md" without a successful write is common
-    enough to be a named failure mode. In a long unattended run nobody
-    is watching to catch it, so the run spends one step catching it."""
+    This outer autonomous-run check is explicit orchestration, not part of the
+    inner model/tool loop. It spends one bounded step reading receipt-backed
+    state before the host settles a long unattended run."""
     if objective:
         return f"{VERIFY_NUDGE}\n\nThe objective:\n{objective}"
     return VERIFY_NUDGE

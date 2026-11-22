@@ -39,7 +39,7 @@ STT, TTS, streaming, duplex, and vision nodes remain portable components.
 The 0.11 extraction moved the whole agent surface out of JaegerAI, not just
 the loop — roughly 43,000 lines across 178 modules:
 
-- The agent loop, interruption, retries, loop backstop, verify gate
+- The typed agent loop, interruption, retries, and loop backstop
 - OpenAI, Anthropic, Hermes XML, llama.cpp and MLX adapters, plus six model
   dialects and the drift parser local models need
 - **~96 tools** — files, web, code, memory, scheduling, board, background
