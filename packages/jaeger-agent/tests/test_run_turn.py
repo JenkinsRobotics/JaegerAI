@@ -89,6 +89,23 @@ def test_no_tool_calls_returns_assistant_text_in_one_iteration():
     assert len(agent.messages) == 2  # user + assistant
 
 
+def test_final_prose_never_becomes_execution_authority():
+    executed: list[str] = []
+
+    @register_tool("write_file", "Write.", _SmallArgs)
+    def _write(value: str = "x") -> dict:
+        executed.append(value)
+        return {"written": True}
+
+    text = "PLAN: write_file(value='not authorized by a typed call')"
+    adapter = _ScriptedAdapter([{"role": "assistant", "content": text}])
+    agent = JaegerAgent(adapter=adapter)
+
+    assert agent.run_turn("Describe the plan") == text
+    assert executed == []
+    assert adapter.call_count == 1
+
+
 def test_single_tool_call_then_final_answer():
     captured: list[str] = []
 
@@ -761,7 +778,6 @@ def test_error_only_results_are_failures_and_preserve_partial_summary():
     assert observed == [(False, 'service offline')] * 2
     assert adapter.last_tools_count == 0
     assert 'failure 2 times' in agent.last_halt_reason
-    assert 'lookup' not in agent._turn_tool_successes
 
 
 def test_failed_tool_result_carries_a_recovery_hint():

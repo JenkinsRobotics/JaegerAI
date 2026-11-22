@@ -51,29 +51,12 @@ and is never denied mid-flow. All existing recovery machinery (warn-before-
 halt, result-hash no-progress, post-tool empty-response nudge, wind-down
 grace) is unchanged.
 
-### Station 2 — the verify gate (the reliability fix)
-Lives at the loop's ONE exit door in `jaeger_agent.py` (the
-`if not tool_calls:` branch). Runs only on a candidate FINAL answer; costs
-nothing when the answer is clean.
-
-- **Check A — plan-halt:** the candidate text is a plan, not an answer
-  (a line starting `PLAN:`). The model "ran out of steam" after narrating.
-  → inject ONE synthetic nudge: *proceed now, emit the tool call*.
-- **Check B — claim-vs-action:** the text claims a completed mutation in the
-  first person ("I've saved/added/noted/remembered/scheduled/queued…") but no
-  matching successful tool call ran this turn (the runner tracks per-turn
-  tool successes for free). → ONE nudge: *call the tool now, or say plainly
-  it was not done*.
-- **Check C — clean:** pass through untouched.
-
-Soft-gate guarantees (the lessons from the 73→66 failure):
-- max ONE verify nudge per turn; the nudge is synthetic and does NOT persist
-  in session history (same mechanism as the existing post-tool nudge);
-- the gate NEVER denies: if the model still doesn't act after the nudge, its
-  answer is accepted — a failed nudge is information, not a wall;
-- claim-verb lists stay tight (first-person + mutation verbs mapped to tool
-  families) so "I've analyzed the options" can never false-trigger;
-- kill switch: `JAEGER_VERIFY_GATE=0`.
+### Station 2 — typed completion boundary
+A response with no structured tool calls is final. Prose is never parsed as
+execution authority and the runtime never inserts a synthetic user message to
+provoke an action. Mutation truth comes from correlated tool results and
+Gateway receipts; unsupported claims remain prose rather than causing hidden
+execution.
 
 ### Station 3 — the persona pass (voice without pollution)
 Workers run vanilla (measured: persona in the execution context costs the 4B
@@ -202,10 +185,8 @@ regresses this. The worker context is sacred; the aux context is disposable.
 
 ## Status
 - Station 1: ✅ shipped (record band).
-- Station 2 (verify gate): ✅ SHIPPED + benched 2026-07-04 — corpus A: E4B
-  78/81 (ties the record), 26B 76/81 (new 26B high); corpus B 73/81
-  (improved). Target class fixed (rec_python_*, write_bench_txt, pf_arxiv
-  false-positive caught by A/B and fixed with the plan-requested stand-down).
+- Station 2 (typed completion boundary): ✅ execution continues only from
+  typed calls; receipt evidence is presented separately from assistant prose.
 - Station 3 (persona pass): ✅ SHIPPED 2026-07-04 — one bounded clean-
   context call at the user boundary; fail-open; live-verified (0.5-1.3s,
   facts/paths preserved verbatim). Bench isolated by construction.
@@ -220,7 +201,7 @@ regresses this. The worker context is sacred; the aux context is disposable.
 
 ## Where the pipeline stands (2026-07-05)
 E4B **79/81** (all-time high) · 26B 75-76 · corpus B 73 · warm ttft ~0.7s
-with full persona. The realtime runner (fluid loop + verify gate + aux-lane
+with full persona. The realtime runner (fluid loop + typed completion + aux-lane
 persona filter + reflect) and the Deep Think staged runner are both live and
 measured. The engine work is essentially complete for this line; remaining
 levers are backlog (Deep Think Phase 2, reflect→skills, the PLAN-halt tail).

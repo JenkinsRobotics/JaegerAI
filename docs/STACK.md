@@ -5,7 +5,7 @@ Centre: jaeger-agent + JaegerAI on top. MODEL != AGENT. Swap the model, provider
 ## Reusable packages (the stack itself)
 
 - **JaegerAI** — standalone intelligence stack, the application layer on top
-- **jaeger-agent** — reusable headless agent brain: loop, ~96 tools, 107 skills, cognition, SQLite memory, sandbox, verify gate
+- **jaeger-agent** — reusable headless agent brain: typed loop, ~96 tools, 107 skills, cognition, SQLite memory, sandbox, and receipt-backed outcomes
 - **JaegerOS** — operating framework for robots, drones, and digital agents: transport/nodes/topics, body contract, local-first on Apple Silicon / Jetson Orin
 - **JaegerKokoroTTS / JaegerWhisperSTT** — speech out / speech in, as engine modules
 - **Your NAS / file storage** — business / content / project home, system of record for files (configured per-instance)

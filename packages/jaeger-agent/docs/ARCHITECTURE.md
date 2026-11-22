@@ -94,9 +94,7 @@ coined in the source are kept as-is rather than re-branded.
 | --- | --- | --- | ---: |
 | **The Soft Loop, Hard Boundary Runner** | The four-station turn architecture: a deliberately unconstrained interior with all the discipline at the exits | `loop/` | §2 |
 | ├ **Station 1 — The Fluid Loop** | Research ⇄ execute in one context, pivots allowed, never denied mid-flow | `loop/jaeger_agent.py` | §2 |
-| ├ **Station 2 — The Verify Gate** | Last-exit check on candidate final answers | `loop/verify_gate.py` | §2 |
-| │  ├ **The Plan-Halt Check** | Catches a plan emitted where an answer belongs | `loop/verify_gate.py` | §2 |
-| │  └ **The Claim-vs-Action Check** | Catches "I've saved it" with no successful mutating call that turn | `loop/verify_gate.py` | §2 |
+| ├ **Station 2 — Typed Completion Boundary** | Continues only on structured tool calls; prose cannot authorize execution | `loop/jaeger_agent.py` | §2 |
 | ├ **Station 3 — The Persona Pass** | One bounded clean-context call that restyles the final answer | `prompts/persona_filter.py` | §6 |
 | └ **Station 4 — The Reflect Journal** | Post-turn journaling after non-trivial tasks | `prompts/reflection.py` | §2 |
 | **The Loop Backstop** | Identical-call, semantic-failure and runaway detection inside Station 1 | `loop/jaeger_agent.py` | §2 |
@@ -164,22 +162,14 @@ boundary"*, one model context, zero added latency on the happy path:
 | | | |
 | --- | --- | --- |
 | **Station 1 — The Fluid Loop** | research ⇄ execute, pivots allowed | benched E4B 77-78/81 — *do not touch* |
-| **Station 2 — The Verify Gate** | `loop/verify_gate.py`, at the single `if not tool_calls:` exit | one nudge max, never denies |
+| **Station 2 — Typed Completion Boundary** | `loop/jaeger_agent.py`, at the single `if not tool_calls:` exit | final prose is returned unchanged |
 | **Station 3 — The Persona Pass** | `prompts/persona_filter.py` | §6 |
 | **Station 4 — The Reflect Journal** | post-turn journaling | feeds future skill creation |
 
-**Station 2** runs only on a candidate *final* answer, so a clean answer
-costs nothing. It catches two failure shapes. **The Plan-Halt Check** (the text is a
-plan, not an answer — the model narrated and ran out of steam) and **The
-Claim-vs-Action Check** (the text claims a completed mutation in first person
-— "I've saved/scheduled/remembered…" — with no matching successful tool
-call that turn; the runner already tracks per-turn successes for free).
-
-Its guarantees come from a specific failure — an earlier hard gate took
-the bench from **73 to 66**. So: at most **one** nudge per turn, the nudge
-is synthetic and never persists in session history, and the gate **never
-denies** — if the model still won't act, its answer is accepted. A failed
-nudge is information, not a wall. Kill switch `JAEGER_VERIFY_GATE=0`.
+**Station 2** is a protocol boundary, not a prose classifier. Structured tool
+calls continue the loop. A response without tool calls is final. Successful
+effects are established by tool results and Gateway receipts, while the UI may
+label unsupported claims without causing another action.
 
 `run_turn` repairs the transcript on **every** exit path. A pre-flight
 overflow rolls the user message back and re-raises; a mid-turn overflow,
@@ -336,7 +326,7 @@ one bounded call at the end.**
    ┌── START ────────┐   ┌── MIDDLE ──────────┐   ┌── END ──────────────┐
    │ identity NAME   │   │  STATIONS 1-2      │   │ STATION 3           │
    │ one line, from  │──▶│  the fluid loop +  │──▶│ apply_persona_voice │──▶ user
-   │ identity.yaml.  │   │  verify gate.      │   │ answer + character  │
+   │ identity.yaml.  │   │  typed boundary.   │   │ answer + character  │
    │ A FACT, not a   │   │  NO character.     │   │ block. No tools,    │
    │ persona.        │   │  Workers vanilla.  │   │ history or schemas. │
    └─────────────────┘   └────────────────────┘   └─────────────────────┘
