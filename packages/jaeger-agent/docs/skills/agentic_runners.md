@@ -52,8 +52,9 @@ halt, result-hash no-progress, post-tool empty-response nudge, wind-down
 grace) is unchanged.
 
 ### Station 2 — typed completion boundary
-A response with no structured tool calls is final. Prose is never parsed as
-execution authority and the runtime never inserts a synthetic user message to
+A response with no provider-native or strictly repaired allow-listed tool calls
+is final. Ordinary prose is never parsed as execution authority and the runtime
+never inserts a synthetic user message to
 provoke an action. Mutation truth comes from correlated tool results and
 Gateway receipts; unsupported claims remain prose rather than causing hidden
 execution.
