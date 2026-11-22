@@ -18,11 +18,11 @@ async function renderControl(host: Parameters<typeof AutonomyControl>[0]["host"]
   return element;
 }
 
-it("shows the three modes and changes the label only after the Gateway confirms", async () => {
+it("shows the four modes and changes the label only after the Gateway confirms", async () => {
   let resolve!: (value: RuntimeAutonomySnapshot) => void;
   const save = vi.fn(() => new Promise<RuntimeAutonomySnapshot>(done => { resolve = done; }));
   const element = await renderControl({
-    runtimeAutonomy: vi.fn().mockResolvedValue({ autonomy: "ask", options: ["ask", "scoped", "auto"] }),
+    runtimeAutonomy: vi.fn().mockResolvedValue({ autonomy: "ask", options: ["ask", "scoped", "auto", "full"] }),
     setRuntimeAutonomy: save,
   });
   const trigger = element.querySelector<HTMLButtonElement>(".jg-composer__policy")!;
@@ -31,13 +31,14 @@ it("shows the three modes and changes the label only after the Gateway confirms"
   await act(async () => trigger.click());
   expect(element.textContent).toContain("How should actions be approved?");
   expect(element.textContent).toContain("Approve for me");
+  expect(element.textContent).toContain("Automatic");
   expect(element.textContent).toContain("Full access");
 
   const scoped = [...element.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(button => button.textContent?.includes("Approve for me"))!;
   await act(async () => scoped.click());
   expect(save).toHaveBeenCalledExactlyOnceWith("scoped");
   expect(trigger.textContent).toContain("Ask");
-  await act(async () => resolve({ autonomy: "scoped", options: ["ask", "scoped", "auto"] }));
+  await act(async () => resolve({ autonomy: "scoped", options: ["ask", "scoped", "auto", "full"] }));
   expect(trigger.textContent).toContain("For me");
   expect(trigger.getAttribute("aria-label")).toBe("Permissions: For me");
   expect(element.querySelector('[role="menu"]')).toBeNull();
@@ -45,7 +46,7 @@ it("shows the three modes and changes the label only after the Gateway confirms"
 
 it("keeps the confirmed mode and exposes an error when the change fails", async () => {
   const element = await renderControl({
-    runtimeAutonomy: vi.fn().mockResolvedValue({ autonomy: "scoped", options: ["ask", "scoped", "auto"] }),
+    runtimeAutonomy: vi.fn().mockResolvedValue({ autonomy: "scoped", options: ["ask", "scoped", "auto", "full"] }),
     setRuntimeAutonomy: vi.fn().mockRejectedValue(new Error("Gateway refused the change")),
   });
   const trigger = element.querySelector<HTMLButtonElement>(".jg-composer__policy")!;

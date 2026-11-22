@@ -501,15 +501,16 @@ class AutomationConfig(BaseModel):
             return "agent"
         return normalize_interaction_tier(str(value))
 
-    autonomy: Literal["ask", "scoped", "auto"] = Field(
+    autonomy: Literal["ask", "scoped", "auto", "full"] = Field(
         "scoped",
         json_schema_extra=_setting("autonomy"),
         description=(
             "Whether the agent pauses for approval before tier-gated actions. "
             "'scoped' (default): prompt once per new kind of action; an 'always' "
-            "answer extends the scope. 'ask': prompt every time. 'auto': no prompts "
-            "for tiers 1-4; only catastrophic commands are still blocked, and every "
-            "action is audited."
+            "answer extends the scope. 'ask': prompt every time. 'auto': no routine "
+            "prompts inside the normal sandbox. 'full': unrestricted local execution "
+            "for the authenticated owner, bypassing Jaeger's approval, sandbox, deny-rule, "
+            "protected-target, and destructive-action gates. Host OS permissions remain."
         ),
     )
     collaboration_mode: Literal["one_mind", "team", "auto"] = Field(
@@ -919,7 +920,7 @@ class PermissionsConfig(BaseModel):
     """Internal confirmation-provider mode, derived from ``automation.autonomy``.
 
       • ``confirm`` — derived from autonomy ``ask`` or ``scoped``.
-      • ``allow``   — derived from autonomy ``auto``.
+      • ``allow``   — derived from autonomy ``auto`` or ``full``.
 
     Owner-facing control is ``automation.autonomy``. This field is kept
     so older readers and the confirmation provider stay compatible.
@@ -929,7 +930,7 @@ class PermissionsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["confirm", "allow"] = Field(
         "confirm", json_schema_extra=_setting("permissions", hidden=True),
-        description="Derived from automation.autonomy (auto→allow, otherwise confirm). "
+        description="Derived from automation.autonomy (auto/full→allow, otherwise confirm). "
                     "Not shown as a separate setting.")
 
 

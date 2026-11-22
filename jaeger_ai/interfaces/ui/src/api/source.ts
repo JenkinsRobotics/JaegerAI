@@ -2,7 +2,7 @@ import type { HomeOptions, HomeSessions } from "../chat/homeSession";
 import type { ChatSession } from "../chat/host";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
-export type RuntimeAutonomy = "ask" | "scoped" | "auto";
+export type RuntimeAutonomy = "ask" | "scoped" | "auto" | "full";
 export type RuntimeTier = "agent" | "plan";
 export interface RuntimeTierSnapshot {
   tier: RuntimeTier;

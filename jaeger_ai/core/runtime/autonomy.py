@@ -2,7 +2,7 @@
 
 The PLAN is agreed up front (we settle the task together); autonomy governs the
 *execution* after that — specifically whether a tier-gated action pauses for a
-prompt or runs on its own. Three modes:
+prompt or runs on its own. Four modes:
 
   ask     — pause for approval before EVERY outward / hardware / destructive
             action (tiers 1-4). The strict, today-style gate.
@@ -10,10 +10,12 @@ prompt or runs on its own. Three modes:
             standing "always" grant runs quiet, anything NEW prompts once (and
             "always" extends the scope). Out-of-scope or missing info → reach
             out via ``clarify``.   (the default)
-  auto    — fully autonomous: auto-approve tiers 1-4 for an admin session; the
-            agent only reaches out (``clarify``) when genuinely blocked.
-            Only when the owner saved it explicitly; never a default, and an
-            unreadable config reads as ``ask``.
+  auto    — automatically approve permitted actions while retaining Jaeger's
+            normal workspace and process sandbox.
+  full    — Full access: the authenticated owner authorizes unrestricted local
+            execution. Jaeger's approval, sandbox, deny-rule, protected-target,
+            and destructive-action gates are bypassed; only the host OS and
+            underlying tool capabilities remain authoritative.
 
 tier-5 DEV_BYPASS still needs an explicit human override in every mode — it
 never routes through this gate. Non-admin sessions are denied upstream, so this
@@ -29,7 +31,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-AUTONOMY = ("ask", "scoped", "auto")
+AUTONOMY = ("ask", "scoped", "auto", "full")
 AUTONOMY_ALIASES: dict[str, str] = {
     "ask": "ask",
     "manual": "ask",
@@ -39,15 +41,20 @@ AUTONOMY_ALIASES: dict[str, str] = {
     "smart-auto": "scoped",
     "smart auto": "scoped",
     "auto": "auto",
-    "full": "auto",
+    "automatic": "auto",
+    "full": "full",
+    "full_access": "full",
+    "full-access": "full",
+    "full access": "full",
     "full_auto": "auto",
     "full-auto": "auto",
     "full auto": "auto",
 }
 AUTONOMY_LABELS: dict[str, str] = {
-    "ask": "Manual",
-    "scoped": "Smart Auto",
-    "auto": "Full Auto",
+    "ask": "Ask for approval",
+    "scoped": "Approve for me",
+    "auto": "Automatic",
+    "full": "Full access",
 }
 DEFAULT = "scoped"
 CONFIG_DEFAULT = "scoped"
@@ -68,10 +75,10 @@ def normalize_autonomy(raw: Any) -> str | None:
 def permissions_mode_for(autonomy: str) -> str:
     """Internal ``permissions.mode`` derived from owner-facing autonomy.
 
-    ``auto`` → ``allow`` (headless auto-approve). ``ask`` and ``scoped``
+    ``auto``/``full`` → ``allow`` (headless auto-approve). ``ask`` and ``scoped``
     → ``confirm``. Specific deny rules are unchanged.
     """
-    return "allow" if (autonomy or "").strip().lower() == "auto" else "confirm"
+    return "allow" if (autonomy or "").strip().lower() in {"auto", "full"} else "confirm"
 
 
 def autonomy_from_permissions_mode(mode: str) -> str:
@@ -80,11 +87,21 @@ def autonomy_from_permissions_mode(mode: str) -> str:
 
 
 _DESC = {
-    "ask": "pause for approval before every outward/hardware/destructive action",
-    "scoped": "agree risky scope up front, then run autonomously within it; "
-              "out-of-scope or missing info → ask",
-    "auto": "fully autonomous; reach out only when genuinely blocked",
+    "ask": "work in the normal sandbox and ask before actions that need more authority",
+    "scoped": "use a reviewer to approve eligible actions while retaining the normal sandbox",
+    "auto": "run permitted tools automatically inside the normal sandbox",
+    "full": "unrestricted local execution; bypass Jaeger approval and sandbox policy",
 }
+
+
+def auto_approves(mode: str | None) -> bool:
+    """Whether routine eligible actions run without an approval card."""
+    return str(mode or "").strip().lower() in {"auto", "full"}
+
+
+def full_access_enabled(mode: str | None) -> bool:
+    """Whether the owner explicitly selected unrestricted local execution."""
+    return str(mode or "").strip().lower() == "full"
 
 _state: dict[str, Any] = {"mode": DEFAULT, "explicit": False}
 
@@ -179,7 +196,7 @@ def sync_permissions_mode(config_path: Path | str | None) -> str:
     """Make ``automation.autonomy`` the source of truth and derive ``permissions.mode``.
 
     If the saved file had ``permissions.mode: allow`` while autonomy was
-    not ``auto``, autonomy is migrated to ``auto`` so auto-approve is not
+    neither ``auto`` nor ``full``, autonomy is migrated to ``auto`` so auto-approve is not
     lost. Specific deny / grant rules are not touched. Returns the
     autonomy value after the sync. No write when already consistent.
     """
@@ -197,7 +214,7 @@ def sync_permissions_mode(config_path: Path | str | None) -> str:
         autonomy = str(saved or "").strip().lower()
         if autonomy not in AUTONOMY:
             autonomy = autonomy_from_permissions_mode(str(mode or ""))
-        elif autonomy != "auto" and str(mode or "").strip().lower() == "allow":
+        elif autonomy not in {"auto", "full"} and str(mode or "").strip().lower() == "allow":
             # Preserve a previously saved auto-approve posture.
             autonomy = "auto"
         derived = permissions_mode_for(autonomy)

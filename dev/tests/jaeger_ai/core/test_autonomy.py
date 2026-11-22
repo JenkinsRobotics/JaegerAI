@@ -37,7 +37,7 @@ def test_gateway_change_persists_and_updates_the_running_mode(tmp_path) -> None:
 def test_module_default_set_and_unknown() -> None:
     try:
         assert autonomy.current_autonomy() == autonomy.DEFAULT == "scoped"
-        assert set(autonomy.list_autonomy()) == {"ask", "scoped", "auto"}
+        assert set(autonomy.list_autonomy()) == {"ask", "scoped", "auto", "full"}
         assert autonomy.set_autonomy("auto")["ok"]
         assert autonomy.current_autonomy() == "auto"
         bad = autonomy.set_autonomy("nope")

@@ -34,6 +34,7 @@ from jaeger_ai.core.runtime.autonomy import (
     normalize_autonomy,
     set_autonomy,
 )
+from jaeger_agent.adapters.cli_turn_mcp import permission_argv
 from jaeger_ai.core.session_tools import session_manage
 from jaeger_ai.core.settings.tools import settings_get, settings_set
 from jaeger_os.core.safety.permissions import PermissionGrants
@@ -233,8 +234,9 @@ def test_autonomy_aliases_and_persistent_grant_expiration_survive_restart(tmp_pa
     assert normalize_autonomy("Manual") == "ask"
     assert normalize_autonomy("Smart Auto") == "scoped"
     assert normalize_autonomy("Full Auto") == "auto"
-    assert set_autonomy("Full Auto")["label"] == "Full Auto"
-    assert autonomy_info()["label"] == "Full Auto"
+    assert set_autonomy("Full Auto")["label"] == "Automatic"
+    assert autonomy_info()["label"] == "Automatic"
+    assert normalize_autonomy("Full access") == "full"
 
     layout = _make_instance(tmp_path, autonomy="auto")
     assert configured_autonomy(layout.config_path) == "auto"
@@ -306,6 +308,57 @@ def test_explicit_shell_deny_is_never_overridden_by_full_auto(tmp_path: Path):
     )
     assert decision.decision == AuthorityDecisionType.DENY
     assert decision.policy_name == "commissioning_authority"
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("exec_command", {"command": "rm -rf /Users/developer/Documents"}),
+    ("exec_command", {"command": "git push --force origin master"}),
+    ("framework_apply_diff", {"workspace": "/tmp/work"}),
+])
+def test_full_access_bypasses_jaeger_policy_gates(tmp_path: Path, tool: str, args: dict):
+    layout = _make_instance(tmp_path, autonomy="full", shell_mode="deny")
+    decision = PolicyKernel().evaluate(
+        ProposedAction(tool_name=tool, arguments=args, actor="owner:webui"),
+        instance_root=layout.root,
+        dry_run=True,
+    )
+    assert decision.decision == AuthorityDecisionType.ALLOW
+    assert decision.policy_name == "owner_full_access"
+
+
+def test_full_access_lifts_absolute_file_boundary(tmp_path: Path, monkeypatch):
+    from jaeger_agent.core import workspace
+    from jaeger_ai.core.runtime import autonomy
+
+    layout = _make_instance(tmp_path, autonomy="full")
+    monkeypatch.setitem(autonomy._state, "mode", "full")
+    monkeypatch.setitem(autonomy._state, "explicit", True)
+    workspace.bind(layout)
+    outside = tmp_path / "outside-normal-roots.txt"
+    assert workspace._resolve_absolute_write(outside) == outside.resolve()
+    credential = tmp_path / "credentials" / "secret.txt"
+    assert workspace._resolve_read(str(credential)) == credential.resolve()
+
+
+def test_full_access_bypasses_hidden_hardline_command_veto(monkeypatch):
+    from jaeger_ai.core.runtime import autonomy
+    from jaeger_os.core.safety.command_guard import hardline_guard
+
+    monkeypatch.setitem(autonomy._state, "mode", "full")
+    monkeypatch.setitem(autonomy._state, "explicit", True)
+
+    @hardline_guard("command")
+    def capture(command: str):
+        return {"ok": True, "command": command}
+
+    assert capture(command="rm -rf /") == {"ok": True, "command": "rm -rf /"}
+
+
+def test_full_access_passes_unrestricted_flags_to_delegated_clis():
+    assert permission_argv("codex", "full") == ["--dangerously-bypass-approvals-and-sandbox"]
+    assert "--dangerously-bypass-approvals-and-sandbox" not in permission_argv("codex", "auto")
+    assert "bypassPermissions" in permission_argv("claude", "full")
+    assert "--yolo" in permission_argv("hermes", "full")
 
 
 # ── 8. Desktop computer use: owner Full Auto ALLOW, untrusted DENY ──────

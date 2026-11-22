@@ -7,9 +7,10 @@ import type { ChatHost } from "./host";
 type AutonomyHost = Pick<ChatHost, "runtimeAutonomy" | "setRuntimeAutonomy">;
 
 const modes: Array<{ id: RuntimeAutonomy; label: string; longLabel: string; description: string; icon: typeof Shield }> = [
-  { id: "ask", label: "Ask", longLabel: "Ask for approval", description: "Ask before outward, hardware, and destructive actions.", icon: Shield },
-  { id: "scoped", label: "For me", longLabel: "Approve for me", description: "Actions inside the saved scope run automatically. Anything else is reviewed first.", icon: ToolShield },
-  { id: "auto", label: "Full", longLabel: "Full access", description: "Run permitted tools automatically.", icon: Zap },
+  { id: "ask", label: "Ask", longLabel: "Ask for approval", description: "Work in the normal sandbox and ask before actions that need more authority.", icon: Shield },
+  { id: "scoped", label: "For me", longLabel: "Approve for me", description: "A reviewer approves eligible requests while the normal sandbox remains active.", icon: ToolShield },
+  { id: "auto", label: "Auto", longLabel: "Automatic", description: "Run permitted tools automatically inside the normal sandbox.", icon: Zap },
+  { id: "full", label: "Full", longLabel: "Full access", description: "Unrestricted local access. Jaeger will not ask, sandbox, or block actions; host OS permissions still apply.", icon: Zap },
 ];
 
 const fallback = modes[0];
@@ -90,7 +91,7 @@ export function AutonomyControl({ host, dimmed = false }: { host: AutonomyHost; 
               type="button"
               role="menuitemradio"
               aria-checked={current === mode.id}
-              className={mode.id === "auto" ? "is-full-access" : undefined}
+              className={mode.id === "full" ? "is-full-access" : undefined}
               disabled={Boolean(saving) || !current}
               onClick={() => void select(mode.id)}
             >

@@ -676,13 +676,14 @@ def run_wizard(
     autonomy_choice = _ask_choice(
         "Choose",
         [
-            ("scoped", "Agree the risky scope up front, then run within it  (recommended)"),
-            ("ask", "Ask me before every outward or destructive action"),
-            ("auto", "Auto-approve  (trusted, unattended deployment)"),
+            ("scoped", "Approve eligible actions for me inside the normal sandbox  (recommended)"),
+            ("ask", "Ask for approval when an action needs more authority"),
+            ("auto", "Run permitted actions automatically inside the normal sandbox"),
+            ("full", "Full local access; keep hard safety blocks"),
         ],
         default=0,
     )
-    perm_mode = "allow" if autonomy_choice == "auto" else "confirm"
+    perm_mode = "allow" if autonomy_choice in {"auto", "full"} else "confirm"
 
     # ── Step 4 · Interaction (WIZ-3) ────────────────────────────────
     # How does the user want to talk to {name} by default? The choice
