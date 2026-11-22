@@ -421,7 +421,9 @@ class DefaultAgentRuntime:
             "provider": self.config.provider,
             "model": model,
             "sessions": len(self._sessions),
-            "tools": len(self.agent_for("default").tool_names()) if self._sessions else 0,
+            # Observability must not create or restore a default session merely
+            # because a caller asks for health.
+            "tools": len(next(iter(self._sessions.values())).tool_names()) if self._sessions else 0,
         }
 
     def close(self) -> None:

@@ -934,3 +934,40 @@ def test_strip_tool_call_blocks_keeps_surrounding_prose():
     out = LocalLlamaAdapter._strip_tool_call_blocks(text)
     assert "tool_call" not in out
     assert "Sure!" in out and "done." in out
+
+
+def test_tool_prose_refreshes_when_same_name_schema_changes():
+    from typing import Literal
+
+    from pydantic import BaseModel
+
+    from jaeger_agent import ToolDef
+
+    class OldArgs(BaseModel):
+        action: Literal["old_action"]
+
+    class NewArgs(BaseModel):
+        action: Literal["new_action"]
+
+    adapter = LocalLlamaAdapter(model_path="/m/Qwen3-1.7B.gguf")
+
+    def prompt(args, description):
+        tool = ToolDef(
+            name="perform",
+            description=description,
+            args_model=args,
+            fn=lambda **kw: kw,
+        )
+        wire = adapter.format_messages(
+            [{"role": "user", "content": "act"}], [tool], "sys"
+        )
+        return next(
+            message["content"]
+            for message in wire["messages"]
+            if message["role"] == "system"
+        )
+
+    assert "old_action" in prompt(OldArgs, "Old description")
+    refreshed = prompt(NewArgs, "New description")
+    assert "new_action" in refreshed and "New description" in refreshed
+    assert "old_action" not in refreshed and "Old description" not in refreshed

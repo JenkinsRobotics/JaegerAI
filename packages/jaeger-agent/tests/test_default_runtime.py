@@ -318,3 +318,13 @@ def test_no_tools_also_suppresses_skill_registered_tools(monkeypatch) -> None:
     monkeypatch.delenv("JAEGER_AGENT_NO_TOOLS", raising=False)
     monkeypatch.setenv("JAEGER_AGENT_NO_SKILLS", "1")
     assert _load_skills(object()) is None
+
+
+def test_health_does_not_create_a_default_session() -> None:
+    rt = DefaultAgentRuntime(adapter=ScriptedAdapter(), config={"tools_enabled": False})
+    rt.agent_for("companion")
+    for _ in range(3):
+        assert rt.health()["sessions"] == 1
+        assert rt.health()["tools"] == 0
+    assert set(rt._sessions) == {"companion"}
+    rt.close()
