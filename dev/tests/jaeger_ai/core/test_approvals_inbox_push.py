@@ -390,3 +390,64 @@ async def test_widget_action_request_creates_projected_approval(tmp_path):
         assert (await c.post("/v1/approvals/requests", json={"source": "widget", "title": "x", "risk": "bogus"})).status == 400
         r = await c.post(f"/v1/approvals/{aid}/decide", json={"decision": "approve"})
         assert r.status == 200 and g.store.get_approval(aid)["status"] == "resolved"
+
+
+def test_live_progress_stays_in_app_terminal_reply_pushes_once(tmp_path):
+    now = [_at(12, 0)]
+    g, dispatcher, sent = _setup_push(tmp_path, lambda: now[0])
+    details = "PRIVATE VERIFIED RESULT"
+    turn = {"request_id": "long-owner-turn"}
+    g.event_bus.publish("s1", "turn.start", turn)
+    now[0] += 121
+    g.event_bus.publish("s1", "tool.started", {**turn, "tool": "read_file"})
+    g.event_bus.publish("s1", "turn.progress", {**turn, "message": "Readback complete"})
+    assert g.live_tasks.snapshot()["running"][0]["step"] == "Readback complete"
+    dispatcher.tick()
+    assert sent == []
+
+    terminal = {**turn, "output": details, "timing": {"turn_finish_ms": 121000}}
+    g.event_bus.publish("s1", "turn.finish", terminal)
+    g.event_bus.publish("s1", "turn.finish", terminal)  # distinct event IDs, one turn
+    assert dispatcher.status()["now"] == 1
+    dispatcher.tick()
+    assert [(p["type"], p["body"], p["privacy"]) for p in sent] == [
+        ("reply", "Tap to read the reply", "title_only")
+    ]
+    assert details not in json.dumps(sent)
+    assert g.live_tasks.snapshot()["recent"][0]["result"] == details
+
+    # A fresh dispatcher also sees the durable delivery marker.
+    restarted = push_routes.PushDispatcher(g, clock=lambda: now[0], poster=dispatcher.poster)
+    assert restarted.enqueue(restarted._turn_candidate(
+        type("Event", (), {"session_id": "s1", "data": terminal, "event": "turn.finish"})()
+    )) == "drop"
+    restarted.tick()
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("case", ["muted_category", "disabled", "quiet_hours", "owner_watching"])
+def test_terminal_phone_alert_respects_policy(tmp_path, case):
+    now = [_at(23 if case == "quiet_hours" else 12, 0)]
+    g, dispatcher, sent = _setup_push(tmp_path, lambda: now[0])
+    turn = {"request_id": "long-owner-turn"}
+    if case in ("muted_category", "disabled"):
+        from jaeger_ai.features.notifications.routes import settings, write
+        with g.store._immediate() as conn:
+            prefs = settings(conn)
+            if case == "disabled":
+                prefs["enabled"] = False
+            else:
+                prefs["categories"]["replies_away"]["push"] = False
+            write(conn, prefs)
+    g.event_bus.publish("s1", "turn.start", turn)
+    now[0] += 130
+    if case == "owner_watching":
+        dispatcher.note_presence("foreground-browser", True)
+    g.event_bus.publish("s1", "turn.finish", {**turn, "output": "Verified outcome", "timing": {"turn_finish_ms": 130000}})
+    dispatcher.tick()
+    assert sent == []
+    assert dispatcher.status()["held"] == (1 if case == "quiet_hours" else 0)
+    if case == "quiet_hours":
+        now[0] = _at(7, 31, day=3)
+        dispatcher.tick()
+        assert [(p["type"], p["body"]) for p in sent] == [("summary", "1 update")]
