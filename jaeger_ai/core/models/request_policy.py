@@ -149,7 +149,14 @@ def require_inference_headroom(
             if lvl < 4 and (is_loaded or (free_gb is not None and free_gb >= 1.5)):
                 blockers = [b for b in blockers if b != "memory pressure is high"]
             if lvl < 4 and (is_loaded or provider == "ollama") and free_gb is not None and free_gb >= 1.5:
-                blockers = [b for b in blockers if b != "the model would leave too little memory for the desktop"]
+                blockers = [
+                    b for b in blockers
+                    if b not in {
+                        "the model would leave too little memory for the desktop",
+                        "the desktop is busy",
+                        "the GPU is busy",
+                    }
+                ]
         except Exception:  # noqa: BLE001 — fail safe to original blockers
             pass
     if blockers:
