@@ -146,9 +146,9 @@ def require_inference_headroom(
             loaded_set = set(snap.get("ollama_loaded") or ())
             norm_name = route.model if ":" in route.model.rsplit("/", 1)[-1] else f"{route.model}:latest"
             is_loaded = (provider == "local" and not loading) or (norm_name in loaded_set) or (route.model in loaded_set)
-            if lvl < 4 and (is_loaded or (free_gb is not None and free_gb >= 2.0)):
+            if lvl < 4 and (is_loaded or (free_gb is not None and free_gb >= 1.5)):
                 blockers = [b for b in blockers if b != "memory pressure is high"]
-            if is_loaded and free_gb is not None and free_gb >= 1.5:
+            if lvl < 4 and (is_loaded or provider == "ollama") and free_gb is not None and free_gb >= 1.5:
                 blockers = [b for b in blockers if b != "the model would leave too little memory for the desktop"]
         except Exception:  # noqa: BLE001 — fail safe to original blockers
             pass

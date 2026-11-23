@@ -305,7 +305,7 @@ def test_phase8_and_9_post_edit_verify_ollama_adaptive_think_batcher_and_cron(tm
     guard2.record_tool_result("terminal", {"command": "pytest"}, ok=True)
     assert guard2.maybe_nudge(has_verify_tool=True) is None
 
-    # 2. Module 01: OllamaAdapter keep_alive + adaptive think=False after >=8 tool steps
+    # 2. Module 01: OllamaAdapter keep_alive + opt-in adaptive think=False after >=8 tool steps
     oa = OllamaAdapter(
         provider="ollama",
         model="qwen3.5:9b",
@@ -319,8 +319,21 @@ def test_phase8_and_9_post_edit_verify_ollama_adaptive_think_batcher_and_cron(tm
         {"role": "tool", "tool_call_id": f"c{i}", "name": "read_file", "content": "ok"}
         for i in range(8)
     ]
-    long_body = oa._native_body(oa.format_messages(long_msgs, [], ""), oa._metadata())
-    assert long_body["think"] is False
+    # Default keeps full thinking ON for multi-step accuracy
+    default_long = oa._native_body(oa.format_messages(long_msgs, [], ""), oa._metadata())
+    assert "think" not in default_long
+    # Opt-in JAEGER_ADAPTIVE_LOCAL_THINK=1 switches to think=False after >=8 tool steps
+    import os as _os
+    _prev_think = _os.environ.get("JAEGER_ADAPTIVE_LOCAL_THINK")
+    try:
+        _os.environ["JAEGER_ADAPTIVE_LOCAL_THINK"] = "1"
+        long_body = oa._native_body(oa.format_messages(long_msgs, [], ""), oa._metadata())
+        assert long_body["think"] is False
+    finally:
+        if _prev_think is None:
+            _os.environ.pop("JAEGER_ADAPTIVE_LOCAL_THINK", None)
+        else:
+            _os.environ["JAEGER_ADAPTIVE_LOCAL_THINK"] = _prev_think
     assert ModelRouter.resolve_profile("gpt-4o").model_id == "gpt-4o"
 
     # 3. Module 08: StreamingDeltaBatcher coalesces deltas & flushes strictly before durable frame
