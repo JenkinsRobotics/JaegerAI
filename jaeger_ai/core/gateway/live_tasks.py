@@ -2,18 +2,8 @@
 
 Fed by the Gateway event bus (the same stream the UI's live trace reads):
 ``turn.start`` opens a row, ``tool.started`` / ``turn.progress`` move its
-step, ``turn.finish`` / ``turn.failed`` close it. Two consumers:
-
-* ``GET /v1/live/tasks`` — the Mac app (JaegerShell) polls this for the menu
-  bar progress state, the running-task list and its in-place notification.
-* Step-by-step web push to the phone: started (once a turn runs past
-  ``START_AFTER_S``), throttled progress milestones, then done/failed. Every
-  push for one turn reuses the tag ``task-<request_id>`` so the phone replaces
-  the notification instead of stacking. A turn that got progress pushes is
-  marked so the generic "reply ready" push does not duplicate its done push.
-
-Background turns (skill review, heartbeat, reflection) are listed for the Mac
-menu but never pushed.
+step, ``turn.finish`` / ``turn.failed`` close it. The read-only feed drives the Mac menu and in-app progress. External alerts
+are owned by PushDispatcher; starting a task or advancing a step never pushes.
 """
 from __future__ import annotations
 
@@ -26,8 +16,6 @@ from aiohttp import web
 
 logger = logging.getLogger(__name__)
 
-START_AFTER_S = 20.0        # a turn this long gets a "started" push
-MILESTONE_EVERY_S = 60.0    # at most one progress push per minute per turn
 RECENT_KEEP_S = 120.0       # finished rows stay visible this long
 MAX_STEP_CHARS = 120
 
@@ -53,17 +41,15 @@ def step_for_tool(tool: str) -> str:
 
 
 class LiveTasks:
-    def __init__(self, gateway, *, clock=time.time, sender=None):
+    def __init__(self, gateway, *, clock=time.time):
         self.gw = gateway
         self.clock = clock
-        self._sender = sender
         self._lock = threading.RLock()
         self.running: dict[str, dict] = {}
         self.recent: dict[str, dict] = {}
-        self.pushed: set[str] = set()   # request ids that got a progress push
         self.seq = 0
 
-    # ── event bus observer (cheap; network goes to a thread) ──
+    # ── event bus observer (in-app activity only) ──
     def observe(self, evt) -> None:
         name = getattr(evt, "event", "") or ""
         if name not in ("turn.start", "tool.started", "turn.progress", "turn.finish", "turn.failed"):
@@ -116,8 +102,7 @@ class LiveTasks:
             return
         row = {"request_id": rid, "session_id": sid, "title": self._title(sid, data), "step": "Starting",
                "steps": 0, "started_at": now, "updated_at": now, "status": "running",
-               "background": self._background(sid, rid), "url": f"/chat/{sid}" if sid else "/",
-               "_pushed_at": 0.0}
+               "background": self._background(sid, rid), "url": f"/chat/{sid}" if sid else "/"}
         with self._lock:
             self.running[rid] = row
             self.seq += 1
@@ -142,58 +127,12 @@ class LiveTasks:
                        result=_clip(data.get("error") if failed else (data.get("output") or data.get("text")), 200))
             self.recent[rid] = row
             self.seq += 1
-        if rid in self.pushed:
-            self._push(row, final=True)
+            self._prune_recent(now)
 
-    # ── phone push (started → milestones → done) ──
-    def tick(self) -> None:
-        now = self.clock()
-        with self._lock:
-            for rid, row in list(self.recent.items()):
-                if now - float(row.get("finished_at") or now) > RECENT_KEEP_S:
-                    self.recent.pop(rid, None)
-                    self.pushed.discard(rid)
-            due = []
-            for rid, row in self.running.items():
-                if row["background"] or now - row["started_at"] < START_AFTER_S:
-                    continue
-                if rid not in self.pushed or now - row["_pushed_at"] >= MILESTONE_EVERY_S:
-                    due.append(row)
-        for row in due:
-            self._push(row)
-
-    def _push(self, row: dict, final: bool = False) -> None:
-        rid = row["request_id"]
-        first = rid not in self.pushed
-        with self._lock:
-            self.pushed.add(rid)
-            row["_pushed_at"] = self.clock()
-        elapsed = int((row.get("finished_at") or self.clock()) - row["started_at"])
-        if final:
-            title = ("Failed: " if row["status"] == "failed" else "Done: ") + row["title"]
-            body = row.get("result") or ("Open the chat to see why." if row["status"] == "failed" else "Tap to see the result")
-        else:
-            title = ("Started: " if first else "Working: ") + row["title"]
-            body = f"{row['step']} · step {row['steps']} · {elapsed // 60}m {elapsed % 60}s"
-        payload = {"v": 1, "id": f"task-{rid}", "type": "progress", "title": _clip(title, 110),
-                   "body": _clip(body, 200), "url": row["url"] + ("?src=push" if "?" not in row["url"] else ""),
-                   "tag": f"task-{rid}"[:60], "silent": (not first and not final), "privacy": "full"}
-        threading.Thread(target=self._send, args=(payload,), daemon=True, name="jaeger-live-push").start()
-
-    def _send(self, payload: dict) -> None:
-        try:
-            if self._sender is not None:
-                self._sender(payload)
-                return
-            from . import push_routes, webpush
-            if not webpush.list_subscriptions():
-                return
-            disp = getattr(self.gw, "push_dispatcher", None)
-            out = webpush.send(payload, subject=push_routes._subject(), urgency="normal", ttl=600,
-                               poster=getattr(disp, "poster", None))
-            logger.info("live push %s %r delivered=%s", payload.get("tag"), payload.get("title"), out.get("delivered"))
-        except Exception:  # noqa: BLE001
-            logger.warning("live task push failed", exc_info=True)
+    def _prune_recent(self, now: float) -> None:
+        for rid, row in list(self.recent.items()):
+            if now - row["finished_at"] > RECENT_KEEP_S:
+                self.recent.pop(rid, None)
 
     def snapshot(self) -> dict:
         now = self.clock()
@@ -202,6 +141,7 @@ class LiveTasks:
             out["elapsed_s"] = round((r.get("finished_at") or now) - r["started_at"], 1)
             return out
         with self._lock:
+            self._prune_recent(now)
             running = sorted((view(r) for r in self.running.values()), key=lambda r: r["started_at"])
             recent = sorted((view(r) for r in self.recent.values()), key=lambda r: -r["finished_at"])
             return {"seq": self.seq, "running": running, "recent": recent[:10],
@@ -214,24 +154,6 @@ def register(gateway) -> LiveTasks:
     add = getattr(gateway.event_bus, "add_observer", None)
     if add:
         add(live.observe)
-    stop = threading.Event()
-
-    def loop() -> None:
-        while not stop.wait(5.0):
-            try:
-                live.tick()
-            except Exception:  # noqa: BLE001
-                logger.warning("live task tick failed", exc_info=True)
-
-    async def _start(_app):
-        threading.Thread(target=loop, daemon=True, name="jaeger-live-tasks").start()
-
-    async def _stop(_app):
-        stop.set()
-
-    gateway.app.on_startup.append(_start)
-    gateway.app.on_cleanup.append(_stop)
-
     async def tasks(request: web.Request) -> web.Response:
         return web.json_response(live.snapshot())
 
