@@ -1,14 +1,7 @@
 """Tool Call Repair & Normalization Middleware for Jaeger.
 
-Modeled after OpenClaw's battle-tested packages/tool-call-repair:
-Protects the agent runtime from malformed LLM outputs by auto-repairing:
-  1. Markdown fences (```json ... ```)
-  2. Single quotes instead of double quotes
-  3. Trailing commas in arrays and objects
-  4. Unescaped newlines and tabs inside strings
-  5. Python-style booleans and None (True/False/None -> true/false/null)
-  6. Unterminated brackets / truncated JSON
-  7. XML-style tool calls (<tool_call name="...">...</tool_call>)
+Delegates JSON/fence/Python-literal/truncation repair and JSON-Schema type
+coercion directly to standalone ``jaeger-reliability`` (Module 07).
 """
 
 from __future__ import annotations
@@ -17,52 +10,8 @@ import json
 import re
 from typing import Any
 
-
-def repair_json_string(raw: str) -> str:
-    """Repair common JSON formatting defects produced by language models."""
-    if not raw:
-        return "{}"
-
-    text = raw.strip()
-
-    # 1. Strip markdown code fences if wrapped
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text)
-        text = text.strip()
-
-    # 2. Extract balanced JSON object if surrounded by prose
-    if not text.startswith("{") and "{" in text:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if match:
-            text = match.group(0).strip()
-
-    # 3. Replace Python constants
-    text = re.sub(r"\bTrue\b", "true", text)
-    text = re.sub(r"\bFalse\b", "false", text)
-    text = re.sub(r"\bNone\b", "null", text)
-
-    # 4. Replace single quotes around keys or strings
-    # Replace 'key': with "key":
-    text = re.sub(r"(?<=[{,\s])'([a-zA-Z0-9_\-\.]+)'\s*:", r'"\1":', text)
-    # Replace : 'value' with : "value"
-    text = re.sub(r":\s*'([^']*)'", r': "\1"', text)
-
-    # 5. Remove trailing commas before closing braces/brackets
-    text = re.sub(r",\s*([\]}])", r"\1", text)
-
-    # 6. Check if braces are unbalanced (truncated JSON recovery)
-    open_curly = text.count("{")
-    close_curly = text.count("}")
-    if open_curly > close_curly:
-        text += "}" * (open_curly - close_curly)
-
-    open_square = text.count("[")
-    close_square = text.count("]")
-    if open_square > close_square:
-        text += "]" * (open_square - close_square)
-
-    return text
+from jaeger_reliability import repair_arguments as _v2_repair_args
+from jaeger_reliability import repair_json_string as repair_json_string
 
 
 def extract_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
@@ -75,7 +24,6 @@ def extract_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
     name = match.group(1) or ""
     body = match.group(2).strip()
 
-    # If name wasn't in attribute, check for <name> tag
     if not name:
         name_match = re.search(r"<name>([a-zA-Z0-9_\-]+)</name>", body, re.IGNORECASE)
         if name_match:
@@ -88,7 +36,7 @@ def extract_xml_tool_call(text: str) -> tuple[str, dict[str, Any]] | None:
 
 
 def safe_parse_tool_arguments(raw: Any) -> dict[str, Any]:
-    """Safely parse tool arguments into a dictionary, applying automatic repair if needed."""
+    """Safely parse tool arguments into a dictionary via standalone ``jaeger-reliability``."""
     if isinstance(raw, dict):
         return raw
     if not raw or not isinstance(raw, str):
@@ -98,7 +46,7 @@ def safe_parse_tool_arguments(raw: Any) -> dict[str, Any]:
     if not text:
         return {}
 
-    # Fast path: standard json
+    # Fast path: valid JSON preserves exact strings/whitespace/primitives
     try:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
@@ -109,29 +57,13 @@ def safe_parse_tool_arguments(raw: Any) -> dict[str, Any]:
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
 
-    # Standalone jaeger-reliability deterministic parser (fences, Python literals, trailing commas)
+    # Standalone jaeger-reliability deterministic parser (fences, Python literals, trailing commas, truncation)
     try:
-        from jaeger_reliability import repair_arguments as _v2_repair_args
         return _v2_repair_args("tool", text, None)
     except ValueError:
         pass
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("jaeger-reliability repair_arguments failed: %s", exc)
 
-    # Repair path
-    repaired = repair_json_string(text)
-    try:
-        parsed = json.loads(repaired)
-        if isinstance(parsed, dict):
-            return parsed
-        if isinstance(parsed, list):
-            return {"items": parsed}
-        return {"value": parsed}
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        pass
-
-    # Fallback: key-value line extraction
+    # Last-resort key-value bullet extraction for non-JSON plain text
     extracted: dict[str, Any] = {}
     for line in text.splitlines():
         line = line.strip().lstrip("-* \t")
@@ -140,7 +72,6 @@ def safe_parse_tool_arguments(raw: Any) -> dict[str, Any]:
             k = k.strip().strip("'\"")
             v = v.strip().strip("'\",")
             if k:
-                # Try simple type conversion
                 if v.lower() == "true":
                     extracted[k] = True
                 elif v.lower() == "false":
@@ -159,36 +90,14 @@ def repair_tool_call(
     parameter_aliases: dict[str, str] | None = None,
     schema: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """Normalize and repair both the tool name and argument payload.
-
-    Args:
-        name: The requested tool name.
-        raw_arguments: The raw argument string or dictionary from model output.
-        parameter_aliases: Optional dict mapping common LLM hallucinated param
-            names to canonical ones (e.g. {"path": "file_path"}).
-        schema: Optional JSON Schema used for deterministic type coercion via
-            standalone ``jaeger-reliability``.
-    """
-    clean_name = name.strip()
-
-    # If the tool name itself contains an XML tag or command prefix
-    clean_name = re.sub(r"^(?:tools?\.|functions?\.)", "", clean_name)
-
+    """Normalize and repair tool name and arguments via standalone ``jaeger-reliability``."""
+    clean_name = re.sub(r"^(?:tools?\.|functions?\.)", "", name.strip())
     arguments = safe_parse_tool_arguments(raw_arguments)
 
     if parameter_aliases:
-        repaired_args: dict[str, Any] = {}
-        for k, v in arguments.items():
-            target_key = parameter_aliases.get(k, k)
-            repaired_args[target_key] = v
-        arguments = repaired_args
+        arguments = {parameter_aliases.get(k, k): v for k, v in arguments.items()}
 
     if schema:
-        try:
-            from jaeger_reliability import repair_arguments as _v2_repair_args
-            arguments = _v2_repair_args(clean_name, arguments, schema)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("jaeger-reliability schema coercion failed: %s", exc)
+        arguments = _v2_repair_args(clean_name, arguments, schema)
 
     return clean_name, arguments

@@ -135,8 +135,8 @@ JAEGER_TOOLSETS: dict[str, ToolsetDef] = {
         includes=[],
     ),
     "files": ToolsetDef(
-        description="Read / write / patch / delete / list / search the sandboxed workspace.",
-        tools=_tools(_core("read_file", "write_file"), _scoping("files")),
+        description="Read / write / patch / delete / list / search / map the sandboxed workspace.",
+        tools=_tools(_core("read_file", "write_file", "repo_map", "search_offloaded_output"), _scoping("files")),
         includes=[],
     ),
     "web": ToolsetDef(

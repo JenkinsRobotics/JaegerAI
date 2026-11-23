@@ -740,6 +740,8 @@ class JaegerAgent:
         finally:
             self._turn_active = False
             self._thinking_budget_boosted = False
+            if getattr(self, "_post_edit_verify", None) is not None:
+                self._post_edit_verify.reset()
             self._record_skill_outcomes()
             if getattr(self, "_ephemeral_run", False):
                 self.bind_run(None)
@@ -970,6 +972,26 @@ class JaegerAgent:
             self.callbacks.on_step(iteration, assistant_msg)
 
             if not tool_calls:
+                # Phase 8: Post-edit verification guard (standalone jaeger-loop).
+                # If code files were mutated since the last shell/test check and a
+                # verification tool is available, inject one automatic verify nudge
+                # before accepting the final answer.
+                import os as _os
+                if _os.environ.get("JAEGER_POST_EDIT_VERIFY", "1").strip() != "0":
+                    guard = getattr(self, "_post_edit_verify", None)
+                    has_verify_tool = bool(
+                        {"terminal", "execute_code", "run_shell", "run_python", "bash"}
+                        & set(self._dispatch_by_name.keys())
+                    )
+                    nudge = guard.maybe_nudge(has_verify_tool=has_verify_tool) if guard is not None else None
+                    if nudge and iteration < self.max_iterations:
+                        self._nudge_pending = True
+                        self._pending_nudge_text = nudge
+                        self._append_message({"role": "user", "content": nudge})
+                        self.callbacks.on_thinking(
+                            "[post-edit verify — nudging once to test modified code before concluding]"
+                        )
+                        continue
                 # A response with no provider-native or strictly repaired tool
                 # calls is final. Ordinary prose is never treated as a call;
                 # the allow-listed repair grammar above exists for providers
@@ -2584,6 +2606,16 @@ class JaegerAgent:
         _ok = not tool_result_failed(content)
         _err = str(content.get("error") or content.get("reason") or _stderr_tail(content)
                    or "tool failed") if not _ok else None
+
+        # Track code mutations vs verification commands via standalone jaeger-loop
+        if getattr(self, "_post_edit_verify", None) is None:
+            from jaeger_loop import PostEditVerificationGuard
+            self._post_edit_verify = PostEditVerificationGuard(max_nudges=1)
+        self._post_edit_verify.record_tool_result(
+            name,
+            args if isinstance(args, dict) else None,
+            ok=_ok,
+        )
 
         # Per-tool-result oversize guard. A single ``run_shell`` dump
         # or screenshot can dominate the next turn's context; cap it

@@ -58,8 +58,9 @@ def _scoping_enabled() -> bool:
 # local model routes over distinct named tools better than one tool's
 # action parameter (measured: the kanban umbrella hurt board filing).
 CORE: frozenset[str] = frozenset({
-    # Files: read / write / edit / search / list / name lookup.
+    # Files: read / write / edit / search / list / name lookup / AST repo map / offload grep.
     "read_file", "write_file", "patch", "search_files", "list_skill_dir", "glob",
+    "repo_map", "search_offloaded_output",
     # Shell and code.
     "terminal", "execute_code",
     # Web: semantic browser is first-class; search/extract cover discovery.
@@ -87,6 +88,7 @@ CORE: frozenset[str] = frozenset({
 LEAN_CORE: frozenset[str] = frozenset({
     "execute_code", "terminal",
     "read_file", "write_file", "patch", "search_files", "list_skill_dir", "glob",
+    "repo_map", "search_offloaded_output",
     "web_search", "web_extract",
     "memory",
     "todo", "clarify", "delegate_task", "board_add", "board_view", "list_skills",

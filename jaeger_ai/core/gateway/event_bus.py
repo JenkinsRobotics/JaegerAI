@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Callable
 
 from jaeger_ai.contract.presence import ACTIVITY_STATES, DISPLAY
+from jaeger_events import StreamingDeltaBatcher, TraceContext
 
 from .session_store import GatewaySessionStore
 
@@ -193,8 +194,32 @@ class GatewayEventBus:
         self._subscribers: dict[asyncio.Event, tuple[str, asyncio.AbstractEventLoop]] = {}
         self.store = store
         self._observers: list[Callable[[GatewayEvent], None]] = []
+        self._delta_batchers: dict[str, StreamingDeltaBatcher] = {}
         if store is not None:
             store.event_listener = self.fanout
+
+    def _batcher_for(self, session_id: str) -> StreamingDeltaBatcher:
+        batcher = self._delta_batchers.get(session_id)
+        if batcher is None:
+            def _emit_batch(_evt_type: str, payload: dict[str, Any]) -> None:
+                self._publish_now(
+                    str(payload["session_id"]),
+                    str(payload["stream_key"]),
+                    {"delta": str(payload["text"])},
+                )
+            batcher = StreamingDeltaBatcher(_emit_batch)
+            self._delta_batchers[session_id] = batcher
+        return batcher
+
+    def publish_delta(self, session_id: str, text: str, *, kind: str = "turn.delta") -> None:
+        """Coalesce high-frequency streaming deltas via standalone ``jaeger-events``."""
+        self._batcher_for(session_id).push_delta(session_id, kind, text)
+
+    def flush_deltas(self, session_id: str) -> None:
+        """Flush buffered streaming deltas strictly before any durable frame."""
+        batcher = self._delta_batchers.get(session_id)
+        if batcher is not None:
+            batcher.flush()
 
     def attach_store(self, store: GatewaySessionStore) -> None:
         self.store = store
@@ -220,16 +245,15 @@ class GatewayEventBus:
         return dict(throttle.suppressed) if throttle is not None else {}
 
     def _publish(self, session_id: str, event: str, data: dict[str, Any]) -> GatewayEvent:
-        # Attach W3C TraceContext from standalone Module 08 (jaeger-events) when absent
-        if isinstance(data, dict) and "traceparent" not in data:
-            try:
-                from jaeger_events import TraceContext
+        # Flush buffered streaming deltas strictly before any durable frame (jaeger-events)
+        if event not in {"turn.delta", "turn.reasoning"} and session_id in self._delta_batchers:
+            self._delta_batchers[session_id].flush()
+        return self._publish_now(session_id, event, data)
 
-                ctx = TraceContext.new_root()
-                if "trace_id" not in data:
-                    data = {**data, "traceparent": ctx.to_traceparent()}
-            except ImportError:
-                pass
+    def _publish_now(self, session_id: str, event: str, data: dict[str, Any]) -> GatewayEvent:
+        # Attach W3C TraceContext from standalone Module 08 (jaeger-events) when absent
+        if isinstance(data, dict) and "traceparent" not in data and "trace_id" not in data:
+            data = {**data, "traceparent": TraceContext.new_root().to_traceparent()}
         if self.store is not None:
             evt = _from_record(self.store.append_event(session_id, event, data))
             with self._lock:
