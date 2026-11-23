@@ -212,7 +212,7 @@ def run_interruptible(
     """
     from jaeger_agent.core.host import confine_process
     proc = subprocess.Popen(  # noqa: S603 — argv list, caller-controlled
-        confine_process(cmd),
+        confine_process(cmd, workspace=cwd),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=text,

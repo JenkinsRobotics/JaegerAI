@@ -92,45 +92,118 @@ def path_guard():
     return check
 
 
-def confine_command(command: Sequence[str]) -> list[str]:
-    """Install read/write denials before exec; never fall back unconfined.
+def confine_command(
+    command: Sequence[str],
+    *,
+    workspace: Path | str | None = None,
+    allow_network: bool | None = None,
+) -> list[str]:
+    """Install OS kernel confinement before exec; never fall back unconfined.
 
-    Shell quoting, aliases, Python, pipelines and symlinks cannot evade an OS
-    path rule. Other platforms must provide equivalent enforcement before
-    running these local arbitrary-process tools with protected resources.
+    When ``workspace`` is supplied on macOS, delegates directly to standalone
+    ``jaeger_authority.MacOsSeatbeltSandbox`` (read-only-by-default outside the
+    workspace, `.git` write-locked, secret stores + framework restricted paths
+    denied, `~/.jaeger/venv` preserved read-only for canonical venv execution).
     """
-    # Read grants authorize bounded file/connector reads, not ambient access
-    # for arbitrary subprocesses. Detached processes must not retain access
-    # after a later grant revocation; these data stores stay inaccessible.
     denied = tuple(replace(item, deny_read=True) for item in restricted_paths())
-    if not denied:
-        return list(command)
+    command = list(command)
     if sys.platform == "linux":
+        if not denied:
+            return command
         from .linux_filesystem import confine_existing_bwrap
         return confine_existing_bwrap(command, denied)
+
     sandbox = Path("/usr/bin/sandbox-exec")
     if sys.platform != "darwin" or not sandbox.is_file():
+        if not denied and workspace is None:
+            return command
         raise PermissionError("Filesystem authority requires a supported OS sandbox; "
                               "unconfined process execution is refused.")
+
+    # Existing default-deny sandbox-exec command (e.g. execute_code): append denials only
+    if command and command[0] == str(sandbox) and "-p" in command:
+        if not denied:
+            return command
+        extra: list[str] = []
+        for restriction in denied:
+            literal = json.dumps(str(restriction.path), ensure_ascii=True)
+            operations = "file-read* file-write*" if restriction.deny_read else "file-write*"
+            extra.append(f"(deny {operations} (subpath {literal}))")
+            for ancestor in restriction.path.parents:
+                if ancestor == Path("/"):
+                    break
+                extra.append(f"(deny file-write-unlink (literal {json.dumps(str(ancestor))}))")
+        index = command.index("-p") + 1
+        if index >= len(command):
+            raise ValueError("Sandbox command is missing its profile")
+        command[index] += "\n" + "\n".join(dict.fromkeys(extra))
+        return command
+
+    # Workspace-scoped production subprocesses: enforce read-only-default Seatbelt via jaeger-authority!
+    if workspace is not None:
+        from jaeger_authority import MacOsSeatbeltSandbox
+        from jaeger_contracts import SandboxProfile
+
+        net = (
+            allow_network
+            if allow_network is not None
+            else os.environ.get("JAEGER_SANDBOX_ALLOW_NETWORK", "0").strip() == "1"
+        )
+        profile = SandboxProfile(
+            workspace=Path(workspace),
+            denied_read_paths=tuple(r.path for r in denied if r.deny_read),
+            denied_write_paths=tuple(r.path for r in denied),
+            allow_network=net,
+        )
+        return list(MacOsSeatbeltSandbox().prepare(command, profile).argv)
+
+    # Non-workspace legacy invocation: still deny all framework restricted_paths
+    if not denied:
+        return command
     rules = ["(version 1)", "(allow default)"]
     for restriction in denied:
         literal = json.dumps(str(restriction.path), ensure_ascii=True)
         operations = "file-read* file-write*" if restriction.deny_read else "file-write*"
         rules.append(f"(deny {operations} (subpath {literal}))")
-        # Deny moving an ancestor away and replacing it with an unrestricted
-        # alias. Leave the ancestors readable for normal directory discovery.
         for ancestor in restriction.path.parents:
             if ancestor == Path("/"):
                 break
             rules.append(f"(deny file-write-unlink (literal {json.dumps(str(ancestor))}))")
-    command = list(command)
-    if command and command[0] == str(sandbox) and "-p" in command:
-        # execute_code already has a default-deny Seatbelt profile. Add only
-        # denials to that profile; nesting sandbox-exec fails on macOS and
-        # adding our allow-default header would widen its existing sandbox.
-        index = command.index("-p") + 1
-        if index >= len(command):
-            raise ValueError("Sandbox command is missing its profile")
-        command[index] += "\n" + "\n".join(dict.fromkeys(rules[2:]))
-        return command
     return [str(sandbox), "-p", "\n".join(dict.fromkeys(rules)), *command]
+
+
+def confine_workspace_command(
+    command: Sequence[str],
+    workspace: Path | str,
+    *,
+    allow_network: bool = False,
+    backend: str | None = None,
+) -> list[str]:
+    """Explicit workspace sandbox helper supporting swappable SandboxPort backends."""
+    from jaeger_authority import (
+        ContainerSandbox,
+        LinuxBwrapSandbox,
+        MacOsSeatbeltSandbox,
+        UnconfinedSandbox,
+        default_os_sandbox,
+    )
+    from jaeger_contracts import SandboxProfile
+
+    denied_reads = tuple(r.path for r in restricted_paths() if r.deny_read)
+    profile = SandboxProfile(
+        workspace=Path(workspace),
+        denied_read_paths=denied_reads,
+        allow_network=allow_network,
+    )
+    selected = (backend or os.environ.get("JAEGER_SANDBOX_BACKEND") or "").strip().lower()
+    if selected == "seatbelt":
+        sb = MacOsSeatbeltSandbox()
+    elif selected == "bwrap":
+        sb = LinuxBwrapSandbox()
+    elif selected == "docker":
+        sb = ContainerSandbox(cli="docker")
+    elif selected == "unconfined":
+        sb = UnconfinedSandbox()
+    else:
+        sb = default_os_sandbox()
+    return list(sb.prepare(command, profile).argv)

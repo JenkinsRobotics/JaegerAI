@@ -130,7 +130,7 @@ def start_background(
     try:
         from jaeger_agent.core.host import confine_process
         proc = subprocess.Popen(
-            confine_process(["/bin/sh", "-c", wrapper]),
+            confine_process(["/bin/sh", "-c", wrapper], workspace=str(proc_dir)),
             cwd=str(proc_dir),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

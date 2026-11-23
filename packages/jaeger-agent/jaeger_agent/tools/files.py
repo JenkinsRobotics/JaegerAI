@@ -180,10 +180,6 @@ def append_file(path: str, content: str) -> dict[str, Any]:
     return result
 
 
-def _leading_ws(line: str) -> str:
-    return line[: len(line) - len(line.lstrip())]
-
-
 def _line_windows(original: str, old: str) -> tuple[list[str], list[str]]:
     return original.split("\n"), old.strip("\n").split("\n")
 
@@ -199,34 +195,6 @@ def _tolerant_hits(original: str, old: str) -> list[int]:
         i for i in range(len(o_lines) - span + 1)
         if [line.strip() for line in o_lines[i:i + span]] == want
     ]
-
-
-def _reindent(new: str, old_indent: str, file_indent: str) -> str:
-    """Give ``new`` the file's indentation where the model's snippet used another one."""
-    out = []
-    for line in new.strip("\n").split("\n"):
-        out.append(file_indent + line[len(old_indent):] if old_indent and line.startswith(old_indent)
-                   else (file_indent + line if not old_indent and line.strip() else line))
-    return "\n".join(out)
-
-
-def _closest_region(original: str, old: str) -> str:
-    """The lines of ``original`` most like ``old``, for a retry hint ('' if nothing is close)."""
-    import difflib
-
-    o_lines, n_lines = _line_windows(original, old)
-    span = max(1, len(n_lines))
-    want = "\n".join(line.strip() for line in n_lines)
-    best, best_at = 0.0, -1
-    for i in range(max(1, len(o_lines) - span + 1)):
-        got = "\n".join(line.strip() for line in o_lines[i:i + span])
-        ratio = difflib.SequenceMatcher(None, want, got).ratio()
-        if ratio > best:
-            best, best_at = ratio, i
-    if best < 0.5 or best_at < 0:
-        return ""
-    region = "\n".join(o_lines[best_at:best_at + min(span, 8)])
-    return f"closest match at lines {best_at + 1}-{best_at + span}:\n{region}"
 
 
 def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> dict[str, Any]:
@@ -249,52 +217,30 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> dict[
         return {"edited": False, "error": str(exc)}
 
     if not target.exists() or not target.is_file():
-        return {"edited": False, "error": "not found", "path": path}
+        return {"ok": False, "edited": False, "error": "not found", "path": path}
     if old == new:
-        return {"edited": False, "error": "old and new are identical", "path": path}
+        return {"ok": False, "edited": False, "error": "old and new are identical", "path": path}
 
-    original = target.read_text(encoding="utf-8")
-    count = original.count(old)
-    matched = "exact"
-    if count == 0:
-        # Models often re-type a snippet with different indentation or trailing
-        # spaces. Accept that when it identifies exactly one place.
-        hits = _tolerant_hits(original, old)
-        if len(hits) == 1 and not replace_all:
-            o_lines, n_lines = _line_windows(original, old)
-            first_new = next((ln for ln in n_lines if ln.strip()), "")
-            first_file = next((ln for ln in o_lines[hits[0]:hits[0] + len(n_lines)] if ln.strip()), "")
-            replacement = _reindent(new, _leading_ws(first_new), _leading_ws(first_file))
-            o_lines[hits[0]:hits[0] + len(n_lines)] = replacement.split("\n")
-            updated, count, matched = "\n".join(o_lines), 1, "whitespace-tolerant"
-        elif len(hits) > 1:
-            return {"edited": False, "path": path, "error": (
-                f"old text matches {len(hits)} places ignoring whitespace (lines "
-                f"{', '.join(str(h + 1) for h in hits[:6])}). Include more surrounding lines to make it unique.")}
-        else:
-            hint = _closest_region(original, old)
-            return {"edited": False, "path": path,
-                    "error": "old text not found in file" + (f"; {hint}" if hint else
-                             ". Re-read the file (read_file) and copy the exact lines.")}
-    elif count > 1 and not replace_all:
-        lines = [original.count("\n", 0, m.start()) + 1 for m in re.finditer(re.escape(old), original)]
-        return {
-            "edited": False,
-            "error": (f"old text appears {count}× (lines {', '.join(map(str, lines[:8]))}) — not unique. "
-                      "Pass a longer unique snippet, or replace_all=true."),
-            "path": path,
-        }
+    # Delegate cascading edit matching (exact -> rstrip -> relative-indent dedent)
+    # directly to standalone Module 02 (jaeger-tools SearchReplaceEditor).
+    from jaeger_tools import SearchReplaceEditor
 
-    if matched == "exact":
-        updated = original.replace(old, new)
-    target.write_text(updated, encoding="utf-8")
+    outcome = SearchReplaceEditor().apply(
+        target,
+        {"target": old, "replacement": new, "replace_all": replace_all},
+    )
+    if not outcome.ok:
+        return {"ok": False, "edited": False, "path": path, "error": outcome.message}
+    updated = target.read_text(encoding="utf-8")
+    matched = "whitespace-tolerant" if outcome.strategy in {"rstrip_lines", "relative_indent"} else outcome.strategy
+    replacements = max(1, int(outcome.replacements or 1))
+
     rel = _display_path(target, layout)
-    replacements = count if replace_all else 1
     _audit("edit_file", {"path": rel, "replacements": replacements})
 
     commit_sha = git_autocommit(layout, rel, f"agent: edit {rel}")
     result: dict[str, Any] = {
-        "edited": True, "path": rel, "replacements": replacements,
+        "ok": True, "edited": True, "path": rel, "replacements": replacements,
         "bytes": len(updated.encode("utf-8")),
     }
     if matched != "exact":
@@ -867,7 +813,20 @@ def apply_patch(patch: str) -> dict[str, Any]:
                 original = target.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
                 return {"ok": False, "error": f"unreadable: {exc}", "path": path, "changed": changed}
-            updated, err = _apply_update_hunks(original, body)
+            # Try standalone Module 02 (jaeger-tools ApplyPatchEditor) first; fall back to legacy hunk parser
+            updated, err = original, ""
+            try:
+                from jaeger_tools import ApplyPatchEditor
+
+                outcome = ApplyPatchEditor().apply(target, {"patch": "\n".join(body)})
+                if outcome.ok:
+                    updated = target.read_text(encoding="utf-8")
+                else:
+                    updated, err = _apply_update_hunks(original, body)
+                    if err:
+                        err = outcome.message
+            except ImportError:
+                updated, err = _apply_update_hunks(original, body)
             if err:
                 return {"ok": False, "error": err, "path": path, "changed": changed}
             result = file_write(path, updated)

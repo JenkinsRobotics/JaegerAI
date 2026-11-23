@@ -20,7 +20,12 @@ _OLLAMA_KEY_NAMES = ("OLLAMA_API_KEY", "OLLAMA_CLOUD_API_KEY", "OLLAMA_KEY")
 
 
 def secrets_env_path() -> Path:
-    root = (os.environ.get("JAEGER_STATE_DIR") or os.environ.get("JAEGER_STATE_HOME") or "").strip()
+    root = (
+        os.environ.get("JAEGER_STATE_DIR")
+        or os.environ.get("JAEGER_STATE_HOME")
+        or os.environ.get("JAEGER_HOME")
+        or ""
+    ).strip()
     if root:
         return Path(root).expanduser() / SECRETS_ENV_NAME
     return Path.home() / ".jaeger" / SECRETS_ENV_NAME
@@ -35,10 +40,10 @@ def load_secrets_env(*, override: bool = False) -> Path | None:
     """
     global _LOADED
     path = secrets_env_path()
-    if not path.is_file():
-        _LOADED = True
-        return None
     try:
+        if not path.is_file():
+            _LOADED = True
+            return None
         mode = path.stat().st_mode & 0o777
         if mode & 0o077:
             _LOADED = True

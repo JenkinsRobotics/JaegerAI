@@ -739,6 +739,7 @@ class JaegerAgent:
             raise
         finally:
             self._turn_active = False
+            self._thinking_budget_boosted = False
             self._record_skill_outcomes()
             if getattr(self, "_ephemeral_run", False):
                 self.bind_run(None)
@@ -904,6 +905,25 @@ class JaegerAgent:
                 # or retrying produces the same outcome, so surface it
                 # plainly instead (Hermes thinking-exhaustion pattern).
                 if assistant_msg.get("finish_reason") == "thinking_exhausted":
+                    # Auto-expand output token budget and nudge once per turn
+                    # when a reasoning model exhausts max_tokens mid-thought
+                    # before emitting code or tool calls.
+                    if not getattr(self, "_thinking_budget_boosted", False):
+                        self._thinking_budget_boosted = True
+                        cur_max = int(getattr(self.primary_adapter, "max_tokens", 0) or 0)
+                        if 0 < cur_max < 16384:
+                            boosted = min(16384, max(8192, cur_max * 2))
+                            setattr(self.primary_adapter, "max_tokens", boosted)
+                        self._nudge_pending = True
+                        self._pending_nudge_text = (
+                            "Your reasoning hit the token limit before producing output. "
+                            "Keep reasoning concise and immediately emit the tool call (e.g. write_file or patch) or final answer."
+                        )
+                        self._append_message({"role": "user", "content": self._pending_nudge_text})
+                        self.callbacks.on_thinking(
+                            "[thinking budget exhausted — nudging once with expanded output budget]"
+                        )
+                        continue
                     note = (
                         "[the model spent its entire output budget "
                         "thinking and never reached an answer — the task "
@@ -996,12 +1016,28 @@ class JaegerAgent:
             # Write-side duplicates dispatch as asked (a double ``speak``
             # may be intentional).
             #
-            # 6a: ALL-READ batches (>1 call, every tool explicitly
-            # ``side_effect="read"``, none interactive) execute
-            # CONCURRENTLY — wall-clock becomes the slowest call
-            # instead of the sum (Hermes tool_executor pattern, gated
-            # to the provably safe subset). Anything else stays
-            # sequential.
+            # 6a: RW-lock-partitioned parallel dispatch via standalone Module 03
+            # (jaeger-loop partition_read_write_batches): consecutive read-only
+            # runs execute concurrently even in mixed read+write batches, while
+            # mutating calls serialize strictly.
+            def _is_parallel_read(tc_item: ToolCall) -> bool:
+                name = tc_item.get("name") or ""
+                td = self._dispatch_by_name.get(name)
+                return (
+                    td is not None
+                    and not getattr(td, "interactive", False)
+                    and name not in self._SERIAL_READ_TOOLS
+                    and getattr(td, "side_effect", "") == "read"
+                )
+
+            _rw_batches: list[tuple[bool, list[ToolCall]]]
+            try:
+                from jaeger_loop import partition_read_write_batches
+
+                _rw_batches = partition_read_write_batches(tool_calls, _is_parallel_read)
+            except ImportError:
+                _rw_batches = [(True, list(tool_calls))] if self._batch_is_parallel_safe(tool_calls) else [(False, [tc]) for tc in tool_calls]
+
             if self._batch_is_parallel_safe(tool_calls):
                 remaining = max(0, max_tool_calls - tool_calls_made)
                 allowed, refused = tool_calls[:remaining], tool_calls[remaining:]
@@ -1033,61 +1069,75 @@ class JaegerAgent:
                 continue
 
             seen_in_batch: dict[str, str] = {}
-            for tc in tool_calls:
-                if tool_calls_made >= max_tool_calls:
-                    self._append_budget_refusal(tc)
-                    self.last_halt_reason = (
-                        f"made {tool_calls_made} tool calls in a single turn"
+            for _is_read_run, _run_calls in _rw_batches:
+                if _is_read_run and len(_run_calls) >= 2 and self._batch_is_parallel_safe(_run_calls):
+                    remaining = max(0, max_tool_calls - tool_calls_made)
+                    allowed, refused = _run_calls[:remaining], _run_calls[remaining:]
+                    if allowed:
+                        tool_calls_made += len(allowed)
+                        self.turn_budget.consume_tool(count=len(allowed), cost=float(len(allowed)))
+                        self._dispatch_parallel(allowed)
+                    for tc in refused:
+                        self._append_budget_refusal(tc)
+                    if self._interrupt_event.is_set():
+                        self.last_halt_reason = "interrupted"
+                        return self._halt_turn()
+                    continue
+                for tc in _run_calls:
+                    if tool_calls_made >= max_tool_calls:
+                        self._append_budget_refusal(tc)
+                        self.last_halt_reason = (
+                            f"made {tool_calls_made} tool calls in a single turn"
+                        )
+                        continue
+                    tool_calls_made += 1
+                    self.turn_budget.consume_tool(cost=self._normalized_tool_cost(tc))
+                    if self._interrupt_event.is_set():
+                        self.last_halt_reason = "interrupted"
+                        return self._halt_turn()
+
+                    dup_sig = call_signature(
+                        tc.get("name") or "", tc.get("arguments") or {},
                     )
-                    continue
-                tool_calls_made += 1
-                self.turn_budget.consume_tool(cost=self._normalized_tool_cost(tc))
-                if self._interrupt_event.is_set():
-                    self.last_halt_reason = "interrupted"
-                    return self._halt_turn()
+                    tdef = self._dispatch_by_name.get(tc.get("name") or "")
+                    if (
+                        tdef is not None
+                        and getattr(tdef, "side_effect", "") == "read"
+                        and dup_sig in seen_in_batch
+                    ):
+                        self._append_message({
+                            "role": "tool",
+                            "tool_call_id": tc.get("id") or "",
+                            "name": tc.get("name") or "",
+                            "content": _stringify({
+                                "ok": True,
+                                "duplicate_of": seen_in_batch[dup_sig],
+                                "note": (
+                                    "identical call deduplicated this "
+                                    "iteration — see that result"
+                                ),
+                            }),
+                        })
+                        continue
+                    seen_in_batch[dup_sig] = tc.get("id") or "(first)"
 
-                dup_sig = call_signature(
-                    tc.get("name") or "", tc.get("arguments") or {},
-                )
-                tdef = self._dispatch_by_name.get(tc.get("name") or "")
-                if (
-                    tdef is not None
-                    and getattr(tdef, "side_effect", "") == "read"
-                    and dup_sig in seen_in_batch
-                ):
-                    self._append_message({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id") or "",
-                        "name": tc.get("name") or "",
-                        "content": _stringify({
-                            "ok": True,
-                            "duplicate_of": seen_in_batch[dup_sig],
-                            "note": (
-                                "identical call deduplicated this "
-                                "iteration — see that result"
-                            ),
-                        }),
-                    })
-                    continue
-                seen_in_batch[dup_sig] = tc.get("id") or "(first)"
+                    self._dispatch_one_tool(tc)
 
-                self._dispatch_one_tool(tc)
+                    # Backstop check after each call — catches the model
+                    # that hammers the same (tool, args) before its next
+                    # response. The reason string is human-readable so the
+                    # TUI / log row can surface it unchanged.
+                    halt = loop_halt_reason(
+                        tool_calls_made,
+                        self._call_signature_counts,
+                        self._failure_signature_counts,
+                        max_tool_calls=max_tool_calls,
+                    )
+                    if halt:
+                        self.last_halt_reason = halt
+                        return self._budget_halt_or_stop(halt)
 
-                # Backstop check after each call — catches the model
-                # that hammers the same (tool, args) before its next
-                # response. The reason string is human-readable so the
-                # TUI / log row can surface it unchanged.
-                halt = loop_halt_reason(
-                    tool_calls_made,
-                    self._call_signature_counts,
-                    self._failure_signature_counts,
-                    max_tool_calls=max_tool_calls,
-                )
-                if halt:
-                    self.last_halt_reason = halt
-                    return self._budget_halt_or_stop(halt)
-
-                self._attach_tool_budget_warning(tool_calls_made)
+                    self._attach_tool_budget_warning(tool_calls_made)
 
             if self.last_halt_reason:
                 return self._budget_halt_or_stop(self.last_halt_reason)
@@ -2095,6 +2145,18 @@ class JaegerAgent:
                         _pre_flight_trim()
                         continue  # same adapter, freshly trimmed prompt
                     kind = _classify_adapter_error(exc)
+                    # Enrich error classification with standalone Module 07 (jaeger-reliability)
+                    if kind not in {"rate_limit", "transient"} and not _policy_blocks_model(exc):
+                        try:
+                            from jaeger_reliability import FailoverReason, classify_error
+
+                            reason_v2 = classify_error(exc)
+                            if reason_v2 == FailoverReason.RATE_LIMIT.value:
+                                kind = "rate_limit"
+                            elif reason_v2 in {FailoverReason.TRANSIENT.value, FailoverReason.EMPTY_RESPONSE.value}:
+                                kind = "transient"
+                        except ImportError:
+                            pass
                     cap = {
                         "rate_limit": self._RATE_LIMIT_RETRIES,
                         "transient": self._TRANSIENT_RETRIES,
@@ -2294,15 +2356,37 @@ class JaegerAgent:
         # surfaces a clean "unknown tool" error so the model can
         # self-correct, rather than silently dispatching a guess.
         if name and name not in dispatch_map:
+            # First resolve standard cross-framework aliases (e.g. bash -> terminal,
+            # edit_file -> patch) ONLY to tools already present in dispatch_map
+            # (never bypassing an explicit allowlist).
+            _COMMON_ALIASES = {
+                "bash": ("terminal", "exec_command", "run_shell"),
+                "sh": ("terminal", "exec_command", "run_shell"),
+                "shell": ("terminal", "exec_command", "run_shell"),
+                "run_shell": ("terminal", "exec_command"),
+                "run_command": ("terminal", "exec_command"),
+                "edit_file": ("patch",),
+                "str_replace": ("patch",),
+                "str_replace_editor": ("patch",),
+                "create_file": ("write_file",),
+                "view_file": ("read_file",),
+                "grep": ("search_files",),
+                "grep_search": ("search_files",),
+                "find_files": ("glob",),
+                "list_dir": ("list_skill_dir",),
+            }
+            for _cand in _COMMON_ALIASES.get(name.strip().lower(), ()):
+                if _cand in dispatch_map:
+                    name = _cand
+                    tc["name"] = name  # type: ignore[typeddict-item]
+                    break
+        if name and name not in dispatch_map:
             try:
                 from jaeger_agent.dialects import normalize_tool_name
                 valid = frozenset(dispatch_map.keys())
                 normalised = normalize_tool_name(name, valid)
                 if normalised != name and normalised in dispatch_map:
                     name = normalised
-                    # Patch the tool_call in place so the loop's bookkeeping
-                    # (backstop signatures, post-dispatch hook) sees the
-                    # corrected name too.
                     tc["name"] = name  # type: ignore[typeddict-item]
             except Exception:  # noqa: BLE001
                 pass
@@ -2593,6 +2677,14 @@ class JaegerAgent:
             mkey = (name, target)
             if _ok:
                 self._failed_mutations.pop(mkey, None)
+                # Editing source files is real TDD progress — reset stale
+                # shell/test failure streaks so re-running pytest does not
+                # trip the 2-strike loop backstop.
+                for _fkey in [
+                    k for k in self._failure_signature_counts
+                    if k.startswith(("terminal|", "exec_command|", "execute_code|", "run_python|"))
+                ]:
+                    self._failure_signature_counts.pop(_fkey, None)
             else:
                 self._failed_mutations[mkey] = (_err or "failed")[:120]
 

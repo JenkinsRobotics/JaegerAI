@@ -124,15 +124,19 @@ def semantic_failure_signature(
         return f"{tool_name}|timeout|timed out"
     if not error:
         return None
-    lines = str(error).strip().splitlines()
-    first_line = lines[0][:160]
+    lines = [ln for ln in str(error).strip().splitlines() if ln.strip()]
+    # Skip benign warning preambles (e.g., PytestDeprecationWarning) so two
+    # distinct test failures don't collide on the same warning header line.
+    non_warn = [
+        ln for ln in lines
+        if "Warning:" not in ln and "warnings.warn(" not in ln and not ln.lstrip().startswith(("The event loop scope", "Future versions of"))
+    ]
+    eff_lines = non_warn or lines
+    first_line = eff_lines[0][:160]
     if first_line.startswith("Traceback (most recent call last):"):
-        # Every Python traceback starts identically. Use the final exception
-        # diagnostic so fixing an ImportError and then reaching a NameError
-        # is progress, while the same exception still trips the backstop.
-        diagnostics = [line.strip() for line in lines
+        diagnostics = [line.strip() for line in eff_lines
                        if re.match(r"^[\w.]+(?:Error|Exception|Interrupt|Exit|Iteration)(?::|$)", line)]
-        first_line = (diagnostics[-1] if diagnostics else lines[-1].strip())[:160]
+        first_line = (diagnostics[-1] if diagnostics else eff_lines[-1].strip())[:160]
     if tool_name in MAIL_TOOLS:
         account = str(args.get("account") or "") if isinstance(args, dict) else ""
         err_l = first_line.lower()

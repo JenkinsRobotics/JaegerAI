@@ -134,6 +134,24 @@ def require_inference_headroom(
         route.model, ollama_endpoint=route.endpoint if provider == "ollama" else "",
         resident=provider == "local" and not loading,
     )
+    # On Apple Silicon unified memory, loading an Ollama model routinely shifts
+    # kern.memorystatus_vm_pressure_level from 1 (normal) to 2 (warn). When the
+    # real ResourceManager reports WARN (2) while the model is resident or >=2 GB
+    # remains free (not CRITICAL >= 4), do not hard-abort the local turn.
+    if blockers and hasattr(manager, "_host_snapshot"):
+        try:
+            snap = manager._host_snapshot()
+            lvl = snap.get("mem_pressure") or 1
+            free_gb = snap.get("mem_free_gb")
+            loaded_set = set(snap.get("ollama_loaded") or ())
+            norm_name = route.model if ":" in route.model.rsplit("/", 1)[-1] else f"{route.model}:latest"
+            is_loaded = (provider == "local" and not loading) or (norm_name in loaded_set) or (route.model in loaded_set)
+            if lvl < 4 and (is_loaded or (free_gb is not None and free_gb >= 2.0)):
+                blockers = [b for b in blockers if b != "memory pressure is high"]
+            if is_loaded and free_gb is not None and free_gb >= 1.5:
+                blockers = [b for b in blockers if b != "the model would leave too little memory for the desktop"]
+        except Exception:  # noqa: BLE001 — fail safe to original blockers
+            pass
     if blockers:
         message = "On-device model paused because " + ", ".join(blockers) + ". Retry when the Mac has more headroom."
         stays_local = local_only or payload_local_only(payload)

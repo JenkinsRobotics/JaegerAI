@@ -220,6 +220,16 @@ class GatewayEventBus:
         return dict(throttle.suppressed) if throttle is not None else {}
 
     def _publish(self, session_id: str, event: str, data: dict[str, Any]) -> GatewayEvent:
+        # Attach W3C TraceContext from standalone Module 08 (jaeger-events) when absent
+        if isinstance(data, dict) and "traceparent" not in data:
+            try:
+                from jaeger_events import TraceContext
+
+                ctx = TraceContext.new_root()
+                if "trace_id" not in data:
+                    data = {**data, "traceparent": ctx.to_traceparent()}
+            except ImportError:
+                pass
         if self.store is not None:
             evt = _from_record(self.store.append_event(session_id, event, data))
             with self._lock:
