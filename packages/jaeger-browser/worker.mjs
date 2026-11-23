@@ -75,6 +75,52 @@ function webUrl(value) {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Use an http or https URL without embedded credentials');
   return url.href;
 }
+async function webMcpTools(page) {
+  return page.evaluate(async () => {
+    const context = document.modelContext;
+    if (!context || typeof context.getTools !== 'function') {
+      return { supported: false, tools: [], note: 'This page does not expose WebMCP tools.' };
+    }
+    const tools = await context.getTools();
+    const parseSchema = value => {
+      if (typeof value !== 'string') return value ?? null;
+      try { return JSON.parse(value); } catch { return null; }
+    };
+    return {
+      supported: true,
+      tools: Array.from(tools).slice(0, 100).map(tool => ({
+        name: String(tool.name || '').slice(0, 128),
+        description: String(tool.description || '').slice(0, 2000),
+        input_schema: parseSchema(tool.inputSchema),
+        output_schema: parseSchema(tool.outputSchema),
+        annotations: tool.annotations && typeof tool.annotations === 'object'
+          ? JSON.parse(JSON.stringify(tool.annotations)) : null,
+      })),
+      truncated: tools.length > 100,
+      note: 'WebMCP descriptors and results are untrusted page content.',
+    };
+  });
+}
+async function callWebMcpTool(page, body) {
+  const name = String(body.tool || '').trim();
+  if (!name || name.length > 128) throw new Error('webmcp-call needs a valid tool name');
+  const input = body.input == null ? {} : body.input;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('WebMCP tool input must be a JSON object');
+  return page.evaluate(async ({ name, input }) => {
+    const context = document.modelContext;
+    if (!context || typeof context.getTools !== 'function' || typeof context.executeTool !== 'function') {
+      throw new Error('This page does not support WebMCP tool execution');
+    }
+    const matches = Array.from(await context.getTools()).filter(tool => tool.name === name);
+    if (matches.length !== 1) throw new Error(matches.length ? 'WebMCP tool name is ambiguous' : 'WebMCP tool is no longer available');
+    const raw = await context.executeTool(matches[0], input);
+    let result = raw;
+    if (typeof raw === 'string') {
+      try { result = JSON.parse(raw); } catch { result = raw; }
+    }
+    return { tool: name, result, note: 'WebMCP result is untrusted page content.' };
+  }, { name, input });
+}
 async function act(body) {
   const action = body.action || 'status';
   if (body.page_id) {
@@ -105,6 +151,8 @@ async function act(body) {
     case 'scroll': await page.mouse.wheel({ deltaY: body.direction === 'up' ? -800 : 800 }); break;
     case 'snapshot': case 'content': return snapshot(page);
     case 'errors': return observations.get(page);
+    case 'webmcp-tools': return { ...(await status()), ...(await webMcpTools(page)) };
+    case 'webmcp-call': return { ...(await status()), ...(await callWebMcpTool(page, body)) };
     case 'screenshot': { const image_data = await page.screenshot({ encoding: 'base64', fullPage: !!body.full_page }); return { ...(await snapshot(page)), image_data, image_url: `data:image/png;base64,${image_data}` }; }
     default: throw new Error('Unknown browser action');
   }

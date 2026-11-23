@@ -9,7 +9,7 @@ from aiohttp import ClientSession, ClientTimeout, WSMsgType, web
 from .runtime import BrowserRuntime, BrowserUnavailable
 
 PREFIX = "/v1/sessions/{id}/browser"
-ACTIONS = frozenset({"viewport", "status", "select", "navigate", "new-tab", "close", "back", "forward", "reload", "click", "type", "press", "snapshot", "scroll", "content", "errors", "screenshot"})
+ACTIONS = frozenset({"viewport", "status", "select", "navigate", "new-tab", "close", "back", "forward", "reload", "click", "type", "press", "snapshot", "scroll", "content", "errors", "screenshot", "webmcp-tools", "webmcp-call"})
 
 
 def register(gateway, runtime=None):

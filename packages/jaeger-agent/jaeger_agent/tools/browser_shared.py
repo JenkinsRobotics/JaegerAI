@@ -15,7 +15,7 @@ def shared_browser(context, action, args):
     action = aliases.get(action, action)
     # Only the admitted task context supplies identity; ignore model-supplied session IDs.
     path = f"/v1/sessions/{quote(context['session_id'], safe='')}/browser/action"
-    allowed = {k: v for k, v in args.items() if k in {"url", "element", "text", "direction", "key", "full_page"}}
+    allowed = {k: v for k, v in args.items() if k in {"url", "element", "text", "direction", "key", "full_page", "tool", "input"}}
     status, result = _request_json("POST", path, {"action": action, "snapshot": True, **allowed}, timeout=105)
     if status >= 400:
         return {"ok": False, **result}
