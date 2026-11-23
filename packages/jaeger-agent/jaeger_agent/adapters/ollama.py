@@ -99,14 +99,12 @@ class OllamaAdapter(OpenAIAdapter):
         effort = formatted.get("reasoning_effort")
         values = (metadata.get("thinking") or {}).get("values", [])
         if effort in {None, "", "auto", "provider"}:
-            # Adaptive local thinking: after deep initial diagnosis (>=8 tool
-            # results in the current turn), switch local loopback Ollama to
-            # fast non-thinking execution so multi-step coding turns finish
-            # edits and verification instead of burning the deadline in <think>.
+            # Opt-in adaptive local thinking (default OFF — Round 5 benchmark
+            # proved disabling think mid-turn degrades 9B multi-step accuracy).
             if (
                 is_local_ollama
                 and False in values
-                and os.environ.get("JAEGER_ADAPTIVE_LOCAL_THINK", "1").strip() != "0"
+                and os.environ.get("JAEGER_ADAPTIVE_LOCAL_THINK", "0").strip() == "1"
             ):
                 tool_steps = sum(1 for m in messages if m.get("role") == "tool")
                 if tool_steps >= 8:

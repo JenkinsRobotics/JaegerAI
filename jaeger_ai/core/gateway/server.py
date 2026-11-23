@@ -4168,7 +4168,13 @@ class JaegerGatewayApp:
     async def handle_get_session(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         conversation = request.query.get("view") == "conversation"
-        session = self.store.get_session(session_id, conversation=True) if conversation else self.store.get_session(session_id)
+        def _read_session_sync():
+            sess = self.store.get_session(session_id, conversation=True) if conversation else self.store.get_session(session_id)
+            if not sess:
+                return None, None
+            lat = None if conversation else self.store.latest_request(session_id)
+            return sess, lat
+        session, latest = await asyncio.to_thread(_read_session_sync)
         if not session:
             return web.json_response({"error": "Session not found"}, status=404)
         # Surfaces chrome polls GET without SSE — stamp role/display_name
@@ -4178,7 +4184,6 @@ class JaegerGatewayApp:
             return web.json_response(payload)
         # Recovery clients need a scoped control identity even when they did
         # not submit this turn. Do not expose input/output through this field.
-        latest = self.store.latest_request(session_id)
         payload["latest_request"] = ({
             key: latest.get(key) for key in (
                 "session_id", "request_id", "turn_id", "status", "updated_at", "finished_at",
