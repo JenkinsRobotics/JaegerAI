@@ -58,10 +58,17 @@ def check_file_access(path: Any, *, write: bool = False) -> None:
         authority.check_path(path, write=write)
 
 
-def confine_process(command: Any) -> list[str]:
+def confine_process(command: Any, *, workspace: Any = None) -> list[str]:
     """Let the host install mandatory OS restrictions before a tool spawns."""
     authority = service("filesystem_authority", required=False)
-    return list(command) if authority is None else authority.confine_command(command)
+    if authority is None:
+        return list(command)
+    if workspace is not None:
+        try:
+            return authority.confine_command(command, workspace=workspace)
+        except TypeError:
+            pass
+    return authority.confine_command(command)
 
 
 def file_access_guard() -> Any:

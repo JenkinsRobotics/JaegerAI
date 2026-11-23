@@ -707,7 +707,17 @@ class PolicyKernel:
             return None
         try:
             from jaeger_ai.core.authority.destructive import destructive_reason
+            from jaeger_authority import destructive_reason as _v2_destructive, evasion_reason as _v2_evasion
+
             reason = destructive_reason(proposal.tool_name, arguments)
+            cid = canonical_tool_id(proposal.tool_name)
+            if cid in SHELL_TOOL_IDS:
+                cmd_txt = str(arguments.get("command") or arguments.get("cmd") or "")
+                ev = _v2_evasion(cmd_txt)
+                if ev:
+                    return _deny(proposal, f"Shell evasion blocked: {ev}", "shell_evasion")
+            if not reason:
+                reason = _v2_destructive(proposal.tool_name, arguments)
         except Exception as exc:  # noqa: BLE001
             logger.error("Destructive-action check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
             return _deny(proposal, f"Destructive-action check failed: {exc} (fail-closed)", "destructive_action")
@@ -741,6 +751,44 @@ class PolicyKernel:
                     granted_by="policy_kernel",
                     proposal_id=proposal.proposal_id,
                 )
+        # Delegate secret-store (~/.ssh, ~/.aws, .git/hooks) & workspace-boundary checks
+        # to installed standalone jaeger-authority BoundaryAndSecretsInspector.
+        try:
+            from jaeger_authority import BoundaryAndSecretsInspector
+            from jaeger_contracts import ActionProposal as _V2Proposal, DecisionKind as _V2Kind
+
+            ws_raw = (proposal.context or {}).get("workspace")
+            ws_path = Path(ws_raw) if ws_raw else Path.cwd()
+            v2_verdict = BoundaryAndSecretsInspector().inspect(
+                _V2Proposal(
+                    tool_name=proposal.tool_name,
+                    arguments=proposal.arguments,
+                    workspace=ws_path,
+                    actor=proposal.actor,
+                    session_id=proposal.session_id,
+                    proposal_id=proposal.proposal_id,
+                    target_path=proposal.target_path,
+                    tier=proposal.tier,
+                )
+            )
+            if v2_verdict is not None:
+                if ws_raw or "escapes workspace" not in v2_verdict.reason:
+                    mapped = (
+                        AuthorityDecisionType.DENY
+                        if v2_verdict.decision == _V2Kind.DENY
+                        else AuthorityDecisionType.REQUIRE_APPROVAL
+                    )
+                    return AuthorityDecision(
+                        decision=mapped,
+                        reason=v2_verdict.reason,
+                        policy_name=v2_verdict.policy_name,
+                        granted_by="jaeger_authority",
+                        proposal_id=proposal.proposal_id,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Boundary/secret check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
+            return _deny(proposal, f"Boundary/secret check failed: {exc} (fail-closed)", "boundary_and_secrets")
+
         # Check git branch push protection (canonical: git_push tool, or a
         # shell-family tool whose command line runs ``git push``)
         cid = canonical_tool_id(proposal.tool_name)

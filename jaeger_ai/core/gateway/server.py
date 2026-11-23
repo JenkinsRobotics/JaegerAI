@@ -1186,8 +1186,10 @@ class JaegerGatewayApp:
         self.file_changes = FileChanges(self.store.path.parent / "turn-file-changes")
         from .agent_safety import AgentSafety
         self.agent_safety = AgentSafety(
-            Path(os.environ.get("JAEGER_STATE_HOME") or Path.home() / ".jaeger").expanduser(),
+            self.store.path.parent,
             self.store.path.parent / "agent-safety")
+        from .orchestration_bridge import GatewayOrchestrationBridge
+        self.orchestration_bridge = GatewayOrchestrationBridge(self.store.path.parent)
         from jaeger_ai.core.agent_registry.projects import ProjectStore
         self.projects = ProjectStore(self.store.path.parent / "projects.json")
         from .chat_organization import ChatOrganization
@@ -2424,89 +2426,16 @@ class JaegerGatewayApp:
 
     async def handle_health(self, request: web.Request) -> web.Response:
         """Backend readiness is independent of optional HTTP adapters and UIs."""
-        owner = self._probe_owner_runtime()
-        bridge, ollama, webui_chat, native_mcp = await asyncio.gather(
-            self._probe_bridge(),
-            self._probe_http(f"{LOCKED_OLLAMA_URL}/api/tags"),
-            self._probe_http(LOCKED_WEBUI_URL),
-            self._probe_native_mcp(),
+        from .health_probes import build_health_response
+
+        return await build_health_response(
+            self,
+            locked_ollama_url=LOCKED_OLLAMA_URL,
+            locked_webui_url=LOCKED_WEBUI_URL,
+            default_gateway_host=DEFAULT_GATEWAY_HOST,
+            default_gateway_port=DEFAULT_GATEWAY_PORT,
+            jaeger_version=JAEGER_VERSION,
         )
-        # Read-only surface availability. Never create fake chat requests from
-        # health checks, and never mistake a 404 for a working conversation.
-        external_model_configured = False
-        try:
-            from jaeger_ai.core.instance.instance import resolve_instance_dir
-            from jaeger_ai.core.instance.schemas import Config, load_yaml
-            cfg_path = resolve_instance_dir() / "config.yaml"
-            if cfg_path.exists():
-                cfg = load_yaml(cfg_path, Config)
-                ext = getattr(cfg, "external_model", None)
-                if ext and getattr(ext, "enabled", False):
-                    external_model_configured = True
-        except Exception:
-            pass
-
-        ollama_required = not external_model_configured
-        checks = {
-            "gateway": {"ok": True, "url": f"http://{DEFAULT_GATEWAY_HOST}:{DEFAULT_GATEWAY_PORT}"},
-            "bridge": {**bridge, "required": False},
-            "ollama": {**ollama, "required": ollama_required},
-            "webui": {**webui_chat, "required": False, "chat_execution_verified": False},
-            "native_mcp": native_mcp,
-            "owner_runtime": owner,
-        }
-        native_mcp["required"] = not owner["ok"]
-        required_ok = (
-            (bool(ollama.get("ok")) or not ollama_required)
-            and (owner["ok"] or bool(native_mcp.get("ok")))
-        )
-        all_green = required_ok
-        status = "ok" if all_green else "unhealthy"
-        git_commit = self.source_revision_at_start
-
-        active_model = "unknown"
-        try:
-            from jaeger_ai.core.runtime.truth import _active_model
-            active_model = _active_model(self._instance_root()).get("model") or "unknown"
-        except Exception:
-            pass
-
-        payload = {
-            "status": status,
-            "service": "jaeger-gateway",
-            "host": socket.gethostname(),
-            "version": JAEGER_VERSION,
-            "commit": git_commit,
-            "model": active_model,
-            "architecture": "single-engine",
-            "persistence_spine": True,
-            "agents_api": "/v1/agents",
-            "fundamentals_fee_gated": False,
-            "fail_closed": True,
-            "health_scope": "backend_transport_readiness",
-            "all_green": all_green,
-            "checks": checks,
-            "diagnostics": {"source_file": str(Path(__file__).resolve()),
-                            "background_delivery": self._background_status,
-                            "session_store": str(self.store.path.resolve()),
-                            "instance_root": str(self._instance_root()),
-                            "schema_version": self.store.schema_version(),
-                            "process_lease": self.store.process_lease(),
-                            **self._entity_diagnostics()},
-            "capabilities": {
-                "native_agent": owner["ok"] or bool(native_mcp.get("ok")),
-                "transport_ready": bool(native_mcp.get("transport_ready") or native_mcp.get("chat_tool_available")),
-                "agent_ready": owner["ok"] or bool(native_mcp.get("agent_ready")),
-                "execution_verified": bool(native_mcp.get("execution_verified")),
-                "end_to_end_chat_verified": False,
-            },
-            "locked_endpoints": {
-                "ollama": LOCKED_OLLAMA_URL,
-                "webui": LOCKED_WEBUI_URL,
-                "gateway": f"http://{DEFAULT_GATEWAY_HOST}:{DEFAULT_GATEWAY_PORT}",
-            },
-        }
-        return web.json_response(payload, status=200 if all_green else 503)
 
     @staticmethod
     def _probe_owner_runtime() -> dict[str, Any]:
@@ -4213,17 +4142,21 @@ class JaegerGatewayApp:
             metadata = {**metadata, "source": surface}
 
         metadata = self._bind_requested_agent(body, metadata)
-        existed = self.store.get_session(session_id) is not None
-        session = self.store.ensure_session(
-            session_id,
-            title=title,
-            profile=profile,
-            workspace=workspace,
-            metadata=metadata,
-        )
-        if not existed:
-            from jaeger_ai.core.gateway.session_hygiene import archive_on_create
-            session = archive_on_create(self.store, session)
+        def _create_session_sync():
+            existed = self.store.get_session(session_id) is not None
+            sess = self.store.ensure_session(
+                session_id,
+                title=title,
+                profile=profile,
+                workspace=workspace,
+                metadata=metadata,
+            )
+            if not existed:
+                from jaeger_ai.core.gateway.session_hygiene import archive_on_create
+                sess = archive_on_create(self.store, sess)
+            return sess
+
+        session = await asyncio.to_thread(_create_session_sync)
         self.event_bus.publish(session_id, "session.created", {"session": session})
         self._activate_owner_session(
             request,
@@ -6347,7 +6280,7 @@ class JaegerGatewayApp:
                 return outcome
         finally:
             flush()
-            if agent_safety_turn[0]:
+            if agent_safety_turn[0] and not self._cancellations.is_cancelled(request_id):
                 try:
                     turn = self.agent_safety.settle(session_key, request_id)
                     if turn.get("files"):
@@ -6962,14 +6895,32 @@ class JaegerGatewayApp:
             else:
                 model_only = (execution or {}).get("allowed_tools") == [] or (text_only and not actionable) or (
                     role_s == "specialist" and specialist_scope is None)
+            from .turn_guard import resolve_turn_timeout_s, run_turn_with_deadline
+
+            _turn_timeout_s = resolve_turn_timeout_s()
+
             if specialist_scope is not None and not model_only:
                 prompt = (f"[Agent]\n{system_prompt}\nYour own notes: use the agent_notes tool "
                           "(read/append/replace) to keep what matters for your specialty.\n\n") + prompt
                 from jaeger_agent.tools.agent_notes import bound_notes_dir
                 with bound_notes_dir(specialist_scope["notes_dir"]):
-                    turn_result = await asyncio.to_thread(_sync_react, prompt)
+                    turn_result = await run_turn_with_deadline(
+                        _sync_react,
+                        prompt,
+                        request_id=rid,
+                        cancellations=self._cancellations,
+                        active_agents=self._active_agents,
+                        timeout_s=_turn_timeout_s,
+                    )
             else:
-                turn_result = await asyncio.to_thread(_model_only_lane if model_only else _sync_react, prompt)
+                turn_result = await run_turn_with_deadline(
+                    _model_only_lane if model_only else _sync_react,
+                    prompt,
+                    request_id=rid,
+                    cancellations=self._cancellations,
+                    active_agents=self._active_agents,
+                    timeout_s=_turn_timeout_s,
+                )
             if prepared is not None and not turn_result.get("error"):
                 try:
                     await asyncio.to_thread(runtime.finish_turn, prepared, str(turn_result.get("text") or ""))
@@ -9285,6 +9236,12 @@ class JaegerGatewayApp:
                     orchestration_id=task_id, goal=body["goal"].strip(), worker=body["worker"].strip(),
                     workspace=str(workspace or ""), artifacts=raw_artifacts,
                     session_id=str(body.get("session_id") or ""),
+                )
+                self.orchestration_bridge.record_task_dispatch(
+                    sender="gateway",
+                    recipient=body["worker"].strip(),
+                    task_id=task_id,
+                    payload={"goal": body["goal"].strip(), "read_only": read_only, "workspace": str(workspace or "")},
                 )
                 operation.add_done_callback(lambda done, oid=task_id: self._settle_dispatch(oid, done))
             except Exception:

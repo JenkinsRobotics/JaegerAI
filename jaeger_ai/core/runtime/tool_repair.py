@@ -109,6 +109,16 @@ def safe_parse_tool_arguments(raw: Any) -> dict[str, Any]:
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
 
+    # Standalone jaeger-reliability deterministic parser (fences, Python literals, trailing commas)
+    try:
+        from jaeger_reliability import repair_arguments as _v2_repair_args
+        return _v2_repair_args("tool", text, None)
+    except ValueError:
+        pass
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("jaeger-reliability repair_arguments failed: %s", exc)
+
     # Repair path
     repaired = repair_json_string(text)
     try:
@@ -147,6 +157,7 @@ def repair_tool_call(
     name: str,
     raw_arguments: Any,
     parameter_aliases: dict[str, str] | None = None,
+    schema: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Normalize and repair both the tool name and argument payload.
 
@@ -155,6 +166,8 @@ def repair_tool_call(
         raw_arguments: The raw argument string or dictionary from model output.
         parameter_aliases: Optional dict mapping common LLM hallucinated param
             names to canonical ones (e.g. {"path": "file_path"}).
+        schema: Optional JSON Schema used for deterministic type coercion via
+            standalone ``jaeger-reliability``.
     """
     clean_name = name.strip()
 
@@ -169,5 +182,13 @@ def repair_tool_call(
             target_key = parameter_aliases.get(k, k)
             repaired_args[target_key] = v
         arguments = repaired_args
+
+    if schema:
+        try:
+            from jaeger_reliability import repair_arguments as _v2_repair_args
+            arguments = _v2_repair_args(clean_name, arguments, schema)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("jaeger-reliability schema coercion failed: %s", exc)
 
     return clean_name, arguments

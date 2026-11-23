@@ -317,6 +317,17 @@ def decide(
     chosen_provider = (provider or "").strip().lower() or None
     if chosen_provider:
         chosen_provider = normalize_ollama_provider(chosen_provider)
+    # Consult standalone Module 01 (jaeger-models ModelCatalog) when provider is unspecified
+    if chosen_model and not chosen_provider:
+        try:
+            from jaeger_models import BUILTIN_PROFILES, ModelCatalog
+
+            if chosen_model in BUILTIN_PROFILES:
+                spec = ModelCatalog().resolve(chosen_model)
+                if spec.provider and spec.provider != "unknown":
+                    chosen_provider = normalize_ollama_provider(spec.provider)
+        except ImportError:
+            pass
     return SensitivityDecision(
         classification="public",
         model=chosen_model,
