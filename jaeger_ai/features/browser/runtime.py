@@ -81,7 +81,8 @@ class BrowserRuntime:
                        CHROME_EXECUTABLE_PATH=str(chrome), CHROME_USER_DATA_DIR=str(home / "profile"),
                        JAEGER_BROWSER_FILES=str(home / "downloads"), JAEGER_BROWSER_ARCHIVES=str(home / "archives"),
                        CHROME_HEADLESS="true", SKIP_FINGERPRINT_INJECTION="true",
-                       FILTER_CHROME_ARGS="--remote-debugging-port=9222", CHROME_ARGS="--remote-debugging-port=0",
+                       FILTER_CHROME_ARGS="--remote-debugging-port=9222",
+                       CHROME_ARGS="--remote-debugging-port=0 --enable-features=WebMCP",
                        JAEGER_BROWSER_TOKEN=token)
             log = (home / "worker.log").open("ab")
             process = await asyncio.create_subprocess_exec(str(node), str(self.bundle / "worker.mjs"),

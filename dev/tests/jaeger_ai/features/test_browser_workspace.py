@@ -1,6 +1,6 @@
 """Browser isolation and authorization on the real Gateway route stack."""
-from pathlib import Path
 import os
+from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -42,6 +42,29 @@ def test_agent_browser_uses_admitted_session_and_existing_transport(monkeypatch)
     assert seen[0][1] == "/v1/sessions/owned%3Asession/browser/action"
     assert "session_id" not in seen[0][2]
     assert seen[0][2]["action"] == "navigate"
+
+
+def test_agent_browser_forwards_bounded_webmcp_arguments(monkeypatch):
+    from jaeger_agent.tools import browser_shared
+    seen = []
+    monkeypatch.setattr(browser_shared, "_request_json", lambda method, path, body, timeout: (seen.append(body) or (200, {"supported": True, "tools": []})))
+    result = browser_shared.shared_browser(
+        {"session_id": "owned"}, "webmcp-call",
+        {"tool": "add-todo", "input": {"text": "Buy milk"}, "session_id": "other", "secret": "drop"},
+    )
+    assert result["ok"]
+    assert seen == [{"action": "webmcp-call", "snapshot": True, "tool": "add-todo", "input": {"text": "Buy milk"}}]
+
+
+def test_browser_worker_declares_webmcp_contract():
+    root = Path(__file__).resolve().parents[4]
+    worker = (root / "packages/jaeger-browser/worker.mjs").read_text()
+    runtime = (root / "jaeger_ai/features/browser/runtime.py").read_text()
+    assert "document.modelContext" in worker
+    assert "typeof context.getTools" in worker
+    assert "typeof context.executeTool" in worker
+    assert "matches.length !== 1" in worker
+    assert "--enable-features=WebMCP" in runtime
 
 
 @pytest.mark.asyncio

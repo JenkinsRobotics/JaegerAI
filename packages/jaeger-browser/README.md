@@ -23,7 +23,12 @@ profiles and logs are stored separately under `<operator_state_root>/browser`.
 The Gateway starts a private worker only when a conversation opens its browser.
 Its stdin lifetime lease shuts down Chromium if the Gateway exits.
 
-The adapter exposes navigation, snapshots, element actions and a streamed
+The adapter exposes navigation, snapshots, element actions, bounded WebMCP
+tool discovery/execution, and a streamed
 interactive viewer. It does not embed destination sites as iframes. The WebUI
 and native WKWebView display the same Gateway-owned browser. Steel's raw CDP
 and administrative endpoints are never proxied to clients.
+
+WebMCP is feature-detected per page. Tool objects are refreshed immediately
+before an exact-name call, duplicate names fail closed, inputs must be JSON
+objects, and descriptors/results are labeled as untrusted page content.
