@@ -269,9 +269,6 @@ class PushDispatcher:
                     "title_text": f"⏰ {job}", "body": text, "session_id": sid, "tag": f"schedule-{job}"[:60]}
         if not rid or data.get("replayed"):
             return None
-        live = getattr(self.gw, "live_tasks", None)
-        if live is not None and rid in getattr(live, "pushed", ()):
-            return None  # live_tasks already sent started/progress and sends the done push on the same tag
         meta = self._request_meta(rid)
         if self._is_background(meta):
             return None
@@ -307,6 +304,7 @@ class PushDispatcher:
             row = conn.execute("SELECT value FROM schema_meta WHERE key=?", (KEY,)).fetchone()
         q = json.loads(row[0]) if row else {}
         q.setdefault("now", []); q.setdefault("batch", []); q.setdefault("held", []); q.setdefault("scheduled", [])
+        q.setdefault("terminal_push_ids", [])
         q.setdefault("pushed_tags", []); q.setdefault("batch_since", None); q.setdefault("quiet_until", None)
         # Stale items are noise, not news: drop anything queued more than a day
         # ago (or with no queue time at all) and cap each lane.
@@ -321,6 +319,7 @@ class PushDispatcher:
 
     def _save(self, q: dict) -> None:
         q["pushed_tags"] = q["pushed_tags"][-500:]
+        q["terminal_push_ids"] = q["terminal_push_ids"][-500:]
         with self.gw.store._immediate() as conn:
             conn.execute("INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                          (KEY, json.dumps(q)))
@@ -387,7 +386,17 @@ class PushDispatcher:
             self._wake.set()  # deliver now, not on the next minute tick
         return route
 
+    @staticmethod
+    def _terminal_key(c: dict) -> str | None:
+        if c.get("id") and c["kind"] in {"reply", "scheduled"}:
+            return f"{c['kind']}:{c['id']}"
+        return None
+
     def _route(self, c: dict, prefs: dict, q: dict, now: float) -> str:
+        terminal = self._terminal_key(c)
+        if terminal and (terminal in q["terminal_push_ids"] or any(
+                self._terminal_key(x) == terminal for k in ("now", "batch", "held", "scheduled") for x in q[k])):
+            return "drop"
         if c["kind"] == "approval" and (c["id"] in q["pushed_tags"] or any(
                 x.get("id") == c["id"] for k in ("now", "batch", "held", "scheduled") for x in q[k])):
             return "drop"  # same approval on the child and parent streams
@@ -426,6 +435,9 @@ class PushDispatcher:
         payload = build_payload(c, prefs, self._badge())
         urgency = "high" if c.get("risk") in ("high", "critical") else "low" if c["kind"] == "resolved" else "normal"
         out = webpush.send(payload, subject=_subject(), urgency=urgency, poster=self.poster)
+        terminal = self._terminal_key(c)
+        if terminal and out["delivered"]:
+            q["terminal_push_ids"].append(terminal)
         if c["kind"] == "approval":
             q["pushed_tags"].append(c["id"])
             try:
@@ -464,8 +476,10 @@ class PushDispatcher:
                 others = len(held) - approvals
                 parts = ([f"{approvals} approval{'s' if approvals != 1 else ''} waiting"] if approvals else []) + \
                         ([f"{others} update{'s' if others != 1 else ''}"] if others else [])
-                self._send({"kind": "summary", "id": "morning-summary", "tag": "morning-summary", "risk": "low",
+                summary = self._send({"kind": "summary", "id": "morning-summary", "tag": "morning-summary", "risk": "low",
                             "body": " · ".join(parts)}, prefs, q)
+                if summary["delivered"]:
+                    q["terminal_push_ids"].extend(filter(None, map(self._terminal_key, held)))
                 sent += 1
             self._save(q)
         return {"sent": sent}
