@@ -92,6 +92,7 @@ run_backend() {
   echo "[+] Skill Catalog audit passed."
   echo "[back-end:tools] Checking discovery isolation, ranking, MCP inventory and policy..."
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
+    dev/tests/jaeger_ai/core/test_live_standalone_modules.py \
     dev/tests/jaeger_ai/core/test_tool_discovery.py \
     dev/tests/jaeger_ai/core/test_framework_audit_regressions.py \
     dev/tests/jaeger_ai/core/test_tool_qualification_repairs.py \

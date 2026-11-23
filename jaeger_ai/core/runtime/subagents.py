@@ -532,39 +532,36 @@ def _delegate_background(client: Any, subtasks: list[str], *, role: str = "leaf"
     execution = dict(context.get('execution') or {})
     opts = dict(execution.get('options') or {})
     # Enforce monotonic sandbox privilege intersection via standalone Module 06 (jaeger-orchestration)
-    try:
-        from pathlib import Path
-        from jaeger_contracts import SandboxProfile
-        from jaeger_orchestration import intersect_sandbox_profiles
+    from pathlib import Path
+    from jaeger_contracts import SandboxProfile
+    from jaeger_orchestration import intersect_sandbox_profiles
 
-        ws = Path(str(execution.get("workspace") or context.get("workspace") or Path.cwd())).resolve()
-        parent_ro = bool(opts.get("read_only", False))
-        child_ro = (role == "readonly") or parent_ro
-        parent_prof = SandboxProfile(
-            workspace=ws,
-            writable_roots=() if parent_ro else (ws,),
-            read_only_subpaths=(ws,) if parent_ro else (),
-            allow_network=bool(opts.get("network_access", False)),
-            read_only_default=parent_ro,
-        )
-        child_req = SandboxProfile(
-            workspace=ws,
-            writable_roots=() if child_ro else (ws,),
-            read_only_subpaths=(ws,) if child_ro else (),
-            allow_network=False,
-            read_only_default=child_ro,
-        )
-        eff = intersect_sandbox_profiles(parent_prof, child_req)
-        ro_set = {p.expanduser().resolve(strict=False) for p in eff.read_only_subpaths}
-        writable = [str(p) for p in eff.writable_roots if p.expanduser().resolve(strict=False) not in ro_set]
-        opts["sandbox_profile"] = {
-            "workspace": str(eff.workspace),
-            "read_only": bool(eff.read_only_default and (ws in ro_set or not writable)),
-            "network_access": bool(eff.allow_network),
-            "writable_roots": writable,
-        }
-    except ImportError:
-        pass
+    ws = Path(str(execution.get("workspace") or context.get("workspace") or Path.cwd())).resolve()
+    parent_ro = bool(opts.get("read_only", False))
+    child_ro = (role == "readonly") or parent_ro
+    parent_prof = SandboxProfile(
+        workspace=ws,
+        writable_roots=() if parent_ro else (ws,),
+        read_only_subpaths=(ws,) if parent_ro else (),
+        allow_network=bool(opts.get("network_access", False)),
+        read_only_default=parent_ro,
+    )
+    child_req = SandboxProfile(
+        workspace=ws,
+        writable_roots=() if child_ro else (ws,),
+        read_only_subpaths=(ws,) if child_ro else (),
+        allow_network=False,
+        read_only_default=child_ro,
+    )
+    eff = intersect_sandbox_profiles(parent_prof, child_req)
+    ro_set = {p.expanduser().resolve(strict=False) for p in eff.read_only_subpaths}
+    writable = [str(p) for p in eff.writable_roots if p.expanduser().resolve(strict=False) not in ro_set]
+    opts["sandbox_profile"] = {
+        "workspace": str(eff.workspace),
+        "read_only": bool(eff.read_only_default and (ws in ro_set or not writable)),
+        "network_access": bool(eff.allow_network),
+        "writable_roots": writable,
+    }
     execution['options'] = {**opts, 'delegation_depth': parent_depth + 1}
     inherited['execution'] = execution
     handles = []

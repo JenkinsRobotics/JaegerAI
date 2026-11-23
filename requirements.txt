@@ -33,6 +33,17 @@ jaeger-agent>=1.2.0
 jaeger-kokoro-tts>=0.12.0
 jaeger-whisper-stt>=0.13.0
 
+# --- standalone modular core (jaeger-modules) ---
+jaeger-contracts>=0.1.0
+jaeger-authority>=0.1.0
+jaeger-events>=0.1.0
+jaeger-loop>=0.1.0
+jaeger-memory>=0.1.0
+jaeger-models>=0.1.0
+jaeger-orchestration>=0.1.0
+jaeger-reliability>=0.1.0
+jaeger-tools>=0.1.0
+
 # --- agent core ---
 snowballstemmer>=3.0,<4
 tomli-w>=1.0

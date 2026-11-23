@@ -1153,3 +1153,96 @@ def _t_notebook_edit(
         edit_mode=edit_mode,
         cell_type=cell_type,
     )
+
+
+def repo_map(
+    path: str = ".",
+    query: str = "",
+    max_chars: int = 4000,
+) -> dict[str, Any]:
+    """Build a compact AST symbol map of a workspace or subdirectory via standalone ``jaeger-tools``."""
+    from jaeger_tools import build_repo_map
+
+    try:
+        target = _resolve_read(path or ".")
+    except SandboxError as exc:
+        return {"ok": False, "error": str(exc), "path": path}
+    if not target.exists():
+        return {"ok": False, "error": f"Path not found: {path}", "path": path}
+    root = target if target.is_dir() else target.parent
+    cap = max(500, min(int(max_chars or 4000), 16000))
+    outline = build_repo_map(root, query=query or "", max_chars=cap)
+    return {
+        "ok": True,
+        "root": str(root),
+        "query": query or "",
+        "chars": len(outline),
+        "map": outline,
+    }
+
+
+def search_offloaded_output(
+    filename_or_path: str,
+    pattern: str,
+    max_matches: int = 30,
+) -> dict[str, Any]:
+    """Regex-search an offloaded tool output artifact via standalone ``jaeger-memory``."""
+    from jaeger_memory import ToolOutputOffloader
+
+    state_root_env = os.environ.get("JAEGER_STATE_DIR") or os.environ.get("JAEGER_HOME")
+    if state_root_env:
+        state_root = Path(state_root_env)
+    else:
+        try:
+            from jaeger_ai.core.instance.instance import operator_state_root
+            state_root = operator_state_root()
+        except Exception:
+            state_root = Path.home() / ".jaeger"
+
+    offloader = ToolOutputOffloader(state_root)
+    try:
+        matches = offloader.grep(
+            filename_or_path,
+            pattern,
+            max_matches=max(1, min(int(max_matches or 30), 200)),
+        )
+    except FileNotFoundError as exc:
+        return {"ok": False, "error": str(exc), "artifact": filename_or_path}
+    except re.error as exc:
+        return {"ok": False, "error": f"Invalid regex: {exc}", "artifact": filename_or_path}
+    return {
+        "ok": True,
+        "artifact": filename_or_path,
+        "pattern": pattern,
+        "count": len(matches),
+        "matches": matches,
+    }
+
+
+@register_tool_from_function(name="repo_map", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="repo_map",
+               summary="build a compact AST symbol map of the workspace")
+def _t_repo_map(path: str = ".", query: str = "", max_chars: int = 4000) -> dict:
+    """Return a compact, token-budgeted AST symbol map (files, classes, methods,
+    functions, and line numbers) of the project or a subdirectory. Pass `query`
+    (e.g. a function or class name) to rank matching files and symbols first so
+    you can jump directly to the right line with `read_file` in one call."""
+    return repo_map(path=path, query=query, max_chars=max_chars)
+
+
+@register_tool_from_function(name="search_offloaded_output", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="files", operation="search_offloaded_output",
+               summary="regex-search an offloaded tool output artifact")
+def _t_search_offloaded_output(
+    filename_or_path: str,
+    pattern: str,
+    max_matches: int = 30,
+) -> dict:
+    """Search a compacted `[OFFLOADED ...]` tool output file by regex without
+    re-running the original command. Pass the offload filename or path shown in
+    the `[OFFLOADED ...]` envelope and a regex `pattern`."""
+    return search_offloaded_output(
+        filename_or_path=filename_or_path,
+        pattern=pattern,
+        max_matches=max_matches,
+    )

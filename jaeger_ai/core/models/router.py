@@ -480,11 +480,23 @@ class SensitivityGate:
 
 
 class ModelRouter:
-    """Central router for endpoint resolution, sensitivity gating, and turn routing."""
+    """Central router for endpoint resolution, sensitivity gating, sticky failover, and turn routing."""
 
     @staticmethod
     def resolve_endpoint(*, openai_compat: bool = True) -> str:
         return resolve_ollama_base_url(openai_compat=openai_compat)
+
+    @staticmethod
+    def resolve_profile(model_id: str) -> Any:
+        """Look up model capabilities via standalone ``jaeger-models`` ModelCatalog."""
+        from jaeger_models import ModelCatalog
+        return ModelCatalog().resolve(model_id)
+
+    @staticmethod
+    def build_sticky_fallback(primary: Any, fallbacks: list[Any], *, cooldown_s: float = 60.0) -> Any:
+        """Create a KV-cache-preserving sticky failover chain via standalone ``jaeger-models``."""
+        from jaeger_models import StickyFallbackModel
+        return StickyFallbackModel(primary, fallbacks, cooldown_s=cooldown_s)
 
     @staticmethod
     def route_turn(

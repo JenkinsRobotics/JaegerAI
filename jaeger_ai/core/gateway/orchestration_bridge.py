@@ -17,9 +17,20 @@ class GatewayOrchestrationBridge:
     """Thin composition adapter over standalone ``jaeger_orchestration``."""
 
     def __init__(self, state_root: Path) -> None:
+        from jaeger_orchestration import CronScheduler
+
         self._state_root = Path(state_root)
         self._mailbox_dir = self._state_root / "orchestration"
         self._mailbox: Any = None
+        self.scheduler = CronScheduler()
+
+    def register_cron(self, job_id: str, interval_s: float, fn: Any) -> None:
+        """Register a recurring job on standalone ``jaeger-orchestration`` CronScheduler."""
+        self.scheduler.register(job_id, interval_s, fn)
+
+    def tick_cron(self) -> list[str]:
+        """Advance due cron jobs deterministically via standalone ``jaeger-orchestration``."""
+        return self.scheduler.tick()
 
     def _ensure_mailbox(self) -> Any:
         if self._mailbox is None:

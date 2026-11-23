@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import threading
 import time
 from urllib.parse import urlparse
@@ -87,12 +88,29 @@ class OllamaAdapter(OpenAIAdapter):
         except Exception:
             model_name = self.model
         body = {"model": model_name, "messages": messages, "stream": True, "options": options}
+        native_host = (urlparse(self._native_root).hostname or "").lower()
+        is_local_ollama = native_host in {"127.0.0.1", "localhost", "::1"}
+        if is_local_ollama:
+            keep_alive = os.environ.get("JAEGER_OLLAMA_KEEP_ALIVE", "10m").strip()
+            if keep_alive:
+                body["keep_alive"] = keep_alive
         if formatted.get("tools"):
             body["tools"] = formatted["tools"]
         effort = formatted.get("reasoning_effort")
         values = (metadata.get("thinking") or {}).get("values", [])
         if effort in {None, "", "auto", "provider"}:
-            pass
+            # Adaptive local thinking: after deep initial diagnosis (>=8 tool
+            # results in the current turn), switch local loopback Ollama to
+            # fast non-thinking execution so multi-step coding turns finish
+            # edits and verification instead of burning the deadline in <think>.
+            if (
+                is_local_ollama
+                and False in values
+                and os.environ.get("JAEGER_ADAPTIVE_LOCAL_THINK", "1").strip() != "0"
+            ):
+                tool_steps = sum(1 for m in messages if m.get("role") == "tool")
+                if tool_steps >= 8:
+                    body["think"] = False
         elif effort == "none":
             if values and False not in values:
                 raise ValueError(f"{self.model} does not support disabling thinking; supported: {values}")

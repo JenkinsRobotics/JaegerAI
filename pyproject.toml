@@ -39,6 +39,15 @@ jaeger-agent = { workspace = true }
 jaeger-os = { workspace = true }
 jaeger-kokoro-tts = { workspace = true }
 jaeger-whisper-stt = { workspace = true }
+jaeger-contracts = { path = "../jaeger-modules/packages/jaeger-contracts", editable = true }
+jaeger-authority = { path = "../jaeger-modules/packages/jaeger-authority", editable = true }
+jaeger-events = { path = "../jaeger-modules/packages/jaeger-events", editable = true }
+jaeger-loop = { path = "../jaeger-modules/packages/jaeger-loop", editable = true }
+jaeger-memory = { path = "../jaeger-modules/packages/jaeger-memory", editable = true }
+jaeger-models = { path = "../jaeger-modules/packages/jaeger-models", editable = true }
+jaeger-orchestration = { path = "../jaeger-modules/packages/jaeger-orchestration", editable = true }
+jaeger-reliability = { path = "../jaeger-modules/packages/jaeger-reliability", editable = true }
+jaeger-tools = { path = "../jaeger-modules/packages/jaeger-tools", editable = true }
 
 [build-system]
 requires = ["setuptools>=83"]

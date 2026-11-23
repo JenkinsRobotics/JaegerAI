@@ -230,7 +230,8 @@ def compact_messages(
     })
     for group in recent:
         rebuilt.extend(group)
-    return rebuilt
+    from jaeger_memory import close_dangling_tool_calls
+    return close_dangling_tool_calls(rebuilt)
 
 
 def _truncate_old_tool_json(
@@ -260,33 +261,23 @@ def _truncate_old_tool_json(
             name = str(message.get("name") or "tool")
             offloaded_text = None
             if os.environ.get("JAEGER_OFFLOAD_COMPACTION", "1").strip() != "0":
-                try:
-                    from jaeger_ai.core.instance.instance import operator_state_root
-                    from jaeger_memory import ToolOutputOffloader
+                from jaeger_ai.core.instance.instance import operator_state_root
+                from jaeger_memory import ToolOutputOffloader
 
-                    offloader = ToolOutputOffloader(
-                        operator_state_root(),
-                        max_inline_chars=max_chars,
-                        preview_chars=max_chars,
-                    )
-                    offloaded_text, _ = offloader.maybe_offload(name, content)
-                except Exception as exc:
-                    import logging
-                    logging.getLogger(__name__).warning("jaeger-memory offload failed: %s", exc)
-                    offloaded_text = None
+                offloader = ToolOutputOffloader(
+                    operator_state_root(),
+                    max_inline_chars=max_chars,
+                    preview_chars=max_chars,
+                )
+                offloaded_text, _ = offloader.maybe_offload(name, content)
             stub["content"] = (
                 offloaded_text
                 if offloaded_text is not None
                 else f"[compacted {name} result, {len(content)} chars] " + content[:max_chars]
             )
             out.append(stub)
-    try:
-        from jaeger_memory import close_dangling_tool_calls
-        return close_dangling_tool_calls(out)
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("jaeger-memory close_dangling_tool_calls failed: %s", exc)
-        return out
+    from jaeger_memory import close_dangling_tool_calls
+    return close_dangling_tool_calls(out)
 
 
 def compact_agent(agent: Any, *, threshold: float | None = None) -> bool:

@@ -231,3 +231,112 @@ def test_live_all_remaining_modules_wired_models_tools_loop_orchestration_events
         assert interrupted["flag"] is True
 
     asyncio.run(_run_async_checks())
+
+
+def test_phase7_deep_replacement_repomap_offload_grep_and_zero_duplication(tmp_path: Path, monkeypatch) -> None:
+    """Proves Phase 7 deep replacements: live repo_map, search_offloaded_output,
+    and single-source delegation for destructive checks and JSON repair."""
+    import re
+    from jaeger_agent.tools.files import repo_map, search_offloaded_output
+    from jaeger_agent.parsing import tool_call_repair
+    from jaeger_ai.core.authority import destructive
+    from jaeger_ai.core.runtime import tool_repair
+    import jaeger_reliability
+
+    # 1. Zero duplication: both JaegerAI and jaeger-agent delegate JSON repair to jaeger-reliability
+    assert tool_repair.repair_json_string is jaeger_reliability.repair_json_string
+    assert tool_call_repair._repair_json_string is jaeger_reliability.repair_json_string
+    assert tool_repair.safe_parse_tool_arguments('{"a": 1, "b": {"c": true') == {"a": 1, "b": {"c": True}}
+
+    # 2. Zero duplication: destructive_reason delegates shell/git rules to jaeger-authority
+    assert destructive.destructive_reason("terminal", {"command": "git update-ref HEAD HEAD~1"}) is not None
+    assert destructive.destructive_reason("framework_delegate", {"framework": "codex"}) is not None
+
+    # 3. Live repo_map tool ranks query matches with line numbers
+    ws = tmp_path / "proj"
+    (ws / "pkg").mkdir(parents=True)
+    (ws / "pkg" / "alpha.py").write_text("def unrelated():\n    return 1\n", encoding="utf-8")
+    (ws / "pkg" / "parser.py").write_text(
+        "class RelationalParser:\n    def parse_expr(self, text):\n        return text\n",
+        encoding="utf-8",
+    )
+    rm = repo_map(path=str(ws), query="parse_expr RelationalParser", max_chars=2000)
+    assert rm["ok"] is True
+    assert "pkg/parser.py" in rm["map"]
+    assert "class RelationalParser" in rm["map"]
+    assert "[L1]" in rm["map"]
+
+    # 4. Live search_offloaded_output greps real offloaded tool output produced by compactor
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
+    big_log = "\n".join([f"INFO line {i}" for i in range(120)] + ["ERROR: NEEDLE_42_FOUND", "INFO tail"])
+    msgs = [
+        {"role": "user", "content": "t1"},
+        {"role": "assistant", "tool_calls": [{"id": "tc1", "name": "terminal"}]},
+        {"role": "tool", "name": "terminal", "tool_call_id": "tc1", "content": big_log},
+        {"role": "user", "content": "t2"},
+        {"role": "assistant", "content": "done"},
+    ]
+    compacted = _truncate_old_tool_json(msgs, keep_last=1, max_chars=200)
+    m = re.search(r"search_offloaded_output on ([^\s\)]+)", compacted[2]["content"])
+    assert m is not None, compacted[2]["content"]
+    res = search_offloaded_output(m.group(1), "NEEDLE_42")
+    assert res["ok"] is True
+    assert res["count"] == 1
+    assert "NEEDLE_42_FOUND" in res["matches"][0]
+
+
+def test_phase8_and_9_post_edit_verify_ollama_adaptive_think_batcher_and_cron(tmp_path: Path) -> None:
+    """Proves Phases 8-9: PostEditVerificationGuard live, Ollama keep_alive + adaptive think,
+    StreamingDeltaBatcher flushing before durable events, and CronScheduler."""
+    from jaeger_loop import PostEditVerificationGuard
+    from jaeger_agent.adapters.ollama import OllamaAdapter
+    from jaeger_ai.core.gateway.event_bus import GatewayEventBus
+    from jaeger_ai.core.gateway.orchestration_bridge import GatewayOrchestrationBridge
+    from jaeger_ai.core.models.router import ModelRouter
+
+    # 1. Module 03: PostEditVerificationGuard nudges once on unverified code edit, clears after shell verify
+    guard = PostEditVerificationGuard(max_nudges=1)
+    guard.record_tool_result("write_file", {"path": "app.py"}, ok=True)
+    nudge = guard.maybe_nudge(has_verify_tool=True)
+    assert nudge is not None and "app.py" in nudge
+    assert guard.maybe_nudge(has_verify_tool=True) is None  # one-shot per turn
+    guard2 = PostEditVerificationGuard(max_nudges=1)
+    guard2.record_tool_result("patch", {"path": "mod.py"}, ok=True)
+    guard2.record_tool_result("terminal", {"command": "pytest"}, ok=True)
+    assert guard2.maybe_nudge(has_verify_tool=True) is None
+
+    # 2. Module 01: OllamaAdapter keep_alive + adaptive think=False after >=8 tool steps
+    oa = OllamaAdapter(
+        provider="ollama",
+        model="qwen3.5:9b",
+        base_url="http://127.0.0.1:11434/v1",
+        metadata={"thinking": {"values": [True, False], "default": True}},
+    )
+    short_body = oa._native_body(oa.format_messages([{"role": "user", "content": "hi"}], [], ""), oa._metadata())
+    assert short_body["keep_alive"] == "10m"
+    assert "think" not in short_body
+    long_msgs = [{"role": "user", "content": "fix bug"}] + [
+        {"role": "tool", "tool_call_id": f"c{i}", "name": "read_file", "content": "ok"}
+        for i in range(8)
+    ]
+    long_body = oa._native_body(oa.format_messages(long_msgs, [], ""), oa._metadata())
+    assert long_body["think"] is False
+    assert ModelRouter.resolve_profile("gpt-4o").model_id == "gpt-4o"
+
+    # 3. Module 08: StreamingDeltaBatcher coalesces deltas & flushes strictly before durable frame
+    bus = GatewayEventBus()
+    seen: list[tuple[str, dict]] = []
+    bus.add_observer(lambda evt: seen.append((evt.event, evt.data)))
+    bus.publish_delta("s-batch", "Hello ")
+    bus.publish_delta("s-batch", "world!")
+    assert seen == []  # coalesced, not emitted yet
+    bus.publish("s-batch", "turn.finish", {"ok": True})
+    assert [e for e, _ in seen] == ["turn.delta", "turn.finish"]
+    assert seen[0][1]["delta"] == "Hello world!"
+
+    # 4. Module 06: CronScheduler live on GatewayOrchestrationBridge
+    bridge = GatewayOrchestrationBridge(tmp_path / "orch-state")
+    ticks = {"n": 0}
+    bridge.register_cron("heartbeat", 0.01, lambda: ticks.__setitem__("n", ticks["n"] + 1))
+    fired = bridge.tick_cron()
+    assert fired == ["heartbeat"] and ticks["n"] == 1

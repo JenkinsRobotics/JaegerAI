@@ -49,8 +49,10 @@ from .files import (
     move_file,
     notebook_edit,
     read_many_files,
+    repo_map,
     reset_read_tracker,
     search_files,
+    search_offloaded_output,
 )
 
 # Time / math / status

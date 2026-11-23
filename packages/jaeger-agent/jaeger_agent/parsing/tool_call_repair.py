@@ -36,28 +36,7 @@ class RepairedToolCall(NamedTuple):
     raw: str
 
 
-def _repair_json_string(raw: str) -> str:
-    """Repair common model JSON syntax bugs (trailing commas, single quotes)."""
-    text = raw.strip()
-    if not text:
-        return "{}"
-
-    # Remove single-line comments // ...
-    text = re.sub(r"//.*$", "", text, flags=re.MULTILINE)
-
-    # Convert single quotes to double quotes when not inside valid strings
-    # Simple heuristic: replace 'key': with "key": and ': 'value' with ": "value"
-    if "'" in text and '"' not in text:
-        text = text.replace("'", '"')
-    else:
-        # Match single-quoted keys: {'foo': -> {"foo":
-        text = re.sub(r"(?<=[{,\s])'([A-Za-z0-9_$-]+)'\s*:", r'"\1":', text)
-        # Match single-quoted simple values: : 'bar' -> : "bar"
-        text = re.sub(r":\s*'([^']*)'(?=[,\s}\]])", r': "\1"', text)
-
-    # Strip trailing commas before closing braces/brackets
-    text = re.sub(r",\s*([\]}])", r"\1", text)
-    return text
+from jaeger_reliability import repair_json_string as _repair_json_string
 
 
 def _safe_parse_json(raw: str) -> Any | None:

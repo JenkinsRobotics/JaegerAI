@@ -707,17 +707,15 @@ class PolicyKernel:
             return None
         try:
             from jaeger_ai.core.authority.destructive import destructive_reason
-            from jaeger_authority import destructive_reason as _v2_destructive, evasion_reason as _v2_evasion
+            from jaeger_authority import evasion_reason as _v2_evasion
 
-            reason = destructive_reason(proposal.tool_name, arguments)
             cid = canonical_tool_id(proposal.tool_name)
             if cid in SHELL_TOOL_IDS:
                 cmd_txt = str(arguments.get("command") or arguments.get("cmd") or "")
                 ev = _v2_evasion(cmd_txt)
                 if ev:
                     return _deny(proposal, f"Shell evasion blocked: {ev}", "shell_evasion")
-            if not reason:
-                reason = _v2_destructive(proposal.tool_name, arguments)
+            reason = destructive_reason(proposal.tool_name, arguments)
         except Exception as exc:  # noqa: BLE001
             logger.error("Destructive-action check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
             return _deny(proposal, f"Destructive-action check failed: {exc} (fail-closed)", "destructive_action")
