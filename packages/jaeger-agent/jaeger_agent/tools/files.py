@@ -77,26 +77,41 @@ def _remember_read(
     _READ_TRACKER[key] = {"mtime": mtime, "count": 1, "total_lines": total_lines}
 
 
-def _maybe_syntax_check(path_rel: str, content: str) -> dict[str, Any] | None:
-    """Run ``compile()`` on Python content so the agent sees syntax
-    errors the same turn it wrote them (Phase 2 of the coding-quality
-    sprint). Returns a ``{"syntax_ok": bool, "syntax_error": str?}``
-    fragment for the caller to merge into its result, or ``None`` if
-    the path isn't a .py file (skip the check for text/data files).
+def _maybe_syntax_check(
+    path_rel: str,
+    content: str,
+    *,
+    target: Path | None = None,
+    workspace: Path | None = None,
+) -> dict[str, Any] | None:
+    """Run fast syntax + static/LSP diagnostics via standalone ``jaeger-tools``
+    so the agent sees syntax errors, undefined names, duplicate keys, and
+    compiler/LSP diagnostics on the same turn it wrote the file.
     """
-    if not path_rel.endswith(".py"):
-        return None
-    try:
-        compile(content, path_rel, "exec")
-    except SyntaxError as exc:
-        # Show line:col + the offending text fragment so the model has
-        # enough to fix it in the retry pass without re-reading the file.
-        offender = (exc.text or "").rstrip()
-        msg = f"{exc.msg} at line {exc.lineno}, col {exc.offset}"
-        if offender:
-            msg += f": {offender!r}"
-        return {"syntax_ok": False, "syntax_error": msg}
-    return {"syntax_ok": True}
+    result: dict[str, Any] = {}
+    if path_rel.endswith(".py"):
+        try:
+            compile(content, path_rel, "exec")
+            result["syntax_ok"] = True
+        except SyntaxError as exc:
+            offender = (exc.text or "").rstrip()
+            msg = f"{exc.msg} at line {exc.lineno}, col {exc.offset}"
+            if offender:
+                msg += f": {offender!r}"
+            result["syntax_ok"] = False
+            result["syntax_error"] = msg
+
+    if target is not None and target.is_file():
+        try:
+            from jaeger_tools import diagnose_file
+
+            report = diagnose_file(target, workspace=workspace)
+            if report.engine != "none":
+                result.update(report.to_tool_payload())
+        except Exception:
+            pass
+
+    return result or None
 
 
 def file_write(path: str, content: str) -> dict[str, Any]:
@@ -137,7 +152,7 @@ def file_write(path: str, content: str) -> dict[str, Any]:
     result: dict[str, Any] = {"written": True, "path": rel, "bytes": bytes_written}
     if commit_sha:
         result["commit"] = commit_sha
-    syntax = _maybe_syntax_check(rel, content)
+    syntax = _maybe_syntax_check(rel, content, target=target, workspace=layout.root)
     if syntax is not None:
         result.update(syntax)
     return result
@@ -247,7 +262,7 @@ def edit_file(path: str, old: str, new: str, replace_all: bool = False) -> dict[
         result["matched"] = matched
     if commit_sha:
         result["commit"] = commit_sha
-    syntax = _maybe_syntax_check(rel, updated)
+    syntax = _maybe_syntax_check(rel, updated, target=target, workspace=layout.root)
     if syntax is not None:
         result.update(syntax)
     return result
@@ -832,7 +847,11 @@ def apply_patch(patch: str) -> dict[str, Any]:
             result = file_write(path, updated)
             if result.get("error") or result.get("written") is False:
                 return {"ok": False, "error": result.get("error") or "write failed", "path": path, "changed": changed}
-            changed.append({"action": "update", "path": result.get("path") or path})
+            entry: dict[str, Any] = {"action": "update", "path": result.get("path") or path}
+            if result.get("diagnostics"):
+                entry["diagnostics"] = result["diagnostics"]
+                entry["diagnostics_ok"] = result.get("diagnostics_ok", True)
+            changed.append(entry)
     return {"ok": True, "changed": changed, "count": len(changed)}
 
 

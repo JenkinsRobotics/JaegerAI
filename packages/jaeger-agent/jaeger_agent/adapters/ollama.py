@@ -159,6 +159,7 @@ class OllamaAdapter(OpenAIAdapter):
             text, reasoning, calls = [], [], []
             final = None
             with httpx.Client(timeout=httpx.Timeout(max(self.timeout_s, first_progress_timeout_s or 0), connect=10), headers=headers) as client:
+                active.append(client)
                 with client.stream("POST", self._native_root + "/api/chat", json=body) as response:
                     active.append(response)
                     response.raise_for_status()
@@ -201,8 +202,11 @@ class OllamaAdapter(OpenAIAdapter):
                           "total_tokens": final.get("prompt_eval_count", 0) + final.get("eval_count", 0)}}
 
         def abandon():
-            for response in list(active):
-                response.close()
+            for resource in list(active):
+                try:
+                    resource.close()
+                except Exception:
+                    pass
             if on_abandon:
                 on_abandon()
 
