@@ -353,3 +353,61 @@ def test_phase8_and_9_post_edit_verify_ollama_adaptive_think_batcher_and_cron(tm
     bridge.register_cron("heartbeat", 0.01, lambda: ticks.__setitem__("n", ticks["n"] + 1))
     fired = bridge.tick_cron()
     assert fired == ["heartbeat"] and ticks["n"] == 1
+
+
+def test_sprint_phases_2_and_3_live_diagnostics_and_convergence_controller(tmp_path: Path) -> None:
+    """Proves Sprint Phases 2 & 3: post-edit static/LSP diagnostics (Python AST undefined names,
+    syntax errors, duplicate keys) and TaskConvergenceController (read-stall, edit-stall,
+    missing requested artifacts, and post-edit verification)."""
+    from jaeger_tools import diagnose_file
+    from jaeger_loop import TaskConvergenceController, extract_requested_artifacts
+
+    # 1. Live diagnostics catch undefined name + duplicate dict key cleanly
+    bad_py = tmp_path / "broken.py"
+    bad_py.write_text(
+        "def compute(x):\n"
+        "    cfg = {'a': 1, 'a': 2}\n"
+        "    return x + unknown_var\n",
+        encoding="utf-8",
+    )
+    rep = diagnose_file(bad_py, workspace=tmp_path)
+    assert rep.ok is False
+    payload = rep.to_tool_payload()
+    assert payload["diagnostics_error_count"] >= 1
+    assert any("unknown_var" in d for d in payload["diagnostics"])
+    assert any("Duplicate dictionary key" in d for d in payload["diagnostics"])
+
+    good_py = tmp_path / "clean.py"
+    good_py.write_text("import math\ndef area(r: float) -> float:\n    return math.pi * r * r\n", encoding="utf-8")
+    rep_ok = diagnose_file(good_py, workspace=tmp_path)
+    assert rep_ok.ok is True
+    assert rep_ok.to_tool_payload()["diagnostics_error_count"] == 0
+
+    # 2. TaskConvergenceController alarms & missing-artifact check
+    arts = extract_requested_artifacts("Inspect log and write forensics.json and implement vault_queue.py.")
+    assert arts == ("forensics.json", "vault_queue.py")
+
+    ctrl = TaskConvergenceController(
+        "Write forensics.json with the summary.",
+        max_read_stall=3,
+        max_untested_edits=2,
+        max_shell_failures=2,
+    )
+    assert ctrl.record_tool_result("read_file", {"path": "a.py"}) is None
+    assert ctrl.record_tool_result("search_files", {"query": "x"}) is None
+    hint_read = ctrl.record_tool_result("read_file", {"path": "b.py"})
+    assert hint_read is not None and "STRATEGY SHIFT (localize -> edit)" in hint_read
+
+    assert ctrl.record_tool_result("patch", {"path": "app.py"}, ok=True) is None
+    hint_edit = ctrl.record_tool_result("patch", {"path": "app.py"}, ok=True)
+    assert hint_edit is not None and "STRATEGY SHIFT (edit -> verify)" in hint_edit
+
+    # Missing artifact blocks premature finish
+    nudge_missing = ctrl.maybe_finish_nudge(workspace=tmp_path, has_verify_tool=True, has_edit_tool=True)
+    assert nudge_missing is not None and "forensics.json" in nudge_missing
+    (tmp_path / "forensics.json").write_text("{}", encoding="utf-8")
+    # Now unverified code edit triggers verification nudge
+    nudge_verify = ctrl.maybe_finish_nudge(workspace=tmp_path, has_verify_tool=True, has_edit_tool=True)
+    assert nudge_verify is not None and "app.py" in nudge_verify
+    ctrl.record_tool_result("terminal", {"command": "pytest"}, ok=True)
+    assert ctrl.maybe_finish_nudge(workspace=tmp_path, has_verify_tool=True, has_edit_tool=True) is None

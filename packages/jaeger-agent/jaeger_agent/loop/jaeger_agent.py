@@ -670,6 +670,9 @@ class JaegerAgent:
         model_user_message = user_message if content is None else content
         self._append_message({"role": "user", "content": model_user_message})
         self._turn_active = True
+        self._thinking_boost_count = 0
+        from jaeger_loop import TaskConvergenceController
+        self._convergence = TaskConvergenceController(user_message)
         try:
             return self._guard_output(self._run_turn_inner(user_message))
         except ContextOverflow:
@@ -740,8 +743,9 @@ class JaegerAgent:
         finally:
             self._turn_active = False
             self._thinking_budget_boosted = False
-            if getattr(self, "_post_edit_verify", None) is not None:
-                self._post_edit_verify.reset()
+            self._thinking_boost_count = 0
+            if getattr(self, "_convergence", None) is not None:
+                self._convergence.reset()
             self._record_skill_outcomes()
             if getattr(self, "_ephemeral_run", False):
                 self.bind_run(None)
@@ -907,23 +911,29 @@ class JaegerAgent:
                 # or retrying produces the same outcome, so surface it
                 # plainly instead (Hermes thinking-exhaustion pattern).
                 if assistant_msg.get("finish_reason") == "thinking_exhausted":
-                    # Auto-expand output token budget and nudge once per turn
+                    # Auto-expand output token budget and nudge up to twice per turn
                     # when a reasoning model exhausts max_tokens mid-thought
                     # before emitting code or tool calls.
-                    if not getattr(self, "_thinking_budget_boosted", False):
+                    boost_count = int(getattr(self, "_thinking_boost_count", 0) or 0)
+                    if boost_count < 2:
+                        self._thinking_boost_count = boost_count + 1
                         self._thinking_budget_boosted = True
                         cur_max = int(getattr(self.primary_adapter, "max_tokens", 0) or 0)
-                        if 0 < cur_max < 16384:
-                            boosted = min(16384, max(8192, cur_max * 2))
+                        cap = 16384 if boost_count == 0 else 32768
+                        if 0 < cur_max < cap:
+                            boosted = min(cap, max(8192 if boost_count == 0 else 16384, cur_max * 2))
                             setattr(self.primary_adapter, "max_tokens", boosted)
                         self._nudge_pending = True
                         self._pending_nudge_text = (
                             "Your reasoning hit the token limit before producing output. "
                             "Keep reasoning concise and immediately emit the tool call (e.g. write_file or patch) or final answer."
+                            if boost_count == 0
+                            else "Output limit hit again inside reasoning. Do NOT spend more tokens thinking — "
+                            "emit the concrete tool call (write_file / patch / terminal) IMMEDIATELY now."
                         )
                         self._append_message({"role": "user", "content": self._pending_nudge_text})
                         self.callbacks.on_thinking(
-                            "[thinking budget exhausted — nudging once with expanded output budget]"
+                            f"[thinking budget exhausted — boost #{self._thinking_boost_count} with expanded output budget]"
                         )
                         continue
                     note = (
@@ -972,24 +982,42 @@ class JaegerAgent:
             self.callbacks.on_step(iteration, assistant_msg)
 
             if not tool_calls:
-                # Phase 8: Post-edit verification guard (standalone jaeger-loop).
-                # If code files were mutated since the last shell/test check and a
-                # verification tool is available, inject one automatic verify nudge
-                # before accepting the final answer.
+                # Sprint Phase 3: TaskConvergenceController (standalone jaeger-loop).
+                # Verifies explicitly requested output artifacts exist AND any
+                # mutated code files were tested before accepting a final answer.
                 import os as _os
                 if _os.environ.get("JAEGER_POST_EDIT_VERIFY", "1").strip() != "0":
-                    guard = getattr(self, "_post_edit_verify", None)
+                    ctrl = getattr(self, "_convergence", None)
+                    tool_names = set(self._dispatch_by_name.keys())
                     has_verify_tool = bool(
-                        {"terminal", "execute_code", "run_shell", "run_python", "bash"}
-                        & set(self._dispatch_by_name.keys())
+                        {"terminal", "execute_code", "run_shell", "run_python", "bash"} & tool_names
                     )
-                    nudge = guard.maybe_nudge(has_verify_tool=has_verify_tool) if guard is not None else None
+                    has_edit_tool = bool(
+                        {"write_file", "patch", "edit_file", "apply_patch"} & tool_names
+                    )
+                    ws_root = None
+                    try:
+                        from jaeger_agent.core.workspace import get_layout
+                        _lay = get_layout()
+                        if _lay is not None:
+                            ws_root = getattr(_lay, "project_root", None) or getattr(_lay, "workspace_dir", None) or getattr(_lay, "root", None)
+                    except Exception:
+                        ws_root = None
+                    nudge = (
+                        ctrl.maybe_finish_nudge(
+                            workspace=ws_root,
+                            has_verify_tool=has_verify_tool,
+                            has_edit_tool=has_edit_tool,
+                        )
+                        if ctrl is not None
+                        else None
+                    )
                     if nudge and iteration < self.max_iterations:
                         self._nudge_pending = True
                         self._pending_nudge_text = nudge
                         self._append_message({"role": "user", "content": nudge})
                         self.callbacks.on_thinking(
-                            "[post-edit verify — nudging once to test modified code before concluding]"
+                            "[convergence guard — nudging to verify code/artifacts before concluding]"
                         )
                         continue
                 # A response with no provider-native or strictly repaired tool
@@ -2607,15 +2635,19 @@ class JaegerAgent:
         _err = str(content.get("error") or content.get("reason") or _stderr_tail(content)
                    or "tool failed") if not _ok else None
 
-        # Track code mutations vs verification commands via standalone jaeger-loop
-        if getattr(self, "_post_edit_verify", None) is None:
-            from jaeger_loop import PostEditVerificationGuard
-            self._post_edit_verify = PostEditVerificationGuard(max_nudges=1)
-        self._post_edit_verify.record_tool_result(
-            name,
-            args if isinstance(args, dict) else None,
-            ok=_ok,
-        )
+        # Track behavioral task stage & convergence alarms via standalone jaeger-loop
+        ctrl = getattr(self, "_convergence", None)
+        if ctrl is not None:
+            tool_names = set(self._dispatch_by_name.keys())
+            conv_hint = ctrl.record_tool_result(
+                name,
+                args if isinstance(args, dict) else None,
+                ok=_ok,
+                has_edit_tool=bool({"write_file", "patch", "edit_file", "apply_patch"} & tool_names),
+                has_verify_tool=bool({"terminal", "execute_code", "run_shell", "run_python", "bash"} & tool_names),
+            )
+            if conv_hint:
+                guidance = f"{guidance}\n{conv_hint}".strip() if guidance else conv_hint
 
         # Per-tool-result oversize guard. A single ``run_shell`` dump
         # or screenshot can dominate the next turn's context; cap it
