@@ -26,6 +26,7 @@ procedural, etc.) — wired through ``skill_tree.award_xp``.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import uuid
 from typing import Any
 
@@ -141,7 +142,7 @@ def set_avatar_state(
         else:
             resolved_path = str(instance_path)  # let the node report missing
 
-    return _publish_animation(
+    result = _publish_animation(
         adapter=mapping["adapter"],
         asset_path=resolved_path,
         duration_ms=int(hold_ms),
@@ -149,6 +150,23 @@ def set_avatar_state(
         params=mapping.get("params", {}),
         wait=wait,
     )
+    # Mirror the live emotion into the WebUI/Swift avatar state store so the
+    # realtime avatar view reflects agent expressions immediately.
+    try:
+        from jaeger_ai.core.gateway.webapp import avatar_api
+        _emo_map = {
+            "thinking": "focused",
+            "speaking": "warm",
+            "listening": "curious",
+        }
+        web_emo = _emo_map.get(emotion, emotion)
+        if web_emo in avatar_api.EMOTIONS:
+            agent_id = getattr(layout, "name", None) or Path(getattr(layout, "root", "default")).name
+            avatar_api.set_emotion(str(agent_id), {"emotion": web_emo, "intensity": 1.0, "source": "agent_tool"})
+            result["webui_emotion"] = web_emo
+    except Exception:  # noqa: BLE001 — WebUI mirror is best-effort
+        pass
+    return result
 
 
 # ── play_timeline ───────────────────────────────────────────────────
@@ -338,7 +356,7 @@ def _publish_animation(
 # ── Agent-tool wrappers (migrated from main.py::_register_builtins) ──
 
 
-@register_tool_from_function(name="set_avatar_state", beta=True)
+@register_tool_from_function(name="set_avatar_state")
 def _t_set_avatar_state(
     emotion: str = "neutral", hold_ms: int = 0, wait: bool = False,
 ) -> dict:
@@ -350,7 +368,7 @@ def _t_set_avatar_state(
     return set_avatar_state(emotion=emotion, hold_ms=hold_ms, wait=wait)
 
 
-@register_tool_from_function(name="play_timeline", beta=True)
+@register_tool_from_function(name="play_timeline")
 def _t_play_timeline(name: str = "", wait: bool = False) -> dict:
     """Play a multi-track avatar animation timeline stored at
     <instance>/timelines/<name>.json. wait=True blocks until the

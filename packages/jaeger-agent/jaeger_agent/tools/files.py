@@ -102,14 +102,30 @@ def _maybe_syntax_check(
             result["syntax_error"] = msg
 
     if target is not None and target.is_file():
+        lsp_needed = True
         try:
             from jaeger_tools import diagnose_file
 
             report = diagnose_file(target, workspace=workspace)
             if report.engine != "none":
                 result.update(report.to_tool_payload())
+                lsp_needed = False
         except Exception:
             pass
+        if lsp_needed and target.suffix.lower() in {".py", ".json", ".js", ".mjs", ".cjs", ".ts", ".swift"}:
+            try:
+                from jaeger_lsp import check_file_diagnostics
+
+                diag = check_file_diagnostics(str(target))
+                if not diag.ok and diag.diagnostics:
+                    result["lsp_ok"] = False
+                    result["lsp_engine"] = diag.checker
+                    result["lsp_diagnostics"] = [d.to_dict() for d in diag.diagnostics[:12]]
+                elif diag.checker != "none":
+                    result["lsp_ok"] = True
+                    result["lsp_engine"] = diag.checker
+            except Exception:
+                pass
 
     return result or None
 

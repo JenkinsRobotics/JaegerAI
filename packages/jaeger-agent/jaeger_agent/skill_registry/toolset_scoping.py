@@ -134,6 +134,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "containers": frozenset({"container"}),
     "media": frozenset({
         "text_to_speech", "listen", "vision_analyze", "view_image",
+        "probe_media", "render_video", "youtube_studio",
         # fal.ai cloud generation (plugins/ai_gen) — the paid counterpart
         # to image_generate (CORE, official Grok Imagine / cached local).
         "generate_image_fal", "generate_video_fal",
@@ -158,9 +159,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "remember", "recall", "forget", "list_facts", "search_memory",
         "record_insight", "recall_insight",
     }),
-    # Planning primitives (Codex ``update_plan`` / ``wait``): stateless display
-    # of the model's plan and a cancellable bounded pause.
-    "planning": frozenset({"update_plan", "wait"}),
+    # Planning primitives (Codex ``update_plan`` / ``wait`` + durable workflows).
+    "planning": frozenset({"update_plan", "wait", "workflow_create", "workflow_checkpoint", "workflow_status"}),
     # A specialist agent's own NOTES.md (bound by the Gateway per turn).
     "agent_notes": frozenset({"agent_notes"}),
     # Other agent frameworks on this Mac (owner grants; see core/frameworks).
@@ -289,8 +289,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
 TOOLSET_SUMMARY: dict[str, str] = {
     "files": "append, delete, patch, glob, batch-read, apply_patch, notebook_edit; list the workspace",
     "code": "shell/terminal, ssh, install packages, venv exec",
-    "media": "text-to-speech, mic capture, image view, vision, image/video generation (local + fal.ai cloud)",
-    "avatar": "avatar face + animation timelines (BETA — dev mode only)",
+    "media": "text-to-speech, mic capture, vision, FFmpeg video rendering/probing, YouTube studio, image/video generation",
+    "avatar": "live avatar face expressions and animation timelines",
     "web": "weather and X (Twitter) search (now always-on via CORE)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
     "planning": "show and update a step plan (update_plan); wait for a bounded time",

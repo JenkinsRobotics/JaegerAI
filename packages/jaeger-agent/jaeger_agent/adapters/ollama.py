@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import threading
 import time
@@ -15,6 +16,11 @@ from urllib.parse import urlparse
 
 from .openai import OpenAIAdapter
 from jaeger_agent.loop.interrupt import AgentInterrupted, CallProgress, interruptible_call
+
+logger = logging.getLogger(__name__)
+
+_TRANSIENT_HTTP_CODES = frozenset({429, 502, 503, 504})
+_ZERO_EVENT_RETRY_DELAYS = (0.6, 1.5)
 
 
 class OllamaAdapter(OpenAIAdapter):
@@ -34,16 +40,27 @@ class OllamaAdapter(OpenAIAdapter):
         return root
 
     def _metadata(self):
-        if urlparse(self._native_root).hostname == "ollama.com":
-            # Direct cloud chat does not need /api/show; skip a failing probe.
+        host = (urlparse(self._native_root).hostname or "").lower()
+        model_name = str(self.model or "").strip().lower()
+        if host == "ollama.com" or model_name.endswith(":cloud") or self.provider == "ollama-cloud":
+            # Cloud models (direct or via local Ollama proxy) do not need
+            # /api/show, which can transiently 502 and abort a healthy chat turn.
             return self._metadata_value or {}
         if self._metadata_value is None:
             import httpx
             headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-            response = httpx.post(self._native_root + "/api/show", json={"model": self.model},
-                                  headers=headers, timeout=5)
-            response.raise_for_status()
-            self._metadata_value = response.json()
+            try:
+                response = httpx.post(
+                    self._native_root + "/api/show",
+                    json={"model": self.model},
+                    headers=headers,
+                    timeout=5,
+                )
+                response.raise_for_status()
+                self._metadata_value = response.json()
+            except Exception as exc:  # noqa: BLE001 — metadata probe is advisory, never fatal
+                logger.warning("Ollama /api/show probe failed for %s (%s); continuing with defaults", self.model, exc)
+                return {}
         return self._metadata_value
 
     def _hosted(self):
@@ -151,46 +168,88 @@ class OllamaAdapter(OpenAIAdapter):
         self.last_ttft_s = None
         active = []
 
+        def _is_transient_before_output(exc: BaseException, httpx_mod) -> bool:
+            if isinstance(exc, httpx_mod.HTTPStatusError):
+                status = getattr(getattr(exc, "response", None), "status_code", None)
+                return status in _TRANSIENT_HTTP_CODES
+            return isinstance(
+                exc,
+                (
+                    httpx_mod.ConnectError,
+                    httpx_mod.ConnectTimeout,
+                    httpx_mod.RemoteProtocolError,
+                    httpx_mod.ReadTimeout,
+                ),
+            )
+
         def generate():
             import httpx
             if interrupt_event.is_set():
                 raise AgentInterrupted("Ollama generation interrupted")
             headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-            text, reasoning, calls = [], [], []
-            final = None
-            with httpx.Client(timeout=httpx.Timeout(max(self.timeout_s, first_progress_timeout_s or 0), connect=10), headers=headers) as client:
-                active.append(client)
-                with client.stream("POST", self._native_root + "/api/chat", json=body) as response:
-                    active.append(response)
-                    response.raise_for_status()
-                    if interrupt_event.is_set():
-                        raise AgentInterrupted("Ollama generation interrupted")
-                    for line in response.iter_lines():
-                        if interrupt_event.is_set():
-                            raise AgentInterrupted("Ollama generation interrupted")
-                        if not line:
-                            continue
-                        row = json.loads(line)
-                        if row.get("error"):
-                            raise RuntimeError(row["error"])
-                        beacon.touch()
-                        msg = row.get("message") or {}
-                        if msg.get("content"):
-                            text.append(msg["content"])
-                            if on_delta:
-                                on_delta(msg["content"])
-                        if msg.get("thinking"):
-                            reasoning.append(msg["thinking"])
-                            if on_reasoning:
-                                on_reasoning(msg["thinking"])
-                        for call in msg.get("tool_calls") or []:
-                            wire_call = copy.deepcopy(call)
-                            arguments = wire_call["function"].get("arguments", {})
-                            wire_call["function"]["arguments"] = json.dumps(arguments) if isinstance(arguments, dict) else arguments
-                            calls.append(wire_call)
-                        if row.get("done"):
-                            final = row
+            max_attempts = len(_ZERO_EVENT_RETRY_DELAYS) + 1
+            for attempt in range(max_attempts):
+                text, reasoning, calls = [], [], []
+                final = None
+                active.clear()
+                try:
+                    with httpx.Client(timeout=httpx.Timeout(max(self.timeout_s, first_progress_timeout_s or 0), connect=10), headers=headers) as client:
+                        active.append(client)
+                        with client.stream("POST", self._native_root + "/api/chat", json=body) as response:
+                            active.append(response)
+                            response.raise_for_status()
+                            if interrupt_event.is_set():
+                                raise AgentInterrupted("Ollama generation interrupted")
+                            for line in response.iter_lines():
+                                if interrupt_event.is_set():
+                                    raise AgentInterrupted("Ollama generation interrupted")
+                                if not line:
+                                    continue
+                                row = json.loads(line)
+                                if row.get("error"):
+                                    raise RuntimeError(row["error"])
+                                beacon.touch()
+                                msg = row.get("message") or {}
+                                if msg.get("content"):
+                                    text.append(msg["content"])
+                                    if on_delta:
+                                        on_delta(msg["content"])
+                                if msg.get("thinking"):
+                                    reasoning.append(msg["thinking"])
+                                    if on_reasoning:
+                                        on_reasoning(msg["thinking"])
+                                for call in msg.get("tool_calls") or []:
+                                    wire_call = copy.deepcopy(call)
+                                    arguments = wire_call["function"].get("arguments", {})
+                                    wire_call["function"]["arguments"] = json.dumps(arguments) if isinstance(arguments, dict) else arguments
+                                    calls.append(wire_call)
+                                if row.get("done"):
+                                    final = row
+                            active.clear()
+                    break
+                except AgentInterrupted:
+                    raise
+                except Exception as exc:  # noqa: BLE001
                     active.clear()
+                    emitted_any = bool(text or reasoning or calls)
+                    if (
+                        not emitted_any
+                        and attempt < len(_ZERO_EVENT_RETRY_DELAYS)
+                        and _is_transient_before_output(exc, httpx)
+                        and not interrupt_event.is_set()
+                    ):
+                        delay = _ZERO_EVENT_RETRY_DELAYS[attempt]
+                        logger.warning(
+                            "Ollama /api/chat transient error before output (%s); retrying %d/%d in %.1fs",
+                            exc,
+                            attempt + 1,
+                            len(_ZERO_EVENT_RETRY_DELAYS),
+                            delay,
+                        )
+                        if interrupt_event.wait(delay):
+                            raise AgentInterrupted("Ollama generation interrupted")
+                        continue
+                    raise
             if final is None:
                 raise RuntimeError("Ollama stream ended without a completion receipt")
             return {"model": final.get("model", self.model), "choices": [{
