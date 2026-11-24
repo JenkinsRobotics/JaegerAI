@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-models"
+version = "0.1.0"
+description = "Standalone ModelProfile catalog, local-first + auxiliary router, sticky fallback, and ReplayModel."
+requires-python = ">=3.11"
+dependencies = ["jaeger-contracts"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

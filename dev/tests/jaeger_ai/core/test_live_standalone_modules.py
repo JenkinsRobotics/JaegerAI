@@ -639,3 +639,66 @@ def test_wave2_reliability_credential_pool_tdd_backstop_gateway_modules_and_shad
     restored = fc.restore_workspace_checkpoint("s-cp", "r-cp")
     assert restored["restored"] is True
     assert (ws / "mod.py").read_text(encoding="utf-8") == "x = 1\n"
+
+
+def test_wave4_and_wave5_single_repo_packages_zero_coupling_and_modular_stores() -> None:
+    """Proves Wave 4 + Wave 5:
+    1. All 9 standalone jaeger-* core packages live inside JaegerAI/packages/ (no external sibling repo).
+    2. None of the 9 standalone packages import jaeger_ai or jaeger_agent (strict zero coupling).
+    3. GatewaySessionStore delegates cleanly to store/{agent,request,session_domain}_store mixins.
+    4. JaegerAgent delegates cleanly to loop/{provider_step,tool_dispatch} mixins.
+    """
+    import ast
+    import importlib
+
+    repo_root = Path(__file__).resolve().parents[4]
+    packages_dir = (repo_root / "packages").resolve()
+    standalone_pkgs = (
+        ("jaeger-contracts", "jaeger_contracts"),
+        ("jaeger-models", "jaeger_models"),
+        ("jaeger-tools", "jaeger_tools"),
+        ("jaeger-loop", "jaeger_loop"),
+        ("jaeger-memory", "jaeger_memory"),
+        ("jaeger-authority", "jaeger_authority"),
+        ("jaeger-orchestration", "jaeger_orchestration"),
+        ("jaeger-reliability", "jaeger_reliability"),
+        ("jaeger-events", "jaeger_events"),
+    )
+
+    for folder, mod_name in standalone_pkgs:
+        mod = importlib.import_module(mod_name)
+        mod_path = Path(mod.__file__).resolve()
+        assert packages_dir in mod_path.parents, (
+            f"{mod_name} loaded from {mod_path} instead of in-repo {packages_dir}"
+        )
+        src_dir = packages_dir / folder / "src"
+        assert src_dir.is_dir(), f"Missing folded package src dir: {src_dir}"
+        for py in src_dir.rglob("*.py"):
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        assert not alias.name.startswith(("jaeger_ai", "jaeger_agent")), (
+                            f"Reverse coupling in {py}: import {alias.name}"
+                        )
+                elif isinstance(node, ast.ImportFrom):
+                    base = node.module or ""
+                    assert not base.startswith(("jaeger_ai", "jaeger_agent")), (
+                        f"Reverse coupling in {py}: from {base} import ..."
+                    )
+
+    from jaeger_agent.loop.jaeger_agent import JaegerAgent
+    from jaeger_agent.loop.provider_step import AgentProviderStepMixin
+    from jaeger_agent.loop.tool_dispatch import AgentToolDispatchMixin
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    from jaeger_ai.core.gateway.store import (
+        AgentStoreMixin,
+        RequestStoreMixin,
+        SessionDomainStoreMixin,
+    )
+
+    assert issubclass(GatewaySessionStore, AgentStoreMixin)
+    assert issubclass(GatewaySessionStore, RequestStoreMixin)
+    assert issubclass(GatewaySessionStore, SessionDomainStoreMixin)
+    assert issubclass(JaegerAgent, AgentProviderStepMixin)
+    assert issubclass(JaegerAgent, AgentToolDispatchMixin)

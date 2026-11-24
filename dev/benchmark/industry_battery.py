@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MODULES_ROOT = REPO_ROOT.parent / "jaeger-modules"
+MODULES_ROOT = REPO_ROOT / "packages"
 for _p in (REPO_ROOT, REPO_ROOT / "packages" / "jaeger-agent", REPO_ROOT / "packages" / "jaeger-os"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
