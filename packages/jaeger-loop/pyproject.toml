@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-loop"
+version = "0.1.0"
+description = "Clean onion-middleware AgentLoop with phase verdicts, RW-lock parallel tool execution, and full port wiring."
+requires-python = ">=3.11"
+dependencies = [
+    "jaeger-contracts",
+    "jaeger-events",
+    "jaeger-models",
+    "jaeger-tools",
+    "jaeger-memory",
+    "jaeger-reliability",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

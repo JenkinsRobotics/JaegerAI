@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-tools"
+version = "0.1.0"
+description = "Standalone ToolRegistry with progressive discovery, swappable EditEngines (SearchReplace + ApplyPatch), RepoMap, and sandboxed shell."
+requires-python = ">=3.11"
+dependencies = ["jaeger-contracts", "jaeger-authority"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

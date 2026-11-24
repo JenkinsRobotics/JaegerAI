@@ -151,6 +151,17 @@ run_backend() {
     packages/jaeger-agent/tests/test_anthropic_adapter.py \
     packages/jaeger-agent/tests/test_liveness.py \
     packages/jaeger-agent/tests/test_run_turn.py
+  echo "[back-end:modules] Running folded standalone modular core test suite..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
+    packages/jaeger-contracts/tests \
+    packages/jaeger-models/tests \
+    packages/jaeger-tools/tests \
+    packages/jaeger-loop/tests \
+    packages/jaeger-memory/tests \
+    packages/jaeger-authority/tests \
+    packages/jaeger-orchestration/tests \
+    packages/jaeger-reliability/tests \
+    packages/jaeger-events/tests
 }
 
 run_wiring() {
