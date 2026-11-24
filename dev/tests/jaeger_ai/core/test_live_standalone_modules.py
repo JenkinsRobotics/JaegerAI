@@ -618,9 +618,13 @@ def test_wave2_reliability_credential_pool_tdd_backstop_gateway_modules_and_shad
     assert loop_halt_reason(2, {}, {sig_a: 1, sig_b: 1}) is None
     assert loop_halt_reason(2, {}, {sig_b: 2}) is not None
 
-    # 4. Extracted Gateway modules are live on JaegerGatewayApp
+    # 4. Extracted Gateway modules (Wave 2 + Wave 3) are live on JaegerGatewayApp
+    from jaeger_ai.core.gateway import agent_routes, runtime_routes, session_routes
     assert issubclass(server.JaegerGatewayApp, turn_callbacks.GatewayTurnCallbacksMixin)
     assert issubclass(server.JaegerGatewayApp, handoff_routes.GatewayHandoffRoutesMixin)
+    assert issubclass(server.JaegerGatewayApp, session_routes.GatewaySessionRoutesMixin)
+    assert issubclass(server.JaegerGatewayApp, agent_routes.GatewayAgentRoutesMixin)
+    assert issubclass(server.JaegerGatewayApp, runtime_routes.GatewayRuntimeRoutesMixin)
     assert server._GatewayToolConfirmationProvider is approval_providers._GatewayToolConfirmationProvider
 
     # 5. Gateway-owned shadow-Git workspace checkpoints (jaeger-memory)
