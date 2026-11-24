@@ -32,7 +32,15 @@ from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODULES_ROOT = REPO_ROOT / "packages"
-for _p in (REPO_ROOT, REPO_ROOT / "packages" / "jaeger-agent", REPO_ROOT / "packages" / "jaeger-os"):
+_STANDALONE_SRCS = [
+    REPO_ROOT / "packages" / p / "src"
+    for p in (
+        "jaeger-contracts", "jaeger-models", "jaeger-tools", "jaeger-loop",
+        "jaeger-memory", "jaeger-authority", "jaeger-orchestration",
+        "jaeger-reliability", "jaeger-events",
+    )
+]
+for _p in (*_STANDALONE_SRCS, REPO_ROOT, REPO_ROOT / "packages" / "jaeger-agent", REPO_ROOT / "packages" / "jaeger-os"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
@@ -228,7 +236,10 @@ def start_isolated_gateway() -> subprocess.Popen:
         "JAEGER_TEST_HEADLESS": "1",
         "JAEGER_AGENT_ISOLATION": "checkpoint",
         "JAEGER_TURN_TIMEOUT_S": "240",
-        "PYTHONPATH": f"{REPO_ROOT}:{REPO_ROOT / 'packages' / 'jaeger-agent'}:{REPO_ROOT / 'packages' / 'jaeger-os'}",
+        "PYTHONPATH": ":".join(
+            [str(p) for p in _STANDALONE_SRCS]
+            + [str(REPO_ROOT), str(REPO_ROOT / "packages" / "jaeger-agent"), str(REPO_ROOT / "packages" / "jaeger-os")]
+        ),
     }
     gw_log_path = STATE_DIR / "gateway.log"
     gw_log = gw_log_path.open("a", encoding="utf-8")

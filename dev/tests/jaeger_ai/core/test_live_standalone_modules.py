@@ -702,3 +702,71 @@ def test_wave4_and_wave5_single_repo_packages_zero_coupling_and_modular_stores()
     assert issubclass(GatewaySessionStore, SessionDomainStoreMixin)
     assert issubclass(JaegerAgent, AgentProviderStepMixin)
     assert issubclass(JaegerAgent, AgentToolDispatchMixin)
+
+
+def test_review_fixes_credential_auth_failover_ws_disabled_cron_model_and_mail_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves all 4 code-review fixes + hybrid cron routing & Apple Mail upgrades:
+    1. CredentialPool preserves primary key priority on healthy calls & rotates on HTTP 401 AUTH.
+    2. Experimental /ws route is disabled by default (fail-closed).
+    3. apply_cron_turn extracts [jaeger:model=ollama/qwen3.5:9b] into requested provider/model.
+    4. email.py exposes mark_mail, scan_junk_mail, block_sender, unblock_sender, list_blocked_senders.
+    """
+    from jaeger_reliability import CredentialPool
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    from jaeger_ai.core.instance.schemas import ExternalModelConfig
+    from jaeger_ai.core.models.external_model import ExternalModelClient
+    from jaeger_ai.core.runtime.cron_turns import apply_cron_turn
+    from jaeger_agent.tools import email as email_tools
+
+    # 1a. Priority preserved on healthy calls (no round-robin drift away from primary key)
+    pool = CredentialPool(["k-primary", "k-secondary"])
+    assert pool.acquire() == "k-primary"
+    assert pool.acquire() == "k-primary"
+    pool.mark_failed("k-primary", cooldown_s=60.0)
+    assert pool.acquire() == "k-secondary"
+
+    # 1b. Secondary API key recovers when primary returns HTTP 401 AUTH
+    class _Auth401(Exception):
+        status_code = 401
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-bad-primary,sk-good-secondary")
+    ext = ExternalModelConfig(enabled=True, provider="openai", model="gpt-4o-mini")
+    client = ExternalModelClient(ext, layout=None)
+    attempted: list[str] = []
+
+    def _fake_oai(messages, max_tokens, temperature, top_p):
+        attempted.append(client._api_key)
+        if client._api_key == "sk-bad-primary":
+            raise _Auth401("401 unauthorized")
+        return "auth-failover-ok"
+
+    monkeypatch.setattr(client, "_chat_openai", _fake_oai)
+    res = client.chat([{"role": "user", "content": "ping"}])
+    assert res.text == "auth-failover-ok"
+    assert attempted == ["sk-bad-primary", "sk-good-secondary"]
+
+    # 2. Experimental /ws is disabled by default
+    monkeypatch.delenv("JAEGER_ENABLE_EXPERIMENTAL_WS", raising=False)
+    gw = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "gw.sqlite3"))
+    assert gw.ws_handler is None
+    ws_paths = {r.resource.canonical for r in gw.app.router.routes() if r.resource is not None}
+    assert "/ws" not in ws_paths and "/api/ws" not in ws_paths
+
+    # 3. Hybrid cron model directive routes routine jobs to local Ollama while stripping header
+    cleaned, req = apply_cron_turn(
+        "[jaeger:model=ollama/qwen3.5:9b]\nRun dry-run inbox triage",
+        session_id="cron:inbox-sweeper",
+        requested={},
+        source="cron",
+    )
+    assert cleaned == "Run dry-run inbox triage"
+    assert req["provider"] == "ollama"
+    assert req["model"] == "qwen3.5:9b"
+
+    # 4. Mail tools exported and blocklist matcher works
+    for fn_name in ("mark_mail", "scan_junk_mail", "block_sender", "unblock_sender", "list_blocked_senders"):
+        assert callable(getattr(email_tools, fn_name))
+    assert email_tools._matches_blocklist("Deals <news@spam.example.com>", ["@spam.example.com"]) == "@spam.example.com"

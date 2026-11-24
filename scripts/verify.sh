@@ -16,7 +16,8 @@ if [[ -d /opt/homebrew/bin ]]; then
 fi
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
-export PYTHONPATH="${REPO_ROOT}/packages/jaeger-agent:${REPO_ROOT}/packages/jaeger-os:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src"
+export PYTHONPATH="${STANDALONE_SRC_PATHS}:${REPO_ROOT}/packages/jaeger-agent:${REPO_ROOT}/packages/jaeger-os:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 JAEGER_VENV_ROOT="${JAEGER_VENV:-${HOME}/.jaeger/venv}"
 VENV_PY="${JAEGER_VENV_ROOT}/bin/python"
 VENV_PYTEST="${JAEGER_VENV_ROOT}/bin/pytest"

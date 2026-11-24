@@ -105,20 +105,28 @@ case "$(uname -s)" in
 esac
 
 # Share the updater's read-only preflight before changing the external env.
-# Prefer the existing Jaeger venv when present so contract/pydantic imports succeed.
-PREFLIGHT_PY="$PY"
+# When the Jaeger venv already exists, fail closed on ANY import error.
+# Only tolerate missing `pydantic` on a genuine first install before the venv exists.
 if [[ -x "$VENV/bin/python" ]]; then
-  PREFLIGHT_PY="$VENV/bin/python"
-fi
-PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "$PREFLIGHT_PY" -B - "$REPO_ROOT" <<'PYTHON'
+  PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "$VENV/bin/python" -B - "$REPO_ROOT" <<'PYTHON'
+from pathlib import Path
+import sys
+from jaeger_ai.cli.verbs.update_verb import _preflight_update
+raise SystemExit(_preflight_update(Path(sys.argv[1])))
+PYTHON
+else
+  PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "$PY" -B - "$REPO_ROOT" <<'PYTHON'
 from pathlib import Path
 import sys
 try:
     from jaeger_ai.cli.verbs.update_verb import _preflight_update
-except ModuleNotFoundError:
-    raise SystemExit(0)
+except ModuleNotFoundError as exc:
+    if exc.name == "pydantic":
+        raise SystemExit(0)
+    raise
 raise SystemExit(_preflight_update(Path(sys.argv[1])))
 PYTHON
+fi
 
 # 2. Create or reuse the external environment
 if [[ ! -d "$VENV" ]]; then

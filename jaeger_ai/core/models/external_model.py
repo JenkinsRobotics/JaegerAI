@@ -454,8 +454,23 @@ class ExternalModelClient:
                 raise
 
         started = time.perf_counter()
-        text = retry_call(_call)
-        return ExtChatResult(text=text.strip(), latency_s=time.perf_counter() - started)
+        max_auth_rotations = len(self._credential_pool) if self._credential_pool is not None else 1
+        tried_auth_keys: set[str] = set()
+        while True:
+            try:
+                text = retry_call(_call)
+                return ExtChatResult(text=text.strip(), latency_s=time.perf_counter() - started)
+            except Exception as exc:
+                reason = classify_error(exc)
+                if (
+                    reason == FailoverReason.AUTH.value
+                    and self._credential_pool is not None
+                    and len(self._credential_pool) > 1
+                ):
+                    tried_auth_keys.add(self._api_key)
+                    if len(tried_auth_keys) < max_auth_rotations:
+                        continue
+                raise
 
     def _chat_openai(self, messages, max_tokens, temperature, top_p) -> str:
         completion = self._chat_openai_completion(messages, max_tokens, temperature, top_p)

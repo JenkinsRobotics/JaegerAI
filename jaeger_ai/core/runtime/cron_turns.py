@@ -37,6 +37,7 @@ HEARTBEAT_FINALIZE_PROMPT = (
 )
 
 _HEARTBEAT_NAME = re.compile(r"heartbeat", re.I)
+_SCHEDULE_MODEL_DIRECTIVE = re.compile(r"^\[jaeger:model=([^\]]+)\]\s*\n?", re.I)
 
 
 def is_cron_source(source: str | None = "", *, session_id: str = "", options: dict[str, Any] | None = None) -> bool:
@@ -191,6 +192,19 @@ def apply_cron_turn(
         options["turn_timeout_s"] = cron_turn_timeout_s()
     requested["options"] = options
     text = str(prompt or "")
+    model_match = _SCHEDULE_MODEL_DIRECTIVE.match(text)
+    if model_match:
+        spec = model_match.group(1).strip()
+        text = text[model_match.end():].lstrip()
+        if spec and not requested.get("model"):
+            from jaeger_ai.contract.model_ids import split_routed_model_id
+            lane, mod = split_routed_model_id(spec)
+            if not lane and "/" in spec:
+                lane, mod = spec.split("/", 1)
+                lane, mod = lane.strip().lower(), mod.strip()
+            if lane and not requested.get("provider"):
+                requested["provider"] = lane
+            requested["model"] = mod or spec
     if is_heartbeat_job(session_id=session_id, prompt=text):
         if requested.get("allowed_tools") is None:
             requested["allowed_tools"] = list(HEARTBEAT_TOOLS)
