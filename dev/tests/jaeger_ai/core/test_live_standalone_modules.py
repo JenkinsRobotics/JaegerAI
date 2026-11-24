@@ -411,3 +411,20 @@ def test_sprint_phases_2_and_3_live_diagnostics_and_convergence_controller(tmp_p
     assert nudge_verify is not None and "app.py" in nudge_verify
     ctrl.record_tool_result("terminal", {"command": "pytest"}, ok=True)
     assert ctrl.maybe_finish_nudge(workspace=tmp_path, has_verify_tool=True, has_edit_tool=True) is None
+
+    # 3. Module 01: Local Ollama 262K model_info max is safely RAM-budgeted (never 17GB KV bloat)
+    from jaeger_ai.core.models import ollama_context as oc
+    monkeypatch_orig = oc.probe_ollama_context
+    try:
+        oc.probe_ollama_context = lambda *a, **k: (262_144, "model_info")
+        ctx, src = oc.resolve_serving_context(
+            provider="ollama",
+            model="qwen3.5:9b",
+            base_url="http://127.0.0.1:11434/v1",
+            configured_ctx=0,
+        )
+        assert src == "model_info"
+        assert 16_384 <= (ctx or 0) <= 131_072
+        assert ctx < 262_144
+    finally:
+        oc.probe_ollama_context = monkeypatch_orig

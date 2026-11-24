@@ -291,6 +291,12 @@ def resolve_serving_context(
         return configured, "configured"
 
     if probed is not None:
+        # Local Ollama: never blindly inject a 128K-1M GGUF training max from
+        # model_info as GPU KV cache on unified-memory laptops — budget it
+        # cleanly via standalone Module 01 (jaeger-models) based on host RAM.
+        if not hosted and source == "model_info":
+            from jaeger_models import safe_local_context_window
+            probed = safe_local_context_window(probed)
         return probed, source
 
     if configured is not None and configured > _LOCAL_DEFAULT_CTX:
