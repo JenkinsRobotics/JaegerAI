@@ -126,3 +126,38 @@ class FileChanges:
             data["undone"] = True
             self._save(session, request, data)
             return self.describe(session, request)
+
+    def snapshot_workspace(self, workspace: Path, session: str, request: str) -> str:
+        """Capture a Gateway-owned shadow-Git workspace checkpoint via ``jaeger-memory``.
+
+        Uses an isolated shadow repository under ``self.root / 'shadow_git'``
+        and never mutates the user's own ``.git`` directory or branch history.
+        """
+        from jaeger_memory import GitCheckpointManager
+
+        ws = Path(workspace).expanduser().resolve()
+        state_root = self.root / "shadow_git" / hashlib.sha256(str(ws).encode()).hexdigest()[:16]
+        with self.lock:
+            mgr = GitCheckpointManager(ws, state_root)
+            ref = mgr.snapshot()
+            data = self._load(session, request)
+            data["shadow_checkpoint"] = {"workspace": str(ws), "ref": ref}
+            self._save(session, request, data)
+            return ref
+
+    def restore_workspace_checkpoint(self, session: str, request: str) -> dict:
+        """Restore a previously captured Gateway shadow-Git workspace checkpoint."""
+        from jaeger_memory import GitCheckpointManager
+
+        with self.lock:
+            data = self._load(session, request)
+            cp = data.get("shadow_checkpoint")
+            if not isinstance(cp, dict) or not cp.get("workspace") or not cp.get("ref"):
+                raise ValueError("No shadow-Git workspace checkpoint recorded for this request")
+            ws = Path(cp["workspace"]).expanduser().resolve()
+            state_root = self.root / "shadow_git" / hashlib.sha256(str(ws).encode()).hexdigest()[:16]
+            mgr = GitCheckpointManager(ws, state_root)
+            mgr.restore(str(cp["ref"]))
+            data["shadow_restored"] = True
+            self._save(session, request, data)
+            return {"requestId": request, "workspace": str(ws), "ref": str(cp["ref"]), "restored": True}

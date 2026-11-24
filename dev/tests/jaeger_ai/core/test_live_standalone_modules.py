@@ -550,3 +550,88 @@ def test_deep_gutting_isolated_executors_sticky_failover_and_zero_event_retry(tm
         agent2.run_turn("stream me")
     assert ms.calls == 1, f"Must not retry after emitting partial delta! calls={ms.calls}"
     assert chunks == ["partial "]
+
+
+def test_wave2_reliability_credential_pool_tdd_backstop_gateway_modules_and_shadow_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proves Wave 2 modular gutting:
+    1. jaeger_agent.core.errors.classify_exception delegates to jaeger_reliability.classify_error.
+    2. ExternalModelClient rotates multi-keys via jaeger_reliability.CredentialPool on 429.
+    3. loop_backstop strips multi-line pytest deprecation preambles and tolerates TDD terminal runs.
+    4. Extracted Gateway modules (approval_providers, turn_callbacks, handoff_routes) stay live on JaegerGatewayApp.
+    5. FileChanges captures & restores shadow-Git checkpoints via jaeger_memory.GitCheckpointManager.
+    """
+    from jaeger_agent.core import errors as core_errors
+    from jaeger_agent.loop.loop_backstop import loop_halt_reason, semantic_failure_signature
+    from jaeger_ai.core.gateway import approval_providers, handoff_routes, server, turn_callbacks
+    from jaeger_ai.core.gateway.file_changes import FileChanges
+    from jaeger_ai.core.instance.schemas import ExternalModelConfig
+    from jaeger_ai.core.models.external_model import ExternalModelClient
+
+    # 1. Single-source error classification
+    class _HttpErr(Exception):
+        def __init__(self, status_code: int, text: str = "") -> None:
+            super().__init__(text)
+            self.status_code = status_code
+
+    assert core_errors.classify_exception(_HttpErr(404, "missing")) == core_errors.NOT_FOUND
+    assert core_errors.classify_exception(_HttpErr(402, "billing")) == core_errors.QUOTA
+    assert core_errors.classify_exception(_HttpErr(429, "too fast")) == core_errors.RATE_LIMIT
+    assert core_errors.classify_exception(_HttpErr(503, "busy")) == core_errors.TRANSIENT
+
+    # 2. CredentialPool multi-key rotation in ExternalModelClient
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-key-one,sk-key-two")
+    ext = ExternalModelConfig(enabled=True, provider="openai", model="gpt-4o-mini")
+    client = ExternalModelClient(ext, layout=None)
+    assert client._credential_pool is not None
+    used_keys: list[str] = []
+
+    def _fake_oai(messages, max_tokens, temperature, top_p):
+        used_keys.append(client._api_key)
+        if len(used_keys) == 1:
+            raise _HttpErr(429, "rate limit")
+        return "rotated-ok"
+
+    monkeypatch.setattr(client, "_chat_openai", _fake_oai)
+    monkeypatch.setattr("jaeger_agent.core.errors.time.sleep", lambda _s: None)
+    res = client.chat([{"role": "user", "content": "hi"}])
+    assert res.text == "rotated-ok"
+    assert used_keys == ["sk-key-one", "sk-key-two"]
+
+    # 3. TDD-safe loop backstop: warning-only stderr falls through to actual stdout failure line
+    warn_only_stderr = (
+        "/venv/pytest_asyncio/plugin.py:217: PytestDeprecationWarning: fixture scope\n"
+        "  icitly in order to avoid unexpected behavior. Valid fixture loop scopes are: function\n"
+    )
+    sig_a = semantic_failure_signature(
+        "terminal",
+        {"command": "pytest -k a"},
+        {"ok": False, "stderr": warn_only_stderr, "stdout": "FAILED test_a.py::test_one\n"},
+    )
+    sig_b = semantic_failure_signature(
+        "terminal",
+        {"command": "pytest -k a"},
+        {"ok": False, "stderr": warn_only_stderr, "stdout": "FAILED test_a.py::test_two\n"},
+    )
+    assert sig_a != sig_b and "test_one" in (sig_a or "") and "test_two" in (sig_b or "")
+    assert loop_halt_reason(2, {}, {sig_a: 1, sig_b: 1}) is None
+    assert loop_halt_reason(2, {}, {sig_b: 2}) is not None
+
+    # 4. Extracted Gateway modules are live on JaegerGatewayApp
+    assert issubclass(server.JaegerGatewayApp, turn_callbacks.GatewayTurnCallbacksMixin)
+    assert issubclass(server.JaegerGatewayApp, handoff_routes.GatewayHandoffRoutesMixin)
+    assert server._GatewayToolConfirmationProvider is approval_providers._GatewayToolConfirmationProvider
+
+    # 5. Gateway-owned shadow-Git workspace checkpoints (jaeger-memory)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "mod.py").write_text("x = 1\n", encoding="utf-8")
+    fc = FileChanges(tmp_path / "changes")
+    ref = fc.snapshot_workspace(ws, "s-cp", "r-cp")
+    assert ref
+    assert not (ws / ".git").exists()
+    (ws / "mod.py").write_text("x = 999\n", encoding="utf-8")
+    restored = fc.restore_workspace_checkpoint("s-cp", "r-cp")
+    assert restored["restored"] is True
+    assert (ws / "mod.py").read_text(encoding="utf-8") == "x = 1\n"

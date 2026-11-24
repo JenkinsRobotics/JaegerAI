@@ -233,6 +233,31 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
     return ""
 
 
+def resolve_api_keys(ext: ExternalModelConfig, layout: Any | None) -> list[str]:
+    """Resolve all configured API keys for ``ext`` in priority order.
+
+    Supports comma-separated multi-key pools (e.g. ``KEY1,KEY2``) as well as
+    distinct fallback env vars so :class:`jaeger_reliability.CredentialPool`
+    can rotate keys cleanly on rate-limit or auth failures.
+    """
+    keys: list[str] = []
+
+    def _add(raw: str) -> None:
+        for part in str(raw or "").split(","):
+            val = part.strip()
+            if val and val not in keys:
+                keys.append(val)
+
+    primary = resolve_api_key(ext, layout)
+    if primary:
+        _add(primary)
+    if ext.api_key_env:
+        _add(os.environ.get(ext.api_key_env, ""))
+    for env_var in _CONVENTIONAL_ENV.get(ext.provider, ()):
+        _add(os.environ.get(env_var, ""))
+    return keys
+
+
 # ---------------------------------------------------------------------------
 # Provider validation
 # ---------------------------------------------------------------------------
@@ -352,9 +377,12 @@ class ExternalModelClient:
         bind_agent_host()
         self.ext = ext
         self.layout = layout
-        self._api_key = validate_external_provider(
-            ext, resolve_api_key(ext, layout),
-        )
+        resolved_keys = resolve_api_keys(ext, layout)
+        primary_key = resolved_keys[0] if resolved_keys else resolve_api_key(ext, layout)
+        self._api_key = validate_external_provider(ext, primary_key)
+        pool_keys = [self._api_key, *[k for k in resolved_keys if k != self._api_key]]
+        from jaeger_reliability import CredentialPool
+        self._credential_pool = CredentialPool(pool_keys) if pool_keys and pool_keys[0] else None
         self.model_name = ext.model
         self.provider = ext.provider
         # Context-window autodetection for the TUI gauge + the
@@ -390,18 +418,40 @@ class ExternalModelClient:
         turn uses the same CliBackendAdapter / per-turn MCP path as the
         agent loop, instead of a tool-less one-shot."""
         from jaeger_agent.core.errors import retry_call
+        from jaeger_reliability import FailoverReason, classify_error
 
         is_oai = self.provider in _OPENAI_COMPATIBLE
 
         def _call() -> str:
-            if self.provider == "cli":
-                return self._chat_cli(
-                    messages, max_tokens, temperature, top_p,
-                    tools=tools, execute_tool=execute_tool,
-                )
-            if is_oai:
-                return self._chat_openai(messages, max_tokens, temperature, top_p)
-            return self._chat_anthropic(messages, max_tokens, temperature, top_p)
+            active_key = (
+                self._credential_pool.acquire()
+                if self._credential_pool is not None
+                else self._api_key
+            )
+            if active_key:
+                self._api_key = active_key
+            try:
+                if self.provider == "cli":
+                    out = self._chat_cli(
+                        messages, max_tokens, temperature, top_p,
+                        tools=tools, execute_tool=execute_tool,
+                    )
+                elif is_oai:
+                    out = self._chat_openai(messages, max_tokens, temperature, top_p)
+                else:
+                    out = self._chat_anthropic(messages, max_tokens, temperature, top_p)
+                if self._credential_pool is not None and active_key:
+                    self._credential_pool.mark_healthy(active_key)
+                return out
+            except Exception as exc:
+                if self._credential_pool is not None and active_key:
+                    reason = classify_error(exc)
+                    if reason in (FailoverReason.RATE_LIMIT.value, FailoverReason.AUTH.value):
+                        self._credential_pool.mark_failed(
+                            active_key,
+                            cooldown_s=60.0 if reason == FailoverReason.AUTH.value else 30.0,
+                        )
+                raise
 
         started = time.perf_counter()
         text = retry_call(_call)

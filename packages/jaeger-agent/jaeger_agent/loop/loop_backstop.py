@@ -125,12 +125,35 @@ def semantic_failure_signature(
     if not error:
         return None
     lines = [ln for ln in str(error).strip().splitlines() if ln.strip()]
-    # Skip benign warning preambles (e.g., PytestDeprecationWarning) so two
-    # distinct test failures don't collide on the same warning header line.
+    # Skip benign multi-line warning preambles (e.g., PytestDeprecationWarning /
+    # pytest_asyncio fixture loop scope warnings) so two distinct test failures
+    # never collide on the same warning line.
+    _WARN_NOISE = (
+        "Warning:",
+        "warnings.warn(",
+        "PytestDeprecationWarning",
+        "DeprecationWarning",
+        "Valid fixture loop scopes",
+        "asyncio_default_fixture_loop_scope",
+    )
     non_warn = [
         ln for ln in lines
-        if "Warning:" not in ln and "warnings.warn(" not in ln and not ln.lstrip().startswith(("The event loop scope", "Future versions of"))
+        if not any(tok in ln for tok in _WARN_NOISE)
+        and not ln.lstrip().startswith(("The event loop scope", "Future versions of", "icitly in order"))
     ]
+    if not non_warn:
+        # Test runners like pytest often print deprecation warnings to stderr
+        # while the actual failure (FAILED / AssertionError / E ...) is in stdout.
+        out_text = str(content.get("stdout") or content.get("output") or "").strip()
+        if out_text:
+            out_lines = [ln.strip() for ln in out_text.splitlines() if ln.strip()]
+            fail_lines = [
+                ln for ln in out_lines
+                if ln.startswith(("FAILED ", "ERROR ", "E   "))
+                or re.match(r"^[\w.]+(?:Error|Exception)(?::|$)", ln)
+            ]
+            if fail_lines:
+                non_warn = [fail_lines[-1]]
     eff_lines = non_warn or lines
     first_line = eff_lines[0][:160]
     if first_line.startswith("Traceback (most recent call last):"):
