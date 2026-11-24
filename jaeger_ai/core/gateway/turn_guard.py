@@ -7,8 +7,13 @@ registry and the live ``JaegerAgent.interrupt()`` handle immediately on timeout.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import os
 from typing import Any, Callable
+
+# Dedicated turn worker pool so an abandoned/timed-out model turn thread NEVER
+# starves asyncio's default threadpool used by session/request/health endpoints.
+_TURN_EXECUTOR = ThreadPoolExecutor(max_workers=16, thread_name_prefix="jaeger-turn")
 
 
 def resolve_turn_timeout_s() -> float | None:
@@ -32,8 +37,9 @@ async def run_turn_with_deadline(
     active_agents: dict[str, Any] | None = None,
     timeout_s: float | None = None,
 ) -> dict[str, Any]:
-    """Execute a synchronous turn function in a worker thread with hard deadline."""
-    coro = asyncio.to_thread(fn, *args)
+    """Execute a synchronous turn function on the isolated turn pool with hard deadline."""
+    loop = asyncio.get_running_loop()
+    coro = loop.run_in_executor(_TURN_EXECUTOR, fn, *args)
     if timeout_s is None:
         return await coro
     try:

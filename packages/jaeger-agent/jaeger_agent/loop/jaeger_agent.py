@@ -1990,6 +1990,17 @@ class JaegerAgent:
         already burned once.
         """
         adapters = [self.primary_adapter, *self.fallback_adapters]
+        # Sticky failover (jaeger-models StickyFallbackModel pattern): if a
+        # fallback adapter took over within the cooldown window, keep it first
+        # so subsequent steps preserve KV prompt-cache prefixes instead of
+        # re-hitting a failing primary on every iteration.
+        sticky_adapter = getattr(self, "_sticky_adapter", None)
+        sticky_until = float(getattr(self, "_sticky_adapter_until", 0.0) or 0.0)
+        if sticky_adapter is not None and sticky_adapter in adapters and time.monotonic() < sticky_until:
+            adapters = [sticky_adapter, *[a for a in adapters if a is not sticky_adapter]]
+        elif sticky_adapter is not None:
+            self._sticky_adapter = None
+            self._sticky_adapter_until = 0.0
 
         def _pre_flight_trim() -> None:
             # Pre-flight context guard. Prune/digest/drop history until
@@ -2086,6 +2097,14 @@ class JaegerAgent:
                                               "messages": len(self.messages)})
                     before_prompt_tokens = self.last_prompt_tokens
                     before_completion_tokens = self.last_completion_tokens
+                    stream_emitted = False
+
+                    def _guarded_delta(chunk: str) -> None:
+                        nonlocal stream_emitted
+                        if chunk:
+                            stream_emitted = True
+                        self.callbacks.on_stream_delta(chunk)
+
                     try:
                         raw = adapter.call(
                         formatted,
@@ -2099,7 +2118,7 @@ class JaegerAgent:
                         # nobody is listening so adapters skip the
                         # per-chunk callback cost entirely.
                         on_delta=(
-                            self.callbacks.on_stream_delta
+                            _guarded_delta
                             if self.callbacks.stream_delta is not None
                             else None
                         ),
@@ -2149,6 +2168,10 @@ class JaegerAgent:
                         # answered): the step recovered, so the stale flag must
                         # not halt the loop after the next tool call.
                         self.last_halt_reason = None
+                    # Pin healthy fallback adapter for 60s (sticky failover)
+                    if adapter is not self.primary_adapter:
+                        self._sticky_adapter = adapter
+                        self._sticky_adapter_until = time.monotonic() + 60.0
                     return adapter.parse_response(raw)
                 except AgentInterrupted:
                     # Interrupt propagates — handled by ``run_turn`` via
@@ -2194,24 +2217,14 @@ class JaegerAgent:
                         )
                         _pre_flight_trim()
                         continue  # same adapter, freshly trimmed prompt
-                    kind = _classify_adapter_error(exc)
-                    # Enrich error classification with standalone Module 07 (jaeger-reliability)
-                    if kind not in {"rate_limit", "transient"} and not _policy_blocks_model(exc):
-                        try:
-                            from jaeger_reliability import FailoverReason, classify_error
-
-                            reason_v2 = classify_error(exc)
-                            if reason_v2 == FailoverReason.RATE_LIMIT.value:
-                                kind = "rate_limit"
-                            elif reason_v2 in {FailoverReason.TRANSIENT.value, FailoverReason.EMPTY_RESPONSE.value}:
-                                kind = "transient"
-                        except ImportError:
-                            pass
+                    kind = _classify_adapter_error(exc) if not _policy_blocks_model(exc) else "policy"
                     cap = {
                         "rate_limit": self._RATE_LIMIT_RETRIES,
                         "transient": self._TRANSIENT_RETRIES,
                     }.get(kind, 0)
-                    if attempt < cap and not self._interrupt_event.is_set():
+                    # Zero-event-safe streaming invariant (jaeger-reliability):
+                    # never retry once visible deltas were already emitted.
+                    if not stream_emitted and attempt < cap and not self._interrupt_event.is_set():
                         attempt += 1
                         delay = _retry_delay(kind, attempt)
                         from jaeger_agent import live as _live
@@ -3037,11 +3050,17 @@ def _scrub_surrogates_in_messages(messages: list[Message]) -> None:
 
 
 def _classify_adapter_error(exc: BaseException) -> str:
-    """Classify an adapter exception for the retry policy. Delegates to
-    :mod:`jaeger_os.core.runtime.cloud_errors` (HTTP status + class-name
-    heuristics); degrades to ``UNKNOWN`` if the classifier itself is
-    unavailable or chokes — UNKNOWN means "no retry, next adapter",
-    which is the pre-classification behaviour."""
+    """Classify an adapter exception via standalone Module 07 (jaeger-reliability)."""
+    from jaeger_reliability import FailoverReason, classify_error
+
+    if isinstance(exc, Exception):
+        reason = classify_error(exc)
+        if reason == FailoverReason.RATE_LIMIT.value:
+            return "rate_limit"
+        if reason in {FailoverReason.TRANSIENT.value, FailoverReason.EMPTY_RESPONSE.value}:
+            return "transient"
+        if reason == FailoverReason.AUTH.value:
+            return "auth"
     try:
         from jaeger_agent.core.errors import classify_exception
         return classify_exception(exc)

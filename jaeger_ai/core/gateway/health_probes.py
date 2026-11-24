@@ -8,11 +8,16 @@ cancelling.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import socket
 from pathlib import Path
 from typing import Any, Callable
 
 from aiohttp import web
+
+# Dedicated tiny executor so stalled/timed-out agent turn threads on asyncio's
+# default executor can NEVER starve GET /health probes.
+_HEALTH_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="jaeger-health")
 
 
 async def safe_thread_probe(
@@ -21,9 +26,13 @@ async def safe_thread_probe(
     timeout_s: float = 1.5,
     default: Any = None,
 ) -> Any:
-    """Run a synchronous probe off the event loop with a hard ceiling."""
+    """Run a synchronous probe off the event loop on the isolated health executor."""
+    loop = asyncio.get_running_loop()
     try:
-        return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout_s)
+        return await asyncio.wait_for(
+            loop.run_in_executor(_HEALTH_EXECUTOR, fn, *args),
+            timeout=timeout_s,
+        )
     except Exception as exc:  # noqa: BLE001 — health must never crash or hang
         return default(exc) if callable(default) else default
 
@@ -110,8 +119,13 @@ async def build_health_response(
         "owner_runtime": owner,
     }
     checks["native_mcp"]["required"] = not owner.get("ok")
+    # If Ollama momentarily times out while actively serving a local GPU decode
+    # (as opposed to being down/refused), do not falsely mark the Gateway dead.
+    ollama_healthy_or_busy = bool(ollama.get("ok")) or (
+        bool(owner.get("ok")) and ollama.get("error") == "TimeoutError"
+    )
     required_ok = (
-        (bool(ollama.get("ok")) or not ollama_required)
+        (ollama_healthy_or_busy or not ollama_required)
         and (bool(owner.get("ok")) or bool(native_mcp.get("ok")))
     )
     all_green = required_ok

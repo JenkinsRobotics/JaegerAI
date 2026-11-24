@@ -428,3 +428,125 @@ def test_sprint_phases_2_and_3_live_diagnostics_and_convergence_controller(tmp_p
         assert ctx < 262_144
     finally:
         oc.probe_ollama_context = monkeypatch_orig
+
+
+def test_deep_gutting_isolated_executors_sticky_failover_and_zero_event_retry(tmp_path: Path) -> None:
+    """Proves Deep Gutting Phases 1-3:
+    1. /health stays 200 OK in <0.5s on isolated _HEALTH_EXECUTOR when Ollama momentarily times out
+    2. JaegerAgent sticky failover stays pinned to healthy fallback across turns (KV cache safe)
+    3. Zero-event-safe streaming never retries after a visible delta was already emitted.
+    """
+    import asyncio
+    import time
+    from jaeger_ai.core.gateway.health_probes import build_health_response
+    from jaeger_agent import JaegerAgent, ProviderAdapter
+    from jaeger_agent.loop.callbacks import AgentCallbacks
+
+    # 1. Health returns 200 OK fast when owner_runtime is healthy and Ollama probe times out under GPU load
+    async def _slow_ollama(*_a, **_kw):
+        await asyncio.sleep(5.0)
+        return {"ok": True}
+
+    async def _fast_ok(*_a, **_kw):
+        return {"ok": True}
+
+    fake_app = SimpleNamespace(
+        _probe_owner_runtime=lambda: {"ok": True, "resident": True, "owner": True},
+        _probe_bridge=_fast_ok,
+        _probe_http=_slow_ollama,
+        _probe_native_mcp=_fast_ok,
+        _instance_root=lambda: tmp_path,
+        _entity_diagnostics=lambda: {},
+        _background_status={"enabled": False},
+        source_revision_at_start="deadbeef",
+        store=SimpleNamespace(
+            path=tmp_path / "gateway.sqlite3",
+            schema_version=lambda: 16,
+            process_lease=lambda: {"ok": True},
+        ),
+    )
+    t0 = time.monotonic()
+    resp = asyncio.run(build_health_response(
+        fake_app,
+        locked_ollama_url="http://127.0.0.1:11434",
+        locked_webui_url="http://127.0.0.1:8790",
+        default_gateway_host="127.0.0.1",
+        default_gateway_port=33418,
+        jaeger_version="test",
+        probe_timeout_s=0.15,
+    ))
+    assert time.monotonic() - t0 < 0.8
+    assert resp.status == 200
+
+    # 2. Sticky failover pins fallback adapter across consecutive turns
+    class _FailingPrimary(ProviderAdapter):
+        name = "failing-primary"
+        calls = 0
+
+        def format_messages(self, messages, tools, system):
+            return {"messages": messages}
+
+        def call(self, formatted, interrupt_event, **kwargs):
+            self.calls += 1
+            raise RuntimeError("401 unauthorized")
+
+        def parse_response(self, raw):
+            return raw
+
+        def supports(self, feature):
+            return False
+
+    class _HealthyFallback(ProviderAdapter):
+        name = "healthy-fallback"
+        calls = 0
+
+        def format_messages(self, messages, tools, system):
+            return {"messages": messages}
+
+        def call(self, formatted, interrupt_event, **kwargs):
+            self.calls += 1
+            return {"role": "assistant", "content": f"fb-reply-{self.calls}"}
+
+        def parse_response(self, raw):
+            return raw
+
+        def supports(self, feature):
+            return False
+
+    p = _FailingPrimary()
+    fb = _HealthyFallback()
+    agent = JaegerAgent(adapter=p, fallback_adapters=[fb])
+    assert agent.run_turn("first") == "fb-reply-1"
+    assert agent.run_turn("second") == "fb-reply-2"
+    # Primary was tried ONLY once; second turn stayed pinned to healthy fallback!
+    assert p.calls == 1
+    assert fb.calls == 2
+
+    # 3. Zero-event-safe streaming: once a delta was emitted, transient error MUST NOT retry
+    class _MidStreamFail(ProviderAdapter):
+        name = "mid-stream-fail"
+        calls = 0
+
+        def format_messages(self, messages, tools, system):
+            return {"messages": messages}
+
+        def call(self, formatted, interrupt_event, **kwargs):
+            self.calls += 1
+            on_delta = kwargs.get("on_delta")
+            if on_delta:
+                on_delta("partial ")
+            raise RuntimeError("503 connection dropped mid-stream")
+
+        def parse_response(self, raw):
+            return raw
+
+        def supports(self, feature):
+            return False
+
+    ms = _MidStreamFail()
+    chunks: list[str] = []
+    agent2 = JaegerAgent(adapter=ms, callbacks=AgentCallbacks(stream_delta=chunks.append))
+    with pytest.raises(RuntimeError, match="503"):
+        agent2.run_turn("stream me")
+    assert ms.calls == 1, f"Must not retry after emitting partial delta! calls={ms.calls}"
+    assert chunks == ["partial "]
