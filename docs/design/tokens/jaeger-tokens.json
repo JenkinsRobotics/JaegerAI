@@ -1,0 +1,1284 @@
+{
+ "$schema": "https://design-tokens.github.io/community-group/format/",
+ "$description": "Jaeger design tokens v1.0.0 (approved 2026-10-21). Single source of truth. Generated outputs: jaeger.css, jaeger-vscode-map.css, aether.css, JaegerTokens.swift, theme.py.",
+ "meta": {
+  "version": {
+   "$type": "string",
+   "$value": "1.0.0"
+  },
+  "default-feel": {
+   "$type": "string",
+   "$value": "jaeger"
+  },
+  "default-stream": {
+   "$type": "string",
+   "$value": "jaeger"
+  },
+  "default-icon": {
+   "$type": "string",
+   "$value": "shield-blue"
+  },
+  "default-avatar": {
+   "$type": "string",
+   "$value": "bronze-helmet"
+  }
+ },
+ "color": {
+  "light": {
+   "bg": {
+    "$type": "color",
+    "$value": "#fcfcfc"
+   },
+   "surface": {
+    "$type": "color",
+    "$value": "#ffffff"
+   },
+   "sidebar": {
+    "$type": "color",
+    "$value": "#f5f5f5"
+   },
+   "raised": {
+    "$type": "color",
+    "$value": "#ffffff"
+   },
+   "inset": {
+    "$type": "color",
+    "$value": "#f0f0f0"
+   },
+   "border": {
+    "$type": "color",
+    "$value": "#e3e3e3"
+   },
+   "border-strong": {
+    "$type": "color",
+    "$value": "#8c8c8c"
+   },
+   "text": {
+    "$type": "color",
+    "$value": "#1c1c1c"
+   },
+   "text-2": {
+    "$type": "color",
+    "$value": "#545454"
+   },
+   "text-3": {
+    "$type": "color",
+    "$value": "#666666"
+   },
+   "faint": {
+    "$type": "color",
+    "$value": "#8c8c8c",
+    "$description": "non-text UI only (>=3:1)"
+   },
+   "accent": {
+    "$type": "color",
+    "$value": "#0b62d6"
+   },
+   "accent-text": {
+    "$type": "color",
+    "$value": "#0b62d6"
+   },
+   "on-accent": {
+    "$type": "color",
+    "$value": "#ffffff"
+   },
+   "accent-hover": {
+    "$type": "color",
+    "$value": "#0953b8"
+   },
+   "focus": {
+    "$type": "color",
+    "$value": "#0b62d6"
+   },
+   "ok": {
+    "$type": "color",
+    "$value": "#137a43"
+   },
+   "warn": {
+    "$type": "color",
+    "$value": "#9a5b00"
+   },
+   "error": {
+    "$type": "color",
+    "$value": "#c42b2b"
+   },
+   "info": {
+    "$type": "color",
+    "$value": "#0b62d6"
+   }
+  },
+  "dark": {
+   "bg": {
+    "$type": "color",
+    "$value": "#121212"
+   },
+   "surface": {
+    "$type": "color",
+    "$value": "#161616"
+   },
+   "sidebar": {
+    "$type": "color",
+    "$value": "#0e0e0e"
+   },
+   "raised": {
+    "$type": "color",
+    "$value": "#1f1f1f"
+   },
+   "inset": {
+    "$type": "color",
+    "$value": "#242424"
+   },
+   "border": {
+    "$type": "color",
+    "$value": "#2c2c2c"
+   },
+   "border-strong": {
+    "$type": "color",
+    "$value": "#7a7a7a"
+   },
+   "text": {
+    "$type": "color",
+    "$value": "#f5f5f5"
+   },
+   "text-2": {
+    "$type": "color",
+    "$value": "#b3b3b3"
+   },
+   "text-3": {
+    "$type": "color",
+    "$value": "#9a9a9a"
+   },
+   "faint": {
+    "$type": "color",
+    "$value": "#707070",
+    "$description": "non-text UI only (>=3:1)"
+   },
+   "accent": {
+    "$type": "color",
+    "$value": "#1f6fe5"
+   },
+   "accent-text": {
+    "$type": "color",
+    "$value": "#5ea2ff"
+   },
+   "on-accent": {
+    "$type": "color",
+    "$value": "#ffffff"
+   },
+   "accent-hover": {
+    "$type": "color",
+    "$value": "#1a5fc8"
+   },
+   "focus": {
+    "$type": "color",
+    "$value": "#5ea2ff"
+   },
+   "ok": {
+    "$type": "color",
+    "$value": "#3fcf86"
+   },
+   "warn": {
+    "$type": "color",
+    "$value": "#e8a940"
+   },
+   "error": {
+    "$type": "color",
+    "$value": "#ff6b6b"
+   },
+   "info": {
+    "$type": "color",
+    "$value": "#5ea2ff"
+   }
+  },
+  "tint": {
+   "red": {
+    "$type": "color",
+    "$value": "#d92d3a",
+    "$description": "white label passes 4.5"
+   },
+   "orange": {
+    "$type": "color",
+    "$value": "#c2410c",
+    "$description": "white label passes 4.5"
+   },
+   "brown": {
+    "$type": "color",
+    "$value": "#8a5a2b",
+    "$description": "white label passes 4.5"
+   },
+   "green": {
+    "$type": "color",
+    "$value": "#13804a",
+    "$description": "white label passes 4.5"
+   },
+   "teal": {
+    "$type": "color",
+    "$value": "#0f7d70",
+    "$description": "white label passes 4.5"
+   },
+   "blue": {
+    "$type": "color",
+    "$value": "#1f6fe5",
+    "$description": "white label passes 4.5"
+   },
+   "purple": {
+    "$type": "color",
+    "$value": "#7c4ddb",
+    "$description": "white label passes 4.5"
+   },
+   "pink": {
+    "$type": "color",
+    "$value": "#c8287a",
+    "$description": "white label passes 4.5"
+   }
+  },
+  "tint-label": {
+   "$type": "color",
+   "$value": "#ffffff"
+  }
+ },
+ "font": {
+  "family-sans": {
+   "$type": "fontFamily",
+   "$value": [
+    "-apple-system",
+    "BlinkMacSystemFont",
+    "SF Pro Text",
+    "Segoe UI",
+    "system-ui",
+    "sans-serif"
+   ]
+  },
+  "family-mono": {
+   "$type": "fontFamily",
+   "$value": [
+    "ui-monospace",
+    "SF Mono",
+    "Menlo",
+    "Consolas",
+    "monospace"
+   ]
+  },
+  "size-body-app": {
+   "$type": "dimension",
+   "$value": "13px"
+  },
+  "size-body-web": {
+   "$type": "dimension",
+   "$value": "14px"
+  },
+  "line-height": {
+   "$type": "number",
+   "$value": 1.54
+  },
+  "scale": {
+   "xs": {
+    "$type": "dimension",
+    "$value": "11px"
+   },
+   "sm": {
+    "$type": "dimension",
+    "$value": "12px"
+   },
+   "body": {
+    "$type": "dimension",
+    "$value": "13px"
+   },
+   "md": {
+    "$type": "dimension",
+    "$value": "14px"
+   },
+   "lg": {
+    "$type": "dimension",
+    "$value": "16px"
+   },
+   "xl": {
+    "$type": "dimension",
+    "$value": "20px"
+   },
+   "xxl": {
+    "$type": "dimension",
+    "$value": "26px"
+   }
+  },
+  "weight": {
+   "regular": {
+    "$type": "fontWeight",
+    "$value": 400
+   },
+   "medium": {
+    "$type": "fontWeight",
+    "$value": 560
+   },
+   "strong": {
+    "$type": "fontWeight",
+    "$value": 650
+   }
+  }
+ },
+ "space": {
+  "1": {
+   "$type": "dimension",
+   "$value": "4px"
+  },
+  "2": {
+   "$type": "dimension",
+   "$value": "8px"
+  },
+  "3": {
+   "$type": "dimension",
+   "$value": "12px"
+  },
+  "4": {
+   "$type": "dimension",
+   "$value": "16px"
+  },
+  "5": {
+   "$type": "dimension",
+   "$value": "20px"
+  },
+  "6": {
+   "$type": "dimension",
+   "$value": "24px"
+  },
+  "7": {
+   "$type": "dimension",
+   "$value": "32px"
+  },
+  "8": {
+   "$type": "dimension",
+   "$value": "40px"
+  },
+  "9": {
+   "$type": "dimension",
+   "$value": "48px"
+  },
+  "10": {
+   "$type": "dimension",
+   "$value": "64px"
+  },
+  "half": {
+   "$type": "dimension",
+   "$value": "2px",
+   "$description": "hairline nudges only"
+  }
+ },
+ "radius": {
+  "xs": {
+   "$type": "dimension",
+   "$value": "4px"
+  },
+  "sm": {
+   "$type": "dimension",
+   "$value": "6px"
+  },
+  "md": {
+   "$type": "dimension",
+   "$value": "8px"
+  },
+  "lg": {
+   "$type": "dimension",
+   "$value": "12px"
+  },
+  "xl": {
+   "$type": "dimension",
+   "$value": "18px"
+  },
+  "pill": {
+   "$type": "dimension",
+   "$value": "999px"
+  }
+ },
+ "motion": {
+  "duration": {
+   "instant": {
+    "$type": "duration",
+    "$value": "50ms"
+   },
+   "fast": {
+    "$type": "duration",
+    "$value": "100ms"
+   },
+   "base": {
+    "$type": "duration",
+    "$value": "150ms"
+   },
+   "slow": {
+    "$type": "duration",
+    "$value": "200ms"
+   },
+   "slower": {
+    "$type": "duration",
+    "$value": "300ms"
+   }
+  },
+  "easing": {
+   "out": {
+    "$type": "cubicBezier",
+    "$value": [
+     0.16,
+     1,
+     0.3,
+     1
+    ]
+   },
+   "press": {
+    "$type": "cubicBezier",
+    "$value": [
+     0.215,
+     0.61,
+     0.355,
+     1
+    ]
+   },
+   "standard": {
+    "$type": "cubicBezier",
+    "$value": [
+     0.4,
+     0,
+     0.2,
+     1
+    ]
+   }
+  },
+  "press-scale": {
+   "$type": "number",
+   "$value": 0.98
+  },
+  "enter-rise": {
+   "$type": "dimension",
+   "$value": "4px"
+  },
+  "reduced-motion": {
+   "$type": "string",
+   "$value": "all transitions off under prefers-reduced-motion"
+  }
+ },
+ "sound": {
+  "$description": "Setting appearance.sounds, default off. Original synthesized cues, <250ms, peak -18 dBFS; muted when unfocused except attention.",
+  "send": {
+   "$type": "string",
+   "$value": "jg.sound.send",
+   "$description": "A5->E6, 60ms each, soft attack"
+  },
+  "done": {
+   "$type": "string",
+   "$value": "jg.sound.done",
+   "$description": "C6 bell, 180ms decay; only if turn >8s"
+  },
+  "attention": {
+   "$type": "string",
+   "$value": "jg.sound.attention",
+   "$description": "two 90ms D6 pulses 120ms apart"
+  },
+  "error": {
+   "$type": "string",
+   "$value": "jg.sound.error",
+   "$description": "E4/F4 minor second 160ms low-passed"
+  }
+ },
+ "feel": {
+  "jaeger": {
+   "$description": "House default. No overrides.",
+   "light": {},
+   "dark": {}
+  },
+  "shield-mono": {
+   "$description": "Jenkins Robotics shield logo (2023-24). Pure black/white, 2px outlines, radius 0-4. High-contrast feel.",
+   "light": {
+    "bg": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "surface": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "sidebar": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "raised": {
+     "$type": "color",
+     "$value": "#f4f4f4"
+    },
+    "inset": {
+     "$type": "color",
+     "$value": "#f4f4f4"
+    },
+    "text": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "text-2": {
+     "$type": "color",
+     "$value": "#3d3d3d"
+    },
+    "text-3": {
+     "$type": "color",
+     "$value": "#3d3d3d"
+    },
+    "accent": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "ok": {
+     "$type": "color",
+     "$value": "#0f6b3a"
+    },
+    "warn": {
+     "$type": "color",
+     "$value": "#7a4800"
+    },
+    "error": {
+     "$type": "color",
+     "$value": "#b0201f"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "border-strong": {
+     "$type": "color",
+     "$value": "#000000"
+    }
+   },
+   "dark": {
+    "bg": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "surface": {
+     "$type": "color",
+     "$value": "#0a0a0a"
+    },
+    "sidebar": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "raised": {
+     "$type": "color",
+     "$value": "#161616"
+    },
+    "inset": {
+     "$type": "color",
+     "$value": "#161616"
+    },
+    "text": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "text-2": {
+     "$type": "color",
+     "$value": "#c2c2c2"
+    },
+    "text-3": {
+     "$type": "color",
+     "$value": "#c2c2c2"
+    },
+    "accent": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#000000"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "ok": {
+     "$type": "color",
+     "$value": "#3fcf86"
+    },
+    "warn": {
+     "$type": "color",
+     "$value": "#e8a940"
+    },
+    "error": {
+     "$type": "color",
+     "$value": "#ff6b6b"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "border-strong": {
+     "$type": "color",
+     "$value": "#ffffff"
+    }
+   },
+   "radius": {
+    "xs": {
+     "$type": "dimension",
+     "$value": "0px"
+    },
+    "sm": {
+     "$type": "dimension",
+     "$value": "2px"
+    },
+    "md": {
+     "$type": "dimension",
+     "$value": "4px"
+    },
+    "lg": {
+     "$type": "dimension",
+     "$value": "4px"
+    },
+    "xl": {
+     "$type": "dimension",
+     "$value": "4px"
+    }
+   },
+   "border-width": {
+    "$type": "dimension",
+    "$value": "2px"
+   }
+  },
+  "ares-bronze": {
+   "$description": "ARES app (ARESApp.swift #d9b256 on #101014, helmet icon). Dark-first; light keeps jaeger neutrals with a clamped bronze accent.",
+   "dark": {
+    "bg": {
+     "$type": "color",
+     "$value": "#101014"
+    },
+    "surface": {
+     "$type": "color",
+     "$value": "#17171c"
+    },
+    "sidebar": {
+     "$type": "color",
+     "$value": "#101014"
+    },
+    "raised": {
+     "$type": "color",
+     "$value": "#1f1f26"
+    },
+    "inset": {
+     "$type": "color",
+     "$value": "#1f1f26"
+    },
+    "text": {
+     "$type": "color",
+     "$value": "#f2ece0"
+    },
+    "text-2": {
+     "$type": "color",
+     "$value": "#b0a794"
+    },
+    "text-3": {
+     "$type": "color",
+     "$value": "#b0a794"
+    },
+    "accent": {
+     "$type": "color",
+     "$value": "#d9b256"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#d9b256"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#d9b256"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#101014"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#d9b256"
+    },
+    "ok": {
+     "$type": "color",
+     "$value": "#5fc48a"
+    },
+    "warn": {
+     "$type": "color",
+     "$value": "#e8a940"
+    },
+    "error": {
+     "$type": "color",
+     "$value": "#ff5a4f"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#d9b256"
+    },
+    "border-strong": {
+     "$type": "color",
+     "$value": "#7d6a42"
+    }
+   },
+   "light": {
+    "accent": {
+     "$type": "color",
+     "$value": "#8d7337"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#76602e"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#826a33"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#8d7337"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#826a33"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#ffffff"
+    }
+   }
+  },
+  "mission-control": {
+   "$description": "ares-minecraft dashboard HUD. Dark-first; cyan glow hairlines, grid tiles, mono labels. Light keeps jaeger neutrals with clamped HUD blue.",
+   "dark": {
+    "bg": {
+     "$type": "color",
+     "$value": "#080b10"
+    },
+    "surface": {
+     "$type": "color",
+     "$value": "#0e141e"
+    },
+    "sidebar": {
+     "$type": "color",
+     "$value": "#080b10"
+    },
+    "raised": {
+     "$type": "color",
+     "$value": "#141c2b"
+    },
+    "inset": {
+     "$type": "color",
+     "$value": "#141c2b"
+    },
+    "text": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "text-2": {
+     "$type": "color",
+     "$value": "#8b9ab0"
+    },
+    "text-3": {
+     "$type": "color",
+     "$value": "#8b9ab0"
+    },
+    "accent": {
+     "$type": "color",
+     "$value": "#3889fd"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#3889fd"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#08ebf1"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#080b10"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#08ebf1"
+    },
+    "ok": {
+     "$type": "color",
+     "$value": "#00ff88"
+    },
+    "warn": {
+     "$type": "color",
+     "$value": "#ffd700"
+    },
+    "error": {
+     "$type": "color",
+     "$value": "#ff4444"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#08ebf1"
+    },
+    "border-strong": {
+     "$type": "color",
+     "$value": "#3a6fb8"
+    },
+    "glow": {
+     "$type": "shadow",
+     "$value": {
+      "color": "#08ebf166",
+      "offsetX": "0px",
+      "offsetY": "0px",
+      "blur": "10px",
+      "spread": "0px"
+     }
+    }
+   },
+   "light": {
+    "accent": {
+     "$type": "color",
+     "$value": "#2f74d7"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#2761b4"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#2c6cc7"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#2f74d7"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#2c6cc7"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#ffffff"
+    }
+   },
+   "radius": {
+    "sm": {
+     "$type": "dimension",
+     "$value": "4px"
+    },
+    "md": {
+     "$type": "dimension",
+     "$value": "6px"
+    },
+    "lg": {
+     "$type": "dimension",
+     "$value": "8px"
+    }
+   }
+  },
+  "aurora": {
+   "$description": "Classic flame-J colours. Dark-first; gradient is decoration only, never under text.",
+   "dark": {
+    "bg": {
+     "$type": "color",
+     "$value": "#120b24"
+    },
+    "surface": {
+     "$type": "color",
+     "$value": "#1a0f2d"
+    },
+    "sidebar": {
+     "$type": "color",
+     "$value": "#120b24"
+    },
+    "raised": {
+     "$type": "color",
+     "$value": "#211437"
+    },
+    "inset": {
+     "$type": "color",
+     "$value": "#211437"
+    },
+    "text": {
+     "$type": "color",
+     "$value": "#f3eefc"
+    },
+    "text-2": {
+     "$type": "color",
+     "$value": "#b8a9d4"
+    },
+    "text-3": {
+     "$type": "color",
+     "$value": "#b8a9d4"
+    },
+    "accent": {
+     "$type": "color",
+     "$value": "#7b3fe0"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#7b3fe0"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#e08cf8"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#e08cf8"
+    },
+    "ok": {
+     "$type": "color",
+     "$value": "#3fcf86"
+    },
+    "warn": {
+     "$type": "color",
+     "$value": "#e8a940"
+    },
+    "error": {
+     "$type": "color",
+     "$value": "#ff6b6b"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#e08cf8"
+    },
+    "border-strong": {
+     "$type": "color",
+     "$value": "#7a5aa8"
+    },
+    "gradient-decor": {
+     "$type": "gradient",
+     "$value": [
+      {
+       "color": "#e05af6",
+       "position": 0
+      },
+      {
+       "color": "#9c4beb",
+       "position": 0.4
+      },
+      {
+       "color": "#4f45cb",
+       "position": 0.7
+      },
+      {
+       "color": "#3d84d8",
+       "position": 1
+      }
+     ]
+    }
+   },
+   "light": {
+    "accent": {
+     "$type": "color",
+     "$value": "#7b3fe0"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#783ddb"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#7b3fe0"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#7b3fe0"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#7b3fe0"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#ffffff"
+    }
+   }
+  },
+  "vscode": {
+   "$description": "Public MIT VS Code Modern defaults (not REA). Inside VS Code the host --vscode-* vars win.",
+   "light": {
+    "bg": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "surface": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "sidebar": {
+     "$type": "color",
+     "$value": "#f8f8f8"
+    },
+    "text": {
+     "$type": "color",
+     "$value": "#3b3b3b"
+    },
+    "accent": {
+     "$type": "color",
+     "$value": "#005fb8"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#005fb8"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#005fb8"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#005fb8"
+    }
+   },
+   "dark": {
+    "bg": {
+     "$type": "color",
+     "$value": "#1f1f1f"
+    },
+    "surface": {
+     "$type": "color",
+     "$value": "#1f1f1f"
+    },
+    "sidebar": {
+     "$type": "color",
+     "$value": "#181818"
+    },
+    "raised": {
+     "$type": "color",
+     "$value": "#252526"
+    },
+    "text": {
+     "$type": "color",
+     "$value": "#cccccc"
+    },
+    "accent": {
+     "$type": "color",
+     "$value": "#0078d4"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#4daafc"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#4daafc"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#4daafc"
+    }
+   },
+   "radius": {
+    "xs": {
+     "$type": "dimension",
+     "$value": "2px"
+    },
+    "sm": {
+     "$type": "dimension",
+     "$value": "4px"
+    },
+    "md": {
+     "$type": "dimension",
+     "$value": "6px"
+    },
+    "lg": {
+     "$type": "dimension",
+     "$value": "8px"
+    }
+   },
+   "stream": {
+    "$type": "string",
+    "$value": "vscode"
+   },
+   "motion-enter": {
+    "$type": "duration",
+    "$value": "0ms"
+   }
+  },
+  "grok": {
+   "$description": "REA grokbot-re measurements; raw accent #1680f3 clamped to #0c73e4 (raw fails 3.88 under white).",
+   "light": {
+    "accent": {
+     "$type": "color",
+     "$value": "#0c73e4"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#0b6ad4"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#0c73e4"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#0b6ad4"
+    }
+   },
+   "dark": {
+    "accent": {
+     "$type": "color",
+     "$value": "#0c73e4"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#4d9bff"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#4d9bff"
+    },
+    "info": {
+     "$type": "color",
+     "$value": "#4d9bff"
+    }
+   },
+   "font-size-body": {
+    "$type": "dimension",
+    "$value": "14px"
+   },
+   "font-weight-body": {
+    "$type": "number",
+    "$value": 420
+   },
+   "line-height-body": {
+    "$type": "dimension",
+    "$value": "22px"
+   },
+   "radius": {
+    "xl": {
+     "$type": "dimension",
+     "$value": "18px"
+    }
+   },
+   "stream": {
+    "$type": "string",
+    "$value": "grok"
+   }
+  }
+ },
+ "feel-later": {
+  "chatgpt": {
+   "$type": "string",
+   "$value": "deferred to later (REA values in proposal \u00a72)"
+  },
+  "claude": {
+   "$type": "string",
+   "$value": "deferred to later"
+  },
+  "gemini": {
+   "$type": "string",
+   "$value": "deferred to later (pending REA data)"
+  }
+ },
+ "brand": {
+  "aether": {
+   "$description": "Aether brand override: shares every Jaeger neutral, text, status, type, space, radius and motion token; only accent differs (Aether Indigo).",
+   "light": {
+    "accent": {
+     "$type": "color",
+     "$value": "#5048d8"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#5048d8"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#5048d8"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#4038b8"
+    }
+   },
+   "dark": {
+    "accent": {
+     "$type": "color",
+     "$value": "#6158e8"
+    },
+    "accent-text": {
+     "$type": "color",
+     "$value": "#9c96ff"
+    },
+    "on-accent": {
+     "$type": "color",
+     "$value": "#ffffff"
+    },
+    "focus": {
+     "$type": "color",
+     "$value": "#9c96ff"
+    },
+    "accent-hover": {
+     "$type": "color",
+     "$value": "#5148c8"
+    }
+   },
+   "cad": {
+    "part": {
+     "$type": "color",
+     "$value": "#36d6c3"
+    },
+    "hardware": {
+     "$type": "color",
+     "$value": "#ff8a3d"
+    },
+    "joint": {
+     "$type": "color",
+     "$value": "#c38bff"
+    }
+   }
+  }
+ },
+ "asset": {
+  "icon": {
+   "shield-blue": {
+    "$type": "string",
+    "$value": "assets/shield-blue.svg"
+   },
+   "shield-dark": {
+    "$type": "string",
+    "$value": "assets/shield-dark.svg"
+   },
+   "shield-light": {
+    "$type": "string",
+    "$value": "assets/shield-light.svg"
+   },
+   "template": {
+    "$type": "string",
+    "$value": "assets/shield-template.svg"
+   }
+  },
+  "avatar": {
+   "bronze-helmet": {
+    "$type": "string",
+    "$value": "assets/avatar-bronze-{full|face}-{px}.png",
+    "$description": "face crop at <=32pt, full above"
+   }
+  }
+ }
+}
