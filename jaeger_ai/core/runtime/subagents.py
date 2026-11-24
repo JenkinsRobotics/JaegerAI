@@ -565,9 +565,25 @@ def _delegate_background(client: Any, subtasks: list[str], *, role: str = "leaf"
     execution['options'] = {**opts, 'delegation_depth': parent_depth + 1}
     inherited['execution'] = execution
     handles = []
+    mailbox = None
+    try:
+        from jaeger_ai.core.instance.instance import operator_state_root
+        from jaeger_orchestration import DurableMailbox
+        mailbox = DurableMailbox(operator_state_root() / "orchestration")
+    except Exception:
+        mailbox = None
     for objective in clean:
         task = context['owner'].submit(objective, context=inherited,
             key=f"delegate:{context['request_id']}:{objective}")
+        if mailbox is not None:
+            try:
+                mailbox.send(
+                    sender=str(context.get("session_id") or "parent"),
+                    recipient=f"task:{task['task_id']}",
+                    payload={"objective": objective, "role": role, "depth": parent_depth + 1},
+                )
+            except Exception:
+                pass
         handles.append({'id':task['task_id'], 'task':objective, 'status':task['status']})
     return {'ok':True, 'background':True, 'dispatched':len(handles), 'handles':handles}
 

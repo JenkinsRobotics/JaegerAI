@@ -6851,17 +6851,20 @@ class JaegerGatewayApp:
             if timing is not None:
                 timing.prepare_turn_start_ms = timing.now()
             try:
-                prepared = await asyncio.to_thread(
-                    runtime.prepare_turn,
-                    text,
-                    session_id=session_id,
-                    source="gateway",
-                    request_id=rid,
-                    gateway_session=session,
-                    metadata=turn_meta,
-                    ide_context=((execution or {}).get("options") or {}).get("ide"),
-                    model=(execution or {}).get("model"),
-                    provider=(execution or {}).get("provider"),
+                prepared = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        runtime.prepare_turn,
+                        text,
+                        session_id=session_id,
+                        source="gateway",
+                        request_id=rid,
+                        gateway_session=session,
+                        metadata=turn_meta,
+                        ide_context=((execution or {}).get("options") or {}).get("ide"),
+                        model=(execution or {}).get("model"),
+                        provider=(execution or {}).get("provider"),
+                    ),
+                    timeout=30.0,
                 )
                 prompt = prepared.prompt
                 context_references = pinned_references + tuple(getattr(prepared, "context_references", ()))
@@ -6928,7 +6931,10 @@ class JaegerGatewayApp:
                 )
             if prepared is not None and not turn_result.get("error"):
                 try:
-                    await asyncio.to_thread(runtime.finish_turn, prepared, str(turn_result.get("text") or ""))
+                    await asyncio.wait_for(
+                        asyncio.to_thread(runtime.finish_turn, prepared, str(turn_result.get("text") or "")),
+                        timeout=15.0,
+                    )
                 except Exception:
                     logger.warning("could not record the answer for %s", rid, exc_info=True)
 
@@ -7446,7 +7452,7 @@ class JaegerGatewayApp:
             return web.json_response({"error": str(exc)}, status=409)
 
     async def handle_get_request(self, request: web.Request) -> web.Response:
-        row = self.store.get_request(request.match_info["request_id"])
+        row = await asyncio.to_thread(self.store.get_request, request.match_info["request_id"])
         if row is None or row["session_id"] != request.match_info["id"]:
             return web.json_response({"error": "Request not found"}, status=404)
         return web.json_response(row)
@@ -7459,7 +7465,7 @@ class JaegerGatewayApp:
         first, then by turn_id (the same fallback handle_cancel_turn uses).
         """
         rid = request.match_info["request_id"]
-        row = self.store.get_request(rid) or self.store.get_request_by_turn(rid)
+        row = await asyncio.to_thread(lambda: self.store.get_request(rid) or self.store.get_request_by_turn(rid))
         if row is None:
             return web.json_response({"error": "Request not found"}, status=404)
         return web.json_response(row)
@@ -7476,7 +7482,7 @@ class JaegerGatewayApp:
             limit = int(request.query.get("limit") or 20)
         except ValueError:
             return web.json_response({"error": "Invalid since_event_id or limit"}, status=400)
-        items = self.store.proactive_notifications(since, limit)
+        items = await asyncio.to_thread(self.store.proactive_notifications, since, limit)
         cursor = items[-1]["event_id"] if items else since
         return web.json_response({"notifications": items, "cursor": cursor})
 
@@ -7512,13 +7518,13 @@ class JaegerGatewayApp:
         Same store, same schema, same cursor semantics as the stream.
         """
         session_id = request.match_info["id"]
-        if not self.store.get_session(session_id):
+        if not await asyncio.to_thread(self.store.get_session, session_id):
             return web.json_response({"error": "Session not found"}, status=404)
         try:
             since = int(request.query.get("since_event_id") or 0)
         except ValueError:
             return web.json_response({"error": "Invalid since_event_id"}, status=400)
-        window = self.event_bus.replay_window(session_id, since)
+        window = await asyncio.to_thread(self.event_bus.replay_window, session_id, since)
         return web.json_response(window)
 
     async def handle_cancel_turn(self, request: web.Request) -> web.Response:
@@ -7527,7 +7533,7 @@ class JaegerGatewayApp:
         request_id = str(body.get("request_id") or body.get("turn_id") or "").strip()
         if not request_id:
             return web.json_response({"error": "request_id is required"}, status=400)
-        row = self.store.get_request(request_id) or self.store.get_request_by_turn(request_id)
+        row = await asyncio.to_thread(lambda: self.store.get_request(request_id) or self.store.get_request_by_turn(request_id))
         if row is None or row["session_id"] != session_id:
             return web.json_response({"error": "Request not found"}, status=404)
         from jaeger_ai.core.authority.kernel import is_untrusted_actor
