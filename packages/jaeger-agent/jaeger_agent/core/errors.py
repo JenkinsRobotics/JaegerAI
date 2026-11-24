@@ -35,73 +35,20 @@ UNKNOWN = "unknown"        # unclassified — surface as-is, do not spin
 # like a 429 but a credit-exhausted account won't recover on a backoff.
 _RETRYABLE = frozenset({RATE_LIMIT, TRANSIENT})
 
-# Markers that mean "out of credits", not "slow down" — providers overload
-# 429 for both, so we sniff the body/code to tell them apart.
-_QUOTA_MARKERS = (
-    "insufficient_quota", "insufficient quota", "exceeded your current quota",
-    "out of credits", "billing", "payment required",
-)
-
-
-def _message_of(exc: BaseException) -> str:
-    """Lowercased text we can pattern-match: the str, plus any string
-    ``code``/``type`` attrs and an OpenAI-style ``.body`` error dict."""
-    parts = [str(exc)]
-    for attr in ("code", "type"):
-        v = getattr(exc, attr, None)
-        if isinstance(v, str):
-            parts.append(v)
-    body = getattr(exc, "body", None)
-    if isinstance(body, dict):
-        err = body.get("error") if isinstance(body.get("error"), dict) else body
-        for k in ("code", "type", "message"):
-            v = err.get(k) if isinstance(err, dict) else None
-            if isinstance(v, str):
-                parts.append(v)
-    return " ".join(parts).lower()
-
-
-def _status_of(exc: BaseException) -> int | None:
-    """Best-effort HTTP status from an arbitrary provider exception."""
-    for attr in ("status_code", "status", "http_status", "code"):
-        v = getattr(exc, attr, None)
-        if isinstance(v, int) and 100 <= v <= 599:
-            return v
-    # openai / httpx nest the status on a `.response` object.
-    resp = getattr(exc, "response", None)
-    if resp is not None:
-        v = getattr(resp, "status_code", None)
-        if isinstance(v, int) and 100 <= v <= 599:
-            return v
-    return None
-
 
 def classify_exception(exc: BaseException) -> str:
-    """Map a provider exception to AUTH / NOT_FOUND / RATE_LIMIT /
-    TRANSIENT / UNKNOWN — by HTTP status and exception-class name."""
-    name = type(exc).__name__.lower()
-    status = _status_of(exc)
+    """Map a provider exception to AUTH / NOT_FOUND / QUOTA / RATE_LIMIT /
+    TRANSIENT / UNKNOWN via standalone ``jaeger_reliability.classify_error``."""
+    from jaeger_reliability import FailoverReason, classify_error
 
-    if status in (401, 403) or "authenticat" in name or "permissiondenied" in name:
-        return AUTH
-    if status == 404 or "notfound" in name:
-        return NOT_FOUND
-    # Quota before rate-limit: a 429 carrying ``insufficient_quota`` is an
-    # empty wallet, not a too-fast burst — retrying it just wastes time.
-    if status == 402 or any(k in _message_of(exc) for k in _QUOTA_MARKERS):
-        return QUOTA
-    if status == 429 or "ratelimit" in name:
-        return RATE_LIMIT
-    if (status is not None and status >= 500) or any(
-        k in name for k in (
-            "timeout", "connection", "apiconnection", "serviceunavailable",
-            "overloaded", "internalserver", "badgateway",
-            "chunkedencodingerror", "remoteprotocolerror", "incompleteread",
-            "streamerrored", "streamclosed",
-        )
-    ) or any(k in _message_of(exc) for k in ("stream disconnected", "chunk decode")):
-        return TRANSIENT
-    return UNKNOWN
+    reason = classify_error(exc)
+    return {
+        FailoverReason.AUTH.value: AUTH,
+        FailoverReason.NOT_FOUND.value: NOT_FOUND,
+        FailoverReason.QUOTA.value: QUOTA,
+        FailoverReason.RATE_LIMIT.value: RATE_LIMIT,
+        FailoverReason.TRANSIENT.value: TRANSIENT,
+    }.get(reason, UNKNOWN)
 
 
 # Match the LMStudio / llama.cpp-server 400 we keep hitting: the loaded

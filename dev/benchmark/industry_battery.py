@@ -230,13 +230,16 @@ def start_isolated_gateway() -> subprocess.Popen:
         "JAEGER_TURN_TIMEOUT_S": "240",
         "PYTHONPATH": f"{REPO_ROOT}:{REPO_ROOT / 'packages' / 'jaeger-agent'}:{REPO_ROOT / 'packages' / 'jaeger-os'}",
     }
+    gw_log_path = STATE_DIR / "gateway.log"
+    gw_log = gw_log_path.open("a", encoding="utf-8")
     proc = subprocess.Popen(
         [VENV_PY, "-B", "-m", "jaeger_ai.core.gateway.server", "--host", "127.0.0.1", "--port", str(PORT)],
         env=env,
-        stdout=subprocess.PIPE,
+        stdout=gw_log,
         stderr=subprocess.STDOUT,
         text=True,
     )
+    gw_log.close()
     deadline = time.time() + 30
     while time.time() < deadline:
         try:
@@ -247,7 +250,7 @@ def start_isolated_gateway() -> subprocess.Popen:
         except Exception:
             pass
         if proc.poll() is not None:
-            out = proc.stdout.read() if proc.stdout else ""
+            out = gw_log_path.read_text(encoding="utf-8", errors="replace") if gw_log_path.exists() else ""
             raise RuntimeError(f"Isolated Gateway exited ({proc.returncode}): {out[-800:]}")
         time.sleep(0.3)
     proc.terminate()

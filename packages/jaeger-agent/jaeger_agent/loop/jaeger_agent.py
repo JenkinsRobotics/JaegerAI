@@ -3000,7 +3000,7 @@ def _merge_guidance(content: Any, guidance: str) -> Any:
 # un-superseded failures and appends a verifier footer to the final
 # answer (Hermes file-mutation-verifier pattern).
 _MUTATION_TOOLS = frozenset({
-    "write_file", "patch", "append_file", "delete_file",
+    "write_file", "file_write", "edit_file", "patch", "apply_patch", "patch_file", "append_file", "delete_file",
 })
 
 # Server-side context-overflow signatures (LM Studio / Ollama /
