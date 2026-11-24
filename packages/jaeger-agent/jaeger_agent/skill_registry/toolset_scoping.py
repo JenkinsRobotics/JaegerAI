@@ -224,7 +224,10 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "credentials": frozenset({
         "get_credential", "list_credentials", "set_credential", "request_secret",
     }),
-    "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin", "list_connectors", "add_connector"}),
+    "plugins": frozenset({
+        "list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin",
+        "list_connectors", "add_connector", "test_connector", "reload_connector", "remove_connector",
+    }),
     "email": frozenset({
         "send_email", "move_mail", "batch_move", "mark_mail",
         "sweep_mail", "schedule_inbox_sweeper", "scan_junk_mail",
@@ -305,7 +308,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "skills": "reload, package, benchmark skills; deep-think queue",
     "computer_use": "Mac-driving + browser automation",
     "credentials": "list, read, and save stored credentials",
-    "plugins": "list, set up + activate plugins; send messages",
+    "plugins": "list, set up + activate plugins; manage MCP connectors (list/add/test/reload/remove); send messages",
     "email": "Mail.app: list/read/plan/scan_junk, send, move, batch_move, mark, blocklist, sweep",
     "smart_home": "Home Assistant — list/read smart-home devices, call services",
     "people": "person index — profiles of people you know (name/likes/access)",

@@ -305,12 +305,12 @@ def _limits(payload: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]
     tools = payload["tools"] if "tools" in payload else existing.get("tools")
     if tools is not None:
         if not isinstance(tools, dict):
-            raise MCPServiceError("tools must be an object: {include?, exclude?, max?, gated?}")
-        unknown = set(tools) - {"include", "exclude", "max", "gated"}
+            raise MCPServiceError("tools must be an object: {include?, exclude?, read_only?, max?, gated?}")
+        unknown = set(tools) - {"include", "exclude", "read_only", "max", "gated"}
         if unknown:
             raise MCPServiceError(f"unknown tools keys: {sorted(unknown)}")
         clean: dict[str, Any] = {}
-        for key in ("include", "exclude"):
+        for key in ("include", "exclude", "read_only"):
             if key in tools:
                 value = tools[key]
                 if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
