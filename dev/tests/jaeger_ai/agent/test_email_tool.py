@@ -740,3 +740,79 @@ def test_mail_tool_cli_list_get_and_batch_move(monkeypatch, capsys):
     assert mod.main(["get", "Google", "INBOX", "5"]) == 0
     assert mod.main(["batch_move", "Google", "INBOX", "trash", "1,2"]) == 0
     assert mod.main(["aliases", "trash"]) == 0
+
+
+def test_run_applescript_serializes_concurrent_calls(monkeypatch):
+    """Parallel LLM tool calls must not hammer Mail.app AppleEvents concurrently."""
+    import concurrent.futures
+    import threading
+    import time
+
+    monkeypatch.setattr(email.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(email.shutil, "which", lambda name: "/usr/bin/osascript")
+
+    active = 0
+    max_active = 0
+    guard = threading.Lock()
+
+    def fake_run(args, **kwargs):
+        nonlocal active, max_active
+        with guard:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with guard:
+            active -= 1
+        return _proc(0, stdout="ok")
+
+    monkeypatch.setattr(email.subprocess, "run", fake_run)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda i: email.run_applescript(f"return {i}"), range(4)))
+    assert all(r["ok"] for r in results)
+    assert max_active == 1
+
+
+def test_mark_mail_generates_valid_applescript_and_validates_ids(monkeypatch):
+    monkeypatch.setattr(email.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(email.shutil, "which", lambda name: "/usr/bin/osascript")
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen["script"] = args[-1]
+        return _proc(0, stdout="UPDATED:2")
+
+    monkeypatch.setattr(email.subprocess, "run", fake_run)
+    with use_policy(PermissionPolicy(confirmation=AllowAllProvider())):
+        res = email.mark_mail("Exchange", "INBOX", ["101", "102"], read=True, flagged=False)
+        bad = email.mark_mail("Exchange", "INBOX", ["abc"], read=True)
+    assert res["ok"] is True and res["updated"] == 2
+    assert "resolveMb" in seen["script"]
+    assert "set read status of m to true" in seen["script"]
+    assert "set flagged status of m to false" in seen["script"]
+    assert bad["ok"] is False and "numeric" in bad["error"]
+
+
+def test_scan_junk_mail_filters_low_confidence_spam_from_rescue_candidates(monkeypatch):
+    monkeypatch.setattr(email, "list_mailboxes", lambda: {
+        "ok": True, "accounts": [{"name": "Exchange"}, {"name": "Google"}],
+    })
+
+    def fake_list_mail(account, mailbox="INBOX", limit=25, unread_only=False):
+        if account == "Exchange":
+            return {
+                "ok": True,
+                "messages": [
+                    {"id": "1", "sender": "Sonos <no-reply@con.sonos.com>", "subject": "Check out speakers", "date": "Tue"},
+                    {"id": "2", "sender": "clientcomm@continentalstock.com", "subject": "Book-Entry Confirm - QUANTUM SPACE", "date": "Tue"},
+                    {"id": "3", "sender": "billing@stripe.com", "subject": "Your receipt #99", "date": "Tue"},
+                ],
+            }
+        return {"ok": False, "error": "temporary error", "timed_out": False}
+
+    monkeypatch.setattr(email, "list_mail", fake_list_mail)
+    res = email.scan_junk_mail(limit=10)
+    assert res["ok"] is True
+    assert res["count"] == 3
+    rescue_ids = {r["id"] for r in res["rescue_candidates"]}
+    assert rescue_ids == {"2", "3"}  # brokerage + receipt rescued; bare no-reply promo excluded
+    assert res["errors"] == ["Google: temporary error"]

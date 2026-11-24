@@ -31,15 +31,22 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
+import threading
 from email.message import EmailMessage
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
-_TIMEOUT_S = 15
+_TIMEOUT_S = 25
 _MAX_FETCH = 25
 _FIELD_SEP = "|||"
+# Mail.app handles AppleEvents on a single main queue. Parallel LLM tool calls
+# (e.g. 4 concurrent plan_mail_triage / scan_junk_mail calls across accounts)
+# launching simultaneous osascript subprocesses contend on Mail.app and cause
+# every call to time out simultaneously. Serialize all Mail.app AppleScript
+# round-trips so each call's timeout starts only once it owns the Mail queue.
+_MAIL_APPLESCRIPT_LOCK = threading.Lock()
 
 
 def _escape_applescript(text: str) -> str:
@@ -74,10 +81,11 @@ def _mail_app_accounts() -> list[str]:
     """Names of every account configured in Mail.app — empty means
     Mail isn't set up (no inbox to send from)."""
     try:
-        out = subprocess.run(
-            ["osascript", "-e", 'tell application "Mail" to get name of every account'],
-            check=False, capture_output=True, text=True, timeout=10,
-        )
+        with _MAIL_APPLESCRIPT_LOCK:
+            out = subprocess.run(
+                ["osascript", "-e", 'tell application "Mail" to get name of every account'],
+                check=False, capture_output=True, text=True, timeout=10,
+            )
     except Exception:  # noqa: BLE001 — treat any failure as "no accounts"
         return []
     if out.returncode != 0:
@@ -123,10 +131,11 @@ def _send_via_mail_app(to: str, subject: str, body: str, cc: str | None) -> dict
         "end tell"
     )
     try:
-        out = subprocess.run(
-            ["osascript", "-e", script],
-            check=False, capture_output=True, text=True, timeout=15,
-        )
+        with _MAIL_APPLESCRIPT_LOCK:
+            out = subprocess.run(
+                ["osascript", "-e", script],
+                check=False, capture_output=True, text=True, timeout=15,
+            )
     except Exception as exc:  # noqa: BLE001 — surface as a tool error, never raise
         return {"sent": False, "error": f"{type(exc).__name__}: {exc}"}
     if out.returncode != 0:
@@ -263,10 +272,11 @@ def run_applescript(script: str, timeout_seconds: int = _TIMEOUT_S) -> dict[str,
             error="osascript not on PATH (macOS-only utility)",
         )
     try:
-        out = subprocess.run(
-            ["osascript", "-e", script],
-            check=False, capture_output=True, text=True, timeout=timeout_seconds,
-        )
+        with _MAIL_APPLESCRIPT_LOCK:
+            out = subprocess.run(
+                ["osascript", "-e", script],
+                check=False, capture_output=True, text=True, timeout=timeout_seconds,
+            )
     except subprocess.TimeoutExpired:
         return _envelope(
             ok=False, exit_code=124, timed_out=True, raw_output="",
@@ -431,6 +441,12 @@ on resolveMb(accName, wanted, aliasCSV)
             end ignoring
         end repeat
         if acc is missing value then error "No Mail account named " & accName
+        -- Fast path: try direct top-level exact name before walking nested folders.
+        if wanted does not contain "/" then
+            try
+                return mailbox wanted of acc
+            end try
+        end if
         ignoring case
             if wanted is "INBOX" then
                 try
@@ -438,9 +454,23 @@ on resolveMb(accName, wanted, aliasCSV)
                 end try
             end if
         end ignoring
-        set found to my _walk(mailboxes of acc, "", wanted, aliasCSV, true, 0)
+        set topMbs to mailboxes of acc
+        -- Fast pass over top-level mailboxes only (avoids nested IPC walks for common folders).
+        if wanted does not contain "/" then
+            repeat with mb in topMbs
+                set n to name of mb as string
+                ignoring case
+                    if n is wanted then return mb
+                end ignoring
+            end repeat
+            repeat with mb in topMbs
+                set n to name of mb as string
+                if my _aliasHit(n, aliasCSV) then return mb
+            end repeat
+        end if
+        set found to my _walk(topMbs, "", wanted, aliasCSV, true, 0)
         if found is missing value then
-            set found to my _walk(mailboxes of acc, "", wanted, aliasCSV, false, 0)
+            set found to my _walk(topMbs, "", wanted, aliasCSV, false, 0)
         end if
         if found is missing value then error "Can't get mailbox " & wanted & " of account " & accName & ". Call list_mailboxes and use an exact path."
         return found
@@ -698,7 +728,7 @@ def list_mailboxes() -> dict[str, Any]:
         return collected
     end collectPaths
     '''
-    res = run_applescript(script, timeout_seconds=10)
+    res = run_applescript(script, timeout_seconds=20)
     if not res.get("ok"):
         return _envelope(
             ok=False, listed=False, accounts=[], error=res.get("error"),
@@ -760,6 +790,9 @@ def list_mail(
             {resolve}
             set startIndex to {start_index}
             set endIndex to {end_index}
+            set totalCount to count of messages of targetMb
+            if totalCount < startIndex then return "COUNT:0"
+            if endIndex > totalCount then set endIndex to totalCount
             set outLines to {{}}
             repeat with i from startIndex to endIndex
                 try
@@ -1104,7 +1137,7 @@ def _batch_move_impl(
         end try
     end tell
     '''
-    res = run_applescript(script, timeout_seconds=10)
+    res = run_applescript(script, timeout_seconds=20)
     if not res.get("ok"):
         return _envelope(
             ok=False, moved=False,
@@ -1341,16 +1374,21 @@ def mark_mail(
     """Mark up to 25 Mail.app messages read/unread and/or flagged/unflagged in one transaction."""
     acc = (account or "").strip()
     src = (mailbox or "").strip() or "INBOX"
-    ids = _parse_message_ids(message_ids)
+    ids = _normalize_ids(message_ids)
     if not acc or not ids:
         return _envelope(ok=False, updated=0, error="account and at least one numeric message_id are required")
+    bad = [i for i in ids if not i.isdigit()]
+    if bad:
+        return _envelope(
+            ok=False, updated=0,
+            error=f"message_ids must be numeric Mail.app ids from list_mail, got {bad!r}",
+        )
     if read is None and flagged is None:
         return _envelope(ok=False, updated=0, error="specify at least one of read or flagged")
     if len(ids) > _MAX_FETCH:
         return _envelope(ok=False, updated=0, error=f"at most {_MAX_FETCH} messages per call (got {len(ids)})")
 
-    acc_esc = _as_escape(acc)
-    src_call = _resolve_expr(acc_esc, src, "src")
+    src_call = _resolve_call("src", acc, src)
     id_list = ", ".join(ids)
     mutations: list[str] = []
     if read is not None:
@@ -1379,7 +1417,7 @@ def mark_mail(
         end try
     end tell
     '''
-    res = run_applescript(script, timeout_seconds=10)
+    res = run_applescript(script, timeout_seconds=20)
     if not res.get("ok"):
         return _envelope(
             ok=False, updated=0, error=res.get("error"),
@@ -1436,21 +1474,32 @@ def scan_junk_mail(
             continue
         for msg in fetched.get("messages") or []:
             filing = classify_filing(str(msg.get("sender") or ""), str(msg.get("subject") or ""))
+            # In Junk, only flag likely false positives for rescue: receipts,
+            # finance, security notices, or non-noreply/non-promo personal/transactional
+            # senders. Low-confidence noreply/promo spam stays out of rescue_candidates.
+            is_rescue = bool(
+                filing["category"] in ("Receipts", "Finance")
+                or (filing["keep"] and filing["confidence"] != "low" and not filing["verify"])
+            )
             row = {
                 "id": str(msg.get("id") or ""),
                 "account": name,
-                "mailbox": "junk",
                 "sender": msg.get("sender"),
                 "subject": msg.get("subject"),
                 "date": msg.get("date"),
                 "category": filing["category"],
-                "keep": filing["keep"],
-                "confidence": filing["confidence"],
-                "reason": filing["reason"],
+                "rescue": is_rescue,
             }
             items.append(row)
-            if filing["keep"] or filing["verify"]:
-                rescue_candidates.append(row)
+            if is_rescue:
+                rescue_candidates.append({
+                    "id": row["id"],
+                    "account": name,
+                    "sender": row["sender"],
+                    "subject": row["subject"],
+                    "category": filing["category"],
+                    "reason": filing["reason"],
+                })
     return _envelope(
         ok=(len(errors) < len(names) if names else False),
         accounts_scanned=names,

@@ -226,8 +226,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
     }),
     "plugins": frozenset({"list_plugins", "setup_plugin", "activate_plugin", "send_message", "certify_admin", "list_connectors", "add_connector"}),
     "email": frozenset({
-        "send_email", "move_mail", "batch_move",
-        "sweep_mail", "schedule_inbox_sweeper",
+        "send_email", "move_mail", "batch_move", "mark_mail",
+        "sweep_mail", "schedule_inbox_sweeper", "scan_junk_mail",
+        "block_sender", "unblock_sender", "list_blocked_senders",
         "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage",
     }),
     "smart_home": frozenset({
@@ -305,7 +306,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "computer_use": "Mac-driving + browser automation",
     "credentials": "list, read, and save stored credentials",
     "plugins": "list, set up + activate plugins; send messages",
-    "email": "Mail.app: list/read/plan, send, move, batch_move, sweep",
+    "email": "Mail.app: list/read/plan/scan_junk, send, move, batch_move, mark, blocklist, sweep",
     "smart_home": "Home Assistant — list/read smart-home devices, call services",
     "people": "person index — profiles of people you know (name/likes/access)",
     "models": "list/download models; set_mode (normal/high/deep-sleep); "
