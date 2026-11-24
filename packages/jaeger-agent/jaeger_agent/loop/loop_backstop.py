@@ -38,7 +38,8 @@ MAX_SEMANTIC_FAILURES = 2  # 2-strike: same failure signature twice → halt
 # errors are the same resolve failure, not a new attempt.
 MAIL_TOOLS = frozenset({
     "list_mail", "list_mailboxes", "read_mail", "plan_mail_triage",
-    "move_mail", "batch_move", "sweep_mail",
+    "move_mail", "batch_move", "mark_mail", "scan_junk_mail",
+    "block_sender", "unblock_sender", "list_blocked_senders", "sweep_mail",
 })
 
 # Warn-before-halt thresholds (Hermes ``tool_guardrails`` pattern).
