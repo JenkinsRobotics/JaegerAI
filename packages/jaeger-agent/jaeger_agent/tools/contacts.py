@@ -14,6 +14,7 @@ import shutil
 import subprocess
 from typing import Any
 
+from jaeger_macos import appleevents_lock, escape_applescript as _escape_applescript
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
@@ -21,10 +22,6 @@ _TIMEOUT_S = 10
 _FIELD_SEP = "␟"
 _VALUE_SEP = "␝"
 _RECORD_SEP = "␞"
-
-
-def _escape_applescript(text: str) -> str:
-    return (text or "").replace("\\", "\\\\").replace('"', '\\"')
 
 
 def lookup_contact(name: str) -> dict[str, Any]:
@@ -73,10 +70,11 @@ def lookup_contact(name: str) -> dict[str, Any]:
         "end tell"
     )
     try:
-        out = subprocess.run(
-            ["osascript", "-e", script], check=False, capture_output=True,
-            text=True, timeout=_TIMEOUT_S,
-        )
+        with appleevents_lock("contacts"):
+            out = subprocess.run(
+                ["osascript", "-e", script], check=False, capture_output=True,
+                text=True, timeout=_TIMEOUT_S,
+            )
     except subprocess.TimeoutExpired:
         return {"found": False, "error": f"Contacts lookup timed out after {_TIMEOUT_S}s"}
     except Exception as exc:  # noqa: BLE001

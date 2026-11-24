@@ -22,16 +22,13 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
+from jaeger_macos import appleevents_lock, escape_applescript as _escape_applescript
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 _TIMEOUT_S = 60
 _FIELD_SEP = "␟"   # unlikely to appear in real event text
 _RECORD_SEP = "␞"
-
-
-def _escape_applescript(text: str) -> str:
-    return (text or "").replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _as_applescript_date(dt: datetime) -> str:
@@ -59,10 +56,11 @@ def _not_macos_error() -> dict[str, Any]:
 
 
 def _run_osascript(script: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["osascript", "-e", script], check=False, capture_output=True,
-        text=True, timeout=_TIMEOUT_S,
-    )
+    with appleevents_lock("calendar"):
+        return subprocess.run(
+            ["osascript", "-e", script], check=False, capture_output=True,
+            text=True, timeout=_TIMEOUT_S,
+        )
 
 
 def get_events(

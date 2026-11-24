@@ -389,8 +389,9 @@ def _resolve_absolute_write(p: Path) -> Path:
     # Full access intentionally bypasses Jaeger's file authority and protected
     # path policy. The host filesystem remains the final authority.
     try:
-        from jaeger_ai.core.runtime.autonomy import effective_autonomy, full_access_enabled
-        if full_access_enabled(effective_autonomy(_require_layout().config_path)):
+        from jaeger_os.core.modules import resolve_application_module
+        _autonomy = resolve_application_module("core.runtime.autonomy")
+        if _autonomy.full_access_enabled(_autonomy.effective_autonomy(_require_layout().config_path)):
             return full
     except Exception:  # noqa: BLE001
         pass
@@ -656,8 +657,9 @@ def _resolve_read(path: str) -> Path:
                     full = cand
                     break
     try:
-        from jaeger_ai.core.runtime.autonomy import effective_autonomy, full_access_enabled
-        if full_access_enabled(effective_autonomy(_require_layout().config_path)):
+        from jaeger_os.core.modules import resolve_application_module
+        _autonomy = resolve_application_module("core.runtime.autonomy")
+        if _autonomy.full_access_enabled(_autonomy.effective_autonomy(_require_layout().config_path)):
             return full
     except Exception:  # noqa: BLE001
         pass

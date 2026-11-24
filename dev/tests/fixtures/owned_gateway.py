@@ -58,6 +58,7 @@ class OwnedGateway:
         environment = {
             **os.environ, "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": os.pathsep.join([
+                *[str(p) for p in sorted(REPO.glob("packages/*/src"))],
                 str(REPO),
                 str(REPO / "packages/jaeger-agent"),
                 str(REPO / "packages/jaeger-os"),

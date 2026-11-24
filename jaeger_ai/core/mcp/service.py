@@ -28,6 +28,24 @@ def _path(layout: Any) -> Path:
     return Path(getattr(layout, "mcp_config_path", Path(layout.root) / "mcp.json"))
 
 
+def schema_cache(layout: Any):
+    """Return the locked discovery-only MCPSchemaCache for this instance."""
+    from jaeger_mcp.schema_cache import MCPSchemaCache
+    return MCPSchemaCache(_path(layout).with_name("mcp_schema_cache.json"))
+
+
+def invalidate_schema_cache(layout: Any, name: str | None = None) -> None:
+    """Explicitly invalidate discovery metadata on configure/reload/remove/notify."""
+    try:
+        cache = schema_cache(layout)
+        if name:
+            cache.invalidate(name)
+        else:
+            cache.invalidate_all()
+    except Exception:  # noqa: BLE001 — cache invalidation must never mask config ops
+        pass
+
+
 def _load(layout: Any) -> dict[str, Any]:
     path = _path(layout)
     if not path.exists():
@@ -368,6 +386,7 @@ def configure_server(layout: Any, name: Any, payload: Any) -> dict[str, Any]:
     _write(layout, data)
     saved = next(x for x in data["servers"] if isinstance(x, dict) and x.get("name") == name)
     _delete_credentials(layout, _owned_secret_refs(existing) - _owned_secret_refs(saved))
+    invalidate_schema_cache(layout, name)
     return {"ok": True, "server": name, "reload_required": True}
 
 
@@ -379,6 +398,7 @@ def set_server_enabled(layout: Any, name: Any, enabled: bool) -> dict[str, Any]:
         raise MCPServiceError(f"unknown MCP server: {name}")
     row["enabled"] = bool(enabled)
     _write(layout, data)
+    invalidate_schema_cache(layout, name)
     return {"ok": True, "server": name, "enabled": bool(enabled), "reload_required": True}
 
 
@@ -394,10 +414,12 @@ def remove_server(layout: Any, name: Any) -> dict[str, Any]:
     assert len(data["servers"]) < before
     _write(layout, data)
     _delete_credentials(layout, _owned_secret_refs(row))
+    invalidate_schema_cache(layout, name)
     return {"ok": True, "server": name, "removed": True, "reload_required": True}
 
 
 def reload_tools(layout: Any) -> dict[str, Any]:
+    invalidate_schema_cache(layout)
     from jaeger_ai.main import _agent_cache, _pipeline
     from jaeger_ai.plugins.mcp import client
     path = _path(layout)
@@ -580,6 +602,7 @@ def set_startup_enabled(layout: Any, name: str, enabled: bool, *, expected_revis
         if len(rows)!=1:raise MCPServiceError('Existing server identity is missing or ambiguous')
         return {**data,'servers':[{**row,'enabled':enabled} if row is rows[0] else row for row in data['servers']]}
     _,revision=mutate_json(_path(layout),change,expected_revision=expected_revision,before_commit=before_commit)
+    invalidate_schema_cache(layout, normalized)
     return {'name':normalized,'startup_enabled':enabled,'config_revision':revision,'connection_attempted':False,'credentials_changed':False,'grants_changed':False,'current_connection_unchanged':True}
 
 
@@ -658,4 +681,5 @@ def set_tool_policy(layout: Any, name: str, policy: Any, *, expected_revision: s
         observed['config_revision']=revision
         if before_commit is not None:before_commit(data,revision,dict(observed))
     _,revision=mutate_json(_path(layout),change,expected_revision=expected_revision,before_commit=planned)
+    invalidate_schema_cache(layout, normalized)
     return {**observed,'config_revision':revision}

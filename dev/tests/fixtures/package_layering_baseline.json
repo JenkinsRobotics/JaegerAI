@@ -1,10 +1,12 @@
 {
   "_ceilings": {
     "core_or_mind_imports_webui_api": 0,
-    "jaeger_agent_imports_product": 47,
-    "jaeger_os_imports_product_or_agent": 1
+    "jaeger_agent_imports_product": 44,
+    "jaeger_os_imports_product_or_agent": 1,
+    "standalone_packages_import_umbrella_or_product": 0
   },
   "core_or_mind_imports_webui_api": {},
+  "standalone_packages_import_umbrella_or_product": {},
   "jaeger_agent_imports_product": {
     "packages/jaeger-agent/jaeger_agent/adapters/cli_backend.py": [
       "jaeger_ai.core.instance.instance",
@@ -34,8 +36,7 @@
       "jaeger_ai.core.runtime"
     ],
     "packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py": [
-      "jaeger_ai.core.runtime.cron_turns",
-      "jaeger_ai.core.runtime.maintenance_text"
+      "jaeger_ai.core.runtime.cron_turns"
     ],
     "packages/jaeger-agent/jaeger_agent/loop/runtime_bridge.py": [
       "jaeger_ai.core.runtime.usage_stats",
@@ -46,10 +47,6 @@
     ],
     "packages/jaeger-agent/jaeger_agent/skill_registry/skill_package.py": [
       "jaeger_ai.core.instance.schemas"
-    ],
-    "packages/jaeger-agent/jaeger_agent/tools/bench.py": [
-      "jaeger_ai.core.bench",
-      "jaeger_ai.main"
     ],
     "packages/jaeger-agent/jaeger_agent/tools/bot_template.py": [
       "jaeger_ai.core.redaction"

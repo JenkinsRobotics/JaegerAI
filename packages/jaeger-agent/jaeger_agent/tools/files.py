@@ -1213,8 +1213,8 @@ def search_offloaded_output(
         state_root = Path(state_root_env)
     else:
         try:
-            from jaeger_ai.core.instance.instance import operator_state_root
-            state_root = operator_state_root()
+            from jaeger_os.core.modules import resolve_application_module
+            state_root = resolve_application_module("core.instance.instance").operator_state_root()
         except Exception:
             state_root = Path.home() / ".jaeger"
 

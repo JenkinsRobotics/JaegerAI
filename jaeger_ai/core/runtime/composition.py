@@ -1,14 +1,19 @@
-"""Hot-swappable, contract-verified ModuleRegistry for JaegerAI standalone modules."""
+"""Product/Gateway composition root — owns mutable ModuleRegistry wiring.
+
+Relocated out of ``jaeger-contracts`` so the contract spine stays pure and
+stateless while the product/Gateway composition root owns runtime slot
+registration and swapping.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from .ports import PORT_PROTOCOLS
+from jaeger_contracts.ports import PORT_PROTOCOLS
 
 
 class ModuleRegistry:
-    """Stores and hot-swaps implementations across JaegerAI's canonical module slots."""
+    """Stores and swaps implementations across JaegerAI's canonical module slots."""
 
     def __init__(self) -> None:
         self._slots: dict[str, dict[str, Any]] = {slot: {} for slot in PORT_PROTOCOLS}
@@ -63,3 +68,6 @@ class ModuleRegistry:
             }
             for slot, impls in self._slots.items()
         }
+
+
+__all__ = ["ModuleRegistry"]

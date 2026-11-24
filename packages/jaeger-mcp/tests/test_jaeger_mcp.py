@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import concurrent.futures
+import json
+
 from jaeger_mcp import (
     CachedToolEntry,
     MCPSchemaCache,
@@ -38,19 +41,51 @@ def test_redact_secrets_scrubs_nested_payloads():
     assert "********" in out["text"]
 
 
-def test_schema_cache_roundtrip_digest_and_ttl(tmp_path):
+def test_schema_cache_is_discovery_only_locked_and_digest_complete(tmp_path):
+    script = tmp_path / "srv.py"
+    script.write_text("# v1\n", encoding="utf-8")
+
     cache = MCPSchemaCache(tmp_path / "cache.json", default_ttl_s=60.0)
-    digest = cache.config_digest({"name": "gh", "command": "github-mcp", "args": [], "tools": {"gated": True}})
+    base_entry = {
+        "name": "gh",
+        "command": "python3",
+        "args": [str(script)],
+        "auth": "",
+        "sandbox": "",
+        "env": {"API_TOKEN": {"secret_ref": "mcp.gh.API_TOKEN"}},
+        "tools": {"gated": True, "read_only": ["get_*"]},
+    }
+    d1 = cache.config_digest(base_entry, protocol_version="2024-11-05")
     cache.put(
         "gh",
-        digest,
-        [CachedToolEntry("gh", "get_me", "mcp__gh__get_me", "whoami", {"type": "object"}, True)],
+        d1,
+        [CachedToolEntry("gh", "get_me", "mcp__gh__get_me", "whoami", {"type": "object"})],
         now=1000.0,
     )
-    hit = cache.get("gh", expected_digest=digest, now=1010.0)
-    assert hit is not None and len(hit) == 1 and hit[0].read_only is True
-    assert cache.get("gh", expected_digest="different", now=1010.0) is None
-    assert cache.get("gh", expected_digest=digest, now=1200.0) is None
+
+    # Verify discovery-only invariant: no read_only / authorization field stored on disk
+    raw_disk = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
+    assert raw_disk["discovery_only"] is True
+    assert "read_only" not in raw_disk["servers"]["gh"]["tools"][0]
+
+    hit = cache.get("gh", expected_digest=d1, now=1010.0)
+    assert hit is not None and len(hit) == 1 and hit[0].tool_name == "get_me"
+
+    # Digest MUST change on sandbox, transport/auth, env/cred ref, protocol, or script edit
+    assert cache.config_digest({**base_entry, "sandbox": "seatbelt"}) != d1
+    assert cache.config_digest({**base_entry, "auth": "oauth"}) != d1
+    assert cache.config_digest({**base_entry, "env": {"API_TOKEN": {"secret_ref": "mcp.gh.NEW"}}}) != d1
+    assert cache.config_digest(base_entry, protocol_version="2025-06-18") != d1
+    script.write_text("# v2 longer executable content\n", encoding="utf-8")
+    assert cache.config_digest(base_entry, protocol_version="2024-11-05") != d1
+
+    # Concurrent locked writes do not corrupt JSON
+    def writer(i: int) -> None:
+        cache.put(f"s{i}", f"dig{i}", [CachedToolEntry(f"s{i}", "ping", f"mcp__s{i}__ping", "p", {})], now=1000.0)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        list(pool.map(writer, range(12)))
+    assert cache.get("s11", expected_digest="dig11", now=1010.0) is not None
     assert cache.invalidate("gh") is True
 
 

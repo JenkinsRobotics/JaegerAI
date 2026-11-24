@@ -17,32 +17,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-CHAT_DB = Path("~/Library/Messages/chat.db").expanduser()
+from jaeger_macos.imessage import SEND_IMESSAGE_SCRIPT as _SEND_SCRIPT, decode_attributed_body
+from jaeger_macos.appleevents import appleevents_lock
 
-_SEND_SCRIPT = r'''
-on run argv
-    set targetHandle to item 1 of argv
-    set msgText to item 2 of argv
-    set svcName to item 3 of argv
-    tell application "Messages"
-        try
-            if svcName is "SMS" then
-                set targetAccount to first account whose service type = SMS
-            else
-                set targetAccount to first account whose service type = iMessage
-            end if
-            send msgText to participant targetHandle of targetAccount
-        on error
-            if svcName is "SMS" then
-                set targetService to first service whose service type = SMS
-            else
-                set targetService to first service whose service type = iMessage
-            end if
-            send msgText to buddy targetHandle of targetService
-        end try
-    end tell
-end run
-'''
+CHAT_DB = Path("~/Library/Messages/chat.db").expanduser()
 
 
 def _norm(text: str) -> str:
@@ -51,33 +29,6 @@ def _norm(text: str) -> str:
 
 def _digest(text: str) -> str:
     return hashlib.sha256(_norm(text).encode()).hexdigest()[:20]
-
-
-def decode_attributed_body(blob: bytes | None) -> str:
-    """Plain text from a typedstream ``attributedBody`` (macOS 13+ often leaves ``text`` NULL)."""
-    if not blob:
-        return ""
-    try:
-        data = bytes(blob)
-        idx = data.find(b"NSString")
-        if idx < 0:
-            return ""
-        rest = data[idx + len(b"NSString"):]
-        plus = rest.find(b"+")
-        if plus < 0:
-            return ""
-        rest = rest[plus + 1:]
-        length = rest[0]
-        offset = 1
-        if length == 0x81:
-            length = int.from_bytes(rest[1:3], "little")
-            offset = 3
-        elif length == 0x82:
-            length = int.from_bytes(rest[1:5], "little")
-            offset = 5
-        return rest[offset:offset + length].decode("utf-8", errors="replace").strip()
-    except Exception:  # noqa: BLE001
-        return ""
 
 
 class IMessageSelfChat:
@@ -170,10 +121,11 @@ class IMessageSelfChat:
             return {"sent": False, "error": "empty"}
         self._sent[_digest(body)] = time.time()
         try:
-            proc = subprocess.run(
-                ["osascript", "-", self.send_to, body, self.service],
-                input=_SEND_SCRIPT, capture_output=True, text=True, timeout=30,
-            )
+            with appleevents_lock("messages"):
+                proc = subprocess.run(
+                    ["osascript", "-", self.send_to, body, self.service],
+                    input=_SEND_SCRIPT, capture_output=True, text=True, timeout=30,
+                )
         except subprocess.TimeoutExpired:
             return {"sent": False, "uncertain": True, "error": "Messages did not answer in 30 s"}
         if proc.returncode != 0:

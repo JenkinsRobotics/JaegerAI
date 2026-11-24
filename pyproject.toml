@@ -49,6 +49,7 @@ jaeger-orchestration = { workspace = true }
 jaeger-reliability = { workspace = true }
 jaeger-tools = { workspace = true }
 jaeger-mcp = { workspace = true }
+jaeger-macos = { workspace = true }
 jaeger-lsp = { workspace = true }
 jaeger-checkpoints = { workspace = true }
 jaeger-skills = { workspace = true }

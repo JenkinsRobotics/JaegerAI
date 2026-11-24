@@ -139,8 +139,11 @@ def run_benchmark(
     and the failure list. Run individual rows by passing ``ids`` —
     handy for re-running a single flaky case after a fix.
     """
-    from jaeger_ai.core.bench import run_bench, summarise
-    from jaeger_ai.core.models.model_resolver import serving_runtime
+    from jaeger_os.core.modules import resolve_application_module
+    _bench = resolve_application_module("core.bench")
+    _resolver = resolve_application_module("core.models.model_resolver")
+    run_bench, summarise = _bench.run_bench, _bench.summarise
+    serving_runtime = _resolver.serving_runtime
 
     client, config = serving_runtime()
     if client is None:
@@ -160,7 +163,7 @@ def run_benchmark(
     from jaeger_agent.task_port import current_task_context
     isolated = current_task_context() is not None
     if isolated:
-        from jaeger_ai.core.bench.isolated import run_isolated
+        run_isolated = resolve_application_module("core.bench.isolated").run_isolated
         try:
             rows = run_isolated(client, config, tags=tag_list or None,
                                 ids=id_list or None, limit=cap)
@@ -184,8 +187,7 @@ def run_benchmark(
             # ``ls``, not a parse-summary-jsons exercise.
             model_name = "unknown"
             try:
-                from jaeger_ai.core.models.model_resolver import serving_model
-                serving = serving_model() or {}
+                serving = _resolver.serving_model() or {}
                 actual = str(serving.get("model") or "unknown")
                 summary["model_name"] = actual
                 summary["provider"] = serving.get("provider")

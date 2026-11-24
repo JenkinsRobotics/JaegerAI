@@ -14,19 +14,18 @@ from jaeger_authority import (
     MacOsSeatbeltSandbox,
     UnconfinedSandbox,
 )
-from jaeger_contracts import ModuleRegistry, SandboxPort, SandboxProfile
+from jaeger_contracts import SandboxPort, SandboxProfile
 
 
-def test_all_sandbox_backends_hot_swap_in_registry(tmp_path: Path) -> None:
-    reg = ModuleRegistry()
-    reg.register("05-sandbox", "seatbelt", MacOsSeatbeltSandbox())
-    reg.register("05-sandbox", "bwrap", LinuxBwrapSandbox())
-    reg.register("05-sandbox", "docker", ContainerSandbox(cli="docker"))
-    reg.register("05-sandbox", "unconfined", UnconfinedSandbox())
-
+def test_all_sandbox_backends_satisfy_sandbox_port(tmp_path: Path) -> None:
+    backends = {
+        "seatbelt": MacOsSeatbeltSandbox(),
+        "bwrap": LinuxBwrapSandbox(),
+        "docker": ContainerSandbox(cli="docker"),
+        "unconfined": UnconfinedSandbox(),
+    }
     profile = SandboxProfile(workspace=tmp_path, allow_network=False)
-    for impl_id in ("seatbelt", "bwrap", "docker", "unconfined"):
-        sb = reg.use("05-sandbox", impl_id)
+    for impl_id, sb in backends.items():
         assert isinstance(sb, SandboxPort)
         spec = sb.prepare(["echo", "ok"], profile)
         assert spec.argv
