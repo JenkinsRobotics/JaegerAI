@@ -748,6 +748,7 @@ class JaegerAgent(AgentProviderStepMixin, AgentToolDispatchMixin):
             self._turn_active = False
             self._thinking_budget_boosted = False
             self._thinking_boost_count = 0
+            self._thinking_effort_override = None
             if getattr(self, "_convergence", None) is not None:
                 self._convergence.reset()
             self._record_skill_outcomes()
@@ -927,6 +928,10 @@ class JaegerAgent(AgentProviderStepMixin, AgentToolDispatchMixin):
                         if 0 < cur_max < cap:
                             boosted = min(cap, max(8192 if boost_count == 0 else 16384, cur_max * 2))
                             setattr(self.primary_adapter, "max_tokens", boosted)
+                        if boost_count >= 1:
+                            # On the second boost, also dial down reasoning effort so
+                            # the model breaks out of an internal thought loop.
+                            self._thinking_effort_override = "low"
                         self._nudge_pending = True
                         self._pending_nudge_text = (
                             "Your reasoning hit the token limit before producing output. "

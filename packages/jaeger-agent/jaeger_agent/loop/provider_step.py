@@ -427,6 +427,9 @@ class AgentProviderStepMixin:
                         for key in ("max_tokens", "max_completion_tokens"):
                             if key in formatted:
                                 formatted[key] = min(formatted[key], self.context_guard.budget.reserve_for_completion)
+                    effort_override = getattr(self, "_thinking_effort_override", None)
+                    if effort_override and isinstance(formatted, dict):
+                        formatted["reasoning_effort"] = effort_override
                     if not getattr(self, "_finalizing", False):
                         self.callbacks.on_tool_selection(self._selection_receipt())
                     self.callbacks.on_model_input(formatted)
@@ -516,7 +519,10 @@ class AgentProviderStepMixin:
                     if adapter is not self.primary_adapter:
                         self._sticky_adapter = adapter
                         self._sticky_adapter_until = time.monotonic() + 60.0
-                    return adapter.parse_response(raw)
+                    parsed = adapter.parse_response(raw)
+                    if isinstance(parsed, dict) and parsed.get("finish_reason") != "thinking_exhausted":
+                        self._thinking_effort_override = None
+                    return parsed
                 except AgentInterrupted:
                     # Interrupt propagates — handled by ``run_turn`` via
                     # the event check at the top of the next iteration.

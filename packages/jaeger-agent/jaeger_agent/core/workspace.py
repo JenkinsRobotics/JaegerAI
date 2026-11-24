@@ -367,15 +367,61 @@ def _resolve_under(root: Path, path: str) -> Path:
     return full
 
 
+def configured_trusted_paths(layout: Any | None = None) -> list[Path]:
+    """Return owner-approved everyday folders from ``config.yaml``'s
+    ``workspace.trusted_paths``. Never accepts ``/`` or raw ``$HOME``;
+    fails closed to ``[]`` on missing or unreadable config."""
+    lay = layout or _layout
+    cfg_path = getattr(lay, "config_path", None) if lay is not None else None
+    if not cfg_path:
+        return []
+    path = Path(cfg_path)
+    if not path.is_file():
+        return []
+    try:
+        import yaml
+
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        ws = raw.get("workspace") if isinstance(raw, dict) else None
+        items = ws.get("trusted_paths") if isinstance(ws, dict) else None
+        if not isinstance(items, list):
+            return []
+    except Exception:  # noqa: BLE001 — fail closed on unreadable config
+        return []
+    home = Path.home().resolve()
+    root_fs = Path(os.path.sep).resolve()
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for entry in items:
+        if not isinstance(entry, str) or not entry.strip():
+            continue
+        try:
+            resolved = Path(entry.strip()).expanduser().resolve()
+        except Exception:  # noqa: BLE001
+            continue
+        # Never widen to filesystem root or entire home directory.
+        if resolved in {root_fs, home}:
+            continue
+        if resolved.exists() and resolved.is_dir() and resolved not in seen:
+            seen.add(resolved)
+            out.append(resolved)
+    return out
+
+
 def writable_roots() -> list[Path]:
     """Roots an absolute write path may land in. A bound project is an
     explicit, contained write scope, so it is the only root then; otherwise
-    the effective workspace dir and the instance skills dir."""
+    the effective workspace dir, instance skills dir, and any owner-configured
+    ``workspace.trusted_paths``."""
     project = get_project_root()
     if project is not None:
         return [project.resolve()]
     layout = _require_layout()
-    return [r.resolve() for r in (get_effective_workspace_dir(), layout.skills_dir)]
+    base = [r.resolve() for r in (get_effective_workspace_dir(), layout.skills_dir)]
+    for trusted in configured_trusted_paths(layout):
+        if trusted not in base:
+            base.append(trusted)
+    return base
 
 
 _INSTANCE_PROTECTED = frozenset({
@@ -409,15 +455,15 @@ def _resolve_absolute_write(p: Path) -> Path:
         # root, its control files and secrets are never write targets.
         if not rel or rel[0] in _INSTANCE_PROTECTED or "credentials" in rel:
             raise SandboxError(f"{str(p)!r} is a protected instance path")
+    from jaeger_os.core.safety.file_safety import is_protected_write_path
+    protected = is_protected_write_path(full)
+    if protected:
+        raise SandboxError(f"refused — {protected}")
     for root in roots:
         if full == root or full.is_relative_to(root):
             if "credentials" in full.relative_to(root).parts:
                 break
             return full
-    from jaeger_os.core.safety.file_safety import is_protected_write_path
-    protected = is_protected_write_path(full)
-    if protected:
-        raise SandboxError(f"refused — {protected}")
     requester = _write_access_requester_var.get()
     if callable(requester):
         granted = requester(full)

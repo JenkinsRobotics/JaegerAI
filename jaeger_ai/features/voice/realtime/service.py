@@ -334,10 +334,27 @@ async def _run_session(connection: SmallWebRTCConnection, request_data: dict):
     worker = PipelineWorker(pipeline, params=PipelineParams(
         audio_in_sample_rate=16000, audio_out_sample_rate=24000, enable_metrics=True))
     runner = WorkerRunner(handle_sigint=False)
-    _sessions[connection.pc_id] = {"engine": engine, "started": time.time()}
+    idle_timeout_s = float(os.environ.get("JAEGER_VOICE_IDLE_TIMEOUT_S", "900") or "900")
+    last_activity = [time.monotonic()]
+    _sessions[connection.pc_id] = {
+        "engine": engine,
+        "started": time.time(),
+        "cancel": worker.cancel,
+    }
+
+    async def _shutdown_session(reason: str) -> None:
+        logger.info(f"closing voice session {connection.pc_id} ({engine}): {reason}")
+        for fut in pending.values():
+            if not fut.done():
+                fut.cancel()
+        try:
+            await worker.cancel()
+        except Exception:
+            pass
 
     @transport.event_handler("on_client_connected")
     async def _connected(_t, _c):
+        last_activity[0] = time.monotonic()
         if engine == "gemini":
             # Gemini Live takes no audio until it has its first context.
             from pipecat.frames.frames import LLMRunFrame
@@ -346,15 +363,33 @@ async def _run_session(connection: SmallWebRTCConnection, request_data: dict):
 
     @transport.event_handler("on_client_disconnected")
     async def _gone(_t, _c):
-        for fut in pending.values():
-            if not fut.done():
-                fut.cancel()
-        await worker.cancel()
+        await _shutdown_session("client disconnected")
 
+    @transport.event_handler("on_client_closed")
+    async def _closed(_t, _c):
+        await _shutdown_session("client closed")
+
+    async def _watchdog():
+        try:
+            while connection.pc_id in _sessions:
+                await asyncio.sleep(30.0)
+                pc = getattr(connection, "_pc", None) or getattr(connection, "pc", None)
+                state = str(getattr(pc, "connectionState", "") or "").lower()
+                if state in {"failed", "closed", "disconnected"}:
+                    await _shutdown_session(f"webrtc state={state}")
+                    return
+                if idle_timeout_s > 0 and (time.monotonic() - last_activity[0]) > idle_timeout_s:
+                    await _shutdown_session(f"idle>{int(idle_timeout_s)}s")
+                    return
+        except asyncio.CancelledError:
+            pass
+
+    watchdog_task = asyncio.create_task(_watchdog())
     await runner.add_workers(worker)
     try:
         await runner.run()
     finally:
+        watchdog_task.cancel()
         _sessions.pop(connection.pc_id, None)
         logger.info(f"voice session {connection.pc_id} ({engine}) ended")
 
@@ -412,12 +447,28 @@ async def _warm(_app):
     asyncio.create_task(go())
 
 
+async def clear_sessions(_request: web.Request) -> web.Response:
+    """Force-close all active WebRTC sessions (clears stale/idle peers)."""
+    closed = 0
+    for sid, info in list(_sessions.items()):
+        cancel = info.get("cancel")
+        if callable(cancel):
+            try:
+                await cancel()
+                closed += 1
+            except Exception:
+                pass
+        _sessions.pop(sid, None)
+    return web.json_response({"ok": True, "closed": closed, "sessions": len(_sessions)})
+
+
 def main():
     app = web.Application(client_max_size=2 * 1024 * 1024)
     app.router.add_post("/offer", offer)
     app.router.add_post("/ice", ice)
     app.router.add_get("/status", status)
     app.router.add_get("/health", status)  # standard probe path; same payload as /status
+    app.router.add_delete("/sessions", clear_sessions)
     app.on_startup.append(_warm)
     web.run_app(app, host=HOST, port=PORT, access_log=None)
 

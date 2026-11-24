@@ -39,6 +39,7 @@ STANDALONE_PACKAGE_SRC_ROOTS = [
     "packages/jaeger-skills/src",
     "packages/jaeger-mcp/src",
     "packages/jaeger-macos/src",
+    "packages/jaeger-workflows/src",
 ]
 
 #: rule name -> (source roots, forbidden top-level module predicate)

@@ -2449,6 +2449,14 @@ class JaegerGatewayApp(
         if staged_dir:
             # Only THIS session's staged uploads; other sessions' stay refused.
             roots.append(str(staged_dir))
+        try:
+            from jaeger_agent.core.workspace import configured_trusted_paths
+            for trusted in configured_trusted_paths(layout):
+                trusted_str = str(trusted)
+                if trusted_str not in roots:
+                    roots.append(trusted_str)
+        except Exception:  # noqa: BLE001 — fail closed if unreadable
+            pass
         return roots
 
     def _load_gateway_mcp(self) -> dict[str, Any]:

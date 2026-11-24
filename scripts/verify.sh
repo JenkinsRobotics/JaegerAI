@@ -16,7 +16,7 @@ if [[ -d /opt/homebrew/bin ]]; then
 fi
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
-STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src"
+STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src:${REPO_ROOT}/packages/jaeger-workflows/src"
 export PYTHONPATH="${STANDALONE_SRC_PATHS}:${REPO_ROOT}/packages/jaeger-agent:${REPO_ROOT}/packages/jaeger-os:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 JAEGER_VENV_ROOT="${JAEGER_VENV:-${HOME}/.jaeger/venv}"
 VENV_PY="${JAEGER_VENV_ROOT}/bin/python"
@@ -152,7 +152,8 @@ run_backend() {
     packages/jaeger-agent/tests/test_cli_backend_adapter.py \
     packages/jaeger-agent/tests/test_anthropic_adapter.py \
     packages/jaeger-agent/tests/test_liveness.py \
-    packages/jaeger-agent/tests/test_run_turn.py
+    packages/jaeger-agent/tests/test_run_turn.py \
+    packages/jaeger-agent/tests/test_production_readiness.py
   echo "[back-end:modules] Running folded standalone modular core test suite..."
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
     packages/jaeger-contracts/tests \
@@ -168,7 +169,8 @@ run_backend() {
     packages/jaeger-macos/tests \
     packages/jaeger-lsp/tests \
     packages/jaeger-checkpoints/tests \
-    packages/jaeger-skills/tests
+    packages/jaeger-skills/tests \
+    packages/jaeger-workflows/tests
 }
 
 run_wiring() {

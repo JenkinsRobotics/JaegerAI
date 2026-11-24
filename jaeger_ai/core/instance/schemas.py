@@ -1021,6 +1021,16 @@ class WorkspaceConfig(BaseModel):
             "Absolute path or ``~``-prefixed; null = default."
         ),
     )
+    trusted_paths: list[str] = Field(
+        default_factory=list,
+        json_schema_extra=_setting("workspace", restart=True),
+        description=(
+            "Owner-approved everyday directories (e.g. ~/Documents, ~/Downloads, "
+            "~/Movies, ~/GitHub) that the agent may read and organize without "
+            "repeating per-session approval cards. Secret stores (~/.ssh, ~/.aws, "
+            "~/.gnupg, credentials/) and system folders remain strictly locked."
+        ),
+    )
 
 
 # 0.2.6: UserConfig removed. The 0.2.1 User layer (separate ``user.dir``
