@@ -24,6 +24,23 @@ BASELINE = Path(__file__).resolve().parent / "fixtures" / "package_layering_base
 
 WEBAPP = REPO / "jaeger_ai/core/gateway/webapp"
 
+STANDALONE_PACKAGE_SRC_ROOTS = [
+    "packages/jaeger-contracts/src",
+    "packages/jaeger-events/src",
+    "packages/jaeger-reliability/src",
+    "packages/jaeger-models/src",
+    "packages/jaeger-authority/src",
+    "packages/jaeger-memory/src",
+    "packages/jaeger-tools/src",
+    "packages/jaeger-lsp/src",
+    "packages/jaeger-checkpoints/src",
+    "packages/jaeger-loop/src",
+    "packages/jaeger-orchestration/src",
+    "packages/jaeger-skills/src",
+    "packages/jaeger-mcp/src",
+    "packages/jaeger-macos/src",
+]
+
 #: rule name -> (source roots, forbidden top-level module predicate)
 RULES = {
     "jaeger_os_imports_product_or_agent": (
@@ -38,6 +55,10 @@ RULES = {
         ["jaeger_ai/core"],
         lambda module: module == "api" or module.startswith("api.")
         or module.startswith("jaeger_ai.features.webui"),
+    ),
+    "standalone_packages_import_umbrella_or_product": (
+        STANDALONE_PACKAGE_SRC_ROOTS,
+        lambda module: module.split(".")[0] in {"jaeger_ai", "jaeger_agent", "jaeger_os"},
     ),
 }
 

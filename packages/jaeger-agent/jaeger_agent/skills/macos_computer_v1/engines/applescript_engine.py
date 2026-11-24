@@ -379,12 +379,14 @@ class AppleScriptEngine:
             safe_value = safe_app
         script = template.replace("{value}", safe_value).replace("{app}", safe_app)
         try:
-            out = subprocess.run(
-                ["osascript", "-e", script],
-                # 30s: document apps (Word, Pages) can cold-start
-                # slower than the 10s the quick probes need.
-                check=False, capture_output=True, text=True, timeout=30,
-            )
+            from jaeger_macos import appleevents_lock
+            with appleevents_lock(app or "gui"):
+                out = subprocess.run(
+                    ["osascript", "-e", script],
+                    # 30s: document apps (Word, Pages) can cold-start
+                    # slower than the 10s the quick probes need.
+                    check=False, capture_output=True, text=True, timeout=30,
+                )
         except Exception as exc:  # noqa: BLE001 — engine must never raise
             return EngineResult(
                 ok=False, engine=_NAME,

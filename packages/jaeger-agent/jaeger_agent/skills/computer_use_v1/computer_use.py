@@ -162,10 +162,10 @@ def _resolve_screenshot_target(path: str) -> tuple[Any, Any]:
     except RuntimeError:
         # Unbound standalone/daemon context: store strictly under operator state root.
         try:
-            from jaeger_ai.core.instance.instance import operator_state_root
-            base = Path(operator_state_root()) / "screenshots"
+            from jaeger_os.core.modules import resolve_application_module
+            base = Path(resolve_application_module("core.instance.instance").operator_state_root()) / "screenshots"
         except Exception:  # noqa: BLE001
-            base = Path(tempfile.gettempdir()) / "jaeger-screenshots"
+            base = Path(os.environ.get("JAEGER_STATE_DIR") or os.environ.get("JAEGER_HOME") or (Path.home() / ".jaeger")) / "screenshots"
         base.mkdir(parents=True, exist_ok=True)
         name = Path(clean).name or "screen.png"
         return (base / name).resolve(), None

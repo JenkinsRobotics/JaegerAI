@@ -432,6 +432,44 @@ class MCPRegistry:
         self._inventory_errors: dict[str, str] = {}
         self._inventory_versions: dict[str, int] = {}
         self._inventory_dirty: set[str] = set()
+        self._schema_cache: Any = None
+        self._server_digests: dict[str, str] = {}
+
+    def bind_schema_cache(self, cache: Any) -> None:
+        """Attach the instance's locked discovery-only MCPSchemaCache."""
+        self._schema_cache = cache
+
+    def _invalidate_cache(self, name: str) -> None:
+        if self._schema_cache is not None:
+            try:
+                self._schema_cache.invalidate(name)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _update_cache(self, config: MCPServerConfig, specs: list[MCPToolSpec]) -> None:
+        if self._schema_cache is None:
+            return
+        digest = self._server_digests.get(config.name)
+        if not digest:
+            return
+        try:
+            from jaeger_mcp.schema_cache import CachedToolEntry
+            self._schema_cache.put(
+                config.name,
+                digest,
+                [
+                    CachedToolEntry(
+                        server_name=s.server_name,
+                        tool_name=s.tool_name,
+                        agent_name=s.agent_name,
+                        description=s.description,
+                        input_schema=s.input_schema,
+                    )
+                    for s in specs
+                ],
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -515,6 +553,7 @@ class MCPRegistry:
         self._inventory_versions[config.name] = self._inventory_versions.get(config.name, 0) + 1
         self._inventory_errors.pop(config.name, None)
         self._inventory_dirty.discard(config.name)
+        self._update_cache(config, specs)
 
     def _tool_available(self, spec: MCPToolSpec) -> bool:
         with self._lifecycle_lock:
@@ -529,6 +568,7 @@ class MCPRegistry:
         # This callback runs on the SDK loop. Never block it with _submit().
         with self._lifecycle_lock:
             self._inventory_dirty.add(name)
+        self._invalidate_cache(name)
         self._refresh_pending.add(name)
         previous = self._refresh_tasks.get(name)
         if previous is None or previous.done():
@@ -711,6 +751,8 @@ class MCPRegistry:
         for spec in removed_specs:
             unregister_tool(spec.agent_name)
         unregister_mcp_server_toolset(name)
+        self._invalidate_cache(name)
+        self._server_digests.pop(name, None)
         if client is not None:
             try:
                 self._submit(client.close(), timeout=10.0)
@@ -807,6 +849,12 @@ def init_from_config(config_path: Path | None = None, *, layout: Any = None,
 
     data = json.loads(path.read_text(encoding="utf-8"))
     registry = MCPRegistry()
+    if layout is not None:
+        try:
+            from jaeger_ai.core.mcp.service import schema_cache as _schema_cache_for
+            registry.bind_schema_cache(_schema_cache_for(layout))
+        except Exception:  # noqa: BLE001
+            pass
     errors: dict[str, str] = {}
     for entry in data.get("servers", []):
         if not entry.get("enabled", True):
@@ -817,6 +865,8 @@ def init_from_config(config_path: Path | None = None, *, layout: Any = None,
         env: dict[str, str] = {}
         headers: dict[str, str] = {}
         try:
+            if registry._schema_cache is not None:
+                registry._server_digests[name] = registry._schema_cache.config_digest(entry)
             env = entry.get("env", {})
             headers = entry.get("headers", {})
             if layout is not None:

@@ -16,7 +16,7 @@ if [[ -d /opt/homebrew/bin ]]; then
 fi
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
-STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src"
+STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src"
 export PYTHONPATH="${STANDALONE_SRC_PATHS}:${REPO_ROOT}/packages/jaeger-agent:${REPO_ROOT}/packages/jaeger-os:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 JAEGER_VENV_ROOT="${JAEGER_VENV:-${HOME}/.jaeger/venv}"
 VENV_PY="${JAEGER_VENV_ROOT}/bin/python"
@@ -49,8 +49,8 @@ run_hygiene() {
   # .pytest_cache / __pycache__ into the repo root (AGENTS.md §1: zero in-repo
   # state). cache_dir in pyproject.toml is a fallback, not a guarantee when
   # pytest is invoked with an explicit test path.
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py -q --no-header -p no:cacheprovider
-  echo "[+] CI hygiene tripwires passed."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py dev/tests/test_package_layering.py -q --no-header -p no:cacheprovider
+  echo "[+] CI hygiene & package layering tripwires passed."
 }
 
 run_frontend() {
@@ -94,6 +94,7 @@ run_backend() {
   echo "[back-end:tools] Checking discovery isolation, ranking, MCP inventory and policy..."
   "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
     dev/tests/jaeger_ai/core/test_live_standalone_modules.py \
+    dev/tests/jaeger_ai/core/test_composition_root.py \
     dev/tests/jaeger_ai/core/test_tool_discovery.py \
     dev/tests/jaeger_ai/core/test_framework_audit_regressions.py \
     dev/tests/jaeger_ai/core/test_tool_qualification_repairs.py \
@@ -164,6 +165,7 @@ run_backend() {
     packages/jaeger-reliability/tests \
     packages/jaeger-events/tests \
     packages/jaeger-mcp/tests \
+    packages/jaeger-macos/tests \
     packages/jaeger-lsp/tests \
     packages/jaeger-checkpoints/tests \
     packages/jaeger-skills/tests

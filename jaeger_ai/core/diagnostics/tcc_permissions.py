@@ -29,22 +29,9 @@ def status() -> dict[str, bool | None]:
     """Read-only grant state; ``None`` = undeterminable. Never prompts."""
     if sys.platform != "darwin":
         return {}
-    out: dict[str, bool | None] = {}
-    try:
-        import ApplicationServices as _AX
-        out["accessibility"] = bool(_AX.AXIsProcessTrusted())
-    except Exception:  # noqa: BLE001 — PyObjC missing
-        out["accessibility"] = None
-    try:
-        import Quartz
-        out["screen_recording"] = bool(Quartz.CGPreflightScreenCaptureAccess())
-    except Exception:  # noqa: BLE001
-        out["screen_recording"] = None
+    from jaeger_macos.tcc import probe_tcc_status
     from jaeger_ai.core.diagnostics.doctor import _probe_fda
-    out["full_disk_access"] = _probe_fda()
-    # Automation is per-target-app and has no read API worth trusting;
-    # request_all() triggers its prompts instead.
-    return out
+    return probe_tcc_status(fda_probe=_probe_fda)
 
 
 def request_all() -> dict[str, bool | None]:
@@ -55,28 +42,9 @@ def request_all() -> dict[str, bool | None]:
     """
     if sys.platform != "darwin":
         return {}
-    try:
-        import ApplicationServices as _AX
-        _AX.AXIsProcessTrustedWithOptions(
-            {_AX.kAXTrustedCheckOptionPrompt: True})
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        import Quartz
-        Quartz.CGRequestScreenCaptureAccess()
-    except Exception:  # noqa: BLE001
-        pass
-    # Automation: one benign Apple event per common target raises that
-    # target's one-time "wants to control" prompt now, not mid-task.
-    for target in ("System Events", "Finder"):
-        try:
-            subprocess.run(
-                ["osascript", "-e", f'tell application "{target}" to count windows'],
-                capture_output=True, timeout=15,
-            )
-        except Exception:  # noqa: BLE001
-            pass
-    return status()
+    from jaeger_macos.tcc import request_tcc_permissions
+    from jaeger_ai.core.diagnostics.doctor import _probe_fda
+    return request_tcc_permissions(fda_probe=_probe_fda)
 
 
 def first_boot_preflight() -> None:

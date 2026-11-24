@@ -1,4 +1,9 @@
-"""jaeger-contracts: zero-dependency Protocols, domain types, and ModuleRegistry."""
+"""jaeger-contracts: zero-dependency pure wire envelopes and local Python SPIs.
+
+Mutable runtime composition (``ModuleRegistry``) lives in the product/Gateway
+composition root (``jaeger_ai.core.runtime.composition``), keeping this spine
+pure, stateless, and free of runtime side effects.
+"""
 
 from .ports import (
     PORT_PROTOCOLS,
@@ -12,7 +17,6 @@ from .ports import (
     StateMemoryPort,
     ToolPort,
 )
-from .registry import ModuleRegistry
 from .types import (
     ActionProposal,
     AutonomyMode,
@@ -24,8 +28,18 @@ from .types import (
     SandboxSpec,
     ToolResult,
 )
+from .wire import (
+    WIRE_SCHEMA_VERSION,
+    OperationClass,
+    WireActionReceipt,
+    WireEnvelope,
+)
 
 __all__ = [
+    "WIRE_SCHEMA_VERSION",
+    "OperationClass",
+    "WireActionReceipt",
+    "WireEnvelope",
     "ActionProposal",
     "AutonomyMode",
     "DecisionKind",
@@ -34,7 +48,6 @@ __all__ = [
     "ExecutionLoopPort",
     "ModelPort",
     "ModelProfile",
-    "ModuleRegistry",
     "OrchestrationPort",
     "PORT_PROTOCOLS",
     "PolicyPort",

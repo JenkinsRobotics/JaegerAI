@@ -31,28 +31,23 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
-import threading
 from email.message import EmailMessage
 from typing import Any
 
+from jaeger_macos import (
+    ALIAS_GROUPS as _ALIAS_GROUPS,
+    MAIL_RESOLVER_AS as _AS_RESOLVER,
+    alias_candidates,
+    appleevents_lock,
+    escape_applescript as _escape_applescript,
+    resolve_mailbox_call as _resolve_call,
+)
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 _TIMEOUT_S = 25
 _MAX_FETCH = 25
 _FIELD_SEP = "|||"
-# Mail.app handles AppleEvents on a single main queue. Parallel LLM tool calls
-# (e.g. 4 concurrent plan_mail_triage / scan_junk_mail calls across accounts)
-# launching simultaneous osascript subprocesses contend on Mail.app and cause
-# every call to time out simultaneously. Serialize all Mail.app AppleScript
-# round-trips so each call's timeout starts only once it owns the Mail queue.
-_MAIL_APPLESCRIPT_LOCK = threading.Lock()
-
-
-def _escape_applescript(text: str) -> str:
-    """Escape backslashes and double-quotes so ``text`` renders safely
-    inside an AppleScript string literal."""
-    return (text or "").replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _coerce_int(
@@ -81,7 +76,7 @@ def _mail_app_accounts() -> list[str]:
     """Names of every account configured in Mail.app — empty means
     Mail isn't set up (no inbox to send from)."""
     try:
-        with _MAIL_APPLESCRIPT_LOCK:
+        with appleevents_lock("mail"):
             out = subprocess.run(
                 ["osascript", "-e", 'tell application "Mail" to get name of every account'],
                 check=False, capture_output=True, text=True, timeout=10,
@@ -131,7 +126,7 @@ def _send_via_mail_app(to: str, subject: str, body: str, cc: str | None) -> dict
         "end tell"
     )
     try:
-        with _MAIL_APPLESCRIPT_LOCK:
+        with appleevents_lock("mail"):
             out = subprocess.run(
                 ["osascript", "-e", script],
                 check=False, capture_output=True, text=True, timeout=15,
@@ -272,7 +267,7 @@ def run_applescript(script: str, timeout_seconds: int = _TIMEOUT_S) -> dict[str,
             error="osascript not on PATH (macOS-only utility)",
         )
     try:
-        with _MAIL_APPLESCRIPT_LOCK:
+        with appleevents_lock("mail"):
             out = subprocess.run(
                 ["osascript", "-e", script],
                 check=False, capture_output=True, text=True, timeout=timeout_seconds,
@@ -308,22 +303,9 @@ def _run_osascript(script: str, timeout_s: int = _TIMEOUT_S) -> dict[str, Any]:
     return run_applescript(script, timeout_seconds=timeout_s)
 
 
-# Universal mailbox aliases. ``"trash"``, ``"[Gmail]/Trash"``, and
-# ``"Deleted Messages"`` all expand to the same candidate set so the
-# AppleScript walker can match Gmail's nested container without the
-# model guessing folder names.
-_ALIAS_GROUPS: dict[str, tuple[str, ...]] = {
-    "trash": ("Trash", "Deleted Messages", "Deleted Items", "Bin"),
-    "deleted": ("Trash", "Deleted Messages", "Deleted Items", "Bin"),
-    "junk": ("Spam", "Junk", "Junk Email", "Bulk"),
-    "spam": ("Spam", "Junk", "Junk Email", "Bulk"),
-    "archive": ("Archive", "All Mail"),
-    # Keep folders: exact name first (two-pass walk), then Archive so a
-    # missing Receipts/Finance/GitHub-Noise folder never dumps mail.
-    "receipts": ("Receipts", "Archive", "All Mail"),
-    "finance": ("Finance", "Archive", "All Mail"),
-    "github-noise": ("GitHub-Noise", "Archive", "All Mail"),
-}
+# Universal mailbox aliases and nested-mailbox AppleScript resolver are owned by
+# ``jaeger_macos.mail`` (imported above as ``_ALIAS_GROUPS``, ``_AS_RESOLVER``,
+# ``alias_candidates``, and ``_resolve_call``).
 
 # Keep-first classification. Receipts and finance ALWAYS beat a
 # noreply@ sender — Amazon/Stripe receipts commonly arrive from
@@ -381,143 +363,8 @@ _SWEEPER_PROMPT = (
     "one-line summary of what was filed."
 )
 
-# Nested-mailbox walker. Gmail's Trash is `mailbox "Trash" of mailbox
-# "[Gmail]"` — a direct `mailbox "Trash" of account` throws. Two-pass
-# (exact path/name, then alias) so a real Archive folder wins over
-# Gmail's All Mail alias.
-_AS_RESOLVER = r'''
-on _aliasHit(nameOrPath, aliasCSV)
-    ignoring case
-        if aliasCSV is "" then return false
-        set oldDelims to AppleScript's text item delimiters
-        set AppleScript's text item delimiters to ","
-        set aliasItems to text items of aliasCSV
-        set AppleScript's text item delimiters to oldDelims
-        repeat with a in aliasItems
-            if nameOrPath is (contents of a) then return true
-        end repeat
-        return false
-    end ignoring
-end _aliasHit
-
-on _walk(mbs, prefix, wanted, aliasCSV, exactOnly, depth)
-    if depth > 5 then return missing value
-    tell application "Mail"
-        repeat with mb in mbs
-            set n to name of mb as string
-            if prefix is "" then
-                set p to n
-            else
-                set p to prefix & "/" & n
-            end if
-            ignoring case
-                if p is wanted or n is wanted then return mb
-            end ignoring
-            if exactOnly is false then
-                if my _aliasHit(n, aliasCSV) then return mb
-                if my _aliasHit(p, aliasCSV) then return mb
-            end if
-            try
-                set kids to mailboxes of mb
-                if (count of kids) > 0 then
-                    set nested to my _walk(kids, p, wanted, aliasCSV, exactOnly, depth + 1)
-                    if nested is not missing value then return nested
-                end if
-            end try
-        end repeat
-    end tell
-    return missing value
-end _walk
-
-on resolveMb(accName, wanted, aliasCSV)
-    tell application "Mail"
-        set acc to missing value
-        repeat with candidate in accounts
-            ignoring case
-                if (name of candidate as string) is accName then
-                    set acc to candidate
-                    exit repeat
-                end if
-            end ignoring
-        end repeat
-        if acc is missing value then error "No Mail account named " & accName
-        -- Fast path: try direct top-level exact name before walking nested folders.
-        if wanted does not contain "/" then
-            try
-                return mailbox wanted of acc
-            end try
-        end if
-        ignoring case
-            if wanted is "INBOX" then
-                try
-                    return mailbox "INBOX" of acc
-                end try
-            end if
-        end ignoring
-        set topMbs to mailboxes of acc
-        -- Fast pass over top-level mailboxes only (avoids nested IPC walks for common folders).
-        if wanted does not contain "/" then
-            repeat with mb in topMbs
-                set n to name of mb as string
-                ignoring case
-                    if n is wanted then return mb
-                end ignoring
-            end repeat
-            repeat with mb in topMbs
-                set n to name of mb as string
-                if my _aliasHit(n, aliasCSV) then return mb
-            end repeat
-        end if
-        set found to my _walk(topMbs, "", wanted, aliasCSV, true, 0)
-        if found is missing value then
-            set found to my _walk(topMbs, "", wanted, aliasCSV, false, 0)
-        end if
-        if found is missing value then error "Can't get mailbox " & wanted & " of account " & accName & ". Call list_mailboxes and use an exact path."
-        return found
-    end tell
-end resolveMb
-'''
-
-
-def alias_candidates(mailbox: str) -> list[str]:
-    """Return Mail.app names that should match ``mailbox``.
-
-    ``"trash"``, ``"[Gmail]/Trash"``, and ``"Deleted Messages"`` all
-    expand to the same trash-folder set.
-    """
-    raw = (mailbox or "").strip()
-    if not raw:
-        return ["INBOX"]
-    key = raw.replace("\\", "/").strip()
-    leaf = key.split("/")[-1]
-    lowered = {key.lower(), leaf.lower()}
-    out: list[str] = []
-    seen: set[str] = set()
-
-    def add(name: str) -> None:
-        cleaned = name.strip()
-        if cleaned and cleaned not in seen:
-            seen.add(cleaned)
-            out.append(cleaned)
-
-    add(key)
-    if leaf != key:
-        add(leaf)
-    for alias_key, names in _ALIAS_GROUPS.items():
-        group_lower = {alias_key, *[n.lower() for n in names]}
-        if lowered & group_lower:
-            add(alias_key)
-            for n in names:
-                add(n)
-    return out
-
-
-def _resolve_call(var_name: str, account: str, mailbox: str) -> str:
-    """AppleScript that sets ``var_name`` to the resolved mailbox object."""
-    acc = _escape_applescript(account)
-    wanted = _escape_applescript((mailbox or "INBOX").strip() or "INBOX")
-    aliases = _escape_applescript(",".join(alias_candidates(mailbox)))
-    return f'set {var_name} to my resolveMb("{acc}", "{wanted}", "{aliases}")'
+# ``_AS_RESOLVER``, ``alias_candidates``, and ``_resolve_call`` are owned by
+# ``jaeger_macos.mail`` (imported at top of module — zero duplicated shadow).
 
 
 def _normalize_ids(message_ids: Any) -> list[str]:

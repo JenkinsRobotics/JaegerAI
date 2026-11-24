@@ -134,8 +134,9 @@ def hardline_guard(arg_name: str = "command") -> Callable[[Callable], Callable]:
             # Full access is the owner's explicit unrestricted-execution mode.
             # Do not retain a hidden command veto below the authority kernel.
             try:
-                from jaeger_ai.core.runtime.autonomy import current_autonomy, full_access_enabled
-                if full_access_enabled(current_autonomy()):
+                from jaeger_os.core.modules import resolve_application_module
+                _autonomy = resolve_application_module("core.runtime.autonomy")
+                if _autonomy.full_access_enabled(_autonomy.current_autonomy()):
                     return fn(*args, **kwargs)
             except Exception:  # noqa: BLE001 — absence of app authority fails guarded
                 pass

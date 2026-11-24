@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from jaeger_authority import PolicyEngine, UnconfinedSandbox
-from jaeger_contracts import ModuleRegistry, OrchestrationPort, SandboxProfile
+from jaeger_contracts import EventBusPort, OrchestrationPort, PolicyPort, SandboxPort, SandboxProfile
 from jaeger_events import EventBus
 from jaeger_loop import AgentLoop
 from jaeger_memory import SqliteStateMemory
@@ -88,13 +88,11 @@ def test_full_9_module_end_to_end_orchestration_and_mailbox_arbiter(tmp_path: Pa
     orch = SubagentOrchestrator(loop_factory=make_loop, events=bus, mailbox=mailbox, max_depth=2)
     assert isinstance(orch, OrchestrationPort)
 
-    # Register all modules in ModuleRegistry to prove full hot-swappable wiring
-    reg = ModuleRegistry()
-    reg.register("08-events", "default", bus)
-    reg.register("05-policy", "default", PolicyEngine())
-    reg.register("05-sandbox", "unconfined", UnconfinedSandbox())
-    reg.register("06-orchestration", "default", orch)
-    assert reg.active_id("06-orchestration") == "default"
+    # Verify protocol conformance across all participating standalone modules
+    assert isinstance(bus, EventBusPort)
+    assert isinstance(PolicyEngine(), PolicyPort)
+    assert isinstance(UnconfinedSandbox(), SandboxPort)
+    assert isinstance(orch, OrchestrationPort)
 
     try:
         parent_prof = SandboxProfile(workspace=ws, allow_network=False)
