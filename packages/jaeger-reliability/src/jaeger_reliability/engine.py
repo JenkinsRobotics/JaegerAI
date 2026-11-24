@@ -145,7 +145,7 @@ class _KeyState:
 
 
 class CredentialPool:
-    """Multi-key same-provider credential rotation with cooldowns (hermes-agent)."""
+    """Priority-ordered multi-key credential pool with cooldown failover (hermes-agent)."""
 
     def __init__(self, keys: Sequence[str], *, clock: Callable[[], float] = time.monotonic) -> None:
         cleaned = [k for k in keys if k]
@@ -153,16 +153,16 @@ class CredentialPool:
             raise ValueError("CredentialPool requires at least one non-empty credential.")
         self._keys = [_KeyState(key=k) for k in cleaned]
         self._clock = clock
-        self._cursor = 0
+
+    def __len__(self) -> int:
+        return len(self._keys)
 
     def acquire(self) -> str:
+        """Return the highest-priority credential not currently in cooldown."""
         now = self._clock()
-        n = len(self._keys)
-        for offset in range(n):
-            idx = (self._cursor + offset) % n
-            if self._keys[idx].cooldown_until <= now:
-                self._cursor = (idx + 1) % n
-                return self._keys[idx].key
+        for state in self._keys:
+            if state.cooldown_until <= now:
+                return state.key
         # All in cooldown: pick the one recovering soonest
         soonest = min(self._keys, key=lambda s: s.cooldown_until)
         return soonest.key

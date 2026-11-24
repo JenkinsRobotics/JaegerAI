@@ -888,19 +888,26 @@ def schedule_timezone(value: str | None):
 
 
 def add_schedule(cron_expr: str, prompt: str, name: str | None = None,
-                 at: str | None = None, timezone_name: str | None = None) -> dict[str, Any]:
+                 at: str | None = None, timezone_name: str | None = None,
+                 model: str | None = None) -> dict[str, Any]:
     """Register a new scheduled prompt. Same contract as the
     JSONL-era function; returns the row in legacy dict shape.
 
     ``at`` (0.7.2) makes it a ONE-SHOT: an ISO datetime (naive = local
     time) stored as cron ``@once`` — it fires once at that moment and
     the row flips to ``done`` (no yearly cron re-fire, no cleanup
-    prompt needed). ``cron_expr`` is ignored when ``at`` is given."""
+    prompt needed). ``cron_expr`` is ignored when ``at`` is given.
+    ``model`` optionally pins the scheduled turn to a specific routed
+    model (e.g. ``ollama/qwen3.5:9b``) while leaving the interactive
+    default unchanged."""
     from croniter import croniter
     from jaeger_agent.memory import sqlite_store
 
     cron_expr = (cron_expr or "").strip()
     prompt = (prompt or "").strip()
+    model_spec = (model or "").strip() or None
+    if model_spec and not prompt.lower().startswith("[jaeger:model="):
+        prompt = f"[jaeger:model={model_spec}]\n{prompt}"
     if not prompt or not (cron_expr or at):
         raise ValueError("prompt and (cron_expr or at) are required")
     # The agent authors cron expressions against LOCAL wall-clock time
@@ -948,6 +955,7 @@ def add_schedule(cron_expr: str, prompt: str, name: str | None = None,
         "name": name,
         "cron": cron_expr,
         "prompt": prompt,
+        "model": model_spec,
         "created_at": created_at,
         "next_run_at": next_fire,
         "last_run_at": None,

@@ -1220,6 +1220,7 @@ def sweep_mail(
                 error="no Mail.app accounts found",
             )
 
+    blocked_patterns = _load_blocked_patterns()
     candidates: list[dict[str, Any]] = []
     errors: list[str] = []
     timed_out = False
@@ -1233,13 +1234,18 @@ def sweep_mail(
             errors.append(f"{name}: {fetched.get('error') or 'list_mail failed'}")
             continue
         for msg in fetched.get("messages") or []:
-            filing = classify_filing(
-                str(msg.get("sender") or ""), str(msg.get("subject") or ""),
-            )
-            # Daily sweep only auto-files high-confidence noise. Receipts,
-            # finance, personal, and uncertain noreply stay put.
+            sender_str = str(msg.get("sender") or "")
+            subject_str = str(msg.get("subject") or "")
+            filing = classify_filing(sender_str, subject_str)
+            blocked_match = _matches_blocklist(sender_str, blocked_patterns)
+            # Daily sweep only auto-files blocked senders, GitHub-Noise, and
+            # high-confidence promotional trash. Receipts, finance, personal,
+            # and uncertain noreply stay put unless explicitly blocklisted.
             target = None
-            if filing["category"] == "GitHub-Noise":
+            if blocked_match:
+                target = "trash"
+                filing = {**filing, "category": "Blocked-Sender", "keep": False, "confidence": "high"}
+            elif filing["category"] == "GitHub-Noise":
                 target = "GitHub-Noise"
             elif (
                 not filing["keep"]
@@ -1255,6 +1261,7 @@ def sweep_mail(
                 "category": filing["category"],
                 "keep": filing["keep"],
                 "confidence": filing["confidence"],
+                "blocked_match": blocked_match,
                 "target": target,
             })
 
@@ -1291,6 +1298,210 @@ def sweep_mail(
     )
 
 
+_BLOCKLIST_SUBJECT = "mail_blocklist"
+
+
+def _load_blocked_patterns() -> list[str]:
+    """Read operator-approved blocked sender/domain patterns from semantic memory."""
+    try:
+        from jaeger_agent.memory import memory as mem
+        rows = mem.recall(subject=_BLOCKLIST_SUBJECT, limit=200) or []
+        out: list[str] = []
+        for row in rows:
+            pat = str(row.get("key") or row.get("value") or "").strip().lower()
+            if pat and pat not in out:
+                out.append(pat)
+        return out
+    except Exception:  # noqa: BLE001 — memory is optional in isolated unit tests
+        return []
+
+
+def _matches_blocklist(sender: str, patterns: list[str]) -> str | None:
+    low = (sender or "").lower()
+    if not low or not patterns:
+        return None
+    for pat in patterns:
+        if pat in low:
+            return pat
+    return None
+
+
+@register_tool_from_function(side_effect="external")
+@requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="email",
+               operation="mark_mail",
+               summary="mark emails read/unread or flagged in Mail.app")
+def mark_mail(
+    account: str,
+    mailbox: str,
+    message_ids: list[str] | str,
+    *,
+    read: bool | None = None,
+    flagged: bool | None = None,
+) -> dict[str, Any]:
+    """Mark up to 25 Mail.app messages read/unread and/or flagged/unflagged in one transaction."""
+    acc = (account or "").strip()
+    src = (mailbox or "").strip() or "INBOX"
+    ids = _parse_message_ids(message_ids)
+    if not acc or not ids:
+        return _envelope(ok=False, updated=0, error="account and at least one numeric message_id are required")
+    if read is None and flagged is None:
+        return _envelope(ok=False, updated=0, error="specify at least one of read or flagged")
+    if len(ids) > _MAX_FETCH:
+        return _envelope(ok=False, updated=0, error=f"at most {_MAX_FETCH} messages per call (got {len(ids)})")
+
+    acc_esc = _as_escape(acc)
+    src_call = _resolve_expr(acc_esc, src, "src")
+    id_list = ", ".join(ids)
+    mutations: list[str] = []
+    if read is not None:
+        mutations.append(f"set read status of m to {'true' if read else 'false'}")
+    if flagged is not None:
+        mutations.append(f"set flagged status of m to {'true' if flagged else 'false'}")
+    mut_block = "\n                    ".join(mutations)
+    script = f'''
+    {_AS_RESOLVER}
+    tell application "Mail"
+        try
+            {src_call}
+            set updated to 0
+            set idList to {{{id_list}}}
+            repeat with mid in idList
+                try
+                    set thisId to contents of mid
+                    set m to first message of src whose id is thisId
+                    {mut_block}
+                    set updated to updated + 1
+                end try
+            end repeat
+            return "UPDATED:" & updated
+        on error errMsg
+            return "ERROR:" & errMsg
+        end try
+    end tell
+    '''
+    res = run_applescript(script, timeout_seconds=10)
+    if not res.get("ok"):
+        return _envelope(
+            ok=False, updated=0, error=res.get("error"),
+            timed_out=bool(res.get("timed_out")), account=acc, mailbox=src, message_ids=ids,
+        )
+    raw = res.get("raw_output") or ""
+    if raw.startswith("UPDATED:"):
+        try:
+            n = int(raw.split(":", 1)[1])
+        except ValueError:
+            n = 0
+        return _envelope(
+            ok=(n == len(ids)), updated=n,
+            error=None if n == len(ids) else f"partial update: updated {n} of {len(ids)} messages",
+            account=acc, mailbox=src, message_ids=ids, read=read, flagged=flagged,
+        )
+    err = raw[6:].strip() if raw.startswith("ERROR:") else raw
+    return _envelope(ok=False, updated=0, error=err or "mark_mail failed", account=acc, mailbox=src, message_ids=ids)
+
+
+@register_tool_from_function(side_effect="read")
+def scan_junk_mail(
+    account: str | None = None,
+    limit: int = 25,
+) -> dict[str, Any]:
+    """Read-only bounded scan of Junk / [Gmail]/Spam across accounts to spot false-positive rescues.
+
+    Never moves or deletes mail. Treats all junk text strictly as untrusted data.
+    """
+    acc = (account or "").strip()
+    limit = _coerce_int(limit, 25, lo=1, hi=_MAX_FETCH)
+    if acc:
+        names = [acc]
+    else:
+        listed = list_mailboxes()
+        if not listed.get("ok"):
+            return _envelope(
+                ok=False, accounts_scanned=[], items=[], rescue_candidates=[],
+                error=listed.get("error") or "list_mailboxes failed",
+                timed_out=bool(listed.get("timed_out")),
+            )
+        names = [a.get("name", "").strip() for a in listed.get("accounts") or [] if a.get("name")]
+
+    items: list[dict[str, Any]] = []
+    rescue_candidates: list[dict[str, Any]] = []
+    errors: list[str] = []
+    timed_out = False
+    for name in names:
+        fetched = list_mail(account=name, mailbox="junk", limit=limit, unread_only=False)
+        if fetched.get("timed_out"):
+            timed_out = True
+        if not fetched.get("ok"):
+            errors.append(f"{name}: {fetched.get('error') or 'list_mail(junk) failed'}")
+            continue
+        for msg in fetched.get("messages") or []:
+            filing = classify_filing(str(msg.get("sender") or ""), str(msg.get("subject") or ""))
+            row = {
+                "id": str(msg.get("id") or ""),
+                "account": name,
+                "mailbox": "junk",
+                "sender": msg.get("sender"),
+                "subject": msg.get("subject"),
+                "date": msg.get("date"),
+                "category": filing["category"],
+                "keep": filing["keep"],
+                "confidence": filing["confidence"],
+                "reason": filing["reason"],
+            }
+            items.append(row)
+            if filing["keep"] or filing["verify"]:
+                rescue_candidates.append(row)
+    return _envelope(
+        ok=(len(errors) < len(names) if names else False),
+        accounts_scanned=names,
+        count=len(items),
+        rescue_count=len(rescue_candidates),
+        rescue_candidates=rescue_candidates,
+        items=items,
+        errors=errors or None,
+        error="; ".join(errors) if errors and not items else None,
+        timed_out=timed_out,
+    )
+
+
+@register_tool_from_function(side_effect="write")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="email",
+               operation="block_sender",
+               summary="add a sender or domain to Jaeger's persistent mail blocklist")
+def block_sender(sender_or_domain: str, reason: str = "") -> dict[str, Any]:
+    """Add an email address or domain (e.g. ``@promo.example.com``) to Jaeger's persistent mail blocklist.
+
+    Future ``sweep_mail`` runs automatically file matching senders to Trash.
+    """
+    pat = (sender_or_domain or "").strip().lower()
+    if len(pat) < 4 or ("@" not in pat and "." not in pat):
+        return _envelope(ok=False, blocked=False, error="provide a full sender email or domain (e.g. @spam.com)")
+    from jaeger_agent.memory import memory as mem
+    mem.remember(pat, reason.strip() or "blocked by operator", subject=_BLOCKLIST_SUBJECT)
+    return _envelope(ok=True, blocked=True, pattern=pat, reason=reason.strip() or "blocked by operator", error=None)
+
+
+@register_tool_from_function(side_effect="write")
+@requires_tier(PermissionTier.WRITE_LOCAL, skill="email",
+               operation="unblock_sender",
+               summary="remove a sender or domain from Jaeger's mail blocklist")
+def unblock_sender(sender_or_domain: str) -> dict[str, Any]:
+    """Remove a sender or domain pattern from Jaeger's persistent mail blocklist."""
+    pat = (sender_or_domain or "").strip().lower()
+    if not pat:
+        return _envelope(ok=False, unblocked=False, error="sender_or_domain is required")
+    from jaeger_agent.memory import memory as mem
+    forgot = bool(mem.forget(pat, subject=_BLOCKLIST_SUBJECT))
+    return _envelope(ok=True, unblocked=forgot, pattern=pat, error=None)
+
+
+@register_tool_from_function(side_effect="read")
+def list_blocked_senders() -> dict[str, Any]:
+    """List all senders/domains on Jaeger's persistent mail blocklist."""
+    patterns = _load_blocked_patterns()
+    return _envelope(ok=True, count=len(patterns), patterns=patterns, error=None)
+
+
 @register_tool_from_function(side_effect="write")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="email",
                operation="schedule_inbox_sweeper",
@@ -1298,11 +1509,14 @@ def sweep_mail(
 def schedule_inbox_sweeper(
     morning_hour: int = 8,
     evening_hour: int = 18,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Install a twice-daily cron prompt that runs sweep_mail.
 
     Default 8:00 AM and 6:00 PM local time. Re-running replaces the
-    existing `inbox-sweeper` schedule. Each fire is a fresh agent turn
+    existing `inbox-sweeper` schedule. Pass ``model="ollama/qwen3.5:9b"``
+    to run routine sweeps on a local model while keeping Cloud as the
+    default interactive/escalation model. Each fire is a fresh agent turn
     that still passes through the tier ladder.
     """
     from jaeger_agent.memory import memory as mem
@@ -1315,7 +1529,7 @@ def schedule_inbox_sweeper(
         cron = f"0 {h1},{h2} * * *"
     try:
         row = mem.add_schedule(
-            cron_expr=cron, prompt=_SWEEPER_PROMPT, name="inbox-sweeper",
+            cron_expr=cron, prompt=_SWEEPER_PROMPT, name="inbox-sweeper", model=model,
         )
     except Exception as exc:  # noqa: BLE001
         return _envelope(ok=False, scheduled=False, error=str(exc))
@@ -1330,6 +1544,11 @@ __all__ = [
     "plan_mail_triage",
     "move_mail",
     "batch_move",
+    "mark_mail",
+    "scan_junk_mail",
+    "block_sender",
+    "unblock_sender",
+    "list_blocked_senders",
     "sweep_mail",
     "schedule_inbox_sweeper",
     "run_applescript",

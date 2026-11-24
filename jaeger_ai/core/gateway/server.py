@@ -1441,15 +1441,18 @@ class JaegerGatewayApp(
         from jaeger_ai.features.app_control.routes import register as register_app_control
         register_app_control(self)
 
-        # WebSocket support for real-time bidirectional communication
-        # Matches Hermes (7+ WS endpoints) and OpenClaw (primary WS transport)
-        try:
-            from .websocket import register_websocket_routes
-            self.ws_handler = register_websocket_routes(self.app, self)
-            logger.info("WebSocket support enabled at /ws")
-        except ImportError as e:
-            logger.warning(f"WebSocket support unavailable: {e}")
-            self.ws_handler = None
+        # Experimental WebSocket RPC surface is disabled by default (fail-closed)
+        # until every RPC method enforces per-method caller scopes and delegates
+        # to canonical Gateway operations with real receipts.
+        self.ws_handler = None
+        if os.environ.get("JAEGER_ENABLE_EXPERIMENTAL_WS", "").strip() == "1":
+            try:
+                from .websocket import register_websocket_routes
+                self.ws_handler = register_websocket_routes(self.app, self)
+                logger.warning("Experimental WebSocket surface enabled at /ws via JAEGER_ENABLE_EXPERIMENTAL_WS=1")
+            except ImportError as e:
+                logger.warning(f"WebSocket support unavailable: {e}")
+                self.ws_handler = None
 
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/v1/stop", self.handle_stop_status)
