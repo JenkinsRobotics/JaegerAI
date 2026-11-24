@@ -2768,12 +2768,20 @@ class JaegerAgent:
         # Failure-signature tracking — only meaningful when the tool
         # returns an explicit failure dict. Successful calls drop out
         # of this counter via ``semantic_failure_signature``'s None
-        # return.
+        # return. When a shell/exec command succeeds, clear stale failure
+        # streaks for that tool family so non-consecutive debugging runs
+        # do not accumulate into a false 2-strike kill.
         fail_sig = semantic_failure_signature(name, args, content)
         if fail_sig is not None:
             self._failure_signature_counts[fail_sig] = (
                 self._failure_signature_counts.get(fail_sig, 0) + 1
             )
+        elif _ok and name in ("terminal", "exec_command", "execute_code", "run_python", "run_shell"):
+            for _fkey in [
+                k for k in self._failure_signature_counts
+                if k.startswith((f"{name}|", "terminal|", "exec_command|"))
+            ]:
+                self._failure_signature_counts.pop(_fkey, None)
 
         # Deferred identical-call counting for READ tools: a repeat
         # only counts when the result is byte-identical to the last
