@@ -48,6 +48,10 @@ jaeger-models = { workspace = true }
 jaeger-orchestration = { workspace = true }
 jaeger-reliability = { workspace = true }
 jaeger-tools = { workspace = true }
+jaeger-mcp = { workspace = true }
+jaeger-lsp = { workspace = true }
+jaeger-checkpoints = { workspace = true }
+jaeger-skills = { workspace = true }
 
 [build-system]
 requires = ["setuptools>=83"]

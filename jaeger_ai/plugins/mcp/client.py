@@ -44,18 +44,8 @@ _MASK = "********"
 
 def _redact_known_secrets(value: Any, secrets: set[str]) -> Any:
     """Remove configured MCP credentials from tool results and errors."""
-    if isinstance(value, str):
-        redacted = value
-        for secret in sorted((item for item in secrets if len(item) >= 4), key=len, reverse=True):
-            redacted = redacted.replace(secret, _MASK)
-        return redacted
-    if isinstance(value, dict):
-        return {key: _redact_known_secrets(item, secrets) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_redact_known_secrets(item, secrets) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_redact_known_secrets(item, secrets) for item in value)
-    return value
+    from jaeger_mcp.policy import redact_secrets
+    return redact_secrets(value, secrets)
 
 
 @dataclass
@@ -89,6 +79,9 @@ class MCPServerConfig:
     tools_read_only: list[str] = field(default_factory=list)
     connect_timeout_s: float = 20.0
     call_timeout_s: float = 60.0
+    # "seatbelt" wraps local stdio MCP subprocesses in jaeger_mcp Seatbelt
+    # confinement denying ~/.ssh, ~/.aws, ~/.gnupg, and ~/.jaeger/secrets.
+    sandbox: str = ""
     #   tool_timeouts_s: {name or fnmatch glob: seconds} overriding call_timeout_s
     #                  for known long tools (e.g. REA analyze_*); first match wins.
     tool_timeouts_s: dict[str, float] = field(default_factory=dict)
@@ -180,6 +173,7 @@ def server_config_from_entry(entry: dict[str, Any], *, env: dict[str, str] | Non
         tools_read_only=_name_list(tools.get("read_only")),
         connect_timeout_s=_timeout(entry.get("connect_timeout_s"), DEFAULT_CONNECT_TIMEOUT_S),
         call_timeout_s=_timeout(entry.get("call_timeout_s"), DEFAULT_CALL_TIMEOUT_S),
+        sandbox=str(entry.get("sandbox", "") or "").strip().lower(),
         tool_timeouts_s={str(k): _timeout(v, DEFAULT_CALL_TIMEOUT_S)
                          for k, v in (entry.get("tool_timeouts_s") or {}).items()
                          if str(k).strip()} if isinstance(entry.get("tool_timeouts_s"), dict) else {},
@@ -341,15 +335,22 @@ class _MCPClient:
 
             inherited = {key: value for key in ("PATH", "HOME", "TMPDIR", "LANG", "LC_ALL")
                          if (value := os.environ.get(key))}
+            cmd = self.config.command or ""
+            cmd_args = list(self.config.args)
+            if self.config.sandbox == "seatbelt" and cmd:
+                from jaeger_mcp.sandbox import wrap_stdio_with_seatbelt
+                cmd, cmd_args, _ = wrap_stdio_with_seatbelt(cmd, cmd_args)
             params = StdioServerParameters(
-                command=self.config.command or "",
-                args=self.config.args,
+                command=cmd,
+                args=cmd_args,
                 env={**inherited, **self.config.env},
             )
             read, write = await self._exit_stack.enter_async_context(stdio_client(params))
         self._session = await self._exit_stack.enter_async_context(ClientSession(read, write, message_handler=self._on_message))
         initialization = await self._session.initialize()
-        self.resources_advertised = getattr(getattr(initialization,"capabilities",None),"resources",None) is not None
+        caps = getattr(initialization, "capabilities", None)
+        self.resources_advertised = getattr(caps, "resources", None) is not None
+        self.prompts_advertised = getattr(caps, "prompts", None) is not None
         return await self.list_tools()
 
     async def _on_message(self, message: Any) -> None:

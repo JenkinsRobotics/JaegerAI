@@ -120,6 +120,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "append_file", "delete_file",
         "move_file", "copy_file",
         "read_many_files", "apply_patch", "notebook_edit",
+        "check_diagnostics", "checkpoint_snapshot", "checkpoint_diff", "checkpoint_restore",
     }),
     "code": frozenset({
         # ``execute_code`` is in CORE; heavy/risky code surfaces load
@@ -232,7 +233,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         "send_email", "move_mail", "batch_move", "mark_mail",
         "sweep_mail", "schedule_inbox_sweeper", "scan_junk_mail",
         "block_sender", "unblock_sender", "list_blocked_senders",
-        "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage",
+        "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "triage_all_accounts",
     }),
     "smart_home": frozenset({
         # Home Assistant plugin tools (jaeger_os/plugins/homeassistant) —
