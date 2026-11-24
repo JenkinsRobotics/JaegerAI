@@ -816,3 +816,28 @@ def test_scan_junk_mail_filters_low_confidence_spam_from_rescue_candidates(monke
     rescue_ids = {r["id"] for r in res["rescue_candidates"]}
     assert rescue_ids == {"2", "3"}  # brokerage + receipt rescued; bare no-reply promo excluded
     assert res["errors"] == ["Google: temporary error"]
+
+
+def test_triage_all_accounts_surveys_inbox_and_junk_in_one_call(monkeypatch):
+    monkeypatch.setattr(email, "list_mailboxes", lambda: {
+        "ok": True, "accounts": [{"name": "Exchange"}, {"name": "Google"}],
+    })
+    monkeypatch.setattr(email, "list_mail", lambda account, mailbox="INBOX", limit=10, unread_only=False: {
+        "ok": True,
+        "messages": [
+            {"id": "10", "sender": "alerts@bank.com", "subject": "Monthly statement", "date": "Tue", "is_read": False},
+            {"id": "11", "sender": "newsletter@shop.com", "subject": "Weekly deals 50% off", "date": "Tue", "is_read": False},
+        ] if account == "Exchange" else [
+            {"id": "20", "sender": "friend@gmail.com", "subject": "Dinner Friday?", "date": "Tue", "is_read": False},
+        ],
+    })
+    monkeypatch.setattr(email, "scan_junk_mail", lambda limit=10: {
+        "ok": True, "count": 1,
+        "rescue_candidates": [{"id": "30", "account": "Exchange", "sender": "elfster.com", "subject": "Secret Santa"}],
+    })
+    res = email.triage_all_accounts(limit_per_account=10, include_junk=True)
+    assert res["ok"] is True
+    assert res["account_count"] == 2 and res["accounts_succeeded"] == 2
+    assert res["junk_rescue_count"] == 1
+    assert res["accounts"][0]["category_counts"]["Finance"] == 1
+    assert res["accounts"][0]["category_counts"]["Trash"] == 1

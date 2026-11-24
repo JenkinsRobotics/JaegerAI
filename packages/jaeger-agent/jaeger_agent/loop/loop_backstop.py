@@ -25,11 +25,10 @@ from __future__ import annotations
 from typing import Any
 import re
 
-# Observed legitimate multi-step work tops out near ~16 tool calls and
-# varies its arguments. These limits are a safety net, not a fine-grained
-# iteration tuner — bump them if real workloads need it, but don't lower.
-MAX_TOOL_CALLS = 24
-WARN_TOOL_CALLS = 20
+# Multi-account / multi-file real-world turns routinely need 25-35 varied calls.
+# Stuck loops are still caught fast by MAX_IDENTICAL_CALLS=4 and MAX_SEMANTIC_FAILURES=2.
+MAX_TOOL_CALLS = 40
+WARN_TOOL_CALLS = 34
 MAX_IDENTICAL_CALLS = 4
 MAX_SEMANTIC_FAILURES = 2  # 2-strike: same failure signature twice → halt
 
@@ -37,7 +36,7 @@ MAX_SEMANTIC_FAILURES = 2  # 2-strike: same failure signature twice → halt
 # signature. Variant `Trash` / `[Gmail]/Trash` / `Deleted Messages`
 # errors are the same resolve failure, not a new attempt.
 MAIL_TOOLS = frozenset({
-    "list_mail", "list_mailboxes", "read_mail", "plan_mail_triage",
+    "list_mail", "list_mailboxes", "read_mail", "plan_mail_triage", "triage_all_accounts",
     "move_mail", "batch_move", "mark_mail", "scan_junk_mail",
     "block_sender", "unblock_sender", "list_blocked_senders", "sweep_mail",
 })

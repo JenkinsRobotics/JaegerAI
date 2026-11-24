@@ -794,17 +794,39 @@ def list_mail(
             if totalCount < startIndex then return "COUNT:0"
             if endIndex > totalCount then set endIndex to totalCount
             set outLines to {{}}
-            repeat with i from startIndex to endIndex
-                try
-                    set m to message i of targetMb
-                    set mid to id of m as string
-                    set s to subject of m
-                    set sndr to sender of m
-                    set dt to (date received of m) as string
-                    set isRead to (read status of m) as string
+            set usedBulk to false
+            try
+                -- Bulk property fetch: 5 AppleEvents total instead of 6*N,
+                -- avoiding 25s timeouts on huge Gmail/Yahoo inboxes.
+                set idList to id of messages startIndex thru endIndex of targetMb
+                set subjList to subject of messages startIndex thru endIndex of targetMb
+                set sndrList to sender of messages startIndex thru endIndex of targetMb
+                set dtList to date received of messages startIndex thru endIndex of targetMb
+                set readList to read status of messages startIndex thru endIndex of targetMb
+                set nItems to count of idList
+                repeat with k from 1 to nItems
+                    set mid to (item k of idList) as string
+                    set s to (item k of subjList) as string
+                    set sndr to (item k of sndrList) as string
+                    set dt to (item k of dtList) as string
+                    set isRead to (item k of readList) as string
                     set end of outLines to mid & "{_FIELD_SEP}" & s & "{_FIELD_SEP}" & sndr & "{_FIELD_SEP}" & dt & "{_FIELD_SEP}" & isRead
-                end try
-            end repeat
+                end repeat
+                set usedBulk to true
+            end try
+            if usedBulk is false then
+                repeat with i from startIndex to endIndex
+                    try
+                        set m to message i of targetMb
+                        set mid to id of m as string
+                        set s to subject of m
+                        set sndr to sender of m
+                        set dt to (date received of m) as string
+                        set isRead to (read status of m) as string
+                        set end of outLines to mid & "{_FIELD_SEP}" & s & "{_FIELD_SEP}" & sndr & "{_FIELD_SEP}" & dt & "{_FIELD_SEP}" & isRead
+                    end try
+                end repeat
+            end if
             set AppleScript's text item delimiters to linefeed
             return (outLines as string)
         on error errMsg
@@ -1551,6 +1573,96 @@ def list_blocked_senders() -> dict[str, Any]:
     return _envelope(ok=True, count=len(patterns), patterns=patterns, error=None)
 
 
+@register_tool_from_function(side_effect="read")
+def triage_all_accounts(
+    limit_per_account: int = 10,
+    include_junk: bool = True,
+) -> dict[str, Any]:
+    """One-shot read-only triage across EVERY configured Apple Mail account.
+
+    Replaces 10-20 separate per-account calls (list_mailboxes + list_mail +
+    plan_mail_triage + scan_junk_mail) with a single bounded survey. Never
+    moves, marks, or deletes mail. Returns per-account INBOX summaries,
+    auto-trash/keep counts, and high-signal Junk rescue candidates.
+    """
+    limit = _coerce_int(limit_per_account, 10, lo=1, hi=_MAX_FETCH)
+    listed = list_mailboxes()
+    if not listed.get("ok"):
+        return _envelope(
+            ok=False, accounts=[], junk_rescues=[],
+            error=listed.get("error") or "list_mailboxes failed",
+            timed_out=bool(listed.get("timed_out")),
+        )
+    blocked_patterns = _load_blocked_patterns()
+    accounts_out: list[dict[str, Any]] = []
+    errors: list[str] = []
+    timed_out = False
+    for acc in listed.get("accounts") or []:
+        name = str(acc.get("name") or "").strip()
+        if not name:
+            continue
+        page = list_mail(account=name, mailbox="INBOX", limit=limit, unread_only=False)
+        if page.get("timed_out"):
+            timed_out = True
+        if not page.get("ok"):
+            errors.append(f"{name} INBOX: {page.get('error') or 'list_mail failed'}")
+            accounts_out.append({"account": name, "ok": False, "error": page.get("error"), "items": []})
+            continue
+        rows: list[dict[str, Any]] = []
+        counts = {"Action": 0, "Receipts": 0, "Finance": 0, "GitHub-Noise": 0, "Trash": 0, "Blocked-Sender": 0}
+        for msg in page.get("messages") or []:
+            sender = str(msg.get("sender") or "")
+            subject = str(msg.get("subject") or "")
+            filing = classify_filing(sender, subject)
+            blocked_hit = _matches_blocklist(sender, blocked_patterns)
+            cat = "Blocked-Sender" if blocked_hit else filing["category"]
+            counts[cat] = counts.get(cat, 0) + 1
+            rows.append({
+                "id": str(msg.get("id") or ""),
+                "sender": sender,
+                "subject": subject,
+                "date": msg.get("date"),
+                "is_read": bool(msg.get("is_read")),
+                "category": cat,
+                "keep": False if blocked_hit else filing["keep"],
+                "verify": False if blocked_hit else filing["verify"],
+            })
+        accounts_out.append({
+            "account": name,
+            "ok": True,
+            "count": len(rows),
+            "unread_in_page": sum(1 for r in rows if not r["is_read"]),
+            "category_counts": {k: v for k, v in counts.items() if v},
+            "items": rows,
+        })
+
+    junk_rescues: list[dict[str, Any]] = []
+    junk_scanned = 0
+    if include_junk:
+        junk = scan_junk_mail(limit=limit)
+        if junk.get("timed_out"):
+            timed_out = True
+        if junk.get("errors"):
+            errors.extend(f"Junk {e}" for e in junk.get("errors") or [])
+        junk_rescues = list(junk.get("rescue_candidates") or [])
+        junk_scanned = int(junk.get("count") or 0)
+
+    succeeded = sum(1 for a in accounts_out if a.get("ok"))
+    return _envelope(
+        ok=succeeded > 0,
+        accounts=accounts_out,
+        account_count=len(accounts_out),
+        accounts_succeeded=succeeded,
+        junk_scanned=junk_scanned,
+        junk_rescue_count=len(junk_rescues),
+        junk_rescues=junk_rescues[:25],
+        blocked_pattern_count=len(blocked_patterns),
+        errors=errors or None,
+        error="; ".join(errors) if errors and succeeded == 0 else None,
+        timed_out=timed_out,
+    )
+
+
 @register_tool_from_function(side_effect="write")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="email",
                operation="schedule_inbox_sweeper",
@@ -1591,6 +1703,7 @@ __all__ = [
     "list_mail",
     "read_mail",
     "plan_mail_triage",
+    "triage_all_accounts",
     "move_mail",
     "batch_move",
     "mark_mail",

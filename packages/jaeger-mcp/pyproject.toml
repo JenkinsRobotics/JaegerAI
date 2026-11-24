@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-mcp"
+version = "0.1.0"
+description = "Synthesized MCP runtime primitives: fail-closed policy/redaction, disk tool-schema cache, Seatbelt stdio sandboxing, prompts/roots, and read-only auto-recovery."
+requires-python = ">=3.11"
+dependencies = ["jaeger-contracts"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

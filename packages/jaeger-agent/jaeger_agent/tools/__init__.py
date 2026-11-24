@@ -195,20 +195,32 @@ from .share_file import share_file
 from .contacts import lookup_contact
 from .email import (
     batch_move,
+    block_sender,
+    list_blocked_senders,
     list_mail,
     list_mailboxes,
+    mark_mail,
     move_mail,
     plan_mail_triage,
     read_mail,
+    scan_junk_mail,
     schedule_inbox_sweeper,
     send_email,
     sweep_mail,
+    triage_all_accounts,
+    unblock_sender,
 )
 from .clipboard import clipboard_read, clipboard_write
 from .notify import notify
 from .system_control import system_control
 from .media_control import media_control, now_playing
 from .ocr import ocr_file
+from .dev_quality import (
+    check_diagnostics,
+    checkpoint_diff,
+    checkpoint_restore,
+    checkpoint_snapshot,
+)
 
 
 __all__ = [

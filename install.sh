@@ -154,7 +154,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   # Build each package in an external scratch directory; install wheels in
   # dependency order so our own code always comes from this checkout.
   echo "→ Installing in-repo packages (modular core, JaegerOS, agent, voice engines)..."
-  for pkg in jaeger-contracts jaeger-authority jaeger-events jaeger-memory jaeger-models jaeger-reliability jaeger-tools jaeger-loop jaeger-orchestration jaeger-os jaeger-agent jaeger-kokoro-tts jaeger-whisper-stt; do
+  for pkg in jaeger-contracts jaeger-authority jaeger-events jaeger-memory jaeger-models jaeger-reliability jaeger-tools jaeger-mcp jaeger-lsp jaeger-checkpoints jaeger-skills jaeger-loop jaeger-orchestration jaeger-os jaeger-agent jaeger-kokoro-tts jaeger-whisper-stt; do
     PKG_SPEC="$REPO_ROOT/packages/$pkg"
     [[ "$pkg" == "jaeger-agent" ]] && PKG_SPEC="$PKG_SPEC[multimodal-duplex]"
     "$VENV/bin/python" "$REPO_ROOT/scripts/install-packages.py" "$PKG_SPEC"
@@ -221,6 +221,7 @@ packages = (
     'jaeger-ai', 'jaeger-os', 'jaeger-agent', 'jaeger-kokoro-tts', 'jaeger-whisper-stt',
     'jaeger-contracts', 'jaeger-authority', 'jaeger-events', 'jaeger-loop',
     'jaeger-memory', 'jaeger-models', 'jaeger-orchestration', 'jaeger-reliability', 'jaeger-tools',
+    'jaeger-mcp', 'jaeger-lsp', 'jaeger-checkpoints', 'jaeger-skills',
 )
 missing = []
 for pkg in packages:

@@ -24,10 +24,11 @@ class SkillHistoryError(ValueError):
 
 
 def _clean_name(name: str) -> str:
-    n = (name or "").strip().lower().replace(" ", "-")
-    if not _NAME.match(n) or ".." in n:
-        raise SkillHistoryError("Skill name must be 2-64 chars: a-z, 0-9, '.', '_' or '-'")
-    return n
+    from jaeger_skills import SkillValidationError, clean_skill_name
+    try:
+        return clean_skill_name(name)
+    except SkillValidationError as exc:
+        raise SkillHistoryError(str(exc)) from exc
 
 
 def history_dir(layout: Any, name: str) -> Path:
@@ -35,31 +36,16 @@ def history_dir(layout: Any, name: str) -> Path:
 
 
 def _frontmatter(text: str) -> dict[str, str]:
-    if not text.startswith("---"):
-        return {}
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}
-    out: dict[str, str] = {}
-    for line in text[3:end].splitlines():
-        if ":" in line and not line.startswith((" ", "\t")):
-            k, v = line.split(":", 1)
-            out[k.strip()] = v.strip().strip("'\"")
-    return out
+    from jaeger_skills import parse_frontmatter
+    return parse_frontmatter(text)
 
 
 def validate(name: str, content: str) -> str:
-    text = (content or "").replace("\r\n", "\n")
-    if not text.strip():
-        raise SkillHistoryError("Skill content is empty")
-    if len(text.encode("utf-8")) > MAX_BYTES:
-        raise SkillHistoryError(f"Skill content exceeds {MAX_BYTES} bytes")
-    fm = _frontmatter(text)
-    if not fm.get("name") or not fm.get("description"):
-        raise SkillHistoryError("SKILL.md needs YAML frontmatter with 'name' and 'description'")
-    if _clean_name(fm["name"]) != name:
-        raise SkillHistoryError(f"Frontmatter name {fm['name']!r} must match the skill name {name!r}")
-    return text if text.endswith("\n") else text + "\n"
+    from jaeger_skills import SkillValidationError, validate_skill_markdown
+    try:
+        return validate_skill_markdown(name, content)
+    except SkillValidationError as exc:
+        raise SkillHistoryError(str(exc)) from exc
 
 
 def skill_folder(layout: Any, name: str) -> Path | None:
