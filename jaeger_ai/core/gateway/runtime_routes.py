@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -116,10 +117,64 @@ class GatewayRuntimeRoutesMixin:
             }
 
     async def _probe_native_mcp(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
-        """Read-only MCP and native-agent readiness; never executes chat."""
+        """Read-only MCP and native-agent readiness; never executes chat.
+
+        Positive (ok=True) probe results are cached briefly (default 5s,
+        configured via JAEGER_MCP_PROBE_CACHE_TTL_S) and coalesced under a
+        per-app asyncio.Lock so high-frequency /health polls from the menu bar
+        and WebUI do not open/close multiple MCP HTTP sessions per second.
+        Failures (ok=False) are never cached so recovery is observed immediately.
+        """
         from jaeger_ai.core.gateway.native_mcp import (
             MCP_URL, MCP_HOST_HEADER, mcp_api_key,
         )
+        try:
+            cache_ttl = float(os.environ.get("JAEGER_MCP_PROBE_CACHE_TTL_S", "5.0"))
+        except ValueError:
+            cache_ttl = 5.0
+        key = mcp_api_key()
+        cache_key = (MCP_URL, MCP_HOST_HEADER, hashlib.sha256(key.encode("utf-8")).hexdigest()[:12] if key else "")
+        lock = getattr(self, "_native_mcp_probe_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._native_mcp_probe_lock = lock
+        if cache_ttl > 0:
+            cached = getattr(self, "_native_mcp_probe_cache", None)
+            if (
+                isinstance(cached, tuple)
+                and len(cached) == 3
+                and cached[0] == cache_key
+                and (time.monotonic() - cached[1]) < cache_ttl
+            ):
+                return dict(cached[2])
+
+        async with lock:
+            if cache_ttl > 0:
+                cached = getattr(self, "_native_mcp_probe_cache", None)
+                if (
+                    isinstance(cached, tuple)
+                    and len(cached) == 3
+                    and cached[0] == cache_key
+                    and (time.monotonic() - cached[1]) < cache_ttl
+                ):
+                    return dict(cached[2])
+            result = await self._probe_native_mcp_uncached(
+                MCP_URL=MCP_URL, MCP_HOST_HEADER=MCP_HOST_HEADER, key=key, timeout_s=timeout_s,
+            )
+            if cache_ttl > 0 and result.get("ok"):
+                self._native_mcp_probe_cache = (cache_key, time.monotonic(), dict(result))
+            else:
+                self._native_mcp_probe_cache = None
+            return result
+
+    async def _probe_native_mcp_uncached(
+        self,
+        *,
+        MCP_URL: str,
+        MCP_HOST_HEADER: str,
+        key: str,
+        timeout_s: float = 3.0,
+    ) -> dict[str, Any]:
         headers = {"Accept": "application/json, text/event-stream", "Host": MCP_HOST_HEADER}
 
         async def terminate_session() -> None:
@@ -170,7 +225,6 @@ class GatewayRuntimeRoutesMixin:
                 return value.get("result", {})
 
         try:
-            key = mcp_api_key()
             if key:
                 headers["Authorization"] = f"Bearer {key}"
             async with asyncio.timeout(timeout_s):

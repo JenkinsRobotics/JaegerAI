@@ -736,6 +736,22 @@ def _wait_for_backend(bridge: Any, *, wait_s: float | None = None, poll_s: float
         time.sleep(poll_s)
 
 
+def _run_http_uvicorn(app: Any, *, host: str, port: int) -> None:
+    """Run MCP Streamable HTTP quietly so routine probes do not bloat mcp.log."""
+    import logging
+    import uvicorn
+
+    for logger_name in (
+        "mcp.server.streamable_http",
+        "mcp.server.streamable_http_manager",
+        "mcp.server.lowlevel.server",
+    ):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+    access_log = os.environ.get("JAEGER_MCP_ACCESS_LOG", "").strip().lower() in {"1", "true", "yes"}
+    log_level = os.environ.get("JAEGER_MCP_LOG_LEVEL", "warning").strip().lower() or "warning"
+    uvicorn.run(app, host=host, port=port, access_log=access_log, log_level=log_level)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     instance = args.instance or args.instance_name
@@ -761,9 +777,7 @@ def main(argv: list[str] | None = None) -> int:
                 print("[jaeger-mcp] No MCP caller token in the Keychain; run `jaeger auth init`. "
                       "Refusing to serve MCP HTTP without authentication.", file=sys.stderr)
                 return 1
-            import uvicorn
-
-            uvicorn.run(http_app(server, tokens), host=args.host, port=args.port)
+            _run_http_uvicorn(http_app(server, tokens), host=args.host, port=args.port)
             return 0
 
         # Gateway fallback for HTTP
@@ -778,9 +792,7 @@ def main(argv: list[str] | None = None) -> int:
                     print("[jaeger-mcp] No MCP caller token in the Keychain; run `jaeger auth init`. "
                           "Refusing to serve MCP HTTP without authentication.", file=sys.stderr)
                     return 1
-                import uvicorn
-
-                uvicorn.run(http_app(server, tokens), host=args.host, port=args.port)
+                _run_http_uvicorn(http_app(server, tokens), host=args.host, port=args.port)
                 return 0
         except (GatewayUnavailable, Exception):
             pass

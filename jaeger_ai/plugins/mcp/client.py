@@ -681,6 +681,50 @@ class MCPRegistry:
                 self._server_states[name] = 'outcome_unknown'
             raise RuntimeError('MCP lifecycle outcome unknown; automatic retry is disabled') from None
 
+    def remove_server(self, name: str) -> bool:
+        """Disconnect ``name`` (if loaded), unregister its tools, and clear cached state.
+
+        Refuses while tool calls for ``name`` are actively in flight. Safe even
+        if the server previously entered ``outcome_unknown`` or ``disconnected``
+        so operators and agents can tear down or reload wedged MCP subprocesses
+        without restarting the entire Gateway.
+        """
+        with self._lifecycle_lock:
+            if self._active_calls.get(name, 0):
+                raise ValueError(f"MCP server {name!r} has active calls; cannot remove")
+            client = self._clients.pop(name, None)
+            was_known = client is not None or name in self._disconnected or name in self._server_states
+            self._disconnected.pop(name, None)
+            self._server_states.pop(name, None)
+            self._inventory_dirty.discard(name)
+            self._inventory_errors.pop(name, None)
+            self._agent_inventories.pop(name, None)
+            removed_specs = [spec for spec in self._tools.values() if spec.server_name == name]
+            self._tools = {k: v for k, v in self._tools.items() if v.server_name != name}
+            cid = self.control_id(name)
+            self._resource_handles = {k: v for k, v in self._resource_handles.items() if k[0] != name}
+            self._resource_pages = {k: v for k, v in self._resource_pages.items() if k[0] != name}
+            self._resource_snapshots = {k: v for k, v in self._resource_snapshots.items() if v.get("server_id") != cid}
+        from jaeger_os.core.tools.tool_registry import unregister_tool
+        from jaeger_agent.skill_registry.toolset_scoping import unregister_mcp_server_toolset
+        for spec in removed_specs:
+            unregister_tool(spec.agent_name)
+        unregister_mcp_server_toolset(name)
+        if client is not None:
+            try:
+                self._submit(client.close(), timeout=10.0)
+            except Exception:  # noqa: BLE001 — best-effort subprocess teardown
+                pass
+        return was_known
+
+    def reload_server(self, config: MCPServerConfig, *, connect_timeout: float | None = None) -> list[MCPToolSpec]:
+        """Tear down any existing connection for ``config.name`` and reconnect fresh."""
+        self.remove_server(config.name)
+        specs = self.add_server(config, connect_timeout=connect_timeout)
+        with self._lifecycle_lock:
+            self._server_states[config.name] = "loaded_not_probed"
+        return specs
+
     def list_tools(self) -> list[MCPToolSpec]:
         return list(self._tools.values())
 

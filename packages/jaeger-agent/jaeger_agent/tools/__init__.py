@@ -114,7 +114,13 @@ from .call_agent import call_agent, delegate, get_agent_result, run_team
 
 # Plugin awareness
 from .plugins import list_plugins, setup_plugin
-from .connectors import list_connectors, add_connector
+from .connectors import (
+    list_connectors,
+    add_connector,
+    test_connector,
+    reload_connector,
+    remove_connector,
+)
 
 # Audio input — one-shot mic capture + whisper transcription
 from .listen import listen
@@ -242,7 +248,7 @@ __all__ = [
     # plugins
     "list_plugins", "setup_plugin",
     # connectors (MCP servers)
-    "list_connectors", "add_connector",
+    "list_connectors", "add_connector", "test_connector", "reload_connector", "remove_connector",
     # audio input
     "listen",
     # meetings (local record/transcribe/summary; no bot joins the call)

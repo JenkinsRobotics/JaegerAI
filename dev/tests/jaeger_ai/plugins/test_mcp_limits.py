@@ -183,3 +183,127 @@ def test_non_read_only_mcp_tool_asks_and_denial_blocks_the_call(monkeypatch):
     finally:
         unregister_tool(mut.agent_name)
         unregister_tool(ro.agent_name)
+
+
+def test_service_configure_server_accepts_and_preserves_read_only(tmp_path):
+    import json
+    from types import SimpleNamespace
+    from jaeger_ai.core.mcp import service
+
+    layout = SimpleNamespace(root=tmp_path, mcp_config_path=tmp_path / "mcp.json")
+    service.configure_server(layout, "gh", {
+        "command": "/usr/bin/true",
+        "args": [],
+        "tools": {"gated": True, "read_only": ["get_*", "list_*"]},
+    })
+    row = json.loads(layout.mcp_config_path.read_text())["servers"][0]
+    assert row["tools"] == {"gated": True, "read_only": ["get_*", "list_*"]}
+    with pytest.raises(service.MCPServiceError):
+        service.configure_server(layout, "gh", {"tools": {"read_only": "not-a-list"}})
+
+
+def test_connector_lifecycle_tools_registered_and_work(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from jaeger_agent.tools import connectors
+    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_ai.plugins.mcp import client
+
+    names = {t.name for t in get_tools()}
+    for expected in ("list_connectors", "add_connector", "test_connector", "reload_connector", "remove_connector"):
+        assert expected in names
+
+    cfg_path = tmp_path / "mcp.json"
+    cfg_path.write_text(json.dumps({
+        "version": 1,
+        "servers": [{
+            "name": "custom",
+            "command": "/usr/bin/true",
+            "args": [],
+            "enabled": True,
+            "gateway": True,
+            "tools": {"gated": True, "read_only": ["ping"]},
+        }],
+    }), encoding="utf-8")
+    layout = SimpleNamespace(root=tmp_path, mcp_config_path=cfg_path)
+    monkeypatch.setattr(connectors, "_require_layout", lambda: layout)
+
+    fake_spec_ro = _spec("ping", True)
+    fake_spec_ro.server_name = "custom"
+    fake_spec_ro.agent_name = "mcp__custom__ping"
+    fake_spec_wr = _spec("write_it", False)
+    fake_spec_wr.server_name = "custom"
+    fake_spec_wr.agent_name = "mcp__custom__write_it"
+
+    class FakeRegistry:
+        def __init__(self):
+            self._clients = {"custom": object()}
+            self._disconnected = {}
+            self._server_states = {"custom": "loaded_not_probed"}
+            self._inventory_errors = {}
+            self.reloaded = 0
+            self.removed = 0
+            self._specs = [fake_spec_ro, fake_spec_wr]
+
+        def list_tools(self):
+            return list(self._specs)
+
+        def reload_server(self, cfg):
+            self.reloaded += 1
+            self._server_states[cfg.name] = "loaded_not_probed"
+            return list(self._specs)
+
+        def remove_server(self, name):
+            self.removed += 1
+            self._clients.pop(name, None)
+            self._specs = []
+            return True
+
+    reg = FakeRegistry()
+    monkeypatch.setattr(client, "get_registry", lambda: reg)
+    monkeypatch.setattr(client, "connection_errors", lambda: {})
+
+    tested = connectors.test_connector("custom")
+    assert tested["ok"] is True
+    assert tested["read_only_count"] == 1
+    assert tested["approval_gated_count"] == 1
+
+    reloaded = connectors.reload_connector("custom")
+    assert reloaded["ok"] is True and reloaded["reloaded"] is True and reg.reloaded == 1
+
+    removed = connectors.remove_connector("custom")
+    assert removed["ok"] is True and removed["removed"] is True and removed["disconnected_live"] is True
+    assert reg.removed == 1
+    assert json.loads(cfg_path.read_text())["servers"] == []
+
+
+@pytest.mark.asyncio
+async def test_probe_native_mcp_caches_positive_only(monkeypatch, tmp_path):
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    import jaeger_ai.core.gateway.native_mcp as transport
+
+    monkeypatch.setattr(transport, "MCP_URL", "http://127.0.0.1:8792/mcp")
+    monkeypatch.setattr(transport, "mcp_api_key", lambda: "tok")
+    monkeypatch.setenv("JAEGER_MCP_PROBE_CACHE_TTL_S", "30")
+
+    calls = 0
+    healthy = False
+
+    async def fake_uncached(**kwargs):
+        nonlocal calls
+        calls += 1
+        return {"ok": healthy, "url": kwargs["MCP_URL"]}
+
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "probe.sqlite3"))
+    monkeypatch.setattr(app, "_probe_native_mcp_uncached", fake_uncached)
+
+    assert (await app._probe_native_mcp())["ok"] is False
+    assert (await app._probe_native_mcp())["ok"] is False
+    assert calls == 2  # failures are never cached
+
+    healthy = True
+    assert (await app._probe_native_mcp())["ok"] is True
+    assert (await app._probe_native_mcp())["ok"] is True
+    assert (await app._probe_native_mcp())["ok"] is True
+    assert calls == 3  # positive result served from cache
