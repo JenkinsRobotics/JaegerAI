@@ -17,6 +17,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createSource } from "./api";
 import { StableDemo } from "./demo/StableDemo";
+import { UnifiedShell } from "./shell/UnifiedShell";
 import { FirstRunGate, firstRunApi } from "./first-run/FirstRun";
 import { GatewayClient } from "./api/gateway";
 import { clearLegacyFlags, legacyRedirect } from "./shell/router";
@@ -43,8 +44,12 @@ const source = await createSource();
 void registerServiceWorker().then(() => syncPush()).catch(() => undefined);
 startPresence();
 
+const useLegacyShell = new URLSearchParams(location.search).get("shell") === "legacy";
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <FirstRunGate api={source instanceof GatewayClient ? firstRunApi(source) : null}><StableDemo source={source} /></FirstRunGate>
+    <FirstRunGate api={source instanceof GatewayClient ? firstRunApi(source) : null}>
+      {useLegacyShell ? <StableDemo source={source} /> : <UnifiedShell source={source} />}
+    </FirstRunGate>
   </StrictMode>,
 );

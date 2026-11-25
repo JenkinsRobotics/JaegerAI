@@ -98,3 +98,37 @@ def test_cycle_detection_and_rejection(tmp_path):
     denied = engine.approve_step(run.run_id, "wipe", approved=False, note="no")
     assert denied.status == StepStatus.FAILED.value
     assert "approval denied" in denied.error
+
+
+def test_interrupted_running_step_reconciliation_and_receipt_provenance(tmp_path):
+    engine = WorkflowEngine(tmp_path / "wf.sqlite3")
+    # 1. Non-idempotent step interrupted mid-run must fail closed to outcome_unknown
+    run_mut = engine.create_run("mut", [WorkflowStep(id="send", name="Send", idempotent=False)])
+    engine.checkpoint_step(run_mut.run_id, "send", status=StepStatus.RUNNING.value)
+    called = []
+    after_mut = engine.advance(run_mut.run_id, lambda s, c: called.append(s.id))
+    assert after_mut.status == StepStatus.OUTCOME_UNKNOWN.value
+    assert after_mut.records["send"].status == StepStatus.OUTCOME_UNKNOWN.value
+    assert called == []  # never blindly replayed!
+
+    # 2. Idempotent step interrupted mid-run safely resets & resumes
+    run_idem = engine.create_run("idem", [WorkflowStep(id="fetch", name="Fetch", idempotent=True)])
+    engine.checkpoint_step(run_idem.run_id, "fetch", status=StepStatus.RUNNING.value)
+    after_idem = engine.advance(run_idem.run_id, lambda s, c: {"rows": 5})
+    assert after_idem.status == StepStatus.COMPLETED.value
+    assert after_idem.records["fetch"].output == {"rows": 5}
+
+    # 3. Receipt provenance distinguishes self-reported vs tool-receipt checkpoints
+    run_rec = engine.create_run("rec", [WorkflowStep(id="s1", name="S1"), WorkflowStep(id="s2", name="S2")])
+    r1 = engine.checkpoint_step(run_rec.run_id, "s1", status=StepStatus.COMPLETED.value)
+    assert r1.records["s1"].verified is False
+    assert r1.records["s1"].receipt_source == "self_reported"
+    r2 = engine.checkpoint_step(
+        run_rec.run_id,
+        "s2",
+        status=StepStatus.COMPLETED.value,
+        receipt={"ok": True, "moved_count": 4},
+        receipt_source="tool_receipt",
+    )
+    assert r2.records["s2"].verified is True
+    assert r2.records["s2"].receipt == {"ok": True, "moved_count": 4}
