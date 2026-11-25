@@ -50,14 +50,30 @@ def workflow_checkpoint(
     status: str = "completed",
     output: Any = None,
     error: str = "",
+    receipt: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Persist a step's result (completed / failed / skipped / waiting_approval)
-    into a durable workflow run so subsequent turns pick up where this one left off."""
+    """Persist a step's result (completed / failed / skipped / waiting_approval /
+    outcome_unknown) into a durable workflow run. Pass ``receipt`` from the
+    actual tool call when marking external work completed; checkpoints without a
+    tool receipt are explicitly marked ``verified=False``."""
     try:
+        src = "tool_receipt" if isinstance(receipt, dict) and receipt else "self_reported"
         run = _engine().checkpoint_step(
-            run_id=run_id, step_id=step_id, status=status, output=output, error=error,
+            run_id=run_id,
+            step_id=step_id,
+            status=status,
+            output=output,
+            error=error,
+            receipt=receipt,
+            receipt_source=src,
         )
-        return {"ok": True, **run.summary()}
+        rec = run.records.get(step_id)
+        return {
+            "ok": True,
+            **run.summary(),
+            "step_verified": bool(rec.verified) if rec else False,
+            "receipt_source": rec.receipt_source if rec else src,
+        }
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
 

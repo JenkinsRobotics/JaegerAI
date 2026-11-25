@@ -15,6 +15,40 @@ export type PageId = "library" | "automations" | "feed" | "home" | "chat" | "age
 export const PRIMARY_PAGES = ["chat", "agents", "work", "research", "studio", "machine"] as const;
 export const PAGES: readonly PageId[] = [...PRIMARY_PAGES, "library", "automations", "feed", "settings"];
 
+/** Revision 2 canonical five-destination IA: Chat, Agents & Characters, Work, Library, Settings. */
+export type CanonicalDestination = "chat" | "agents" | "work" | "library" | "settings";
+export const CANONICAL_DESTINATIONS: readonly CanonicalDestination[] = [
+  "chat",
+  "agents",
+  "work",
+  "library",
+  "settings",
+] as const;
+
+/** Map any parsed Route (including legacy /research, /studio, /automations, /feed, /machine) to its canonical destination. */
+export function canonicalDestinationOf(route: Route): CanonicalDestination {
+  switch (route.page) {
+    case "agents":
+      return "agents";
+    case "work":
+    case "automations":
+    case "studio":
+    case "feed":
+      return "work";
+    case "library":
+    case "research":
+      return "library";
+    case "settings":
+    case "models":
+    case "machine":
+      return "settings";
+    case "chat":
+    case "home":
+    default:
+      return "chat";
+  }
+}
+
 /** Sub-tabs of merged pages, in display order; the first is the default. */
 export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: string }[]>> = {
   agents: [{ id: "roster", title: "Agents" }, { id: "team", title: "Team" }, { id: "characters", title: "Characters" }, { id: "knowledge", title: "Memory & Skills" }],

@@ -26,6 +26,7 @@ class StepStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
+    OUTCOME_UNKNOWN = "outcome_unknown"
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -81,6 +82,9 @@ class StepRecord:
     approved: bool | None = None
     approval_note: str = ""
     output: Any = None
+    receipt: dict[str, Any] | None = None
+    verified: bool = False
+    receipt_source: str = ""
     error: str = ""
     updated_at: float = 0.0
 
@@ -96,6 +100,9 @@ class StepRecord:
             approved=data.get("approved"),
             approval_note=str(data.get("approval_note") or ""),
             output=data.get("output"),
+            receipt=data.get("receipt") if isinstance(data.get("receipt"), dict) else None,
+            verified=bool(data.get("verified", False)),
+            receipt_source=str(data.get("receipt_source") or ""),
             error=str(data.get("error") or ""),
             updated_at=float(data.get("updated_at") or 0.0),
         )
@@ -317,7 +324,9 @@ class WorkflowEngine:
 
     def _recompute_status(self, run: WorkflowRun) -> None:
         statuses = {rec.status for rec in run.records.values()}
-        if StepStatus.FAILED.value in statuses:
+        if StepStatus.OUTCOME_UNKNOWN.value in statuses:
+            run.status = StepStatus.OUTCOME_UNKNOWN.value
+        elif StepStatus.FAILED.value in statuses:
             run.status = StepStatus.FAILED.value
         elif StepStatus.WAITING_APPROVAL.value in statuses:
             run.status = StepStatus.WAITING_APPROVAL.value
@@ -327,6 +336,42 @@ class WorkflowEngine:
             run.status = StepStatus.RUNNING.value
         else:
             run.status = StepStatus.PENDING.value
+
+    def reconcile_interrupted(self, run_id: str) -> WorkflowRun:
+        """Recover steps left in ``running`` after a process crash/restart.
+
+        Idempotent steps safely reset to ``pending`` for resume; non-idempotent
+        steps fail closed to ``outcome_unknown`` so side effects are never
+        blindly replayed without explicit reconciliation.
+        """
+        with self._lock:
+            run = self.get_run(run_id)
+            if run is None:
+                raise WorkflowError(f"unknown workflow run: {run_id!r}")
+            changed = False
+            by_id = {s.id: s for s in run.steps}
+            now = time.time()
+            for sid, rec in run.records.items():
+                if rec.status != StepStatus.RUNNING.value:
+                    continue
+                step = by_id.get(sid)
+                changed = True
+                rec.updated_at = now
+                if step is not None and step.idempotent:
+                    rec.status = StepStatus.PENDING.value
+                    rec.attempts = max(0, rec.attempts - 1)
+                    rec.error = "interrupted while running; reset for idempotent retry"
+                else:
+                    rec.status = StepStatus.OUTCOME_UNKNOWN.value
+                    rec.error = (
+                        "interrupted while executing non-idempotent step; "
+                        "reconcile external state before replaying"
+                    )
+                    run.error = f"step {sid!r} outcome unknown after interruption"
+            if changed:
+                self._recompute_status(run)
+                self._save(run)
+            return run
 
     def approve_step(self, run_id: str, step_id: str, *, approved: bool = True, note: str = "") -> WorkflowRun:
         with self._lock:
@@ -358,8 +403,15 @@ class WorkflowEngine:
         status: str = StepStatus.COMPLETED.value,
         output: Any = None,
         error: str = "",
+        receipt: dict[str, Any] | None = None,
+        receipt_source: str = "self_reported",
     ) -> WorkflowRun:
-        """Manually checkpoint a step result (for agent-driven multi-turn workflows)."""
+        """Persist a step result with explicit receipt/verification provenance.
+
+        A self-reported ``completed`` checkpoint without a structured tool
+        receipt is stored with ``verified=False`` so callers never mistake a
+        model-authored checklist update for proven external execution.
+        """
         valid = {s.value for s in StepStatus}
         if status not in valid:
             raise WorkflowError(f"invalid step status {status!r}; expected one of {sorted(valid)}")
@@ -374,10 +426,19 @@ class WorkflowEngine:
             rec.attempts = max(1, rec.attempts)
             if output is not None:
                 rec.output = output
+            if receipt is not None and isinstance(receipt, dict) and receipt:
+                rec.receipt = dict(receipt)
+                rec.receipt_source = str(receipt_source or "tool_receipt")
+                rec.verified = bool(receipt.get("ok", True)) and rec.receipt_source != "self_reported"
+            else:
+                rec.receipt_source = str(receipt_source or "self_reported")
+                rec.verified = False
             if error:
                 rec.error = str(error)
-                if status == StepStatus.FAILED.value:
+                if status in {StepStatus.FAILED.value, StepStatus.OUTCOME_UNKNOWN.value}:
                     run.error = rec.error
+            elif status == StepStatus.COMPLETED.value:
+                rec.error = ""
             rec.updated_at = time.time()
             self._recompute_status(run)
             self._save(run)
@@ -390,10 +451,12 @@ class WorkflowEngine:
     ) -> WorkflowRun:
         """Execute ready steps in topological order until completion, failure, or an approval gate."""
         with self._lock:
-            run = self.get_run(run_id)
-            if run is None:
-                raise WorkflowError(f"unknown workflow run: {run_id!r}")
-            if run.status in {StepStatus.COMPLETED.value, StepStatus.FAILED.value}:
+            run = self.reconcile_interrupted(run_id)
+            if run.status in {
+                StepStatus.COMPLETED.value,
+                StepStatus.FAILED.value,
+                StepStatus.OUTCOME_UNKNOWN.value,
+            }:
                 return run
 
             run.status = StepStatus.RUNNING.value

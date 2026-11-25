@@ -25,7 +25,7 @@ import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, CloseIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { MessageActions, ModelError, ThinkingRow, isDebugThinking } from "./chatUx";
 import { ErrorState } from "../shell/ErrorState";
-import { badge, messageCount, unreadSince } from "./scrollFollow";
+import { badge, messageCount, nextStickState, unreadSince } from "./scrollFollow";
 import { RuntimeSettings } from "../settings/RuntimeSettings";
 import { SessionFiles } from "./SessionFiles";
 import { VoiceDictation } from "./VoiceDictation";
@@ -508,7 +508,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
     if (!sessionId || !host.messageReadState) return;
     let live = true, loading = false, unsupported = false;
     const load = async () => {
-      if (loading || unsupported) return; loading = true;
+      if (loading || unsupported || document.hidden) return; loading = true;
       try {
         const snapshot = await host.messageReadState!.load(sessionId);
         if (live && owner === readGeneration.current && snapshot.event_id >= readVersion.current) {
@@ -517,8 +517,10 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       } catch (error) { if (live && !reportMissingSession(error) && error instanceof GatewayError && error.status === 404) unsupported = true; }
       finally { loading = false; }
     };
-    void load(); const timer = setInterval(load, 5000);
-    return () => { live = false; readGeneration.current++; clearInterval(timer); };
+    const onFocus = () => { if (!document.hidden) void load(); };
+    void load(); const timer = setInterval(load, 15000);
+    window.addEventListener("focus", onFocus);
+    return () => { live = false; readGeneration.current++; clearInterval(timer); window.removeEventListener("focus", onFocus); };
   }, [host, sessionId, reportMissingSession]);
   const changeReadMarker = async (target: typeof readMarker) => {
     if (!sessionId || !host.messageReadState || readStateBusy) return;
@@ -546,20 +548,22 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
     if (!sessionId || !host.messageReactions) return;
     let live = true, reading = false;
     const load = async () => {
-      if (reading) return; reading = true;
+      if (reading || document.hidden) return; reading = true;
       try { const snapshot = await host.messageReactions!.load(sessionId); if (live && owner === reactionGeneration.current) { applyReactions(snapshot); setReactionError(undefined); } }
       catch (e) { if (live && !reportMissingSession(e)) setReactionError(`Reactions unavailable: ${String((e as Error).message ?? e)}`); }
       finally { reading = false; }
     };
-    void load(); const timer = setInterval(load, 5000);
-    return () => { live = false; reactionGeneration.current++; clearInterval(timer); };
+    const onFocus = () => { if (!document.hidden) void load(); };
+    void load(); const timer = setInterval(load, 15000);
+    window.addEventListener("focus", onFocus);
+    return () => { live = false; reactionGeneration.current++; clearInterval(timer); window.removeEventListener("focus", onFocus); };
   }, [host, sessionId, reportMissingSession]);
   useEffect(() => { setBusyMessages([]); setDeliveryNotice(undefined); }, [sessionId]);
   useEffect(() => {
     if (!sessionId || !host.sessionQueue) { setQueuedRequests([]); return; }
     let live = true, reading = false;
     const load = async () => {
-      if (reading) return;
+      if (reading || document.hidden) return;
       reading = true;
       try {
         const result = await host.sessionQueue!.list(sessionId);
@@ -567,9 +571,11 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       } catch (error) { reportMissingSession(error); /* otherwise the next poll reconciles a transient read failure */ }
       finally { reading = false; }
     };
+    const onFocus = () => { if (!document.hidden) void load(); };
     void load();
-    const timer = setInterval(load, 3000);
-    return () => { live = false; clearInterval(timer); };
+    const timer = setInterval(load, 10000);
+    window.addEventListener("focus", onFocus);
+    return () => { live = false; clearInterval(timer); window.removeEventListener("focus", onFocus); };
   }, [host, sessionId, reportMissingSession]);
   useEffect(() => {
     const recorded = new Set(session?.turns.map(turn => turn.requestId).filter(Boolean));
@@ -697,23 +703,25 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
 
   /** Stream style (Settings → Chat): pacing, entrance and scroll-follow. */
   const streamStyle = useStreamStyle();
-  /** Only the reader's own input releases the follow (the reference: within 250 ms of a wheel, touch, key
-   * or pointer press); our own smooth scrolling never does. */
   const inputAt = useRef(0);
+  const lastScrollTop = useRef(0);
+  const programmaticUntil = useRef(0);
   const userScrolled = () => Date.now() - inputAt.current <= USER_INPUT_WINDOW_MS;
   // Auto-follow pauses while a menu is open (it would scroll the target out from under it) and catches up on close.
   const follow = (el: HTMLElement) => whenNoPopup(() => { if (stick.current) followNow(el); });
   const followNow = (el: HTMLElement) => {
-    const jump = el.scrollHeight - el.clientHeight - el.scrollTop;
-    void jump;
+    programmaticUntil.current = Date.now() + 80;
     el.scrollTop = el.scrollHeight;
+    lastScrollTop.current = el.scrollTop;
   };
   // Follow new content only while the reader is at the bottom; after an older page lands, hold the
   // reader's place instead.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && prepend.current) {
+      programmaticUntil.current = Date.now() + 80;
       el.scrollTop = el.scrollHeight - prepend.current.height + prepend.current.top;
+      lastScrollTop.current = el.scrollTop;
       prepend.current = null;
       return;
     }
@@ -735,10 +743,19 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
     const el = scroller.current;
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const near = gap < Math.max(STICK_PX, streamStyle.scroll.thresholdPx);
+    const thresholdPx = Math.max(STICK_PX, streamStyle.scroll.thresholdPx);
+    const near = gap < thresholdPx;
     if (el.scrollTop < OLDER_PX && older && !loadingOlder && !olderError) loadOlder();
-    if (userScrolled()) stick.current = near;
-    else if (near) stick.current = true;
+    stick.current = nextStickState({
+      prevScrollTop: lastScrollTop.current,
+      scrollTop: el.scrollTop,
+      gap,
+      thresholdPx,
+      isProgrammatic: Date.now() <= programmaticUntil.current,
+      userInputActive: userScrolled(),
+      wasSticking: stick.current,
+    });
+    lastScrollTop.current = el.scrollTop;
     if (near) trimRetained();
     // Remember how much was there when the reader left, for the unread badge.
     if (near) unreadBase.current = null;
@@ -933,7 +950,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   }, [session?.id, draftReady]);
   useEffect(() => {
     if (!session || !draftReady || active || recoveryStatus !== "clear" || !(host instanceof WebHost)) return;
-    const timer = setInterval(() => { void checkSavedRequest(true); }, 3000);
+    const timer = setInterval(() => { if (!document.hidden) void checkSavedRequest(true); }, 10000);
     return () => clearInterval(timer);
   }, [session?.id, draftReady, Boolean(active), recoveryStatus, host]);
 

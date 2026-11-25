@@ -108,7 +108,7 @@ def _msg(t: str, **kw) -> OutputTransportMessageUrgentFrame:
 class LocalBridge(FrameProcessor):
     """Captions, turn ends and barge-in to the client; its sentences to TTS."""
 
-    def __init__(self):
+    def __init__(self, on_activity=None):
         super().__init__()
         self._words: list[str] = []
         self._speech_end = 0.0
@@ -116,6 +116,11 @@ class LocalBridge(FrameProcessor):
         self._speak_at = 0.0
         self._bot = False
         self._hold: asyncio.Task | None = None
+        self._on_activity = on_activity
+
+    def _touch(self) -> None:
+        if callable(self._on_activity):
+            self._on_activity()
 
     async def _finalize(self):
         text = " ".join(w for w in self._words if w).strip()
@@ -138,18 +143,23 @@ class LocalBridge(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, InputTransportMessageFrame):
+            self._touch()
             await self._client(frame.message)
             return
         if direction == FrameDirection.DOWNSTREAM:
             if isinstance(frame, VADUserStoppedSpeakingFrame):
+                self._touch()
                 self._speech_end = time.time() - VAD_STOP
             elif isinstance(frame, UserStartedSpeakingFrame):
+                self._touch()
                 self._cancel_hold()
                 await self.push_frame(_msg("user-speaking", bot=self._bot))
             elif isinstance(frame, TranscriptionFrame):
+                self._touch()
                 self._words.append(frame.text.strip())
                 await self.push_frame(_msg("user-partial", text=" ".join(self._words)))
             elif isinstance(frame, UserStoppedSpeakingFrame):
+                self._touch()
                 text = " ".join(w for w in self._words if w).strip()
                 self._cancel_hold()
                 if text and _FRAGMENT.match(text):
@@ -157,9 +167,11 @@ class LocalBridge(FrameProcessor):
                 else:
                     await self._finalize()
             elif isinstance(frame, InterruptionFrame) and self._bot:
+                self._touch()
                 await self.push_frame(_msg("interrupted"))
         else:
             if isinstance(frame, BotStartedSpeakingFrame):
+                self._touch()
                 self._bot = True
                 extra = {}
                 if self._speak_at:
@@ -167,6 +179,7 @@ class LocalBridge(FrameProcessor):
                     self._speak_at = 0.0
                 await self.push_frame(_msg("bot-speaking", on=True, **extra))
             elif isinstance(frame, BotStoppedSpeakingFrame):
+                self._touch()
                 self._bot = False
                 await self.push_frame(_msg("bot-speaking", on=False))
         await self.push_frame(frame, direction)
@@ -189,14 +202,20 @@ class LocalBridge(FrameProcessor):
 class GeminiBridge(FrameProcessor):
     """Captions and speaking state for Gemini Live; resolves ask_jaeger."""
 
-    def __init__(self, pending: dict[str, asyncio.Future]):
+    def __init__(self, pending: dict[str, asyncio.Future], on_activity=None):
         super().__init__()
         self._pending = pending
         self._bot_text = ""
+        self._on_activity = on_activity
+
+    def _touch(self) -> None:
+        if callable(self._on_activity):
+            self._on_activity()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, InputTransportMessageFrame):
+            self._touch()
             m = frame.message if isinstance(frame.message, dict) else {}
             if m.get("t") == "tool-result":
                 fut = self._pending.pop(str(m.get("id")), None)
@@ -206,29 +225,35 @@ class GeminiBridge(FrameProcessor):
                 await self.broadcast_interruption()
         elif direction == FrameDirection.DOWNSTREAM:
             if isinstance(frame, TranscriptionFrame):
+                self._touch()
                 await self.push_frame(_msg("user-partial", text=frame.text))
             elif isinstance(frame, TTSTextFrame):
+                self._touch()
                 self._bot_text = re.sub(r"\s+", " ", f"{self._bot_text} {frame.text}").strip()
                 await self.push_frame(_msg("bot-text", text=self._bot_text))
             elif isinstance(frame, (UserStartedSpeakingFrame, VADUserStartedSpeakingFrame, InterruptionFrame)):
+                self._touch()
                 # Local Silero drives the orb only; Gemini decides the turn itself.
                 self._bot_text = ""
                 await self.push_frame(_msg("user-speaking"))
             elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                self._touch()
                 await self.push_frame(_msg("user-stopped", stopMs=round(VAD_STOP * 1000)))
         else:
             if isinstance(frame, BotStartedSpeakingFrame):
+                self._touch()
                 await self.push_frame(_msg("bot-speaking", on=True))
             elif isinstance(frame, BotStoppedSpeakingFrame):
+                self._touch()
                 self._bot_text = ""
                 await self.push_frame(_msg("bot-speaking", on=False))
         await self.push_frame(frame, direction)
 
 
-def _local_pipeline(transport):
+def _local_pipeline(transport, on_activity=None):
     vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(confidence=0.5, start_secs=0.15, stop_secs=VAD_STOP)))
     return Pipeline([transport.input(), vad, ParakeetSTTService(), UserTurnProcessor(),
-                     LocalBridge(), PhononTTSService(), transport.output()])
+                     LocalBridge(on_activity=on_activity), PhononTTSService(), transport.output()])
 
 
 GEMINI_SYSTEM = (
@@ -240,7 +265,7 @@ GEMINI_SYSTEM = (
 )
 
 
-def _gemini_pipeline(transport, request_data: dict, pending: dict, send):
+def _gemini_pipeline(transport, request_data: dict, pending: dict, send, on_activity=None):
     from pipecat.adapters.llm.schemas.direct_function import tool_options
     from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
     from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
@@ -305,7 +330,7 @@ def _gemini_pipeline(transport, request_data: dict, pending: dict, send):
                   "interrupted": bool(getattr(message, "interrupted", False))})
 
     vad = VADProcessor(vad_analyzer=SileroVADAnalyzer(params=VADParams(confidence=0.5, start_secs=0.15, stop_secs=VAD_STOP)))
-    return Pipeline([transport.input(), vad, user_agg, llm, GeminiBridge(pending), transport.output(),
+    return Pipeline([transport.input(), vad, user_agg, llm, GeminiBridge(pending, on_activity=on_activity), transport.output(),
                      assistant_agg])
 
 
@@ -315,8 +340,13 @@ async def _run_session(connection: SmallWebRTCConnection, request_data: dict):
         audio_in_enabled=True, audio_out_enabled=True,
         audio_in_sample_rate=16000, audio_out_sample_rate=24000))
     pending: dict[str, asyncio.Future] = {}
+    last_activity = [time.monotonic()]
+
+    def touch_activity() -> None:
+        last_activity[0] = time.monotonic()
 
     def send(message: dict):
+        touch_activity()
         connection.send_app_message({"at": time.time(), **message})
 
     try:
@@ -324,9 +354,9 @@ async def _run_session(connection: SmallWebRTCConnection, request_data: dict):
             if not gemini_key():
                 send({"t": "error", "message": "Gemini Live needs GEMINI_API_KEY in ~/.jaeger/secrets.env"})
                 return
-            pipeline = _gemini_pipeline(transport, request_data, pending, send)
+            pipeline = _gemini_pipeline(transport, request_data, pending, send, on_activity=touch_activity)
         else:
-            pipeline = _local_pipeline(transport)
+            pipeline = _local_pipeline(transport, on_activity=touch_activity)
     except Exception as exc:
         logger.exception("pipeline build failed")
         send({"t": "error", "message": f"Voice engine failed to start: {type(exc).__name__}"})
@@ -335,10 +365,10 @@ async def _run_session(connection: SmallWebRTCConnection, request_data: dict):
         audio_in_sample_rate=16000, audio_out_sample_rate=24000, enable_metrics=True))
     runner = WorkerRunner(handle_sigint=False)
     idle_timeout_s = float(os.environ.get("JAEGER_VOICE_IDLE_TIMEOUT_S", "900") or "900")
-    last_activity = [time.monotonic()]
     _sessions[connection.pc_id] = {
         "engine": engine,
         "started": time.time(),
+        "last_activity": last_activity,
         "cancel": worker.cancel,
     }
 
