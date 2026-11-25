@@ -155,7 +155,7 @@ def test_clarify_tool_uses_the_answer_or_falls_back_to_plain_text():
     from unittest.mock import MagicMock
 
     import jaeger_ai.main as m
-    from jaeger_os.core.tools import tool_registry as reg
+    from jaeger_tools import tool_registry as reg
     snap = reg.snapshot_registry()
     try:
         reg.clear_registry()

@@ -185,7 +185,7 @@ def test_review_description_is_second_person_audit() -> None:
 
 
 def test_review_tools_registered() -> None:
-    from jaeger_os.core.tools import tool_registry as R
+    from jaeger_tools import tool_registry as R
     import jaeger_ai.main as m
     m._register_builtins(object())
     names = {t.name for t in R.get_tools()}

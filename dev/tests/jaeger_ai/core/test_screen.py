@@ -10,7 +10,7 @@ from jaeger_os.core.safety.permissions import (
     PermissionPolicy,
     use_policy,
 )
-from jaeger_os.core.tools.tool_registry import get_tools
+from jaeger_tools.tool_registry import get_tools
 
 
 @pytest.fixture(autouse=True)

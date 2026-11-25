@@ -1622,7 +1622,7 @@ def _observe_memory() -> None:
     def wrap(fn, op):
         @functools.wraps(fn)
         def inner(*args, **kwargs):
-            from jaeger_agent import live as _live
+            from jaeger_events import live as _live
             ok, out = False, None
             try:
                 out = fn(*args, **kwargs)

@@ -1380,7 +1380,7 @@ def test_bridge_confirmation_provider_follows_attached_turn_output(_instance_on_
 
 
 def test_clarify_and_secret_tools_use_turn_scoped_interaction_sink():
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
 
     from jaeger_ai.main import _register_builtins, interaction_request_sink
 

@@ -367,7 +367,7 @@ def test_drive_one_turn_surfaces_halt_reason_when_loop_caps():
     def _impl(value: str = "x") -> dict:
         return {"ok": True}
 
-    from jaeger_agent.loop.loop_backstop import MAX_IDENTICAL_CALLS
+    from jaeger_loop.backstop import MAX_IDENTICAL_CALLS
     script: list[dict[str, Any]] = []
     for _ in range(MAX_IDENTICAL_CALLS + 2):
         script.append({

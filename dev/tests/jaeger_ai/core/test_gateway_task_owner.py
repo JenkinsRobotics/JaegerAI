@@ -457,3 +457,18 @@ def test_delayed_task_dispatch_respects_current_agent_disable_without_fallback(o
     assert task.state == TaskState.PAUSED and 'disabled' in task.error
     assert owner.gateway.store.get_session(f'task:{tid}')['metadata']['agent_id'] == 'native:builder'
     assert owner.gateway.store.list_requests() == []
+
+
+def test_submit_falls_back_to_parent_session_workspace_for_artifacts(owner):
+    ctx = dict(
+        session_id='parent',
+        request_id='parent-req-ws-fallback',
+        user_text='Queue this work in the background',
+        source='user',
+        execution={'model': 'configured-model'},  # no explicit workspace
+    )
+    res = owner.submit('Write report', context=ctx, artifacts=['report.md'])
+    assert res['ok'] is True
+    task = owner.store.get_task(res['task_id'])
+    assert task.payload['execution']['workspace'] == str(owner.store.db_path.parent)
+    assert task.payload['artifacts'] == [str((owner.store.db_path.parent / 'report.md').resolve())]

@@ -14,7 +14,7 @@ from __future__ import annotations
 import pathlib
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.skill_registry import playbook_skills as _pb
 from jaeger_agent.core.workspace import get_layout
 
@@ -389,7 +389,7 @@ def _t_record_skill_revision(skill: str, version: str, summary: str = "",
 # playbook recipe to follow (delegates to the skill(view) reader).
 def _register_use_skill() -> None:
     from pydantic import BaseModel
-    from jaeger_os.core.tools.tool_registry import register_tool
+    from jaeger_tools.tool_registry import register_tool
 
     class UseSkillArgs(BaseModel):
         name: str
@@ -414,7 +414,7 @@ def _register_use_skill() -> None:
         # that calls tools that don't exist.
         need = r.get("requires_tools") or []
         if need:
-            from jaeger_os.core.tools.tool_registry import get_tools
+            from jaeger_tools.tool_registry import get_tools
             have = {t.name for t in get_tools()}
             # MCP tools are real, callable tools, but they never enter the
             # native tool registry — they arrive from connected MCP servers

@@ -148,7 +148,7 @@ def ensure_local_ollama(*, timeout_s: float = 25.0) -> bool:
     if _reachable("127.0.0.1", _DEFAULT_OLLAMA_PORT) or _reachable("localhost", _DEFAULT_OLLAMA_PORT):
         return True
     try:
-        from jaeger_agent import live
+        from jaeger_events import live
         live.emit("turn.progress", {"message": "Starting Ollama…"})
     except Exception:
         pass

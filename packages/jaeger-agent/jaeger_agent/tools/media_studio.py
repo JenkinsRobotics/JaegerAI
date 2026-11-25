@@ -19,9 +19,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 
+from jaeger_agent.tools.youtube_playlist import http_json, list_playlist_api, playlist_id, read_api_key
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.core.workspace import (
     SandboxError,
     _audit,
@@ -341,9 +343,12 @@ def render_video(
     }
 
 
+def _state_root() -> Path:
+    return Path(os.environ.get("JAEGER_STATE_HOME") or os.environ.get("JAEGER_STATE_DIR") or (Path.home() / ".jaeger"))
+
+
 def _kb_root() -> Path:
-    state = Path(os.environ.get("JAEGER_STATE_HOME") or os.environ.get("JAEGER_STATE_DIR") or (Path.home() / ".jaeger"))
-    return state / "research" / "kb"
+    return _state_root() / "research" / "kb"
 
 
 def youtube_studio(
@@ -357,6 +362,7 @@ def youtube_studio(
     Actions:
       - ``status``: check local ffmpeg, ffprobe, yt-dlp, whisper-cli, and KB docs.
       - ``kb_search``: search your researched YouTube style guides & notes in ``~/.jaeger/research/kb``.
+      - ``playlist``: list a bounded sample and total count through the official YouTube Data API.
       - ``transcript``: fetch metadata & captions/transcript for a YouTube video via ``yt-dlp``.
     """
     act = (action or "status").strip().lower()
@@ -399,6 +405,31 @@ def youtube_studio(
             if len(matches) >= cap:
                 break
         return {"ok": True, "query": query, "count": len(matches), "matches": matches}
+
+    if act == "playlist":
+        lid = playlist_id(url_or_id or "")
+        if not lid:
+            return {"ok": False, "error": "Provide a YouTube playlist URL with a list= parameter."}
+        key = read_api_key(_state_root())
+        if not key:
+            return {"ok": False, "error_code": "not_configured",
+                    "error": "YouTube Data API is not configured. Try Work → YouTube or open the playlist in the browser."}
+        try:
+            cap = max(1, min(50, int(limit or 10)))
+            listing = list_playlist_api(lid, cap, key, http_json)
+        except HTTPError as exc:
+            return {"ok": False, "error_code": "youtube_http_error", "http_status": exc.code,
+                    "error": f"YouTube Data API returned HTTP {exc.code}. Check playlist visibility or API access."}
+        except (URLError, TimeoutError):
+            return {"ok": False, "error_code": "youtube_connection",
+                    "error": "Could not connect to the YouTube Data API."}
+        except RuntimeError:
+            return {"ok": False, "error_code": "playlist_not_visible",
+                    "error": "The playlist is not visible to the configured YouTube Data API. Ask to use the signed-in browser if it is private."}
+        except (TypeError, ValueError):
+            return {"ok": False, "error_code": "invalid_playlist_response",
+                    "error": "YouTube returned an unreadable playlist result or the requested limit was invalid."}
+        return {"ok": True, "playlist_id": lid, "listed_count": len(listing["entries"]), **listing}
 
     if act == "transcript":
         yt_dlp = _which_media("yt-dlp")
@@ -464,7 +495,7 @@ def youtube_studio(
                 "transcript": transcript_text,
             }
 
-    return {"ok": False, "error": f"unknown action {action!r}; choose from status, kb_search, transcript"}
+    return {"ok": False, "error": f"unknown action {action!r}; choose from status, kb_search, playlist, transcript"}
 
 
 @register_tool_from_function(name="probe_media", side_effect="read")
@@ -504,7 +535,7 @@ def _t_render_video(
 
 @register_tool_from_function(name="youtube_studio", side_effect="read")
 @requires_tier(PermissionTier.READ_ONLY, skill="media", operation="youtube_studio",
-               summary="inspect YouTube production tools, search research KB, or fetch a transcript")
+               summary="read YouTube playlist listings, video transcripts, or the research library")
 def _t_youtube_studio(
     action: str = "status",
     query: str = "",
@@ -512,8 +543,12 @@ def _t_youtube_studio(
     limit: int = 10,
 ) -> dict[str, Any]:
     """YouTube production helper: action='status' checks ffmpeg/yt-dlp/KB,
-    action='kb_search' searches your style guides & research notes,
-    action='transcript' fetches metadata and captions for a YouTube video."""
+    action='playlist' reads a YouTube playlist link via the official API and
+    returns its total count and up to limit entries (50 max). Prefer it to
+    generic web fetches or mirrors for playlist inventory. Never implies
+    that videos were watched, downloaded, or modified.
+    action='kb_search' searches your research notes; action='transcript'
+    fetches metadata and captions for one YouTube video."""
     return youtube_studio(action=action, query=query, url_or_id=url_or_id, limit=limit)
 
 

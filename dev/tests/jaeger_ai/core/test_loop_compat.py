@@ -33,7 +33,7 @@ def test_schedule_prompt_schema_gains_deliver_fields():
     import jaeger_agent.tools.scheduling  # noqa: F401 — register tools
 
     loop_compat.install()
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
 
     tool = get_tool("schedule_prompt")
     fields = tool.args_model.model_fields

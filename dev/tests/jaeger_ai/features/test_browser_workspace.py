@@ -67,6 +67,21 @@ def test_browser_worker_declares_webmcp_contract():
     assert "--enable-features=WebMCP" in runtime
 
 
+def test_browser_runtime_syncs_stale_bundle_worker_from_repo(tmp_path):
+    from jaeger_ai.features.browser.runtime import BrowserRuntime
+
+    bundle = tmp_path / "bundle"
+    (bundle / "steel").mkdir(parents=True)
+    stale = bundle / "worker.mjs"
+    stale.write_text("// stale worker without webmcp\n", encoding="utf-8")
+
+    rt = BrowserRuntime(bundle=bundle, state=tmp_path / "state")
+    resolved = rt._resolve_worker_script()
+    assert resolved == stale
+    synced = stale.read_text(encoding="utf-8")
+    assert "webmcp-tools" in synced and "webmcp-call" in synced
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(not os.environ.get("JAEGER_TEST_BROWSER_BUNDLE"), reason="Explicit built browser bundle required")
 async def test_real_gateway_browser_keeps_selected_page_and_profiles_isolated(tmp_path, monkeypatch):

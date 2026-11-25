@@ -407,6 +407,9 @@ export class GatewayClient implements JaegerSource {
     const data = await this.json<{ approvals: PendingApproval[] }>(`/v1/approvals?session_id=${encodeURIComponent(sessionId)}`);
     return data.approvals;
   }
+  async pendingWorkApprovals(): Promise<PendingApproval[]> {
+    return (await this.json<{ approvals: PendingApproval[] }>("/v1/approvals")).approvals;
+  }
   approvalStatus(approvalId: string) {
     return this.json<PendingApproval & { decision?: string; resolved_at?: number }>(`/v1/approvals/${encodeURIComponent(approvalId)}`);
   }

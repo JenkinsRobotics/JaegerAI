@@ -1,7 +1,7 @@
 /* Agents › Team: a pixel-art office where every roster agent has a desk and you
  * can see who is working. State comes from the live orchestration snapshot and
- * the global event stream (useOrchestration): statuses from /v1/agents/summary,
- * agent.status.changed overrides, handoffs and tasks. Nothing is staged — an
+ * the global event stream (useOrchestration): current chat, handoffs and tasks.
+ * Nothing is staged — an
  * agent with no live signal sits idle with a coffee. Art is drawn in code
  * (sprites.ts); text (name tags, bubbles, the side panel) stays real HTML. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,7 +14,7 @@ import type { ActivityRow } from "../../orchestration/types";
 import { foldAll, type Span } from "../../process/model";
 import { useProcessEvents } from "../../process/useProcessEvents";
 import { AgentAvatar } from "../AgentAvatar";
-import { deriveWorkers, type Mood, type Worker } from "./officeState";
+import { deriveWorkers, recoverMaskedChatStatus, type Mood, type Worker } from "./officeState";
 import {
   aisleY, CELL_H, CELL_W, coffeePoint, deskGeom, dimRect, drawDesk, drawRoom, drawWalker, lookFor, PALETTE_KEYS,
   seatPoint, visitPoint, WALL_H, worldSize, type DeskGeom, type Look, type Palette,
@@ -30,8 +30,8 @@ const SPEED = 42; // world px per second
 const FPS = 8;
 const SHOW_ALL_KEY = "jaeger.office.showTestAgents";
 const MOODS: { mood: Mood; label: string }[] = [
-  { mood: "working", label: "Working" }, { mood: "handoff", label: "Handing off" }, { mood: "approval", label: "Waiting on you" },
-  { mood: "idle", label: "Idle" }, { mood: "error", label: "Error" }, { mood: "offline", label: "Offline" },
+  { mood: "working", label: "Working" }, { mood: "queued", label: "Queued" }, { mood: "handoff", label: "Handing off" }, { mood: "approval", label: "Waiting on you" },
+  { mood: "idle", label: "Idle" }, { mood: "error", label: "Blocked" }, { mood: "offline", label: "Offline" },
 ];
 
 function hash(s: string) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -78,16 +78,18 @@ const ago = (t: number) => {
 
 export function PixelOffice({ source, onNavigate, params }: { source: JaegerSource; onNavigate: (to: string) => void; params?: URLSearchParams }) {
   const adapter = useMemo(() => {
-    if (!(source instanceof GatewayClient)) return liveAdapter(source);
     const base = (source as unknown as { base?: unknown }).base;
-    const gaps: GapProvider = { ...derivedGaps, kind: "gateway", activity: gatewayActivity(typeof base === "string" ? base : "") };
-    return liveAdapter(source, gaps);
+    const gaps: GapProvider = source instanceof GatewayClient
+      ? { ...derivedGaps, kind: "gateway", activity: gatewayActivity(typeof base === "string" ? base : "") }
+      : derivedGaps;
+    const adapter = liveAdapter(source, gaps);
+    return { ...adapter, snapshot: async () => recoverMaskedChatStatus(await adapter.snapshot(), source) };
   }, [source]);
   const orch = useOrchestration(adapter, { refreshMs: 8000 });
   const reduce = Boolean(useReducedMotion());
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => { const t = setInterval(() => setNow(Date.now() / 1000), 5000); return () => clearInterval(t); }, []);
-  const gatewayDown = orch.status === "error";
+  const gatewayDown = orch.snapshotStale || (orch.status === "error" && !orch.snapshot);
   const workers = useMemo(() => deriveWorkers(orch.live, orch.snapshot, now, gatewayDown), [orch.live, orch.snapshot, now, gatewayDown]);
 
   const [showAll, setShowAll] = useState(() => { try { return localStorage.getItem(SHOW_ALL_KEY) === "1"; } catch { return false; } });
@@ -246,7 +248,7 @@ export function PixelOffice({ source, onNavigate, params }: { source: JaegerSour
         <ul className="jg-office__legend" aria-label="Who is doing what">
           {MOODS.map(({ mood, label }) => <li key={mood} className={`is-${mood}`}><i aria-hidden="true" />{label}<b>{counts.get(mood) ?? 0}</b></li>)}
         </ul>
-        {gatewayDown && <div className="jg-office__banner" role="alert">Can't reach the Gateway, so the lights are off. {orch.error} <button type="button" onClick={orch.retry}>Retry</button></div>}
+        {gatewayDown && <div className="jg-office__banner" role="alert">Can't refresh Office status. {orch.snapshot ? "" : orch.error} <button type="button" onClick={orch.retry}>Retry</button></div>}
         <div ref={frameRef} className="jg-office__frame">
           {orch.status === "loading" && !shown.length ? <div className="jg-office__empty">Opening the office…</div> : !shown.length ? <div className="jg-office__empty">No agents on the roster yet.</div> : (
             <div className="jg-office__world" style={{ width: world.w * scale, height: world.h * scale }}>
@@ -286,7 +288,7 @@ function WorkerPanel({ worker, rows, source, onNavigate, onClose }: { worker: Wo
     return [...state.spans.values()].filter((s) => STEP_KINDS.has(String(s.kind))).sort((a, b) => b.startTs - a.startTs).slice(0, 8);
   }, [events]);
   const activity = useMemo(() => rows.filter((r) => r.agentId === worker.id).slice(0, 6), [rows, worker.id]);
-  const task = worker.live.currentTask;
+  const task = worker.currentTask;
   const go = (to: string) => onNavigate(to);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [onClose]);
   return (
@@ -303,9 +305,8 @@ function WorkerPanel({ worker, rows, source, onNavigate, onClose }: { worker: Wo
       <section>
         <h4>Current task</h4>
         {task ? <p className="jg-office__task" title={task.goal || undefined}>{clip(task.goal || task.task_id, 280)}<small>{String(task.state ?? "").replace(/_/g, " ")}{task.eta ? ` · ETA ${task.eta}` : ""}</small></p>
-          : worker.handoff ? <p className="jg-office__task">{worker.bubble}: {clip(worker.handoff.task ?? "", 280)}</p>
-          : (worker.mood === "working" || worker.mood === "queued") && worker.live.summary?.last_preview ? <p className="jg-office__task">{worker.live.summary.last_preview}<small>{worker.mood === "queued" ? "queued" : "chat turn running"}</small></p>
-          : <p className="jg-office__muted">Nothing running{worker.live.summary?.last_preview ? `. Last: ${worker.live.summary.last_preview}` : "."}</p>}
+          : worker.handoff ? <p className="jg-office__task">{clip(worker.handoff.task ?? "", 280) || worker.statusText}</p>
+          : <p className="jg-office__muted">{worker.mood === "idle" ? "Nothing running." : worker.mood === "offline" ? "Live status unavailable." : worker.bubble ?? worker.statusText}</p>}
       </section>
       <section>
         <h4>Recent steps</h4>

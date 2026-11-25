@@ -10,30 +10,36 @@ import { LeadCard } from "./LeadCard";
 import type { Navigate } from "./OutputLinkView";
 import { SpecialistStatusList } from "./SpecialistStatusList";
 import { useOrchestration } from "./useOrchestration";
+import { WorkActivity } from "./WorkActivity";
 
 /** Three panes per RESPONSIVE-SYSTEM.md: team list (nav column) · activity
  * (content) · handoff inspector (docked ≥1200, trailing overlay 840–1199,
  * bottom sheet <840). Layout is driven by container queries on .jg-orch, so
  * it behaves the same inside the Agents tab or the harness. */
-export function OrchestrationPanes({ adapter, onNavigate, now, initialCaller }: { adapter: OrchestrationAdapter; onNavigate: Navigate; now?: number; initialCaller?: string }) {
+export function OrchestrationPanes({ adapter, onNavigate, now, initialCaller, embedded = false }: { adapter: OrchestrationAdapter; onNavigate: Navigate; now?: number; initialCaller?: string; embedded?: boolean }) {
   const [caller, setCaller] = useState<string | undefined>(initialCaller);
-  const s = useOrchestration(adapter, { callerId: caller });
+  const s = useOrchestration(adapter, { callerId: caller, refreshMs: embedded ? 15000 : undefined });
   const [agentFilter, setAgentFilter] = useState<string>();
   const [handoffId, setHandoffId] = useState<string>();
   const names = useMemo(() => namesFrom(s.snapshot?.agents ?? []), [s.snapshot]);
   const lead = s.live.find((l) => l.agent.id === LEAD_ID || l.agent.role === "lead");
   const team = s.live.filter((l) => l !== lead);
   const handoff = handoffForId(handoffId, s.snapshot?.handoffs ?? [], s.rows);
+  const go: Navigate = path => path.startsWith("handoff:") ? setHandoffId(path.slice(8)) : onNavigate(path);
 
   if (s.status === "error") return <div className="jg-orch"><ErrorState title="Couldn't load agent activity" error={s.error ?? "Unknown error"} onRetry={s.retry} /></div>;
   return (
-    <div className="jg-orch" data-inspector={handoff ? "open" : undefined}>
+    <div className="jg-orch" data-embedded={embedded || undefined} data-inspector={handoff ? "open" : undefined}>
       <div className="jg-orch-grid">
-        <nav className="jg-orch-nav" aria-label="Agents">
+        {!embedded && <nav className="jg-orch-nav" aria-label="Agents">
           {s.status === "loading" ? <SkeletonRows n={4} /> : <><LeadCard lead={lead} team={team} rows={s.rows} /><SpecialistStatusList team={team} selected={agentFilter} onSelect={setAgentFilter} /></>}
-        </nav>
+        </nav>}
         <main className="jg-orch-main">
-          {s.status === "loading" ? <SkeletonRows n={6} /> : <ActivityFeed rows={s.rows} names={names} stream={s.stream} agentFilter={agentFilter} selectedHandoff={handoffId} onOpenHandoff={setHandoffId} onNavigate={onNavigate} now={now} onLoadOlder={s.loadOlder} historyError={s.historyError} caller={caller} onCaller={setCaller} />}
+          {s.status === "loading" ? <SkeletonRows n={6} /> : <>
+            {embedded && s.snapshot && <WorkActivity snapshot={s.snapshot} rows={s.rows} stale={s.snapshotStale} names={names} onNavigate={go} />}
+            {embedded ? <details className="jg-orch-diagnostics"><summary>Event log & diagnostics</summary><ActivityFeed rows={s.rows} names={names} stream={s.stream} onOpenHandoff={setHandoffId} onNavigate={onNavigate} onLoadOlder={s.loadOlder} historyError={s.historyError} caller={caller} onCaller={setCaller} /></details>
+              : <ActivityFeed rows={s.rows} names={names} stream={s.stream} agentFilter={agentFilter} selectedHandoff={handoffId} onOpenHandoff={setHandoffId} onNavigate={onNavigate} now={now} onLoadOlder={s.loadOlder} historyError={s.historyError} caller={caller} onCaller={setCaller} />}
+          </>}
         </main>
         {handoff && <>
           <div className="jg-orch-scrim" onClick={() => setHandoffId(undefined)} aria-hidden />

@@ -20,8 +20,8 @@ import pytest
 
 from jaeger_ai.core.authority import filesystem
 from jaeger_ai.core.authority.kernel import AuthorityDecisionType, PolicyKernel, ProposedAction
-from jaeger_ai.core.runtime.context_compactor import _truncate_old_tool_json
-from jaeger_ai.core.runtime.tool_repair import repair_tool_call
+from jaeger_memory.compactor import _truncate_old_tool_json
+from jaeger_reliability.tool_repair import repair_tool_call
 from jaeger_agent.core import host
 from jaeger_agent.util.tool_interrupt import run_interruptible
 
@@ -238,14 +238,12 @@ def test_phase7_deep_replacement_repomap_offload_grep_and_zero_duplication(tmp_p
     and single-source delegation for destructive checks and JSON repair."""
     import re
     from jaeger_agent.tools.files import repo_map, search_offloaded_output
-    from jaeger_agent.parsing import tool_call_repair
-    from jaeger_ai.core.authority import destructive
-    from jaeger_ai.core.runtime import tool_repair
+    from jaeger_authority import destructive
+    from jaeger_reliability import tool_repair
     import jaeger_reliability
 
-    # 1. Zero duplication: both JaegerAI and jaeger-agent delegate JSON repair to jaeger-reliability
+    # 1. Zero duplication: tool repair lives solely in jaeger-reliability (legacy copies deleted)
     assert tool_repair.repair_json_string is jaeger_reliability.repair_json_string
-    assert tool_call_repair._repair_json_string is jaeger_reliability.repair_json_string
     assert tool_repair.safe_parse_tool_arguments('{"a": 1, "b": {"c": true') == {"a": 1, "b": {"c": True}}
 
     # 2. Zero duplication: destructive_reason delegates shell/git rules to jaeger-authority
@@ -556,14 +554,14 @@ def test_wave2_reliability_credential_pool_tdd_backstop_gateway_modules_and_shad
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Proves Wave 2 modular gutting:
-    1. jaeger_agent.core.errors.classify_exception delegates to jaeger_reliability.classify_error.
+    1. jaeger_reliability.errors.classify_exception delegates to jaeger_reliability.classify_error.
     2. ExternalModelClient rotates multi-keys via jaeger_reliability.CredentialPool on 429.
     3. loop_backstop strips multi-line pytest deprecation preambles and tolerates TDD terminal runs.
     4. Extracted Gateway modules (approval_providers, turn_callbacks, handoff_routes) stay live on JaegerGatewayApp.
     5. FileChanges captures & restores shadow-Git checkpoints via jaeger_memory.GitCheckpointManager.
     """
-    from jaeger_agent.core import errors as core_errors
-    from jaeger_agent.loop.loop_backstop import loop_halt_reason, semantic_failure_signature
+    from jaeger_reliability import errors as core_errors
+    from jaeger_loop.backstop import loop_halt_reason, semantic_failure_signature
     from jaeger_ai.core.gateway import approval_providers, handoff_routes, server, turn_callbacks
     from jaeger_ai.core.gateway.file_changes import FileChanges
     from jaeger_ai.core.instance.schemas import ExternalModelConfig
@@ -594,7 +592,7 @@ def test_wave2_reliability_credential_pool_tdd_backstop_gateway_modules_and_shad
         return "rotated-ok"
 
     monkeypatch.setattr(client, "_chat_openai", _fake_oai)
-    monkeypatch.setattr("jaeger_agent.core.errors.time.sleep", lambda _s: None)
+    monkeypatch.setattr("jaeger_reliability.errors.time.sleep", lambda _s: None)
     res = client.chat([{"role": "user", "content": "hi"}])
     assert res.text == "rotated-ok"
     assert used_keys == ["sk-key-one", "sk-key-two"]

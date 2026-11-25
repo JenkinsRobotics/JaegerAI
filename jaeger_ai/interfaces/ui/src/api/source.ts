@@ -41,6 +41,7 @@ export interface PendingApproval {
   approval_id: string; session_id?: string; kind: string; prompt: string;
   task?: string; status: string;
   tool?: string; target?: string;
+  task_id?: string | null; request_id?: string | null; agent_id?: string | null; created_at?: number;
   reviewer_verdict?: string | null; reviewer_reason?: string | null;
 }
 
@@ -371,6 +372,7 @@ export interface JaegerSource {
   uploadAttachment?(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string, options?:import("./chunkUpload").UploadOptions): Promise<UploadedAttachment>;
   cancel(sessionId: string, requestId?: string): Promise<CancellationReceipt|void>;
   pendingApprovals?(sessionId: string): Promise<PendingApproval[]>;
+  pendingWorkApprovals?(): Promise<PendingApproval[]>;
   /** GET /v1/sessions/{id}/clarify: recover form and terminal status without resubmitting the turn. */
   clarifications?(sessionId: string): Promise<ClarificationSnapshot[]>;
   /** Read one original clarification receipt after an uncertain answer acknowledgement. */

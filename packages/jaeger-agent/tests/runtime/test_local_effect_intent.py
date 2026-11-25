@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from jaeger_agent.cognition.effects import InMemoryEffectLedger
 from jaeger_agent.tool_executor import DirectToolExecutor, LedgerToolExecutor
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools.tool_schema import ToolDef
 
 
 class _Args(BaseModel):

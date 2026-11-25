@@ -18,6 +18,12 @@ const COLUMNS = [
   { id: "waiting", title: "Needs you", states: ["needs_owner", "paused", "blocked"] },
   { id: "done", title: "Finished", states: ["done", "completed", "completed_verified", "failed", "cancelled"] },
 ];
+export function taskListPriority(task: Task): number {
+  if (COLUMNS[2].states.includes(String(task.state)) || task.state === "waiting_approval") return 0;
+  if (task.state === "running") return 1;
+  if (task.state === "queued") return 2;
+  return 3;
+}
 
 interface ProposalIntent { requestId: string; sessionId: string; origin: string; goal: string }
 const PROPOSAL_DRAFT = 'jaeger.ui.task-proposal.draft.v1';
@@ -37,9 +43,10 @@ export interface TasksBoardOptions {
   /** Hide the legacy title band (the unified page has its own header). */
   bare?: boolean;
   onCount?: (shown: number, total: number) => void;
+  onInspectRun?: (task: Task) => void;
 }
 
-export function TasksBoard({ source, agents, view = "board", filter, initialTaskId, composer = true, bare = false, onCount }: { source: JaegerSource; agents: Agent[] } & TasksBoardOptions) {
+export function TasksBoard({ source, agents, view = "board", filter, initialTaskId, composer = true, bare = false, onCount, onInspectRun }: { source: JaegerSource; agents: Agent[] } & TasksBoardOptions) {
   const [artifactTask, setArtifactTask] = useState<string>();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
@@ -257,16 +264,10 @@ export function TasksBoard({ source, agents, view = "board", filter, initialTask
       {operationError && <p role="alert">{operationError}</p>}
       {proposalError && <p role="alert">{proposalError}</p>}
 
-      {bare ? (
-        <details className="jg-u-card jg-tasks__handoffs">
-          <summary>Specialist hand-offs</summary>
-          <OwnedHandoffs source={source} />
-          {source.delegation && source.agentHome && <SpecialistHandoff source={source} agents={agents} />}
-        </details>
-      ) : (<>
+      {!bare && <>
         <OwnedHandoffs source={source} />
         {source.delegation && source.agentHome && <SpecialistHandoff source={source} agents={agents} />}
-      </>)}
+      </>}
 
       {composer && source.taskActions && source.agentHome && (
         <form
@@ -328,7 +329,7 @@ export function TasksBoard({ source, agents, view = "board", filter, initialTask
                 <span role="columnheader">Task</span><span role="columnheader">State</span><span role="columnheader">Agent</span><span role="columnheader">Updated</span>
               </div>
               {shown.length === 0 && <p className="jg-muted" role="row" style={{ padding: 16 }}>No tasks match these filters.</p>}
-              {[...shown].sort((a, b) => Number(b.updated_at ?? 0) - Number(a.updated_at ?? 0)).map(t => {
+              {[...shown].sort((a, b) => taskListPriority(a) - taskListPriority(b) || Number(b.updated_at ?? 0) - Number(a.updated_at ?? 0)).map(t => {
                 const a = agents.find(x => x.id === (t.agent_id ?? t.owning_agent));
                 return (
                   <button key={t.task_id} type="button" role="row" className="jg-tasklist__row" aria-selected={selectedTaskId === t.task_id} onClick={() => setSelectedTaskId(t.task_id)}>
@@ -407,6 +408,7 @@ export function TasksBoard({ source, agents, view = "board", filter, initialTask
               source={source}
               busy={busy}
               onClose={() => setSelectedTaskId(undefined)}
+              onInspectRun={selectedTask.provenance?.session_id && onInspectRun ? () => onInspectRun(selectedTask) : undefined}
               onApprove={
                 source.taskActions
                   ? task =>
@@ -432,6 +434,12 @@ export function TasksBoard({ source, agents, view = "board", filter, initialTask
           )}
         </div>
       )}
+
+      {bare && <details className="jg-tasks__handoffs">
+        <summary>Specialist handoffs</summary>
+        <OwnedHandoffs source={source} />
+        {source.delegation && source.agentHome && <SpecialistHandoff source={source} agents={agents} />}
+      </details>}
 
       {artifactTask && source.taskArtifacts && (
         <div className="jg-tasks__artifact-overlay">

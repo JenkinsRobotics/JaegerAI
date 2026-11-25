@@ -1,7 +1,7 @@
 """Search, inspect and load tools through Jaeger's existing registry and executor."""
 from __future__ import annotations
 from typing import Any
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.skill_registry import tool_discovery as discovery
 
 
@@ -10,9 +10,14 @@ def describe_tool(name: str) -> dict[str, Any]:
     """Inspect a permitted tool's schema, availability and permission metadata before loading it.
     An unspecified permission tier is unknown; it never implies approval to execute.
     """
-    tool = next((t for t in discovery.catalog() if t.name == name.strip()), None)
+    catalog = discovery.catalog()
+    tool = next((t for t in catalog if t.name == name.strip()), None)
     if tool is None:
-        return {'ok': False, 'error': 'Unknown or unavailable tool in this agent’s catalog'}
+        suggestions = [t.name for t in discovery.ranked(catalog, name.strip()[:200], 5)] if name.strip() else []
+        out: dict[str, Any] = {'ok': False, 'error': 'Unknown or unavailable tool in this agent’s catalog'}
+        if suggestions:
+            out['suggestions'] = suggestions
+        return out
     fn = discovery.schema(tool)['function']
     return {'ok': True, **discovery.row(tool), 'name': tool.name,
             'description': fn.get('description', ''), 'parameters': fn.get('parameters', {}),
@@ -49,14 +54,44 @@ def load_tools(name: str = '', tools: list[str] | None = None) -> dict[str, Any]
         state = current_selection()
         if state is None:
             return {'ok': False, 'error': 'Exact tools must be loaded within an agent session'}
-        if any(n not in by_name for n in exact):
-            return {'ok': False, 'error': 'Requested tool is not in this agent’s catalog'}
-        unavailable = [discovery.row(by_name[n]) for n in exact if not discovery.availability(by_name[n])[0]]
+        present = [n for n in exact if n in by_name]
+        unknown = [n for n in exact if n not in by_name]
+        if not present:
+            suggestions: list[str] = []
+            for missing in unknown[:3]:
+                for cand in discovery.ranked(catalog, missing[:100], 3):
+                    if cand.name not in suggestions:
+                        suggestions.append(cand.name)
+            out: dict[str, Any] = {
+                'ok': False,
+                'error': f"Requested tool(s) not in this agent’s catalog: {', '.join(unknown)}",
+                'unknown': unknown,
+            }
+            if suggestions:
+                out['suggestions'] = suggestions[:8]
+            return out
+        ready_names = [n for n in present if discovery.availability(by_name[n])[0]]
+        unavailable = [discovery.row(by_name[n]) for n in present if not discovery.availability(by_name[n])[0]]
+        if not ready_names:
+            return {
+                'ok': False,
+                'error': 'Resolve tool prerequisites before loading',
+                'unavailable': unavailable,
+                **({'unknown': unknown} if unknown else {}),
+            }
+        state.names.update(ready_names)
+        state.reasons.update({n: 'Explicitly loaded' for n in ready_names})
+        result: dict[str, Any] = {
+            'ok': True,
+            'loaded': ready_names,
+            'tools': [describe_tool(n) for n in ready_names],
+        }
+        if unknown:
+            result['unknown'] = unknown
+            result['note'] = f"Loaded {len(ready_names)} tool(s); skipped unknown name(s): {', '.join(unknown)}"
         if unavailable:
-            return {'ok': False, 'error': 'Resolve tool prerequisites before loading', 'unavailable': unavailable}
-        state.names.update(exact)
-        state.reasons.update({n: 'Explicitly loaded' for n in exact})
-        return {'ok': True, 'loaded': exact, 'tools': [describe_tool(n) for n in exact]}
+            result['unavailable'] = unavailable
+        return result
     available = discovery.groups(catalog)
     clean = clean.lower()
     if clean in available:

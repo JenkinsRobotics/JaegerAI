@@ -68,9 +68,10 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 }
 const Anchor = ({ id, children }: { id: string; children: ReactNode }) => <div id={`set-${id}`} className="jg-set-anchor">{children}</div>;
 
-export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, resetPanel, open, onClose, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, integrationsPanel, modelsContent, integrationsExtras, checkpointsPanel }: {
+export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, resetPanel, open, onClose, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, integrationsPanel, modelsContent, integrationsExtras, checkpointsPanel, navigationOpen = true, navigationFooter }: {
   /** Render as a page (the /settings route) instead of a modal sheet. */ inline?: boolean; tab?: Tab; segment?: string; onTab?: (tab: Tab | "") => void; resetPanel?: ReactNode;
   integrationsPanel?: ReactNode; modelsContent?: ReactNode; integrationsExtras?: ReactNode; checkpointsPanel?: ReactNode; widgetsPanel?: ReactNode;
+  navigationOpen?: boolean; navigationFooter?: ReactNode;
   financePanel?:ReactNode;computerPanel?:ReactNode;clipboardPanel?:ReactNode;updatesPanel?:ReactNode;requestedTab?:{tab:Tab;sequence:number}; open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode; memoryPanel?:ReactNode;
 }) {
   const [ownTab, setOwnTab] = useState<Tab>("appearance");
@@ -105,7 +106,7 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
     if (!open && !inline) return;
     const key = (e: globalThis.KeyboardEvent) => {
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? "");
-      if ((e.metaKey && e.key.toLowerCase() === "f") || (e.key === "/" && !typing)) { e.preventDefault(); searchRef.current?.focus(); searchRef.current?.select(); }
+      if (searchRef.current && ((e.metaKey && e.key.toLowerCase() === "f") || (e.key === "/" && !typing))) { e.preventDefault(); searchRef.current.focus(); searchRef.current.select(); }
       if (e.metaKey && e.key === "[" && compact && controlledTab) { e.preventDefault(); onTab?.(""); }
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
@@ -130,13 +131,13 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
   const embedded = !inline;
   const header = (title: string, subtitle?: string) => <PageHeader title={title} subtitle={short ? undefined : subtitle} embedded={embedded}
     back={inline && compact ? { label: "Settings", onBack: () => onTab?.("") } : undefined} />;
-  const showList = !(inline && compact) || !controlledTab;
+  const showList = !inline || (compact ? !controlledTab : navigationOpen);
   const showPanel = !(inline && compact) || !!controlledTab;
   const integ = isValidElement(integrationsPanel) ? cloneElement(integrationsPanel as ReactElement<{ embedded?: boolean; initialTab?: string; back?: { label: string; onBack: () => void } }>, { embedded, initialTab: seg === "tools" || seg === "apps" || seg === "servers" ? seg : undefined, back: inline && compact ? { label: "Settings", onBack: () => onTab?.("") } : undefined }) : integrationsPanel;
   return (
     <div ref={root} className={inline ? "jg-sheet__inline" : "jg-sheet__scrim"} data-size={cls} onMouseDown={inline ? undefined : onClose}>
       <div className={`jg-sheet${inline ? " jg-sheet--inline" : ""}`} data-view={inline && compact ? (controlledTab ? "panel" : "list") : "split"} role={inline ? "region" : "dialog"} aria-modal={inline ? undefined : true} aria-label="Settings" onMouseDown={(e) => e.stopPropagation()}>
-        {showList && <nav ref={navRef} className="jg-sheet__nav" aria-label="Settings sections" onKeyDown={navKey}>
+        {showList && <div className="jg-set-navigation"><nav ref={navRef} className="jg-sheet__nav" aria-label="Settings sections" onKeyDown={navKey}>
           {inline && compact && <h1 className="jg-set-list-title">Settings</h1>}
           <div className="jg-set-search">
             <input ref={searchRef} type="search" className="jg-set-search__input" placeholder="Search settings" aria-label="Search settings" value={q}
@@ -154,13 +155,13 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
             return <div key={group.id} className="jg-sheet__group" role="group" aria-label={group.label}>
               <h4 className="jg-sheet__group-title">{group.label}</h4>
               {tabs.map((t) => (
-                <button key={t} type="button" className={`jg-sheet__tab${t === tab ? " is-active" : ""}`} aria-current={t === tab ? "page" : undefined} tabIndex={t === tab ? 0 : -1} onClick={() => { setAutoSeg(undefined); setTab(t); }}>
+                <button key={t} type="button" className={`jg-sheet__tab${t === tab ? " is-active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => { setAutoSeg(undefined); setTab(t); }}>
                   <Icon name={ICON[t]} size={15} />{PANEL_LABEL[t]}{inline && compact && <span className="jg-set-chev" aria-hidden="true">›</span>}
                 </button>
               ))}
             </div>;
           })}
-        </nav>}
+        </nav>{inline && navigationFooter && <div className="jg-set-navigation__footer">{navigationFooter}</div>}</div>}
         {showPanel && <div className="jg-sheet__page">
           {!inline && <button type="button" className="jg-sheet__close" aria-label="Close settings" onClick={onClose}><Icon name="close" size={16} /></button>}
           {!inline && <h2 className="jg-sheet__title">{PANEL_LABEL[tab]}</h2>}
@@ -180,7 +181,7 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
               </fieldset>
             </Section>
           </>}
-          {tab === "agents" && <>{header("Agents", "Your agents, primary agent and pins.")}<Anchor id="agents">{agentsPanel ?? <p>Agent management is not available from this host.</p>}</Anchor></>}
+          {tab === "agents" && <>{header("Agents", "Your agents, primary agent and pins.")}<Anchor id="agents">{agentsPanel ?? (inline ? <button type="button" className="jg-u-btn" onClick={() => navigate("/agents")}>Open Agents</button> : <p>Agent management is not available from this host.</p>)}</Anchor></>}
           {tab === "models" && <>{header("Models & Providers", "Sign-in and status for the apps and local models Jaeger runs. No API keys.")}<Anchor id="cli"><ProvidersPanel /></Anchor><span id="set-ollama" />{modelsContent}</>}
           {tab === "integrations" && <>{integ ?? toolsPanel}{integrationsExtras}</>}
           {tab === "checkpoints" && checkpointsPanel}

@@ -189,7 +189,7 @@ def register(host: Any) -> None:
     calls this with the host's registry-binding object once the
     skill's smoke tests pass."""
     import sys
-    from jaeger_os.core.tools.tool_registry import register_tool_from_function
+    from jaeger_tools.tool_registry import register_tool_from_function
     from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
     # The registered tools share their names with the module-level

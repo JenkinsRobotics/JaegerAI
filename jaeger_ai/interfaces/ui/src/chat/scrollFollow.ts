@@ -23,6 +23,7 @@ export interface ScrollIntentInput {
   gap: number;
   thresholdPx: number;
   isProgrammatic: boolean;
+  viewportResized?: boolean;
   userInputActive: boolean;
   wasSticking: boolean;
 }
@@ -34,7 +35,7 @@ export interface ScrollIntentInput {
  */
 export function nextStickState(input: ScrollIntentInput): boolean {
   const near = input.gap < input.thresholdPx;
-  if (input.isProgrammatic) return input.wasSticking;
+  if (input.isProgrammatic || (input.viewportResized && !input.userInputActive)) return input.wasSticking;
   if (near) return true;
   // Any upward movement not caused by our own followNow() immediately yields
   // scroll control back to the reader — even during iOS momentum deceleration.

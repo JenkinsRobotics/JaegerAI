@@ -141,7 +141,7 @@ def test_shell_test_can_run_again_after_an_edit(tmp_path, name):
 
     from jaeger_agent import LedgerToolExecutor
     from jaeger_agent.cognition.effects import InMemoryEffectLedger
-    from jaeger_agent.live import tool_call
+    from jaeger_events.live import tool_call
 
     class Args(BaseModel):
         cmd: str
@@ -172,7 +172,7 @@ def test_shell_test_can_run_again_after_an_edit(tmp_path, name):
 def test_shell_preserves_existing_argument_key_on_upgrade():
     from jaeger_agent import LedgerToolExecutor
     from jaeger_agent.cognition.effects import InMemoryEffectLedger
-    from jaeger_agent.live import tool_call
+    from jaeger_events.live import tool_call
 
     class Args(BaseModel):
         cmd: str

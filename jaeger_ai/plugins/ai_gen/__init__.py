@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_write, _display_path
 from jaeger_agent.util.tool_interrupt import is_interrupted
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier

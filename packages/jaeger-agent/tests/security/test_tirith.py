@@ -13,7 +13,7 @@ from unittest import mock
 
 import pytest
 
-from jaeger_agent import tirith
+from jaeger_authority import tirith
 
 
 @pytest.fixture(autouse=True)

@@ -144,7 +144,7 @@ def test_run_shortcut_skipped_on_non_macos(monkeypatch):
 
 def test_list_shortcuts_is_registered_read_only():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert "list_shortcuts" in tools
@@ -153,7 +153,7 @@ def test_list_shortcuts_is_registered_read_only():
 
 def test_run_shortcut_is_registered_external_effect():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert "run_shortcut" in tools

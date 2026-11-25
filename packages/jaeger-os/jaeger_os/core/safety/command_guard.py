@@ -171,7 +171,7 @@ def hardline_guard(arg_name: str = "command") -> Callable[[Callable], Callable]:
             # the resolve_mind_module hop above. Off unless configured, so
             # an install without it behaves exactly as before.
             try:
-                from jaeger_agent import tirith as _tirith
+                from jaeger_authority import tirith as _tirith
                 verdict = _tirith.scan_command(str(cmd or ""))
             except Exception:  # noqa: BLE001 — a scanner must not break exec
                 verdict = None

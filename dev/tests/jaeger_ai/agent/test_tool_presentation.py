@@ -16,7 +16,7 @@ from jaeger_agent.dialects import (
     render_tools_for as render_tool_presentation,
     strip_think_blocks,
 )
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools.tool_schema import ToolDef
 from pydantic import BaseModel
 
 

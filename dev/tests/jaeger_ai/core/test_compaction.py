@@ -188,7 +188,7 @@ def test_summarizer_for_handles_no_client():
 def test_guard_uses_the_llm_digest_and_keeps_it_clean():
     """The whole point: a wired summarizer replaces the deterministic
     digest, and what lands in ``messages`` is prose."""
-    from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
+    from jaeger_memory.context_guard import ContextBudget, ContextGuard
 
     client = SimpleNamespace(
         chat=lambda messages, **kw: SimpleNamespace(
@@ -216,7 +216,7 @@ def test_guard_uses_the_llm_digest_and_keeps_it_clean():
 
 def test_guard_falls_back_when_the_summarizer_fails():
     """A summarizer hiccup costs digest quality, never the turn."""
-    from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
+    from jaeger_memory.context_guard import ContextBudget, ContextGuard
 
     def _boom(messages, **kw):
         raise RuntimeError("down")

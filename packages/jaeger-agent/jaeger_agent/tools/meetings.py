@@ -35,7 +35,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 _WHISPER_MODEL = os.environ.get("JAEGER_MEETING_STT_MODEL", "large-v3-turbo")
 _OLLAMA = os.environ.get("JAEGER_OLLAMA_URL", "http://127.0.0.1:11434")

@@ -110,3 +110,31 @@ def test_roots_and_reconnect_policy(tmp_path):
     assert rp.can_auto_reconnect("github", strictly_read_only=True) is False
     rp.record_success("github")
     assert rp.can_auto_reconnect("github", strictly_read_only=True) is True
+
+
+def test_mcp_schema_budget_and_connection_pool():
+    from jaeger_mcp import MCPConnectionPool, enforce_mcp_schema_budget
+
+    bloated_desc = "X" * 10_000
+    tools = [
+        {"name": "small_a", "description": "ok", "input_schema": {"type": "object"}},
+        {"name": "bloated_b", "description": bloated_desc, "input_schema": {"type": "object"}},
+        {"name": "huge_c", "description": "ok", "input_schema": {"type": "object", "properties": {f"p{i}": {"type": "string"} for i in range(400)}}},
+    ]
+    accepted, report = enforce_mcp_schema_budget(tools, max_per_tool=8192, max_total=12_000)
+    names = [t["name"] for t in accepted]
+    assert "small_a" in names
+    assert "bloated_b" in names  # compacted under 8KB
+    assert "huge_c" in report.dropped_tools
+    assert report.compacted_count >= 1
+    assert report.total_bytes <= 12_000
+
+    closed: list[str] = []
+    pool = MCPConnectionPool(idle_ttl_s=10.0, closer=lambda h: closed.append(h["id"]))
+    h1 = pool.acquire("github", lambda: {"id": "conn-1"})
+    h2 = pool.acquire("github", lambda: {"id": "conn-2"})
+    assert h1 is h2
+    assert pool.active_servers() == ("github",)
+    assert pool.close_all() == 1
+    assert closed == ["conn-1"]
+

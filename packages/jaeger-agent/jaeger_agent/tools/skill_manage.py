@@ -13,7 +13,7 @@ import re
 
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.core.workspace import _require_layout
 from jaeger_agent.skill_improvement import skill_history as sh
 

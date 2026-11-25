@@ -39,8 +39,8 @@ from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.adapters.cli_backend import CliBackendAdapter
 from jaeger_agent.adapters.local_llama import LocalLlamaAdapter
 from jaeger_agent.adapters.openai import OpenAIAdapter
-from jaeger_agent.schemas.message_types import Message
-from jaeger_agent.loop.turn_budget import TurnBudgetLimits
+from jaeger_contracts import Message
+from jaeger_loop.budget import TurnBudgetLimits
 
 
 def _inject_usage_callbacks(cb: AgentCallbacks) -> AgentCallbacks:
@@ -465,7 +465,7 @@ def build_jaeger_agent(
     from jaeger_agent.skill_registry.toolset_scoping import (
         tool_visible,
     )
-    from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
+    from jaeger_memory.context_guard import ContextBudget, ContextGuard
 
     def _reset_turn_state() -> None:
         from jaeger_agent.tools.files import reset_read_tracker
@@ -651,8 +651,8 @@ def drive_one_turn(
       • ``new_messages``   — the ``Message`` slice produced this turn
         (for history extension)
     """
-    from jaeger_agent.core.errors import friendly_overflow_text
-    from jaeger_agent.util.context_guard import ContextOverflow
+    from jaeger_reliability.errors import friendly_overflow_text
+    from jaeger_memory.context_guard import ContextOverflow
 
     started = time.perf_counter()
     try:

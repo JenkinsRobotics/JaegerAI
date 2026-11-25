@@ -90,7 +90,7 @@ async def tool_bridge(tmp_path, monkeypatch):
         from jaeger_agent import JaegerAgent, ProviderAdapter
         from jaeger_agent.tool_executor import tool_allowlist
         from jaeger_os.core.safety.permissions import PermissionPolicy, use_policy
-        from jaeger_os.core.tools.tool_registry import get_tools
+        from jaeger_tools.tool_registry import get_tools
 
         name, arguments = json.loads(text)
 

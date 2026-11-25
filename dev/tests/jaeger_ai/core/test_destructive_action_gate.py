@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.core.authority.destructive import destructive_reason
+from jaeger_authority.destructive import destructive_reason
 from jaeger_ai.core.authority.kernel import AuthorityDecisionType, PolicyKernel, ProposedAction
 
 DESTRUCTIVE = [
@@ -92,7 +92,7 @@ def test_a_hook_rewrite_into_a_destructive_call_is_judged_again(monkeypatch):
 
 
 def test_detection_failure_fails_closed(monkeypatch):
-    import jaeger_ai.core.authority.destructive as mod
+    import jaeger_authority.destructive as mod
 
     def boom(*a, **k):
         raise RuntimeError("parser exploded")

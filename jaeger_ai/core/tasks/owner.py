@@ -106,7 +106,8 @@ class GatewayTaskOwner:
         if not goal:
             raise ValueError('Task objective is required')
         parent = str(context.get('session_id') or '')
-        if not parent or not self.gateway.store.get_session(parent):
+        parent_session = self.gateway.store.get_session(parent) if parent else None
+        if not parent or not parent_session:
             raise ValueError('Task requires an existing originating session')
         execution = dict(context.get('execution') or {})
         execution.pop('attachment_ids', None)
@@ -114,7 +115,17 @@ class GatewayTaskOwner:
         # Source authorization is installed by the owner, not a model argument.
         authorized = context.get('source') == 'user' and background_requested(context.get('user_text', ''))
         approved = authorized or (not proposal and context.get('source') == 'client')
-        workspace = str(execution.get('workspace') or '')
+        workspace = str(execution.get('workspace') or parent_session.get('workspace') or '').strip()
+        if not workspace and artifacts:
+            try:
+                from jaeger_agent.core.workspace import get_effective_workspace_dir
+                ws_dir = get_effective_workspace_dir()
+                if ws_dir:
+                    workspace = str(ws_dir)
+            except Exception:  # noqa: BLE001
+                workspace = ''
+        if workspace and not execution.get('workspace'):
+            execution['workspace'] = workspace
         paths = self.artifact_paths(workspace, artifacts)
         submission_id = context.get('client_submission_id')
         fingerprint = None

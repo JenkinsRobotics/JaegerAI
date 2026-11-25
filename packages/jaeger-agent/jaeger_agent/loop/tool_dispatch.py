@@ -5,12 +5,12 @@ import threading
 import time
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import get_tools
-from jaeger_os.core.tools.tool_schema import ToolDef
-from jaeger_agent.schemas.message_types import ToolCall
-from .loop_backstop import call_signature, loop_warning, semantic_failure_signature
+from jaeger_tools.tool_registry import get_tools
+from jaeger_tools.tool_schema import ToolDef
+from jaeger_contracts import ToolCall
+from jaeger_loop.backstop import call_signature, loop_warning, semantic_failure_signature
 from jaeger_agent.skill_registry.tool_selection import tool_permitted
-from .tool_result_safety import protect_tool_result
+from jaeger_loop.safety import protect_tool_result
 
 
 def _ja(name: str) -> Any:
@@ -260,7 +260,7 @@ class AgentToolDispatchMixin:
             )
 
         started = time.perf_counter()
-        from jaeger_agent import live as _live
+        from jaeger_events import live as _live
         _sub = _live.current_subagent()
         live_call = f"{_sub}:{call_id}" if _sub else call_id
         with _live.tool_call(live_call):
@@ -339,7 +339,7 @@ class AgentToolDispatchMixin:
                 # nodes: bind the turn's own event for the call so a cancel or Global Stop
                 # reaches a running command (tool_interrupt.is_interrupted reads it).
                 from jaeger_agent.core.cancellation import turn_cancellation
-                from jaeger_agent import live as _live
+                from jaeger_events import live as _live
                 # The call id rides a ContextVar so delegates, progress and
                 # hooks inside the tool report under THIS call's span.
                 with turn_cancellation(self._interrupt_event), _live.tool_call(prep.get("live_call") or prep.get("call_id")):
@@ -461,7 +461,7 @@ class AgentToolDispatchMixin:
             content = {**content, "recovery": recovery}
 
         elapsed = time.perf_counter() - started
-        from jaeger_agent import live as _live
+        from jaeger_events import live as _live
         _sub = _live.current_subagent()
         _call_scope = _live.tool_call(f"{_sub}:{call_id}" if _sub else call_id)
         _call_scope.__enter__()

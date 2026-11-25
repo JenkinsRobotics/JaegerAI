@@ -27,7 +27,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 PACKAGES = [
     "jaeger_agent.tools",
-    "jaeger_os.core.tools",
+    "jaeger_tools",
     "jaeger_ai.core.instance",
     "jaeger_ai.core.gateway",
     "jaeger_ai.core.runtime.cancellation",
@@ -69,6 +69,7 @@ def test_importing_tool_and_core_surfaces_has_no_side_effects(tmp_path):
         "HOME": str(home),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONPATH": os.pathsep.join([
+            *[str(p) for p in sorted((REPO / "packages").glob("jaeger-*/src"))],
             str(REPO / "packages/jaeger-agent"), str(REPO / "packages/jaeger-os"), str(REPO),
         ]),
         "JAEGER_STATE_DIR": str(tmp_path / "state"),

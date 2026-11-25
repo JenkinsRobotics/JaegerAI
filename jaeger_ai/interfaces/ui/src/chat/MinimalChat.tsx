@@ -56,6 +56,8 @@ import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
 import type { VoiceHost } from "./nativeHost";
 import { AutonomyControl } from "./AutonomyControl";
 import { RunModeControl } from "./RunModeControl";
+import { ConversationTasks } from "./ConversationTasks";
+import { SlidersHorizontal } from "lucide-react";
 import type { RuntimeTier } from "../api/source";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
@@ -309,7 +311,7 @@ function currentWorkLabel(parts: ChatPart[]): string | undefined {
   return progress && progress.kind === "progress" ? progress.message : undefined;
 }
 
-export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boolean;links:Links;style:StreamStyleParams}) {
+export function ActivityFold({parts,live,links,style,sessionId}:{parts:ChatPart[];live:boolean;links:Links;style:StreamStyleParams;sessionId?:string}) {
   const [open,setOpen]=useState(false);
   const [now,setNow]=useState(Date.now());
   const started = useRef<number | undefined>(undefined);
@@ -356,7 +358,7 @@ export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boo
       ) :
       part.kind==="toolInvocation" ? <ToolActivity key={part.callId || i} part={part} /> :
       <BubblePart key={i} part={part} links={links} style={style} live={false}/>
-    )}</div>}
+    )}{sessionId && <a href={`/work/process?session=${encodeURIComponent(sessionId)}`} onClick={e => { e.preventDefault(); navigate(e.currentTarget.getAttribute("href")!); }}>Inspect run</a>}</div>}
   </div>;
 }
 
@@ -416,6 +418,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   const [session, setSession] = useState<ChatSession | null>(null);
   /** Home chat (Grok-style): summary + posted-result entries, and the cursor for the next older page. */
   const home: HomeSessions | undefined = host instanceof WebHost ? host.home : undefined;
+  const shellChrome = host instanceof WebHost && host.shellOwnsChrome;
   const [entries, setEntries] = useState<Record<string, HomeEntry>>({});
   const [older, setOlder] = useState<string>();
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -487,6 +490,16 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   /** Grok's "Composer actions" (the + button) and "Message actions" (right-click a bubble) menus. */
   const plus = useRef<HTMLButtonElement>(null);
   const [composerMenu, setComposerMenu] = useState(false);
+  const [chatControlsOpen, setChatControlsOpen] = useState(false);
+  const chatControlsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!chatControlsOpen) return;
+    const dismiss = (event: MouseEvent) => {
+      if (event.target instanceof Node && !chatControlsRef.current?.contains(event.target)) setChatControlsOpen(false);
+    };
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [chatControlsOpen]);
   const [runTier, setRunTier] = useState<RuntimeTier>();
   // On iOS, moving focus from the software-keyboard textarea to a toolbar
   // button can dismiss the keyboard before the synthetic click is delivered.
@@ -705,6 +718,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   const streamStyle = useStreamStyle();
   const inputAt = useRef(0);
   const lastScrollTop = useRef(0);
+  const lastViewportHeight = useRef<number | undefined>(undefined);
   const programmaticUntil = useRef(0);
   const userScrolled = () => Date.now() - inputAt.current <= USER_INPUT_WINDOW_MS;
   // Auto-follow pauses while a menu is open (it would scroll the target out from under it) and catches up on close.
@@ -731,7 +745,9 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   // height), which a session change alone doesn't catch.
   useLayoutEffect(() => {
     const el = scroller.current, column = el?.firstElementChild;
-    if (!el || !column || typeof ResizeObserver === "undefined") return;
+    if (!el || !column) return;
+    lastViewportHeight.current = el.clientHeight;
+    if (typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => { if (stick.current) follow(el); });
     ro.observe(column);
     // Keyboard/visual-viewport and composer resizes change the viewport, not the column.
@@ -742,7 +758,10 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
-    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const height = el.clientHeight;
+    const viewportResized = lastViewportHeight.current !== undefined && lastViewportHeight.current !== height;
+    lastViewportHeight.current = height;
+    const gap = el.scrollHeight - el.scrollTop - height;
     const thresholdPx = Math.max(STICK_PX, streamStyle.scroll.thresholdPx);
     const near = gap < thresholdPx;
     if (el.scrollTop < OLDER_PX && older && !loadingOlder && !olderError) loadOlder();
@@ -752,6 +771,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       gap,
       thresholdPx,
       isProgrammatic: Date.now() <= programmaticUntil.current,
+      viewportResized,
       userInputActive: userScrolled(),
       wasSticking: stick.current,
     });
@@ -1215,8 +1235,8 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
   return (
     <ClarificationAnswers key={sessionId}>
-    <div className={`jg-chat${session && !session.turns.length ? " is-home" : ""}${dropping ? " is-dropping" : ""}`} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
-      <div className="jg-chat__band" data-aether-window-drag-region>
+    <div className={`jg-chat${session && !session.turns.length ? " is-home" : ""}${dropping ? " is-dropping" : ""}`} data-shell-chrome={shellChrome || undefined} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+      {!shellChrome && <div className="jg-chat__band" data-aether-window-drag-region>
         {host.sessionFiles && sessionId && <button type="button" aria-expanded={filesOpen} onClick={()=>setFilesOpen(value=>!value)}>Files</button>}
         <div className="jg-agent-pill-wrap">
           <button ref={pill} type="button" className="jg-agent-pill" title={`${agent.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
@@ -1228,9 +1248,9 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
             items={[{ id: "details", label: "Agent info" }, { id: "history", label: "History" }]}
             onSelect={(id) => { setMenuOpen(false); if (id === "history") (host as WebHost).openHistory?.(agent.id); else host.openDetails?.(agent.id); }} />
         </div>
-      </div>
+      </div>}
       {readMarker && <div className="jg-unread-banner" role="status"><span>Conversation marked as unread</span><button type="button" disabled={readStateBusy} onClick={() => void changeReadMarker(null)}>Mark read</button></div>}
-      <ConversationMinimap onNavigate={markInput} scroller={scroller} revision={`${sessionId}:${session?.turns.length}`} />
+      {!shellChrome && <ConversationMinimap onNavigate={markInput} scroller={scroller} revision={`${sessionId}:${session?.turns.length}`} />}
       <div className="jg-chat__scroll" ref={scroller} onContextMenu={press.onContextMenu} onScroll={() => { press.cancel(); onScroll(); }} onWheel={markInput} onTouchMove={markInput} onPointerDown={event => { markInput(); press.onPointerDown(event); }} onPointerMove={press.onPointerMove} onPointerUp={press.onPointerUp} onPointerCancel={press.onPointerCancel} onClickCapture={press.onClickCapture} onKeyDown={event => { markInput(); press.onKeyDown(event); }}>
         <div className="jg-chat__column">
           {filesOpen && host.sessionFiles && sessionId && <><SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)} onSelectMedia={bytesUploadEnabled()&&draftReady&&!active&&!recoveryBlocked?file=>{try{if(!sessionId||active||recoveryBlocked)return;stageSavedMedia([],sessionId,file);setFiles(current=>{const result=stageSavedMedia(current,sessionId,file);setFileNote(result.note);return result.files;});}catch(e){setFileNote(String(e));}}:undefined}/>{host.taskArtifacts&&<TaskArtifacts key={"artifacts:"+sessionId} controls={host.taskArtifacts} sessionId={sessionId}/>}</>}
@@ -1250,7 +1270,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
               )}
               {entries[turn.turnId].kind === "summary"
                 ? <SummaryCard entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "summary" }>} links={links} />
-                : <PostMessage onOpenTaskArtifacts={host.openTaskArtifacts ? id=>host.openTaskArtifacts?.(id) : undefined} onReply={host.openHandoffReply ? (id) => host.openHandoffReply?.(id) : undefined} entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} onOpenChat={host instanceof WebHost && host.openChat ? (id) => (host as WebHost).openChat?.(id) : undefined} />}
+                : <PostMessage onViewTask={host instanceof WebHost ? host.openTask : undefined} onOpenTaskArtifacts={host.openTaskArtifacts ? id=>host.openTaskArtifacts?.(id) : undefined} onReply={host.openHandoffReply ? (id) => host.openHandoffReply?.(id) : undefined} entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} onOpenChat={host instanceof WebHost && host.openChat ? (id) => (host as WebHost).openChat?.(id) : undefined} />}
             </section>
           ) : (
             <section key={turn.turnId} data-turn-id={turn.turnId} className={`jg-turn${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
@@ -1296,7 +1316,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 : "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
-                : "activity" in seg ? <ActivityFold key={`work:${turn.turnId || turn.requestId || "pending"}:${i}`} parts={seg.activity} live={turn.state === "pending" && i === segments(turn.parts, turn.state).length - 1} links={links} style={streamStyle} />
+                : "activity" in seg ? <ActivityFold key={`work:${turn.turnId || turn.requestId || "pending"}:${i}`} parts={seg.activity} live={turn.state === "pending" && i === segments(turn.parts, turn.state).length - 1} links={links} style={streamStyle} sessionId={shellChrome ? sessionId : undefined} />
                 : "diagnostic" in seg ? null
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant" tabIndex={0} aria-haspopup="menu">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} sessionId={sessionId} files={host.sessionFiles} />)}</div>)}
               <SourceChips sources={webSources(turn.parts)} onOpen={links.onOpen} />
@@ -1335,6 +1355,8 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
           {recoveryStatus !== "clear" && <div role="status" className="jg-recovery">{recoveryStatus === "checking" ? "Checking saved work…" : <>Previous request outcome unknown. It was not replayed. <button type="button" disabled={acknowledging || !unknownRequest} onClick={() => void continueWithoutReplay()}>Continue without replaying</button> <button type="button" onClick={() => void checkSavedRequest()}>Check again</button></>}</div>}
           {sessionId && host instanceof WebHost && <SessionApprovals key={sessionId} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "confirmation" ? [p.callId] : []))} />}
           {sessionId && host instanceof WebHost && <SessionClarifications key={`clarifications:${sessionId}`} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "question" ? [p.callId] : []))} />}
+          {shellChrome && session && sessionId && host instanceof WebHost && <ConversationTasks key={sessionId} host={host} sessionId={sessionId}
+            revision={`${session.turns.length}:${session.turns.at(-1)?.turnId ?? ""}:${session.turns.at(-1)?.state ?? ""}`} />}
         </div>
       </div>
       <button type="button" className={`jg-jump${atBottom ? "" : " is-visible"}`} onClick={jumpToLatest}
@@ -1346,9 +1368,9 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       {selectText !== null && <MessageTextSelection returnFocus={messageInvoker.current} text={selectText} onCopy={text => void copyMessageText(text)} onClose={() => setSelectText(null)} />}
       {actionNotice && <p className="jg-message-notice" role={actionNotice.error ? "alert" : "status"}>{actionNotice.text}<button type="button" aria-label="Dismiss message action notice" onClick={() => setActionNotice(undefined)}>×</button></p>}
       {reactionError && <p role="alert">{reactionError}</p>}
-      {session && <AgentActivity turns={session.turns} onOpen={host.openHandoff ? id=>host.openHandoff?.(id) : undefined}/> }
+      {!shellChrome && session && <AgentActivity turns={session.turns} onOpen={host.openHandoff ? id=>host.openHandoff?.(id) : undefined}/> }
       {sessionId && host instanceof WebHost && <WorktreeBar key={`worktree:${sessionId}`} sessionId={sessionId} refreshKey={`${session?.turns.length ?? 0}:${session?.turns.at(-1)?.state ?? ""}`} />}
-      <form ref={composer} className="jg-composer" data-expanded={Boolean(composerExpanded || draft || files.length || quote || preparingFiles || draftError || deliveryNotice || fileNote)} onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
+      <form ref={composer} className="jg-composer" data-expanded={Boolean(shellChrome || composerExpanded || draft || files.length || quote || preparingFiles || draftError || deliveryNotice || fileNote)} onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
             {files.map((f) => (
@@ -1378,17 +1400,27 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         <button ref={plus} type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach file" title="Attach file" aria-haspopup="menu"
           aria-expanded={composerMenu} onClick={() => setComposerMenu(true)}><PlusIcon /></button>
         <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
-          items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
-          onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
-          <AutonomyControl host={host} />
-          <RunModeControl host={host} onTier={setRunTier} />
+          items={[{ id: "attach", label: "Attach files" }, ...(shellChrome && host.sessionFiles && sessionId ? [{ id: "saved", label: filesOpen ? "Hide conversation files" : "Conversation files" }] : []), ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
+          onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else if (id === "saved") setFilesOpen(v => !v); else void toggleListening("dictation"); }} />
+          {shellChrome ? <div ref={chatControlsRef} className="jg-chat-controls" onKeyDown={e => {
+            if (e.key === "Escape" && chatControlsOpen && !chatControlsRef.current?.querySelector(".jg-chat-controls__panel [aria-expanded=true]")) {
+              e.stopPropagation(); setChatControlsOpen(false); chatControlsRef.current?.querySelector("button")?.focus();
+            }
+          }}>
+            <button type="button" className="jg-composer__icon" aria-label="Chat controls" aria-expanded={chatControlsOpen} title="Model, run mode, and permissions" onClick={() => setChatControlsOpen(v => !v)}><SlidersHorizontal size={16} /></button>
+            <div className="jg-chat-controls__panel" hidden={!chatControlsOpen}>
+              <AutonomyControl host={host} /><RunModeControl host={host} onTier={setRunTier} />
+              <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} />
+              {!voiceModeOpen && <VoiceDictation />}
+            </div>
+          </div> : <><AutonomyControl host={host} /><RunModeControl host={host} onTier={setRunTier} /></>}
           <span className="jg-composer__spacer" />
-          <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} />
-          {host instanceof WebHost && <>{!voiceModeOpen && <VoiceDictation />}<VoiceMode primary={!active && !hasText} onOpenChange={setVoiceModeOpen} disabled={Boolean(listening) || !session || !draftReady || preparingFiles || files.length>0 || Boolean(quote) || recoveryBlocked || recoveryStatus === 'unknown'} busy={Boolean(active)} outcome={session?.turns.at(-1) ? {id:session.turns.at(-1)!.requestId || session.turns.at(-1)!.turnId,state:session.turns.at(-1)!.state} : undefined} reply={spokenTurn ? {id:spokenTurn.requestId || spokenTurn.turnId,text:replyText(spokenTurn),final:spokenTurn.state === 'complete'} : undefined} history={() => (session?.turns || []).slice(-8).flatMap(t => [{role:'user',content:t.message},{role:'assistant',content:replyText(t)}]).filter(m => m.content.trim())} onSaveTranscript={(role,text,engine,interrupted) => session ? sendJson('POST', `/v1/sessions/${encodeURIComponent(session.id)}/voice-transcript`, {role,text,engine,interrupted}).then(r => { setAttempt(n => n + 1); return r; }) : undefined} onClosed={changed => { if (changed) setAttempt(n => n + 1); }} onTranscript={async (text,opts)=>{const accepted=active?await submitWhileBusy('steer',text):send(text,true,Boolean(opts?.full));if(!accepted&&!active)setDraft(draft=>draft?draft+'\n'+text:text);return Boolean(accepted);}} /></>}
+          {!shellChrome && <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} />}
+          {host instanceof WebHost && <>{!shellChrome && !voiceModeOpen && <VoiceDictation />}<VoiceMode primary={!shellChrome && !active && !hasText} onOpenChange={setVoiceModeOpen} disabled={Boolean(listening) || !session || !draftReady || preparingFiles || files.length>0 || Boolean(quote) || recoveryBlocked || recoveryStatus === 'unknown'} busy={Boolean(active)} outcome={session?.turns.at(-1) ? {id:session.turns.at(-1)!.requestId || session.turns.at(-1)!.turnId,state:session.turns.at(-1)!.state} : undefined} reply={spokenTurn ? {id:spokenTurn.requestId || spokenTurn.turnId,text:replyText(spokenTurn),final:spokenTurn.state === 'complete'} : undefined} history={() => (session?.turns || []).slice(-8).flatMap(t => [{role:'user',content:t.message},{role:'assistant',content:replyText(t)}]).filter(m => m.content.trim())} onSaveTranscript={(role,text,engine,interrupted) => session ? sendJson('POST', `/v1/sessions/${encodeURIComponent(session.id)}/voice-transcript`, {role,text,engine,interrupted}).then(r => { setAttempt(n => n + 1); return r; }) : undefined} onClosed={changed => { if (changed) setAttempt(n => n + 1); }} onTranscript={async (text,opts)=>{const accepted=active?await submitWhileBusy('steer',text):send(text,true,Boolean(opts?.full));if(!accepted&&!active)setDraft(draft=>draft?draft+'\n'+text:text);return Boolean(accepted);}} /></>}
         {active
           ? <button type="button" className="jg-send jg-send--stop" aria-label="Stop current turn (⌘Esc)" onClick={stop}><StopIcon /></button>
-          : !hasText && host instanceof WebHost ? null
-          : hasText || primary === "send"
+          : !shellChrome && !hasText && host instanceof WebHost ? null
+          : shellChrome || hasText || primary === "send"
             ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText || recoveryBlocked || preparingFiles || !draftReady || !session || Boolean(pendingSteer || pendingQueue) || recoveryStatus === "unknown"}><SendIcon /></button>
             : <button type="button" className={`jg-send jg-send--speak${listening ? " is-listening" : ""}`}
                 aria-label={listening ? "Stop voice" : "Start voice"} aria-pressed={Boolean(listening)}

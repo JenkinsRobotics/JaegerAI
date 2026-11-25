@@ -263,7 +263,7 @@ def pytest_sessionstart(session: "pytest.Session") -> None:  # noqa: ARG001
         _register_builtins(None)
     except Exception:  # noqa: BLE001 — package-only runs may lack jaeger_ai.main
         pass
-    from jaeger_os.core.tools.tool_registry import snapshot_registry
+    from jaeger_tools.tool_registry import snapshot_registry
     _registry_snapshot = snapshot_registry()
 
 
@@ -436,7 +436,7 @@ def _restore_tool_registry():
     Restoring only after a test left the first ``dev/tests`` case after a
     ``packages/jaeger-agent/tests`` run looking at an empty map.
     """
-    from jaeger_os.core.tools.tool_registry import restore_registry
+    from jaeger_tools.tool_registry import restore_registry
     if _registry_snapshot is not None:
         restore_registry(_registry_snapshot)
     yield

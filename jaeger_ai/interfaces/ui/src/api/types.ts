@@ -70,6 +70,7 @@ export interface SessionRow {
   unread?: { request_id: string; role: "user" | "assistant" } | null;
   session_id: string;
   title?: string;
+  status?: string;
   agent_id?: string | null;
   created_at?: number;
   updated_at?: number;

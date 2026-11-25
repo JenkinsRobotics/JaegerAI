@@ -1,4 +1,4 @@
-from jaeger_agent.loop.turn_budget import TurnBudget, TurnBudgetLimits
+from jaeger_loop.budget import TurnBudget, TurnBudgetLimits
 
 
 def test_turn_budget_tracks_all_dimensions_and_snapshots():

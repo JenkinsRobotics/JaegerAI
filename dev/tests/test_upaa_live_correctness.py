@@ -36,7 +36,7 @@ def test_direct_response_exposes_zero_tools():
     """P0-A: build_jaeger_agent(tools=[]) must not advertise a tool schema."""
     from jaeger_agent.loop.jaeger_agent import JaegerAgent
     from jaeger_agent.adapters.base import ProviderAdapter
-    from jaeger_agent.schemas.message_types import Message
+    from jaeger_contracts import Message
     import threading
 
     class FakeAdapter(ProviderAdapter):

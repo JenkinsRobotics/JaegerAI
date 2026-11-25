@@ -488,9 +488,15 @@ def _command_reason(tokens: list[str], depth: int) -> str | None:
 
 
 def destructive_reason(tool_name: str, arguments: Mapping[str, Any]) -> str | None:
-    """Canonical destructive-action check across shell, code_exec, file, and DB tools."""
-    tool = canonical_tool_id(tool_name)
+    """Canonical destructive-action check across shell, code_exec, file, framework, and DB tools."""
+    raw = str(tool_name or "").strip().lower()
     args = arguments or {}
+    if raw == "framework_delegate":
+        return f"handing a task to another agent framework ({args.get('framework') or '?'})"
+    if raw == "framework_apply_diff":
+        return f"applying another framework's patch to {args.get('workspace') or '?'}"
+
+    tool = canonical_tool_id(tool_name)
 
     if tool in SHELL_TOOL_IDS:
         cmd = str(args.get("command") or args.get("cmd") or "")
@@ -520,3 +526,29 @@ def destructive_reason(tool_name: str, arguments: Mapping[str, Any]) -> str | No
         return f"{tool} destroys persistent data"
 
     return None
+
+
+# Codex exec_policy.rs pattern: shells, interpreters, and launchers must NEVER
+# be promoted to persistent standing allow-prefixes.
+BANNED_STANDING_GRANT_PREFIXES: frozenset[str] = frozenset({
+    "sh", "bash", "zsh", "dash", "ksh", "fish",
+    "python", "python3", "node", "perl", "ruby",
+    "env", "sudo", "doas", "su", "exec", "nohup", "xargs",
+    "rm", "dd", "mkfs", "chmod", "chown", "git",
+    "curl", "wget", "ssh", "scp", "rsync",
+    "npm", "npx", "pip", "pip3", "uv",
+})
+
+
+def is_banned_standing_grant(command: str) -> bool:
+    """True when ``command``'s leading executable must never become a standing allow prefix."""
+    try:
+        tokens = shlex.split(command or "")
+    except ValueError:
+        return True  # fail closed on unparseable shell
+    for tok in tokens:
+        if _ENV_ASSIGN.match(tok):
+            continue
+        base = os.path.basename(tok).strip().lower()
+        return (not base) or (base in BANNED_STANDING_GRANT_PREFIXES)
+    return True

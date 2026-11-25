@@ -24,7 +24,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_under
 
 # Re-export the module's constants so existing imports keep working.

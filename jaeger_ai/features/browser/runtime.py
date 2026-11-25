@@ -85,7 +85,8 @@ class BrowserRuntime:
                        CHROME_ARGS="--remote-debugging-port=0 --enable-features=WebMCP",
                        JAEGER_BROWSER_TOKEN=token)
             log = (home / "worker.log").open("ab")
-            process = await asyncio.create_subprocess_exec(str(node), str(self.bundle / "worker.mjs"),
+            worker_script = self._resolve_worker_script()
+            process = await asyncio.create_subprocess_exec(str(node), str(worker_script),
                 cwd=home, env=env, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=log)
             worker = BrowserWorker(process, 0, token, log)
             try:
@@ -115,6 +116,21 @@ class BrowserRuntime:
             worker.drain = asyncio.create_task(self._drain(process.stdout, log))
             self.workers[session_id] = worker
             return worker
+
+    def _resolve_worker_script(self) -> Path:
+        """Keep the bundle's worker.mjs in sync with the canonical repo adapter."""
+        target = self.bundle / "worker.mjs"
+        canonical = Path(__file__).resolve().parents[3] / "packages" / "jaeger-browser" / "worker.mjs"
+        if (self.bundle / "steel").is_dir() and canonical.is_file():
+            try:
+                src_bytes = canonical.read_bytes()
+                if not target.is_file() or target.read_bytes() != src_bytes:
+                    tmp = self.bundle / ".worker.mjs.tmp"
+                    tmp.write_bytes(src_bytes)
+                    os.replace(tmp, target)
+            except OSError:
+                pass
+        return target
 
     async def _drain(self, stream, log):
         while line := await stream.readline():

@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { STREAM_STYLE_KEY } from "../chat/streamStyle";
 import { RevealMarkdown } from "../chat/MinimalChat";
 import { STREAM_STYLES } from "../chat/streamStyle";
@@ -75,6 +75,25 @@ describe("Settings (TAB-01)", () => {
     expect(parseSettingsRest("widgets").tab).toBe("appearance");
     expect(parseSettingsRest("reset").tab).toBe("about");
     expect(parseSettingsRest("nope")).toEqual({});
+  });
+  it("keeps search and the status footer in one inline Settings navigation and preserves compact push navigation", async () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(950);
+    const view = await mount(<SettingsDialog inline open tab="appearance" onClose={() => {}} navigationFooter={<button>System status</button>} />);
+    try {
+      expect(view.el.querySelectorAll('nav[aria-label="Settings sections"]')).toHaveLength(1);
+      expect(view.el.querySelector('.jg-set-navigation input[type="search"]')).toBeTruthy();
+      expect(view.el.querySelector(".jg-set-navigation__footer")?.textContent).toBe("System status");
+      await act(async () => view.root.render(<SettingsDialog inline open tab="appearance" navigationOpen={false} onClose={() => {}} />));
+      expect(view.el.querySelector('nav[aria-label="Settings sections"]')).toBeNull();
+      expect(view.el.querySelector("h1")?.textContent).toBe("Appearance");
+      width.mockReturnValue(420);
+      await act(async () => window.dispatchEvent(new Event("resize")));
+      await act(async () => view.root.render(<SettingsDialog inline open navigationOpen={false} onClose={() => {}} />));
+      expect(view.el.querySelector('nav[aria-label="Settings sections"]')).toBeTruthy();
+      expect(view.el.querySelector(".jg-sheet__page")).toBeNull();
+    } finally {
+      await act(async () => view.root.unmount()); width.mockRestore();
+    }
   });
 });
 

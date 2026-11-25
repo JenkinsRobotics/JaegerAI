@@ -1,6 +1,6 @@
 """External tool results keep a clear data/instruction trust boundary."""
 
-from jaeger_agent.loop.tool_result_safety import (
+from jaeger_loop.safety import (
     is_untrusted_tool,
     protect_tool_result,
 )

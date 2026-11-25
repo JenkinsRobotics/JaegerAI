@@ -193,7 +193,22 @@ class ApplyPatchEditor:
         return EditOutcome(True, "apply_patch", str(path), f"Applied {len(hunks)} patch hunk(s).", replacements=len(hunks))
 
     @staticmethod
-    def _find_sequence(haystack: list[str], needle: list[str]) -> int | None:
+    def _normalize_unicode_punct(text: str) -> str:
+        """Tier 4 Codex seek_sequence normalization for typographic quotes/dashes/NBSP."""
+        table = str.maketrans({
+            "\u2018": "'",
+            "\u2019": "'",
+            "\u201c": '"',
+            "\u201d": '"',
+            "\u2013": "-",
+            "\u2014": "-",
+            "\u2212": "-",
+            "\u00a0": " ",
+        })
+        return text.translate(table).strip()
+
+    @classmethod
+    def _find_sequence(cls, haystack: list[str], needle: list[str]) -> int | None:
         if not needle:
             return 0
         n = len(needle)
@@ -206,9 +221,59 @@ class ApplyPatchEditor:
         for i in range(len(haystack) - n + 1):
             if [s.rstrip() for s in haystack[i : i + n]] == r_needle:
                 return i
-        # 3. Whitespace-trimmed fallback (codex seek_sequence)
+        # 3. Whitespace-trimmed fallback (codex seek_sequence tier 3)
         trimmed_needle = [s.strip() for s in needle]
         for i in range(len(haystack) - n + 1):
             if [s.strip() for s in haystack[i : i + n]] == trimmed_needle:
                 return i
+        # 4. Unicode-punctuation-normalized fallback (codex seek_sequence tier 4)
+        norm_needle = [cls._normalize_unicode_punct(s) for s in needle]
+        for i in range(len(haystack) - n + 1):
+            if [cls._normalize_unicode_punct(s) for s in haystack[i : i + n]] == norm_needle:
+                return i
         return None
+
+
+def lint_guarded_edit(
+    path: Path,
+    editor: EditEngine,
+    payload: dict,
+    *,
+    workspace: Path | None = None,
+) -> EditOutcome:
+    """SWE-agent lint-gated auto-rollback edit.
+
+    Snapshots the original file content, applies ``editor.apply(path, payload)``,
+    and runs ``diagnose_file(path)``. If the edit introduces syntax/lint errors,
+    atomically rolls back to the original content and returns the exact
+    diagnostics so the model can self-correct without corrupting the file.
+    """
+    from .diagnostics import diagnose_file
+
+    target = Path(path)
+    if not target.is_file():
+        return editor.apply(target, payload)
+
+    before_text = target.read_text(encoding="utf-8")
+    before_report = diagnose_file(target, workspace=workspace)
+    before_errors = len([d for d in before_report.diagnostics if d.severity == "error"])
+
+    outcome = editor.apply(target, payload)
+    if not outcome.ok:
+        return outcome
+
+    after_report = diagnose_file(target, workspace=workspace)
+    after_errors = [d for d in after_report.diagnostics if d.severity == "error"]
+    if len(after_errors) > before_errors:
+        target.write_text(before_text, encoding="utf-8")
+        details = "; ".join(
+            f"L{d.line}: {d.message}" for d in after_errors[:5]
+        )
+        return EditOutcome(
+            ok=False,
+            strategy=f"{outcome.strategy}_rolled_back",
+            path=str(target),
+            message=f"Edit rolled back due to syntax/lint error(s): {details}",
+            replacements=0,
+        )
+    return outcome

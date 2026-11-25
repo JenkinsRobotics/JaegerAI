@@ -3,7 +3,7 @@ import asyncio
 from types import SimpleNamespace as NS
 import pytest
 from jaeger_ai.plugins.mcp import client as mcp
-from jaeger_os.core.tools import tool_registry as registry
+from jaeger_tools import tool_registry as registry
 from jaeger_os.core.safety.permissions import PermissionPolicy, use_policy
 
 

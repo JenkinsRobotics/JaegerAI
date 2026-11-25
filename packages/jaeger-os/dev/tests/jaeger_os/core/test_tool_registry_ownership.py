@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
-from jaeger_os.core.tools import tool_registry as tr
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools import tool_registry as tr
+from jaeger_tools.tool_schema import ToolDef
 
 
 class _Args(BaseModel):

@@ -70,6 +70,7 @@ export type ActivityKind =
   | "caller.goal";
 
 export interface ActivityRow {
+  externalRun?: { id: string; status: string; owner: string; brief?: string; session?: string };
   /** Stable key for dedupe: `<kind>:<resource id>[:<state>]`. */
   key: string;
   kind: ActivityKind;
@@ -100,12 +101,13 @@ export interface AgentLive {
   status: string;
   /** GAP G4: agent-level runner; live falls back to the current task's runner. */
   runner?: string;
-  currentTask?: Pick<Task, "task_id" | "goal" | "eta" | "state">;
+  currentTask?: Pick<Task, "task_id" | "goal" | "eta" | "state" | "updated_at">;
   /** Hidden from the roster by the shared visible() rule, but did work here. */
   offRoster?: boolean;
 }
 
 export interface OrchestrationSnapshot {
+  approvals?: import("../api/source").PendingApproval[] | null;
   agents: Agent[];
   summaries: AgentSummary[];
   handoffs: Handoff[];

@@ -417,7 +417,7 @@ class ExternalModelClient:
         CLI brains accept ``tools`` and ``execute_tool`` so a toolful
         turn uses the same CliBackendAdapter / per-turn MCP path as the
         agent loop, instead of a tool-less one-shot."""
-        from jaeger_agent.core.errors import retry_call
+        from jaeger_reliability.errors import retry_call
         from jaeger_reliability import FailoverReason, classify_error
 
         is_oai = self.provider in _OPENAI_COMPATIBLE
@@ -584,7 +584,7 @@ class ExternalModelClient:
         import threading
 
         from jaeger_agent.adapters.cli_backend import CliBackendAdapter
-        from jaeger_agent.schemas.message_types import Message
+        from jaeger_contracts import Message
 
         adapter = CliBackendAdapter(
             backend_id=self.ext.model,
@@ -719,7 +719,7 @@ class ExternalModelClient:
         except Exception as exc:  # noqa: BLE001
             # Classify the failure so the user sees "bad API key" rather
             # than a raw exception repr (audit A8).
-            from jaeger_agent.core.errors import classify_exception, friendly_message
+            from jaeger_reliability.errors import classify_exception, friendly_message
             return {
                 "ok": False,
                 "detail": friendly_message(exc, provider=self.provider),

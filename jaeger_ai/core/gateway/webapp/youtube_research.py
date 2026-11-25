@@ -27,6 +27,8 @@ import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+from jaeger_agent.tools.youtube_playlist import list_playlist_api, read_api_key
 from urllib.parse import parse_qs, urlparse
 
 STEPS = ("meta", "transcript", "frames", "ocr", "audio", "shot_notes", "timeline", "analysis")
@@ -193,11 +195,7 @@ def _api_key():
     f = _deps.get("api_key")
     if f:
         return f()
-    p = Path(_d("state_root")()) / "secrets" / "youtube_api_key"
-    try:
-        return p.read_text().strip() or None
-    except OSError:
-        return None
+    return read_api_key(Path(_d("state_root")()))
 
 
 def _http_json(url: str) -> dict:
@@ -208,57 +206,17 @@ def _http_json(url: str) -> dict:
         return json.loads(r.read())
 
 
-def _iso_dur(s):
-    m = re.match(r"^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$", s or "")
-    if not m:
-        return None
-    d, h, mi, se = (int(x or 0) for x in m.groups())
-    return d * 86400 + h * 3600 + mi * 60 + se
-
-
 def list_playlist(lid: str, limit: int) -> dict:
     key = _api_key()
     note = "no YouTube Data API key; used yt-dlp"
     if key:
         try:
-            return _list_api(lid, limit, key)
+            return list_playlist_api(lid, limit, key, _http_json)
         except Exception as exc:  # noqa: BLE001
             note = f"YouTube Data API failed ({type(exc).__name__}); used yt-dlp"
     out = _list_ytdlp(lid, limit)
     out["listing_note"] = note
     return out
-
-
-def _list_api(lid: str, limit: int, key: str) -> dict:
-    def q(path, **kw):
-        return _http_json("https://www.googleapis.com/youtube/v3/" + path + "?" + urllib.parse.urlencode({**kw, "key": key}))
-    meta = q("playlists", part="snippet,contentDetails", id=lid).get("items") or []
-    if not meta:
-        raise RuntimeError("playlist not visible to the API key")
-    entries, token = [], None
-    while len(entries) < limit:
-        kw = {"pageToken": token} if token else {}
-        r = q("playlistItems", part="snippet,contentDetails,status", playlistId=lid, maxResults=50, **kw)
-        for it in r.get("items", []):
-            sn = it.get("snippet", {})
-            cd = it.get("contentDetails") or {}
-            if sn.get("title") in ("Private video", "Deleted video") or (it.get("status") or {}).get("privacyStatus") == "private":
-                continue
-            entries.append({"id": cd.get("videoId"), "title": sn.get("title"), "channel": sn.get("videoOwnerChannelTitle"),
-                            "position": sn.get("position"), "added_at": sn.get("publishedAt"), "published_at": cd.get("videoPublishedAt")})
-        token = r.get("nextPageToken")
-        if not token:
-            break
-    entries = [e for e in entries if e["id"] and _VID.match(e["id"])][:limit]
-    for i in range(0, len(entries), 50):
-        chunk = entries[i:i + 50]
-        r = q("videos", part="contentDetails", id=",".join(e["id"] for e in chunk))
-        dur = {it["id"]: _iso_dur((it.get("contentDetails") or {}).get("duration")) for it in r.get("items", [])}
-        for e in chunk:
-            e["duration"] = dur.get(e["id"])
-    sn = meta[0].get("snippet", {})
-    return {"title": sn.get("title"), "channel": sn.get("channelTitle"), "item_count": (meta[0].get("contentDetails") or {}).get("itemCount"),
-            "entries": entries, "listing": "youtube_data_api"}
 
 
 def _list_ytdlp(lid: str, limit: int) -> dict:

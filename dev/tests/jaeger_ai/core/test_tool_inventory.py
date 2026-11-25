@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import threading
 import json
 from jaeger_ai.core.gateway.tool_inventory import collect
-from jaeger_os.core.tools import tool_registry
+from jaeger_tools import tool_registry
 
 
 def test_loaded_inventory_redacts_transport_secrets_without_probing(monkeypatch):

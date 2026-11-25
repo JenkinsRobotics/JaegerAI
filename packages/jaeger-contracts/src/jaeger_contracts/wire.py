@@ -100,3 +100,181 @@ class WireActionReceipt:
             "idempotency_key": self.idempotency_key,
             "error": self.error,
         }
+
+
+# ── Unified Transport Frame Vocabulary (AG2 LocalLink / WsLink pattern) ─────
+
+
+@dataclass(frozen=True)
+class HelloFrame:
+    """Client handshake carrying the last contiguous sequence seen for replay."""
+
+    client_id: str
+    session_id: str = ""
+    since_seq: int = 0
+    schema_version: str = WIRE_SCHEMA_VERSION
+    frame_type: str = "hello"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "frame_type": self.frame_type,
+            "schema_version": self.schema_version,
+            "client_id": self.client_id,
+            "session_id": self.session_id,
+            "since_seq": self.since_seq,
+        }
+
+
+@dataclass(frozen=True)
+class WelcomeFrame:
+    """Server handshake acknowledging protocol version and current high-water seq."""
+
+    server_id: str
+    session_id: str = ""
+    head_seq: int = 0
+    replayed_count: int = 0
+    schema_version: str = WIRE_SCHEMA_VERSION
+    frame_type: str = "welcome"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "frame_type": self.frame_type,
+            "schema_version": self.schema_version,
+            "server_id": self.server_id,
+            "session_id": self.session_id,
+            "head_seq": self.head_seq,
+            "replayed_count": self.replayed_count,
+        }
+
+
+@dataclass(frozen=True)
+class RequestFrame:
+    """Control-plane RPC request frame."""
+
+    request_id: str
+    method: str
+    params: Mapping[str, Any] = field(default_factory=dict)
+    idempotency_key: str = ""
+    schema_version: str = WIRE_SCHEMA_VERSION
+    frame_type: str = "request"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "frame_type": self.frame_type,
+            "schema_version": self.schema_version,
+            "request_id": self.request_id,
+            "method": self.method,
+            "params": dict(self.params),
+            "idempotency_key": self.idempotency_key,
+        }
+
+
+@dataclass(frozen=True)
+class ResponseFrame:
+    """Control-plane RPC response frame."""
+
+    request_id: str
+    ok: bool
+    result: Mapping[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    schema_version: str = WIRE_SCHEMA_VERSION
+    frame_type: str = "response"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "frame_type": self.frame_type,
+            "schema_version": self.schema_version,
+            "request_id": self.request_id,
+            "ok": self.ok,
+            "result": dict(self.result),
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
+class NotifyFrame:
+    """Data-plane push notification wrapping a sequenced WireEnvelope."""
+
+    envelope: WireEnvelope
+    schema_version: str = WIRE_SCHEMA_VERSION
+    frame_type: str = "notify"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "frame_type": self.frame_type,
+            "schema_version": self.schema_version,
+            "envelope": self.envelope.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class ReceiptFrame:
+    """Client acknowledgement of a received data-plane envelope seq."""
+
+    envelope_id: str
+    session_id: str
+    seq: int
+    schema_version: str = WIRE_SCHEMA_VERSION
+    frame_type: str = "receipt"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "frame_type": self.frame_type,
+            "schema_version": self.schema_version,
+            "envelope_id": self.envelope_id,
+            "session_id": self.session_id,
+            "seq": self.seq,
+        }
+
+
+WireFrame = HelloFrame | WelcomeFrame | RequestFrame | ResponseFrame | NotifyFrame | ReceiptFrame
+
+
+def parse_wire_frame(raw: Mapping[str, Any]) -> WireFrame:
+    """Deserialize any supported transport frame; fails closed on unknown types."""
+    ftype = str(raw.get("frame_type") or "").strip().lower()
+    ver = str(raw.get("schema_version") or WIRE_SCHEMA_VERSION)
+    if ftype == "hello":
+        return HelloFrame(
+            client_id=str(raw["client_id"]),
+            session_id=str(raw.get("session_id") or ""),
+            since_seq=int(raw.get("since_seq") or 0),
+            schema_version=ver,
+        )
+    if ftype == "welcome":
+        return WelcomeFrame(
+            server_id=str(raw["server_id"]),
+            session_id=str(raw.get("session_id") or ""),
+            head_seq=int(raw.get("head_seq") or 0),
+            replayed_count=int(raw.get("replayed_count") or 0),
+            schema_version=ver,
+        )
+    if ftype == "request":
+        return RequestFrame(
+            request_id=str(raw["request_id"]),
+            method=str(raw["method"]),
+            params=dict(raw.get("params") or {}),
+            idempotency_key=str(raw.get("idempotency_key") or ""),
+            schema_version=ver,
+        )
+    if ftype == "response":
+        return ResponseFrame(
+            request_id=str(raw["request_id"]),
+            ok=bool(raw["ok"]),
+            result=dict(raw.get("result") or {}),
+            error=str(raw["error"]) if raw.get("error") is not None else None,
+            schema_version=ver,
+        )
+    if ftype == "notify":
+        return NotifyFrame(
+            envelope=WireEnvelope.from_dict(raw["envelope"]),
+            schema_version=ver,
+        )
+    if ftype == "receipt":
+        return ReceiptFrame(
+            envelope_id=str(raw["envelope_id"]),
+            session_id=str(raw["session_id"]),
+            seq=int(raw["seq"]),
+            schema_version=ver,
+        )
+    raise ValueError(f"Unknown wire frame_type: {ftype!r}")

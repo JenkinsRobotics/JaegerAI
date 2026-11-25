@@ -27,6 +27,7 @@ WEBAPP = REPO / "jaeger_ai/core/gateway/webapp"
 STANDALONE_PACKAGE_SRC_ROOTS = [
     "packages/jaeger-contracts/src",
     "packages/jaeger-events/src",
+    "packages/jaeger-gateway/src",
     "packages/jaeger-reliability/src",
     "packages/jaeger-models/src",
     "packages/jaeger-authority/src",
@@ -39,7 +40,6 @@ STANDALONE_PACKAGE_SRC_ROOTS = [
     "packages/jaeger-skills/src",
     "packages/jaeger-mcp/src",
     "packages/jaeger-macos/src",
-    "packages/jaeger-workflows/src",
 ]
 
 #: rule name -> (source roots, forbidden top-level module predicate)

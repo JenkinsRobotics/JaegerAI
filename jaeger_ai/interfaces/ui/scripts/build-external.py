@@ -24,13 +24,22 @@ def main():
         parser.error('output-root must be outside the repository')
     cache.mkdir(parents=True, exist_ok=True)
     snapshot = Path(tempfile.mkdtemp(prefix='build-', dir=cache))
-    work = snapshot / 'ui'
-    # Preserve the canonical sibling layout for the shared IDE/browser reducer.
+    work = snapshot / 'jaeger_ai' / 'interfaces' / 'ui'
+    # Preserve the canonical sibling layout for the shared IDE/browser reducer & @jaeger/ui-* packages.
     shared = source.parent / 'ide' / 'media'
     shared_files = ('timeline.js', 'timeline.d.ts')
-    (snapshot / 'ide' / 'media').mkdir(parents=True)
+    (snapshot / 'jaeger_ai' / 'interfaces' / 'ide' / 'media').mkdir(parents=True)
     for name in shared_files:
-        shutil.copy2(shared / name, snapshot / 'ide' / 'media' / name)
+        shutil.copy2(shared / name, snapshot / 'jaeger_ai' / 'interfaces' / 'ide' / 'media' / name)
+    for pkg_name in ('jaeger-ui-protocol', 'jaeger-ui-sdk', 'jaeger-ui-kit', 'jaeger-ui-features'):
+        pkg_src = repo / 'packages' / pkg_name
+        if pkg_src.is_dir():
+            shutil.copytree(
+                pkg_src,
+                snapshot / 'packages' / pkg_name,
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns('node_modules', 'dist', '.git'),
+            )
     shutil.copytree(source, work, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns('node_modules', 'dist', '.git',
                                                  'test-results', 'playwright-report'))

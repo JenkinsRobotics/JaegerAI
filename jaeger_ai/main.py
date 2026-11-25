@@ -35,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_os.core.modules import set_application_package
 from jaeger_agent.core import credentials as creds
 from jaeger_ai.core.runtime import log_rotation
@@ -2522,7 +2522,7 @@ def _openai_tools_for_prewarm(agent: Any) -> list[dict[str, Any]] | None:
     # Registry path — pull from the shared registry the agent reads
     # from at turn 0.  This matches what the live agent will see.
     try:
-        from jaeger_os.core.tools.tool_registry import get_tools
+        from jaeger_tools.tool_registry import get_tools
     except Exception:  # noqa: BLE001
         return None
     try:
@@ -3186,7 +3186,7 @@ def _ensure_session_agent(client: Any, session_key: str, *, scope_tools: bool | 
             _active_ctx = min(_active_ctx or _focus['context'], _focus['context'])
             _active_reserve = min(_active_reserve or 2048, _active_ctx // 4)
         if agent is not None and getattr(agent, "context_guard", None) is not None and _active_ctx:
-            from jaeger_agent.util.context_guard import ContextBudget
+            from jaeger_memory.context_guard import ContextBudget
             old_b = agent.context_guard.budget
             # Match build_jaeger_agent: never let completion reserve eat the
             # whole window. Ollama /api/ps often reports a small loaded
@@ -3584,7 +3584,7 @@ def _run_turn_via_jaeger_agent(
     # assistant call was deleted, and both cloud APIs 400 on that
     # orphan for every later turn in the session.
     if len(jaeger_agent.messages) > _MAX_HISTORY_MESSAGES * 2:
-        from jaeger_agent.util.context_guard import oldest_group_size
+        from jaeger_memory.context_guard import oldest_group_size
         msgs = jaeger_agent.messages
         drop = 0
         while len(msgs) - drop > _MAX_HISTORY_MESSAGES * 2 and drop < len(msgs):

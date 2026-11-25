@@ -19,8 +19,8 @@ from jaeger_ai.features.agent_bridge.tool_scope import supported_tools
 @pytest.mark.asyncio
 async def test_ares_cannot_read_or_mutate_grokbot_fixture_target(tmp_path, monkeypatch):
     from jaeger_agent.tool_executor import AllowlistToolExecutor, DirectToolExecutor
-    from jaeger_os.core.tools.tool_registry import register_tool_instance
-    from jaeger_os.core.tools.tool_schema import ToolDef
+    from jaeger_tools.tool_registry import register_tool_instance
+    from jaeger_tools.tool_schema import ToolDef
 
     ares_root, grok_root = tmp_path / "ares", tmp_path / "grokbot"
     ares_root.mkdir()

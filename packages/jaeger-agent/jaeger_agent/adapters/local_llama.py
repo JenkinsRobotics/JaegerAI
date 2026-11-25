@@ -35,13 +35,13 @@ from jaeger_agent.dialects import (
     extract_think_blocks,
     textify_tool_history,
 )
-from jaeger_agent.loop.interrupt import (
+from jaeger_loop.interrupt import (
     AgentInterrupted,
     CallProgress,
     StaleCallTimeout,
 )
-from jaeger_agent.schemas.message_types import Message
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_contracts import Message
+from jaeger_tools.tool_schema import ToolDef
 from .openai import OpenAIAdapter
 
 
@@ -156,7 +156,7 @@ class _LlamaChatFacade:
         # Sanitisation is idempotent so calling it twice is safe.
         tools = kwargs.get("tools")
         if isinstance(tools, list):
-            from jaeger_agent.parsing import schema_sanitizer
+            from jaeger_reliability import schema_sanitizer
             kwargs["tools"] = schema_sanitizer.sanitize_tool_schemas(tools)
         # Cooperative cancellation: ``create_chat_completion`` doesn't
         # accept ``stopping_criteria`` (only the low-level completion
@@ -863,7 +863,7 @@ class LocalLlamaAdapter(OpenAIAdapter):
             cleaned = ""
         message["content"] = cleaned or None
 
-        # All model-generated tool calls pass through jaeger_ai.core.runtime.tool_repair
+        # All model-generated tool calls pass through jaeger_reliability.tool_repair
         # to automatically recover from malformed JSON, markdown fences, Python literals, or single quotes
         from jaeger_agent.core.host import service
         try:

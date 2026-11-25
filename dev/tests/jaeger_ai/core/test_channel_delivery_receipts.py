@@ -20,7 +20,7 @@ def test_approved_send_receipt_survives_reopen_without_duplicate_and_denial_prev
     from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
     from jaeger_agent.tool_executor import LedgerToolExecutor
     from jaeger_os.core.safety.permissions import PermissionPolicy,use_policy,PermissionDenied
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
     sqlite_store.bind(SimpleNamespace(memory_dir=tmp_path/'memory'))
     file=tmp_path/'owned-outbound.txt';calls=[];decisions=[]
     class Decision:
@@ -58,7 +58,7 @@ def test_partial_send_receipt_is_durable_pending_and_never_replayed(tmp_path,mon
     from jaeger_agent.cognition.effects import EffectIndeterminate
     from jaeger_agent.tool_executor import LedgerToolExecutor
     from jaeger_os.core.safety.permissions import PermissionPolicy,use_policy
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
     sqlite_store.bind(SimpleNamespace(memory_dir=tmp_path/'memory'))
     file=tmp_path/'owned-partial.txt'
     def send(recipient,text):
@@ -121,7 +121,7 @@ def test_reply_correlation_is_conversation_bound_and_preserves_approval_and_dura
     from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
     from jaeger_agent.tool_executor import LedgerToolExecutor
     from jaeger_os.core.safety.permissions import PermissionPolicy,use_policy,PermissionDenied
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
     gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
     gateway.store.ensure_session('owned-home',metadata={'agent_id':'native:builder'})
     gateway.store.ensure_session('owned-other',metadata={'agent_id':'native:finance'})

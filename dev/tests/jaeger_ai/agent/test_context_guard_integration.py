@@ -20,7 +20,7 @@ from __future__ import annotations
 from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.loop.jaeger_agent import JaegerAgent
 from jaeger_agent.loop.runtime_bridge import drive_one_turn
-from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
+from jaeger_memory.context_guard import ContextBudget, ContextGuard
 
 
 class _NeverCalledAdapter(ProviderAdapter):
@@ -84,7 +84,7 @@ def test_drive_one_turn_succeeds_when_prompt_fits():
     """The opposite of the above — a roomy budget, a tiny prompt, and
     the guard stays out of the way. This pins that we don't accidentally
     short-circuit a perfectly-good turn."""
-    from jaeger_agent.schemas.message_types import Message
+    from jaeger_contracts import Message
 
     class _OneAnswerAdapter(ProviderAdapter):
         def describe(self) -> str:

@@ -19,7 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 
 #: The host supplies its bound Gateway URL; jaeger-agent cannot import the
@@ -131,7 +131,7 @@ def _handoff_body(work, turn, *, from_agent_id, require_approval, request_id,
         "allowed_tools": tools,
     }
     try:  # the asking tool call, so the Process view nests the agent under it
-        from jaeger_agent import live as _live
+        from jaeger_events import live as _live
         call_id = _live.current_tool_call()
     except Exception:  # noqa: BLE001
         call_id = None

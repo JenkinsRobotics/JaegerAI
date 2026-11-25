@@ -42,6 +42,7 @@ jaeger-whisper-stt = { workspace = true }
 jaeger-contracts = { workspace = true }
 jaeger-authority = { workspace = true }
 jaeger-events = { workspace = true }
+jaeger-gateway = { workspace = true }
 jaeger-loop = { workspace = true }
 jaeger-memory = { workspace = true }
 jaeger-models = { workspace = true }
@@ -53,7 +54,6 @@ jaeger-macos = { workspace = true }
 jaeger-lsp = { workspace = true }
 jaeger-checkpoints = { workspace = true }
 jaeger-skills = { workspace = true }
-jaeger-workflows = { workspace = true }
 
 [build-system]
 requires = ["setuptools>=83"]

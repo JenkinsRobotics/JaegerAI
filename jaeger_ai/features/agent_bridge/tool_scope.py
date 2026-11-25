@@ -25,7 +25,7 @@ _scope = ContextVar("agent_bridge_goal_scope", default=None)
 def supported_tools():
     # Registration and dispatch remain owned by the lead's canonical catalog.
     from jaeger_agent.tools import files  # noqa: F401 — register native tools
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     return sorted(
         tool.name

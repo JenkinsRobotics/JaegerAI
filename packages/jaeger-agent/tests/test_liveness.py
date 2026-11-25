@@ -353,7 +353,7 @@ def test_stale_timeout_sets_stalled_halt_reason_when_chain_exhausted():
 def test_stalled_diagnostics_emit_reliability_events_not_chat_thinking():
     """Stall/retry/fallback diagnostics emit structured live reliability
     events and stay out of the user-visible thinking channel."""
-    from jaeger_agent import live
+    from jaeger_events import live
 
     seen_thoughts: list[str] = []
     live_events: list[tuple[str, dict]] = []
@@ -384,7 +384,7 @@ def test_progress_touches_keep_long_healthy_call_alive():
     """A call whose worker reports progress (chunks/tokens flowing)
     must survive a stale_timeout shorter than its total duration —
     'stale' means silence, not slowness."""
-    from jaeger_agent.loop.interrupt import CallProgress
+    from jaeger_loop.interrupt import CallProgress
 
     ev = threading.Event()
     prog = CallProgress()
@@ -405,7 +405,7 @@ def test_progress_touches_keep_long_healthy_call_alive():
 def test_progress_silence_still_trips_stale():
     """With a progress beacon attached, a worker that STOPS reporting
     progress trips the detector after the quiet period."""
-    from jaeger_agent.loop.interrupt import CallProgress
+    from jaeger_loop.interrupt import CallProgress
 
     ev = threading.Event()
     prog = CallProgress()

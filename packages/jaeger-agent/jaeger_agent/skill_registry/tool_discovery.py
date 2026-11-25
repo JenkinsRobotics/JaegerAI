@@ -7,8 +7,8 @@ from .toolset_scoping import all_toolsets, tool_group, tool_visible
 
 
 def catalog() -> list[Any]:
-    from jaeger_os.core.tools.tool_registry import get_tools
-    from jaeger_os.core.tools.tool_schema import dev_mode_enabled
+    from jaeger_tools.tool_registry import get_tools
+    from jaeger_tools.tool_schema import dev_mode_enabled
     state = current_selection()
     tools = state.catalog if state is not None and state.catalog is not None else get_tools()
     return sorted((t for t in tools if tool_permitted(t.name)
@@ -59,7 +59,7 @@ def row(tool: Any) -> dict[str, Any]:
 
 
 def ranked(tools: list[Any], query: str, limit: int) -> list[Any]:
-    from .tool_search import CatalogEntry, _entry_search_text, _tokenize, search_catalog
+    from jaeger_tools.search import CatalogEntry, _entry_search_text, _tokenize, search_catalog
     by_name = {t.name: t for t in tools}
     entries = []
     for tool in tools:

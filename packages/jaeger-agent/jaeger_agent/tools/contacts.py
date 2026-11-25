@@ -15,7 +15,7 @@ import subprocess
 from typing import Any
 
 from jaeger_macos import appleevents_lock, escape_applescript as _escape_applescript
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 _TIMEOUT_S = 10

@@ -2501,7 +2501,7 @@ class JaegerGatewayApp(
         if any(str(t).startswith("mcp__") and "*" in str(t) for t in tools):
             self._load_gateway_mcp()  # globs expand against the started servers
         try:
-            from jaeger_os.core.tools.tool_registry import get_tools
+            from jaeger_tools.tool_registry import get_tools
             available = {t.name for t in get_tools()}
         except Exception:  # noqa: BLE001 — no registry: globs expand to nothing
             available = set()
@@ -2584,7 +2584,7 @@ class JaegerGatewayApp(
             lead = [str(x) for x in lead_allowed if isinstance(x, str)]
         else:
             try:
-                from jaeger_os.core.tools.tool_registry import get_tools
+                from jaeger_tools.tool_registry import get_tools
                 lead = [t.name for t in get_tools()]
             except Exception:  # noqa: BLE001 — no registry: no tools
                 lead = []
@@ -3266,7 +3266,7 @@ class JaegerGatewayApp(
         actor = (execution or {}).get("caller")
         try:
             from jaeger_ai.core.runtime.cron_turns import cron_turn_scope
-            from jaeger_agent.telemetry import agent_span
+            from jaeger_events import agent_span
             _opts = (execution or {}).get("options") or {}
             with agent_span("jaeger", session_id, request_id, str(_opts.get("interaction_tier") or (execution or {}).get("interaction_tier") or "")), \
                     caller_identity(actor if isinstance(actor, str) and actor.strip() else None), \

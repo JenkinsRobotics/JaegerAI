@@ -96,6 +96,29 @@
 
 /* ── TAB-01 Settings (2026-10-31): search, groups, pickers, push nav. Tokens only; container queries per RESPONSIVE-SYSTEM. ── */
 .jg-sheet__inline { container: settings / inline-size; }
+.jg-settings-standalone { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.jg-settings-standalone > .jg-sheet__inline { flex: 1; min-width: 0; }
+.jg-set-navigation { display: contents; }
+.jg-sheet--inline > .jg-set-navigation {
+  display: flex;
+  flex: 0 0 15.5rem;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-inline-end: 1px solid var(--jg-color-border);
+}
+.jg-sheet--inline .jg-set-navigation > .jg-sheet__nav {
+  box-sizing: border-box;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 0;
+}
+.jg-sheet--inline .jg-sheet__tab { width: 100%; cursor: pointer; }
+.jg-sheet--inline .jg-sheet__tab:focus-visible { outline: 2px solid var(--jg-color-accent); outline-offset: 2px; }
+.jg-set-navigation__footer { padding: var(--jg-space-2) var(--jg-space-3); border-block-start: 1px solid var(--jg-color-border); }
+.jg-ushell[data-dest="settings"]:has(.jg-sheet__inline[data-size="compact"]) .jg-ushell__navigation-toggle { display: none; }
 .jg-set-search { position: relative; margin: 0 0 var(--jg-space-2); }
 .jg-set-search__input { width: 100%; box-sizing: border-box; height: 32px; padding: 0 44px 0 var(--jg-space-3); border-radius: var(--jg-radius-s); border: 1px solid var(--jg-color-border); background: var(--jg-color-pane); color: var(--jg-color-text); font: inherit; }
 .jg-set-search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: var(--jg-font-tiny); color: var(--jg-color-text-tertiary); }
@@ -136,6 +159,8 @@
 @container settings (max-width: 599px) {
   .jg-sheet--inline { flex-direction: column; }
   .jg-sheet--inline .jg-sheet__nav { width: auto; display: grid; overflow: visible; border-right: 0; padding: max(12px, env(safe-area-inset-top)) 16px calc(72px + env(safe-area-inset-bottom)); }
+  .jg-sheet--inline > .jg-set-navigation { flex: 1; border: 0; }
+  .jg-sheet--inline .jg-set-navigation > .jg-sheet__nav { padding-bottom: var(--jg-space-3); }
   .jg-sheet--inline .jg-sheet__tab { height: 52px; flex-shrink: 1; }
   .jg-sheet--inline .jg-sheet__page { padding: max(12px, env(safe-area-inset-top)) 16px calc(72px + env(safe-area-inset-bottom)); }
   .jg-set-feels { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }

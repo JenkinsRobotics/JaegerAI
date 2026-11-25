@@ -313,7 +313,7 @@ def test_move_mail_rejects_non_numeric_id():
 
 def test_send_email_is_registered_and_tier_gated():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert "send_email" in tools
@@ -843,3 +843,44 @@ def test_triage_all_accounts_surveys_inbox_and_junk_in_one_call(monkeypatch):
     assert res["junk_rescue_count"] == 1
     assert res["accounts"][0]["category_counts"]["Finance"] == 1
     assert res["accounts"][0]["category_counts"]["Trash"] == 1
+
+
+def test_all_mail_applescripts_compile_with_osacompile(monkeypatch, tmp_path):
+    """Every Mail.app AppleScript template must compile cleanly with osacompile (no -2741)."""
+    import platform
+    import shutil
+    import subprocess as real_subprocess
+
+    if platform.system() != "Darwin" or shutil.which("osacompile") is None:
+        pytest.skip("osacompile is macOS-only")
+
+    captured: list[tuple[str, str]] = []
+    label = [""]
+
+    def fake_run_as(script, timeout_seconds=25.0, **kwargs):
+        captured.append((label[0], script))
+        return {"ok": True, "success": True, "raw_output": "", "timed_out": False, "error": None}
+
+    monkeypatch.setattr(email, "run_applescript", fake_run_as)
+    label[0] = "list_mailboxes"
+    email.list_mailboxes()
+    label[0] = "list_mail"
+    email.list_mail(account="Google", mailbox="INBOX", limit=10)
+    label[0] = "_read_mail_impl"
+    email._read_mail_impl("Google", "INBOX", ["12345"])
+    label[0] = "_batch_move_impl"
+    email._batch_move_impl("Google", "INBOX", "trash", ["12345"])
+    label[0] = "mark_mail"
+    email.mark_mail("Google", "INBOX", ["12345"], read=True, flagged=False)
+
+    assert len(captured) == 5
+    out_scpt = tmp_path / "check.scpt"
+    for name, script in captured:
+        proc = real_subprocess.run(
+            ["osacompile", "-o", str(out_scpt)],
+            input=script,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert proc.returncode == 0, f"{name} failed osacompile: {proc.stderr}"

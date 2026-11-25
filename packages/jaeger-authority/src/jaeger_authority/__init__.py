@@ -10,13 +10,22 @@ from .canonical import (
     is_owner_actor,
     is_untrusted_actor,
 )
-from .destructive import destructive_reason, evasion_reason, shell_command_reason
+from . import guardrails
+from .destructive import (
+    BANNED_STANDING_GRANT_PREFIXES,
+    destructive_reason,
+    evasion_reason,
+    is_banned_standing_grant,
+    shell_command_reason,
+)
 from .engine import PolicyEngine
+from .guardrails import GuardrailResult
 from .inspectors import (
     ActorTrustInspector,
     BoundaryAndSecretsInspector,
     ControlPlaneInspector,
     DestructiveAndEvasionInspector,
+    EgressInspector,
     PermissionRules,
     PrecedenceAndAutonomyInspector,
     ToolInspector,
@@ -31,10 +40,13 @@ from .sandbox import (
 
 __all__ = [
     "ActorTrustInspector",
+    "BANNED_STANDING_GRANT_PREFIXES",
     "BoundaryAndSecretsInspector",
     "ContainerSandbox",
     "ControlPlaneInspector",
     "DestructiveAndEvasionInspector",
+    "EgressInspector",
+    "GuardrailResult",
     "IDENTITY_TOOL_IDS",
     "LinuxBwrapSandbox",
     "MEMORY_WRITE_TOOL_IDS",
@@ -51,6 +63,8 @@ __all__ = [
     "default_os_sandbox",
     "destructive_reason",
     "evasion_reason",
+    "guardrails",
+    "is_banned_standing_grant",
     "is_owner_actor",
     "is_untrusted_actor",
     "shell_command_reason",

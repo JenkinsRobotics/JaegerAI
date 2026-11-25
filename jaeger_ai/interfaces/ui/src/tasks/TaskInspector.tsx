@@ -21,6 +21,7 @@ export interface TaskInspectorProps {
   onEdit?: (task: Task) => void;
   onCancel?: (taskId: string) => void;
   onPresentationChange?: () => void;
+  onInspectRun?: () => void;
 }
 
 export function TaskInspector({
@@ -33,6 +34,7 @@ export function TaskInspector({
   onEdit,
   onCancel,
   onPresentationChange,
+  onInspectRun,
 }: TaskInspectorProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'steps' | 'artifacts'>('overview');
 
@@ -70,6 +72,7 @@ export function TaskInspector({
       </div>
 
       <div className="jg-task-inspector__toolbar">
+        {onInspectRun && <button type="button" className="jg-u-btn" onClick={onInspectRun}>Inspect execution</button>}
         {source.taskActions && (
           <div className="jg-task-inspector__actions">
             {isProposal && typeof task.updated_at === 'number' && (

@@ -45,12 +45,12 @@ export function StudioPage({ source, agents, onNavigate, initialSection = "creat
   };
   return (
     <div className="jg-u-page jg-studio">
-      <PageHead title={initialSection === "library" ? "Media" : "Imagine"} subtitle="Generate images, keep an asset library and lay ideas out on a board." actions={<>
-          <Segmented label="Studio section" value={tab} onChange={setTab} options={[{ value: "create", label: "Generate" }, { value: "library", label: `Library${assets ? ` (${assets.length})` : ""}` }, { value: "board", label: "Board" }]} />
+      <PageHead title={initialSection === "library" ? "Media" : "Media Studio"} subtitle="Create images, find saved assets, or arrange a visual board." actions={<>
           <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={(e) => { void importFiles(e.target.files); e.target.value = ""; }} />
           <button type="button" className="jg-u-btn" onClick={() => fileInput.current?.click()}>Import images</button>
         </>} />
       {err && <p className="jg-u-error" role="alert">Studio storage unavailable: {err}</p>}
+      <div className="jg-ui-toolbar jg-mb-4"><Segmented label="Studio view" value={tab} onChange={setTab} options={[{ value: "create", label: "Create" }, { value: "library", label: `Assets${assets ? ` (${assets.length})` : ""}` }, { value: "board", label: "Board" }]} /></div>
       {tab === "create" && <Generate onMade={async () => { await load(); }} assets={assets} />}
       {tab === "library" && <Library assets={assets} reload={load} source={source} agents={agents} onNavigate={onNavigate} />}
       {tab === "board" && <Board assets={assets ?? []} />}
@@ -78,10 +78,11 @@ function Generate({ onMade, assets }: { onMade: () => Promise<void>; assets: Ass
   return (
     <div className="jg-ui-split">
       <section className="jg-u-card" aria-label="Generate">
-        <h2>What should we imagine?</h2>
+        <h2>Create an image</h2>
         {!providers && !err && <SkeletonRows />}
         {providers && (
           <form className="jg-studio__form" onSubmit={(e) => { e.preventDefault(); void run(); }}>
+            <label className="jg-ui-field">Describe the image<textarea rows={4} maxLength={2000} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A brushed-steel robot reading in a sunlit library, isometric" /></label>
             <fieldset className="jg-studio__providers" aria-label="Provider">
               {providers.map((p) => (
                 <label key={p.id} className="jg-studio__provider" data-off={!p.available || undefined}>
@@ -89,7 +90,6 @@ function Generate({ onMade, assets }: { onMade: () => Promise<void>; assets: Ass
                   <span><strong>{p.name}</strong> <Badge tone={p.available ? "ok" : undefined}>{p.available ? "Ready" : "Not set up"}</Badge><br /><small>{p.cost}{p.note ? ` · ${p.note}` : ""}</small></span>
                 </label>))}
             </fieldset>
-            <label className="jg-ui-field">Prompt<textarea rows={4} maxLength={2000} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="A brushed-steel robot reading in a sunlit library, isometric" disabled={!ready} /></label>
             {err && <p className="jg-u-error" role="alert">{err}</p>}
             <div className="jg-ui-actions">
               {!ready && <span className="jg-u-note">No image provider is set up on this Mac yet — see the notes above. You can still import images.</span>}
@@ -100,7 +100,7 @@ function Generate({ onMade, assets }: { onMade: () => Promise<void>; assets: Ass
       <aside className="jg-ui-inspector" aria-label="Recent generations">
         <h3>Recent generations</h3>
         {!assets ? <SkeletonRows /> : recent.length ? <div className="jg-studio__thumbs">{recent.map((a) => <img key={a.id} src={fileUrl(a)} alt={a.prompt ?? a.name} loading="lazy" />)}</div>
-          : <Empty title="Nothing generated yet">Generated images land in the Library.</Empty>}
+          : <Empty title="Nothing generated yet">Generated images also appear under Assets.</Empty>}
       </aside>
     </div>
   );

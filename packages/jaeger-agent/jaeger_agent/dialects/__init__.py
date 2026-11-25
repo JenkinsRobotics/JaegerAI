@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_agent.schemas.message_types import ToolCall
+from jaeger_contracts import ToolCall
 
 from . import chatml, gemma, harmony, llama3, mistral
 from ._shared import new_id, normalize_tool_name, repair_arguments

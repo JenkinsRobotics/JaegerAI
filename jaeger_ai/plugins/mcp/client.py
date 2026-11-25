@@ -220,7 +220,7 @@ def check_mcp_permission(spec: MCPToolSpec, arguments: dict[str, Any]) -> None:
 
 def _agent_tool_def(spec: MCPToolSpec, invoke_call: Any = None) -> Any:
     """Expose a connected MCP tool through Jaeger's canonical registry."""
-    from jaeger_os.core.tools.tool_schema import ToolDef
+    from jaeger_tools.tool_schema import ToolDef
     from pydantic import BaseModel, ConfigDict
 
     schema = dict(spec.input_schema or {"type": "object", "properties": {}})
@@ -280,7 +280,7 @@ def _agent_tool_def(spec: MCPToolSpec, invoke_call: Any = None) -> Any:
 
 
 def _register_agent_tool(spec: MCPToolSpec) -> None:
-    from jaeger_os.core.tools.tool_registry import replace_tool_inventory
+    from jaeger_tools.tool_registry import replace_tool_inventory
     replace_tool_inventory({}, [_agent_tool_def(spec)])
 
 
@@ -530,7 +530,7 @@ class MCPRegistry:
         return specs
 
     def _publish_inventory(self, config: MCPServerConfig, tools: list[Any]) -> None:
-        from jaeger_os.core.tools.tool_registry import replace_tool_inventory
+        from jaeger_tools.tool_registry import replace_tool_inventory
         from jaeger_agent.skill_registry.toolset_scoping import register_mcp_server_toolset
         keep = set(filter_tool_names([t.name for t in tools], config))
         specs = []
@@ -696,7 +696,7 @@ class MCPRegistry:
             if action == 'disconnect':
                 client = self._clients[name]
                 self._submit(client.close(strict=True), timeout=10)
-                from jaeger_os.core.tools.tool_registry import unregister_tool
+                from jaeger_tools.tool_registry import unregister_tool
                 from jaeger_agent.skill_registry.toolset_scoping import unregister_mcp_server_toolset
                 with self._lifecycle_lock:
                     for key, spec in list(self._tools.items()):
@@ -746,7 +746,7 @@ class MCPRegistry:
             self._resource_handles = {k: v for k, v in self._resource_handles.items() if k[0] != name}
             self._resource_pages = {k: v for k, v in self._resource_pages.items() if k[0] != name}
             self._resource_snapshots = {k: v for k, v in self._resource_snapshots.items() if v.get("server_id") != cid}
-        from jaeger_os.core.tools.tool_registry import unregister_tool
+        from jaeger_tools.tool_registry import unregister_tool
         from jaeger_agent.skill_registry.toolset_scoping import unregister_mcp_server_toolset
         for spec in removed_specs:
             unregister_tool(spec.agent_name)
@@ -782,7 +782,7 @@ class MCPRegistry:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
         self._submit(stop_refreshes(), timeout=5.0)
-        from jaeger_os.core.tools.tool_registry import unregister_tool
+        from jaeger_tools.tool_registry import unregister_tool
         for spec in self._tools.values():
             unregister_tool(spec.agent_name)
         try:

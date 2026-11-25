@@ -129,7 +129,7 @@ def test_work_ledger_tool_rejects_truncated_raw_arguments():
 
 
 def test_registered_work_ledger_exposes_structured_progress_arguments():
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
 
     from jaeger_ai.core.runtime.work_ledger import _t_work_ledger
 

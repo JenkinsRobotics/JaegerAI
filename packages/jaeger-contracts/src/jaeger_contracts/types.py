@@ -7,7 +7,114 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping, NotRequired, TypedDict
+
+
+Role = Literal["system", "user", "assistant", "tool"]
+
+
+class ToolCall(TypedDict):
+    """One tool call emitted by the assistant (zero-overhead TypedDict)."""
+
+    id: str
+    provider_id: NotRequired[str]
+    name: str
+    arguments: dict[str, Any]
+
+
+class Message(TypedDict, total=False):
+    """Provider-neutral conversation turn shared across adapters and loops."""
+
+    role: Role
+    content: Any
+    tool_calls: list[ToolCall] | None
+    tool_call_id: str | None
+    name: str | None
+    reasoning: str | None
+    provider_state: dict[str, Any]
+    finish_reason: str | None
+
+
+class ApprovalRequirementKind(str, Enum):
+    """Four-state execution approval requirement (Codex exec_policy pattern).
+
+    ``NEEDS_HUMAN_APPROVAL`` is non-delegable: hooks, automated reviewers, and
+    session-cached standing grants must never silently satisfy it.
+    """
+
+    SKIP = "skip"
+    NEEDS_APPROVAL = "needs_approval"
+    NEEDS_HUMAN_APPROVAL = "needs_human_approval"
+    FORBIDDEN = "forbidden"
+
+
+class RunRequirementKind(str, Enum):
+    """Explicit resumable pause reason for durable runs (Agno RunRequirement)."""
+
+    CONFIRMATION = "confirmation"
+    USER_INPUT = "user_input"
+    USER_FEEDBACK = "user_feedback"
+    EXTERNAL_EXECUTION = "external_execution"
+
+
+@dataclass(frozen=True)
+class RunRequirement:
+    """Serializable HITL pause contract that bubbles cleanly from subagents."""
+
+    requirement_id: str
+    kind: RunRequirementKind
+    prompt: str
+    tool_name: str = ""
+    arguments: Mapping[str, Any] = field(default_factory=dict)
+    member_agent_id: str = ""
+    member_run_id: str = ""
+    resolved: bool = False
+    resolution: Any = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "requirement_id": self.requirement_id,
+            "kind": self.kind.value,
+            "prompt": self.prompt,
+            "tool_name": self.tool_name,
+            "arguments": dict(self.arguments),
+            "member_agent_id": self.member_agent_id,
+            "member_run_id": self.member_run_id,
+            "resolved": self.resolved,
+            "resolution": self.resolution,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, Any]) -> "RunRequirement":
+        return cls(
+            requirement_id=str(raw["requirement_id"]),
+            kind=RunRequirementKind(str(raw["kind"])),
+            prompt=str(raw.get("prompt") or ""),
+            tool_name=str(raw.get("tool_name") or ""),
+            arguments=dict(raw.get("arguments") or {}),
+            member_agent_id=str(raw.get("member_agent_id") or ""),
+            member_run_id=str(raw.get("member_run_id") or ""),
+            resolved=bool(raw.get("resolved", False)),
+            resolution=raw.get("resolution"),
+        )
+
+
+@dataclass(frozen=True)
+class HandoffResult:
+    """Typed tool return requesting delegation to a named specialist passport."""
+
+    target: str
+    reason: str = ""
+    payload: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class FinishResult:
+    """Typed tool return signaling clean completion of a delegated or root turn."""
+
+    summary: str
+    artifacts: tuple[str, ...] = ()
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 class AutonomyMode(str, Enum):
@@ -119,8 +226,13 @@ class ModelProfile:
     max_output_tokens: int = 8192
     supports_native_tools: bool = True
     supports_structured_output: bool = True
+    supports_json_schema_output: bool = True
+    supports_tool_return_schema: bool = False
     supports_prompt_caching: bool = False
     supports_reasoning: bool = False
+    defer_loading_mode: str = "client"  # "native" | "client"
+    runs_own_tool_loop: bool = False
+    session_bound: bool = False
     local_only: bool = False
 
 

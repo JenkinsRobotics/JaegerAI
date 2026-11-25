@@ -8,7 +8,7 @@ user-facing tool is live in the registry. If you add a tool module, its
 name belongs in EXPECTED — and the import belongs in agent/tools/__init__.
 """
 import jaeger_agent.tools  # the production boot import — nothing else
-from jaeger_os.core.tools.tool_registry import get_tools
+from jaeger_tools.tool_registry import get_tools
 
 EXPECTED = {
     # 0.9.3 everyday-agency additions (the class that regressed)

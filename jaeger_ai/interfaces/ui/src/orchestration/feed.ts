@@ -128,6 +128,7 @@ export function taskRow(t: Task): ActivityRow {
   const state = t.state ?? "updated";
   return {
     key: `task:${t.task_id}:${state}`, kind: "task.updated", agentId, taskId: t.task_id,
+    statusPill: { text: state.replace(/_/g, " ") },
     action: `${state === "queued" ? "queued" : state === "running" ? "is working on" : state.replace(/_/g, " ")} ${t.goal ? `“${t.goal}”` : "a task"}`,
     at: sec(t.updated_at ?? t.created_at), output: taskLink(t), needsYou: state === "needs_owner",
   };
@@ -292,6 +293,7 @@ function callerGoalRow(e: GatewayEvent, p: Record<string, unknown>, at: number, 
   const text = typeof p.error === "string" ? p.error : typeof p.text === "string" ? p.text : "";
   return {
     key: `goal:${id}:${status}`, kind: "caller.goal", agentId: c.caller_id, callerId: c.caller_id, at,
+    externalRun: { id, status, owner: to, brief: e.event === "turn.start" ? text : undefined, session: c.session_id },
     action: `${c.caller_kind === "a2a" ? "(A2A) " : ""}→ ${names(to)} goal${c.goal_id ? ` ${c.goal_id}` : ""}${c.thread ? ` (${c.thread})` : ""}${text ? `: ${text.slice(0, 300)}` : ""}`,
     statusPill: GOAL_STATUS[status] ?? { text: status.replace(/_/g, " ") },
     output: sessionLink(to, `Open ${names(to)}`),

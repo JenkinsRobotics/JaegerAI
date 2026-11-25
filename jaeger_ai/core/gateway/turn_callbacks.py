@@ -127,7 +127,7 @@ class GatewayTurnCallbacksMixin:
             heartbeats.pop(activity_id, None)
 
         def live_activity() -> str | None:
-            from jaeger_agent import live as _live
+            from jaeger_events import live as _live
             call = _live.current_tool_call()
             return _live_activity_id(request_id, call) if call else None
         file_snapshots: dict[str, list[dict]] = {}
@@ -512,7 +512,7 @@ class GatewayTurnCallbacksMixin:
             options = selection.get("options") or {}
             source = "background" if options.get("background") else "user"
             from jaeger_ai.main import interaction_request_sink
-            from jaeger_agent import live as _live
+            from jaeger_events import live as _live
             live_ids = {"turn_id": request_row.get("turn_id") or request_id, "request_id": request_id}
 
             def _live_emit(name: str, data: dict[str, Any]) -> None:

@@ -39,7 +39,7 @@ from .config import AgentConfig
 from .contracts import TurnResult
 from ..loop.callbacks import AgentCallbacks
 from ..loop.jaeger_agent import JaegerAgent
-from ..loop.turn_budget import TurnBudgetLimits
+from jaeger_loop.budget import TurnBudgetLimits
 
 
 #: Conventional environment variable per provider, used when the config

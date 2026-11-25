@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from jaeger_agent import LocalLlamaAdapter
-from jaeger_agent.loop.interrupt import AgentInterrupted
+from jaeger_loop.interrupt import AgentInterrupted
 
 
 class _FakeLlama:
@@ -161,7 +161,7 @@ def test_format_messages_injects_native_dialect_per_family():
     """The adapter injects tools in the model's OWN dialect (we match
     the model). A Hermes/chatml model gets <tool_call>; a Mistral model
     gets [TOOL_CALLS] — never the wrong one forced on it."""
-    from jaeger_os.core.tools.tool_schema import ToolDef
+    from jaeger_tools.tool_schema import ToolDef
     from pydantic import BaseModel
 
     class _A(BaseModel):
@@ -189,7 +189,7 @@ def test_format_messages_injects_native_dialect_per_family():
 def test_format_messages_gemma_injects_no_prose():
     """Gemma works through structured tools= — the adapter must NOT
     add prose for it (avoid perturbing a model that already routes)."""
-    from jaeger_os.core.tools.tool_schema import ToolDef
+    from jaeger_tools.tool_schema import ToolDef
     from pydantic import BaseModel
 
     class _A(BaseModel):
@@ -213,7 +213,7 @@ def test_format_messages_prose_family_drops_structured_tools():
     the model's fragile GGUF tool template (DeepSeek-R1 crashes on dict
     args; Hermes builds strip the tool section). The catalogue is in the
     system prose instead."""
-    from jaeger_os.core.tools.tool_schema import ToolDef
+    from jaeger_tools.tool_schema import ToolDef
     from pydantic import BaseModel
 
     class _A(BaseModel):
@@ -306,7 +306,7 @@ def test_reasoning_model_gets_higher_stall_floor():
     a = LocalLlamaAdapter(llama=fake,
                           model_path="/m/DeepSeek-R1-0528-Qwen3-8B.gguf")
     captured: dict[str, Any] = {}
-    real = __import__("jaeger_agent.loop.interrupt",
+    real = __import__("jaeger_loop.interrupt",
                       fromlist=["interruptible_call"]).interruptible_call
 
     def _spy(fn, ev, **kw):
@@ -331,7 +331,7 @@ def test_non_reasoning_model_keeps_caller_timeout():
     fake = _FakeLlama(_mk_response("ok"))
     a = LocalLlamaAdapter(llama=fake, model_path="/m/Qwen3.5-9B.gguf")
     captured: dict[str, Any] = {}
-    real = __import__("jaeger_agent.loop.interrupt",
+    real = __import__("jaeger_loop.interrupt",
                       fromlist=["interruptible_call"]).interruptible_call
 
     def _spy(fn, ev, **kw):
@@ -752,7 +752,7 @@ def test_in_process_call_passes_through_stale_timeout():
 
     captured: dict[str, Any] = {}
     real_interruptible = __import__(
-        "jaeger_agent.loop.interrupt", fromlist=["interruptible_call"]
+        "jaeger_loop.interrupt", fromlist=["interruptible_call"]
     ).interruptible_call
 
     def _spy(fn, ev, **kw):
@@ -780,7 +780,7 @@ def test_in_process_call_raises_stale_timeout_when_model_hangs():
     import threading
     import time
 
-    from jaeger_agent.loop.interrupt import StaleCallTimeout
+    from jaeger_loop.interrupt import StaleCallTimeout
 
     class _HangingLlama:
         def create_chat_completion(self, **_kwargs):

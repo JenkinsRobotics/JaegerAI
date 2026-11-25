@@ -51,18 +51,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Sheet({ title, onClose, children, variant }: { title: string; onClose: () => void; children: ReactNode; variant?: "agent-profile" }) {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     panel.current?.querySelector<HTMLElement>("input, textarea, select, button")?.focus();
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && (e.target instanceof Element ? e.target.closest('[role="dialog"][aria-modal="true"]') ?? panel.current : panel.current) === panel.current) onClose();
+    };
     addEventListener("keydown", key);
     return () => { removeEventListener("keydown", key); prev?.focus?.(); };
   }, [onClose]);
   return (
     <div className="jg-ui-sheet" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div ref={panel} className="jg-ui-sheet__panel" role="dialog" aria-modal="true" aria-label={title}><h2>{title}</h2>{children}</div>
+      <div ref={panel} className="jg-ui-sheet__panel" data-variant={variant} role="dialog" aria-modal="true" aria-label={title}><h2>{title}</h2>{children}</div>
     </div>
   );
 }

@@ -36,11 +36,20 @@ from jaeger_ai.core.runtime.autonomous_runner import (
     looks_like_batch,
     next_continuation_prompt,
 )
-from jaeger_ai.core.runtime.context_compactor import compact_agent
+from jaeger_memory.compactor import compact_agent, configure_compactor
+from jaeger_ai.core.instance.instance import operator_state_root
 from jaeger_ai.core.runtime.work_ledger import (
+    LEDGER_TAG,
     active_ledger,
     consume_completion,
+    context_block,
     last_completion,
+)
+
+configure_compactor(
+    ledger_provider=context_block,
+    state_root_provider=operator_state_root,
+    ledger_tag=LEDGER_TAG,
 )
 
 

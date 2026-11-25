@@ -28,7 +28,7 @@ import json
 
 import pytest
 
-from jaeger_agent.util.context_guard import (
+from jaeger_memory.context_guard import (
     ContextBudget,
     ContextGuard,
     ContextOverflow,

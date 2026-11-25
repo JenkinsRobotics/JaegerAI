@@ -91,3 +91,75 @@ def test_agent_loop_halts_on_stuck_repetition(tmp_path: Path) -> None:
     out = loop.run_turn("Do task", max_steps=10)
     assert out["verdict"] == TurnVerdict.LOOP_HALTED.value
     assert out["steps"] == 3
+
+
+def test_slice6_state_machine_capability_ordering_mailbox_two_tier_and_cancel_scope(tmp_path: Path) -> None:
+    from jaeger_loop import (
+        CancelScope,
+        CapabilityOrdering,
+        LoopOperation,
+        LoopState,
+        LoopStateMachine,
+        MailPriority,
+        TurnMailbox,
+        TwoTierLoopDetector,
+        instantiate_middlewares_for_run,
+    )
+
+    # 1. Goose state machine operations & effects
+    sm = LoopStateMachine()
+    eff1 = sm.apply(LoopOperation.START_TURN, {"prompt": "hi"})
+    assert sm.state == LoopState.CALLING_MODEL and eff1[0].kind == "invoke_model"
+    eff2 = sm.apply(LoopOperation.APPROVAL_REQUIRED, {"tool": "shell"})
+    assert sm.state == LoopState.AWAITING_APPROVAL
+    assert [e.kind for e in eff2] == ["checkpoint", "request_approval"]
+    sm.apply(LoopOperation.APPROVAL_GRANTED)
+    assert sm.state == LoopState.EXECUTING_TOOLS
+    sm.apply(LoopOperation.MODEL_TEXT_ONLY)
+    assert sm.state == LoopState.COMPLETED
+
+    # 2. Pydantic-AI CapabilityOrdering + for_run isolation
+    class _MW:
+        def __init__(self, name: str, ordering: CapabilityOrdering):
+            self.name = name
+            self.capability_ordering = ordering
+            self.run_id = None
+
+        def for_run(self, run_id: str):
+            clone = _MW(self.name, self.capability_ordering)
+            clone.run_id = run_id
+            return clone
+
+    mw_b = _MW("audit", CapabilityOrdering("audit", priority=50, after=("auth",)))
+    mw_a = _MW("auth", CapabilityOrdering("auth", priority=100))
+    mw_c = _MW("telemetry", CapabilityOrdering("telemetry", priority=10, before=("auth",)))
+    ordered = instantiate_middlewares_for_run([mw_b, mw_a, mw_c], "run-42")
+    assert [m.name for m in ordered] == ["telemetry", "auth", "audit"]
+    assert all(m.run_id == "run-42" for m in ordered)
+    assert mw_a.run_id is None  # parent template unmutated
+
+    # 3. Codex TurnMailbox priority (ABORT > STEER > NORMAL)
+    box = TurnMailbox()
+    box.post("normal note", priority=MailPriority.NORMAL)
+    box.steer("change direction")
+    box.abort("stop now")
+    drained = box.drain()
+    assert [m.priority for m in drained] == [MailPriority.ABORT, MailPriority.STEER, MailPriority.NORMAL]
+
+    # 4. Gemini CLI 2-tier oscillation detector (A -> B -> A -> B -> A -> B)
+    det = TwoTierLoopDetector(max_identical=10, oscillation_repeats=3)
+    halt = None
+    for i in range(6):
+        tool = "read_a" if i % 2 == 0 else "read_b"
+        halt = det.record(tool, {"x": i % 2}, {"ok": True})
+    assert halt is not None and "oscillation" in halt
+
+    # 5. Isolated sub-agent CancelScope tree
+    parent = CancelScope()
+    child_a = parent.child()
+    child_b = parent.child()
+    child_a.cancel("subagent timeout")
+    assert child_a.is_cancelled and not parent.is_cancelled and not child_b.is_cancelled
+    parent.cancel("user stop")
+    assert parent.is_cancelled and child_b.is_cancelled
+

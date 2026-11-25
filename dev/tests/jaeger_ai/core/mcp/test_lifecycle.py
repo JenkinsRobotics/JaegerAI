@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 
-from jaeger_os.core.tools.tool_registry import get_tool, has_tool
+from jaeger_tools.tool_registry import get_tool, has_tool
 
 from jaeger_ai.core.instance.instance import InstanceLayout
 from jaeger_ai.core.mcp import service

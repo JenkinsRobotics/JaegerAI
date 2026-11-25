@@ -16,7 +16,7 @@ if [[ -d /opt/homebrew/bin ]]; then
 fi
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
-STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src:${REPO_ROOT}/packages/jaeger-workflows/src"
+STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-gateway/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src"
 export PYTHONPATH="${STANDALONE_SRC_PATHS}:${REPO_ROOT}/packages/jaeger-agent:${REPO_ROOT}/packages/jaeger-os:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 JAEGER_VENV_ROOT="${JAEGER_VENV:-${HOME}/.jaeger/venv}"
 VENV_PY="${JAEGER_VENV_ROOT}/bin/python"
@@ -165,12 +165,12 @@ run_backend() {
     packages/jaeger-orchestration/tests \
     packages/jaeger-reliability/tests \
     packages/jaeger-events/tests \
+    packages/jaeger-gateway/tests \
     packages/jaeger-mcp/tests \
     packages/jaeger-macos/tests \
     packages/jaeger-lsp/tests \
     packages/jaeger-checkpoints/tests \
-    packages/jaeger-skills/tests \
-    packages/jaeger-workflows/tests
+    packages/jaeger-skills/tests
 }
 
 run_wiring() {

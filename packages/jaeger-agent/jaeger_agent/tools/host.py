@@ -17,7 +17,7 @@ import platform
 import subprocess
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.task_port import ide_request
 from jaeger_agent.tools.time_and_math import system_status
 from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_under

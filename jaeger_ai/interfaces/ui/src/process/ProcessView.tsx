@@ -15,7 +15,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   Ban, Bot, Brain, CheckCircle2, Clock, Cpu, Database, FlagTriangleRight, GitBranch, HelpCircle, LifeBuoy, Loader2,
-  Pause, Play, Radio, Repeat, ShieldCheck, Sparkles, SquareStack, Webhook, Wrench, XCircle, type LucideIcon,
+  Pause, Play, Radio, Repeat, ShieldCheck, SquareStack, Webhook, Wrench, XCircle, type LucideIcon,
 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import type { JaegerSource } from "../api/source";
@@ -25,6 +25,7 @@ import { layout, NODE_H, NODE_W } from "./layout";
 import { respOf, responsibilities, type Resp, type RespId } from "./responsibilities";
 import { useProcessEvents } from "./useProcessEvents";
 import { AgentAvatar } from "../team/AgentAvatar";
+import { Badge, PageHead, Segmented } from "../unified/ui";
 import "./process.css";
 import "../team/team.css";
 
@@ -287,7 +288,7 @@ function useAgentFaces(source: JaegerSource): ReadonlyMap<string, AgentFace> | u
   return faces;
 }
 
-function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSearchParams }) {
+function ProcessInner({ source, params, onBack }: { source: JaegerSource; params?: URLSearchParams; onBack?: () => void }) {
   const faces = useAgentFaces(source);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [showProbes, setShowProbes] = useState(false);
@@ -295,7 +296,8 @@ function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSe
   const [scrub, setScrub] = useState<number | null>(null); // null = live
   const [runPick, setRunPick] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<"waterfall" | "log">("waterfall");
+  const [tab, setTab] = useState<"waterfall" | "graph" | "log">("waterfall");
+  const [sessionError, setSessionError] = useState(false);
   const [respFilter, setRespFilter] = useState<RespId | null>(null);
   const [clock, setClock] = useState(() => Date.now() / 1000);
   const playing = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -303,10 +305,16 @@ function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSe
 
   useEffect(() => {
     let live = true;
-    void source.sessions().then((rows) => { if (live) setSessions([...rows].filter((r) => !r.archived).sort((a, b) => (b.last_activity_at ?? b.updated_at ?? 0) - (a.last_activity_at ?? a.updated_at ?? 0))); }).catch(() => undefined);
+    void source.sessions().then((rows) => { if (live) setSessions([...rows].sort((a, b) => (b.last_activity_at ?? b.updated_at ?? 0) - (a.last_activity_at ?? a.updated_at ?? 0))); }, () => { if (live) setSessionError(true); });
     return () => { live = false; };
   }, [source]);
-  const visible = useMemo(() => sessions.filter((r) => showProbes || !isProbeSession(r) || r.session_id === sessionId).slice(0, 60), [sessions, showProbes, sessionId]);
+  const deepSession = params?.get("session");
+  useEffect(() => { if (deepSession) setSessionId(deepSession); }, [deepSession]);
+  const visible = useMemo(() => {
+    const rows = sessions.filter(r => !r.archived && (showProbes || !isProbeSession(r))).slice(0, 60);
+    const linked = sessions.find(r => r.session_id === sessionId);
+    return linked && !rows.includes(linked) ? [linked, ...rows] : rows;
+  }, [sessions, showProbes, sessionId]);
   useEffect(() => { if (!sessionId && visible[0]) setSessionId(visible[0].session_id); }, [sessionId, visible]);
 
   const { events, health, hasOlder, loadOlder } = useProcessEvents(source, sessionId);
@@ -316,7 +324,9 @@ function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSe
 
   const upTo = scrub ?? events.length - 1;
   const state = useMemo(() => foldAll(events, upTo), [events, upTo]);
-  const runId = runPick && state.spans.has(runPick) ? runPick : state.runs[state.runs.length - 1] ?? null;
+  const requested = params?.get("run");
+  const linked = requested ? state.runs.find(id => id === `run:${requested}` || state.spans.get(id)?.runId === requested) : undefined;
+  const runId = runPick && state.spans.has(runPick) ? runPick : linked ?? state.runs[state.runs.length - 1] ?? null;
   const run = runId ? state.spans.get(runId) : undefined;
   const now = scrub == null ? clock : (events[upTo]?.trace?.ts ?? events[upTo]?.created_at ?? clock);
   const resp = useMemo(() => responsibilities(events, upTo, runId, health), [events, upTo, runId, health]);
@@ -340,66 +350,66 @@ function ProcessInner({ source, params }: { source: JaegerSource; params?: URLSe
   }, [events, upTo, respFilter, runId]);
 
   return (
-    <section className="jg-pv" aria-label="Live process view">
-      <header className="jg-pv__bar">
-        <div className="jg-pv__title"><Sparkles size={16} /> Process</div>
-        <label className="jg-pv__field">Session
-          <select value={sessionId ?? ""} onChange={(e) => setSessionId(e.target.value || null)}>
-            {visible.length === 0 && <option value="">No conversations yet</option>}{visible.map((s) => <option key={s.session_id} value={s.session_id}>{(s.title || s.session_id).slice(0, 60)}</option>)}
+    <section className="jg-u-page jg-pv jg-pv--runs" aria-label="Run inspector">
+      <PageHead title="Runs" subtitle="See what Jaeger did, where it waited, and what went wrong." actions={<>
+        {sessionId && <span className={`jg-pv__link is-${health.link}`} title={`Replayed ${health.replayed} · reconnects ${health.reconnects} · gaps ${health.gaps}`}><i className="jg-pv-dot" />{health.link === "live" ? "Live updates" : health.link === "unsupported" ? "Unavailable" : health.link}</span>}
+        {onBack && <button type="button" className="jg-u-btn" onClick={onBack}>Back to tasks</button>}
+      </>} />
+      {sessionError && <p role="alert" className="jg-u-error">Couldn’t load the conversation list.</p>}
+      <div className="jg-pv__bar">
+        <label className="jg-pv__field">Conversation
+          <select value={sessionId ?? ""} onChange={e => { stop(); setSessionId(e.target.value || null); setRespFilter(null); }}>
+            {!sessionId && <option value="">{sessionError ? "Conversations unavailable" : "Select a conversation"}</option>}
+            {sessionId && !visible.some(s => s.session_id === sessionId) && <option value={sessionId}>Linked conversation</option>}
+            {visible.map(s => <option key={s.session_id} value={s.session_id}>{(s.title || "Untitled conversation").slice(0, 80)}</option>)}
           </select>
         </label>
-        <label className="jg-pv__check"><input type="checkbox" checked={showProbes} onChange={(e) => setShowProbes(e.target.checked)} /> Show test sessions</label>
-        {hasOlder && <button type="button" className="jg-pv-btn" onClick={() => void loadOlder()}>Load older turns</button>}
-        <span className={`jg-pv__link is-${health.link}`} title={`replayed ${health.replayed} · reconnects ${health.reconnects} · seq gaps ${health.gaps}`}><i className="jg-pv-dot" />{health.link === "live" ? "Live" : health.link}</span>
-      </header>
-
-      {health.link === "unsupported" ? <p className="jg-pv__empty">Process needs a live Gateway connection.</p> : <>
-        <div className="jg-pv__resps" role="list" aria-label="Status">
-          {resp.map((r) => <RespCard key={r.id} r={r} active={respFilter === r.id} onClick={() => { setRespFilter((f) => (f === r.id ? null : r.id)); setTab("log"); }} />)}
+        {state.runs.length > 0 && <label className="jg-pv__field">Run
+          <select value={runId ?? ""} onChange={e => { stop(); setScrub(null); setRunPick(e.target.value); setSelected(null); }}>
+            {state.runs.map((id, i) => { const r = state.spans.get(id)!; return <option key={id} value={id}>Turn {i + 1} · {r.state === "succeeded" ? "Completed" : r.state}</option>; }).reverse()}
+          </select>
+        </label>}
+        {hasOlder && <button type="button" className="jg-pv-btn" onClick={() => void loadOlder()}>Load earlier runs</button>}
+      </div>
+      {requested && !linked && !runPick && scrub == null && health.link === "live" && <p className="jg-u-note">The linked run isn’t in the loaded history. {hasOlder ? "Load earlier runs to look for it." : "Select a recorded run to inspect it."}</p>}
+      {health.link === "unsupported" ? <p className="jg-pv__empty">Runs need a live Gateway connection.</p> : <>
+        <div className="jg-pv__bar jg-pv__switch">
+          <Segmented label="Run view" value={tab} onChange={setTab} options={[{ value: "waterfall", label: "Steps" }, { value: "graph", label: "Graph" }, { value: "log", label: "Event log" }]} />
+          {run && <><Badge tone={run.state === "failed" ? "bad" : run.state === "succeeded" ? "ok" : undefined}>{run.state === "succeeded" ? "Completed" : run.state.replace(/^./, c => c.toUpperCase())}</Badge><span className="jg-u-note">{fmtMs(run.durationMs ?? spanDuration(run, now))}</span></>}
+          {tab === "log" && respFilter && <button type="button" className="jg-pv-link" onClick={() => setRespFilter(null)}>Clear {resp.find(r => r.id === respFilter)?.label} filter</button>}
         </div>
-
-        {state.runs.length > 0 && <div className="jg-pv__runs" role="tablist" aria-label="Turns">
-          {state.runs.map((id, i) => { const r = state.spans.get(id)!; return (
-            <button key={id} type="button" role="tab" aria-selected={id === runId} className={`jg-pv-chip is-${r.state}`} onClick={() => { setRunPick(id); setSelected(null); }}>
-              <i className="jg-pv-dot" />Turn {i + 1}<small>{fmtMs(r.durationMs ?? spanDuration(r, now))}</small>
-            </button>); })}
-        </div>}
-
-        <div className={`jg-pv__main${selSpan ? " has-inspector" : ""}`}>
-          <div className="jg-pv__canvas">
-            {runId ? <Canvas state={state} runId={runId} now={now} selected={selected} onSelect={setSelected} faces={faces} />
-              : <p className="jg-pv__empty">{!sessionId ? "Select a conversation to inspect its turns." : events.length ? "This conversation has no recorded activity yet." : "Waiting for events…"}</p>}
-          </div>
+        {runId && tab !== "log" && <div className={`jg-pv__main${selSpan ? " has-inspector" : ""}`}>
+          {tab === "graph" ? <div className="jg-pv__canvas"><Canvas state={state} runId={runId} now={now} selected={selected} onSelect={setSelected} faces={faces} /></div>
+            : <Waterfall state={state} runId={runId} now={now} selected={selected} onSelect={setSelected} />}
           {selSpan && <Inspector span={selSpan} events={events} now={now} onClose={() => setSelected(null)} />}
-        </div>
-
-        <div className="jg-pv__replay">
-          <button type="button" className="jg-pv-btn" onClick={play} disabled={!events.length} aria-label={isPlaying ? "Pause replay" : "Replay turn"}>{isPlaying ? <Pause size={14} /> : <Play size={14} />} {isPlaying ? "Pause" : "Replay"}</button>
+        </div>}
+        {tab !== "log" && !runId && <p className="jg-pv__empty">{!sessionId ? "Select a conversation to inspect its runs." : health.link === "connecting" ? "Loading recorded steps…" : "No recorded runs for this conversation yet."}</p>}
+        {tab === "log" && <div className="jg-pv__panel">
+          {log.length ? <ol className="jg-pv-log">
+            {log.map(e => <li key={`${e.event_id}-${e.event}`} className={e.trace?.state ? `is-${e.trace.state}` : ""}>
+              <code>#{e.event_id ?? "—"}</code><b>{e.event}</b><span>{e.trace ? `${e.trace.span_id}${e.trace.state ? ` → ${e.trace.state}` : ""}${e.trace.duration_ms != null ? ` (${fmtMs(e.trace.duration_ms)})` : ""}` : ""}</span>
+            </li>)}
+          </ol> : <p className="jg-pv__empty">No events match this view.</p>}
+        </div>}
+        {events.length > 0 && <details className="jg-pv__secondary"><summary>Replay timeline</summary><div className="jg-pv__replay">
+          <button type="button" className="jg-pv-btn" onClick={play} aria-label={isPlaying ? "Pause replay" : "Replay timeline"}>{isPlaying ? <Pause size={14} /> : <Play size={14} />} {isPlaying ? "Pause" : "Replay"}</button>
           <button type="button" className={`jg-pv-btn${scrub == null ? " is-on" : ""}`} onClick={() => { stop(); setScrub(null); }}><Radio size={14} /> Live</button>
           <input type="range" min={0} max={Math.max(0, events.length - 1)} value={upTo < 0 ? 0 : upTo} aria-label="Scrub the event log"
-            onChange={(e) => { stop(); const v = Number(e.target.value); setScrub(v >= events.length - 1 ? null : v); }} />
-          <span className="jg-pv__pos">{events.length ? `event ${upTo + 1} / ${events.length}` : "no events"}{events[upTo]?.created_at ? ` · ${new Date(events[upTo].created_at! * 1000).toLocaleTimeString()}` : ""}</span>
-        </div>
-
-        <div className="jg-pv__panel">
-          <div className="jg-pv__tabs" role="tablist">
-            <button type="button" role="tab" aria-selected={tab === "waterfall"} onClick={() => setTab("waterfall")}>Waterfall</button>
-            <button type="button" role="tab" aria-selected={tab === "log"} onClick={() => setTab("log")}>Event log{respFilter ? ` · ${resp.find((r) => r.id === respFilter)?.label}` : ""}</button>
-            {respFilter && <button type="button" className="jg-pv-link" onClick={() => setRespFilter(null)}>clear filter</button>}
+            onChange={e => { stop(); const v = Number(e.target.value); setScrub(v >= events.length - 1 ? null : v); }} />
+          <span className="jg-pv__pos">{`event ${upTo + 1} / ${events.length}`}</span>
+        </div></details>}
+        <details className="jg-pv__secondary"><summary>Diagnostics</summary>
+          <label className="jg-pv__check"><input type="checkbox" checked={showProbes} onChange={e => setShowProbes(e.target.checked)} /> Include test conversations</label>
+          <div className="jg-pv__resps" role="list" aria-label="Runtime signals">
+            {resp.map(r => <RespCard key={r.id} r={r} active={respFilter === r.id} onClick={() => { setRespFilter(f => f === r.id ? null : r.id); setTab("log"); }} />)}
           </div>
-          {tab === "waterfall" ? (runId ? <Waterfall state={state} runId={runId} now={now} selected={selected} onSelect={setSelected} /> : null) : (
-            <ol className="jg-pv-log">
-              {log.map((e) => <li key={`${e.event_id}-${e.event}`} className={e.trace?.state ? `is-${e.trace.state}` : ""}>
-                <code>#{e.event_id ?? "—"}</code><b>{e.event}</b><span>{e.trace ? `${e.trace.span_id}${e.trace.state ? ` → ${e.trace.state}` : ""}${e.trace.duration_ms != null ? ` (${fmtMs(e.trace.duration_ms)})` : ""}` : ""}</span>
-              </li>)}
-            </ol>)}
-        </div>
+        </details>
       </>}
     </section>
   );
 }
 
-export function ProcessView(props: { source: JaegerSource; params?: URLSearchParams }) {
+export function ProcessView(props: { source: JaegerSource; params?: URLSearchParams; onBack?: () => void }) {
   return <ReactFlowProvider><ProcessInner {...props} /></ReactFlowProvider>;
 }
 export default ProcessView;

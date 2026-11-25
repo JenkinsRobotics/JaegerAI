@@ -19,19 +19,18 @@ import { AgentKnowledge } from "../agents/AgentKnowledge";
 import { AgentFace } from "./AgentFace";
 import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 import { createSpecialist } from "./agentCreate";
-import { CharacterRoster } from "./CharacterRoster";
 import { AvatarStudio } from "../avatar/AvatarStudio";
 
 const statusTone = (s?: string) => (s === "working" ? "ok" : s === "waiting_approval" ? "warn" : s === "error" || s === "blocked" ? "bad" : undefined);
 const when = (t?: number | null) => (t ? new Date((t > 1e12 ? t : t * 1000)).toLocaleString() : "–");
 type Show = "active" | "archived";
 
-export function AgentsRoster({ source, store, refresh, onNavigate, avatarFor }: { source: JaegerSource; store: AgentsState; refresh: () => Promise<void> | void; onNavigate: (to: string) => void; avatarFor?: string | null }) {
+export function AgentsRoster({ source, store, refresh, onNavigate, avatarFor, initialAgent }: { source: JaegerSource; store: AgentsState; refresh: () => Promise<void> | void; onNavigate: (to: string) => void; avatarFor?: string | null; initialAgent?: string }) {
   const toast = useToast();
   const [query, setQuery] = useState("");
   const [show, setShow] = useState<Show>("active");
   const [robots, setRobots] = useRobotIcons();
-  const [selected, setSelected] = useState<string>();
+  const [selected, setSelected] = useState<string | undefined>(initialAgent);
   const [creating, setCreating] = useState(false);
   const shared = Boolean(source.agentActions?.savePins) && store.agents.some((a) => a.ui_actions?.pin);
   const pins = shared ? store.agents.filter((a) => a.pinned).sort((a, b) => (a.pin_order ?? 0) - (b.pin_order ?? 0)).map((a) => a.id) : loadPins();
@@ -66,11 +65,8 @@ export function AgentsRoster({ source, store, refresh, onNavigate, avatarFor }: 
           <input className="jg-u-search" type="search" placeholder="Filter agents" aria-label="Filter agents" value={query} onChange={(e) => setQuery(e.target.value)} />
           <Segmented label="Show" value={show} onChange={(v) => { setShow(v); setSelected(undefined); }} options={[{ value: "active", label: "Active" }, { value: "archived", label: "Archived" }]} />
           <label className="jg-u-check"><input type="checkbox" checked={robots} onChange={(e) => setRobots(e.target.checked)} /> Robot icons</label>
-          <button type="button" className="jg-u-btn" onClick={() => onNavigate("/agents/activity")}>Activity</button>
-          <button type="button" className="jg-u-btn" onClick={() => onNavigate("/agents/characters")}>From character</button>
           <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New agent</button>
         </>} />
-      <CharacterRoster onNavigate={onNavigate} />
       {store.error && <p className="jg-u-error" role="alert">Gateway unreachable: {store.error}</p>}
       <div className="jg-ui-split">
         <ul className="jg-u-roster" aria-label="Agents">
@@ -103,7 +99,7 @@ export function AgentsRoster({ source, store, refresh, onNavigate, avatarFor }: 
   );
 }
 
-function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, onPin }: { source: JaegerSource; agent: Agent; status?: string; refresh: () => Promise<void> | void; onNavigate: (to: string) => void; pinned: boolean; onPin: () => void }) {
+export function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, onPin, profile = false }: { source: JaegerSource; agent: Agent; status?: string; refresh: () => Promise<void> | void; onNavigate: (to: string) => void; pinned?: boolean; onPin?: () => void; profile?: boolean }) {
   const toast = useToast();
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
   const [model, setModel] = useState<ModelChoiceSnapshot | null | undefined>();
@@ -131,18 +127,18 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
   const variant = robotVariant(agent.id);
   return (
     <aside className="jg-ui-inspector" aria-label={`${label(agent)} details`}>
-      <div className="jg-agent-hero">
+      {!profile && <div className="jg-agent-hero">
         <AgentFace agent={agent} size={56} status={status} />
         <div>
           <strong>{label(agent)}</strong>
           <span>{(typeof agent.metadata?.specialty === "string" && agent.metadata.specialty) || (agent.role ? ROLE_TEXT[agent.role] ?? agent.role : "Specialist")}</span>
           <span className="jg-row jg-mt-1"><Badge tone={statusTone(status)}>{status ?? "idle"}</Badge>{agent.primary && <Badge>Primary</Badge>}{archived && <Badge tone="warn">Archived</Badge>}</span>
         </div>
-      </div>
+      </div>}
       <div className="jg-ui-toolbar">
         <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => onNavigate(`/chat?agent=${encodeURIComponent(agent.id)}`)}>Open chat</button>
         <button type="button" className="jg-u-btn" onClick={() => onNavigate(`/agents/${encodeURIComponent(agent.id)}/avatar`)}>Avatar</button>
-        {!agent.primary && <button type="button" className="jg-u-btn" aria-pressed={pinned} onClick={onPin}>{pinned ? "Unpin" : "Pin"}</button>}
+        {!agent.primary && onPin && <button type="button" className="jg-u-btn" aria-pressed={pinned} onClick={onPin}>{pinned ? "Unpin" : "Pin"}</button>}
         {caps.rename && actions && <button type="button" className="jg-u-btn" onClick={() => setPanel("rename")}>Rename</button>}
         {caps.hide && actions && !agent.primary && <button type="button" className="jg-u-btn" disabled={busy} onClick={() => void patch({ archived: !archived }, archived ? "Restored" : "Archived")}>{archived ? "Restore" : "Archive"}</button>}
       </div>
@@ -196,29 +192,36 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
   );
 }
 
-function CreateAgentSheet({ source, onClose, onCreated }: { source: JaegerSource; onClose: () => void; onCreated: (a: Agent) => void }) {
+export function CreateAgentSheet({ source, onClose, onCreated, simple = false }: { source: JaegerSource; onClose: () => void; onCreated: (a: Agent) => void | Promise<void>; simple?: boolean }) {
   const toast = useToast();
   const [f, setF] = useState({ displayName: "", specialty: "", summary: "", instructions: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
+  const [icon, setIcon] = useState<(typeof ROBOT_VARIANTS)[number]>();
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((x) => ({ ...x, [k]: e.target.value }));
   const submit = async () => {
     setBusy(true); setErr(undefined);
     try {
-      const { agent, configured } = await createSpecialist(source, f);
-      toast(configured || !f.instructions.trim() ? `Created ${f.displayName}` : `Created ${f.displayName}; instructions couldn't be saved — open Instructions to add them.`, configured || !f.instructions.trim() ? undefined : "error");
-      onCreated(agent);
+      const spec = simple ? { ...f, summary: f.specialty, instructions: f.specialty } : f;
+      const { agent, configured } = await createSpecialist(source, spec);
+      if (icon) setRobotVariant(agent.id, icon);
+      toast(configured || !spec.instructions.trim() ? `Created ${f.displayName}` : `Created ${f.displayName}; instructions couldn't be saved — open Instructions to add them.`, configured || !spec.instructions.trim() ? undefined : "error");
+      await onCreated(agent);
     } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
   return (
-    <Sheet title="New agent" onClose={onClose}>
+    <Sheet title={simple ? "Add agent" : "New agent"} onClose={() => { if (!busy) onClose(); }}>
       <form className="jg-stack" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
         <label className="jg-ui-field">Name<input required maxLength={80} value={f.displayName} onChange={set("displayName")} placeholder="Research assistant" /></label>
-        <label className="jg-ui-field">Specialty<input maxLength={200} value={f.specialty} onChange={set("specialty")} placeholder="What it's good at" /></label>
+        <label className="jg-ui-field">{simple ? "What job should this agent own?" : "Specialty"}<input required={simple} maxLength={200} value={f.specialty} onChange={set("specialty")} placeholder={simple ? "Own the video backlog and prepare episode briefs" : "What it's good at"} /></label>
+        {simple ? <fieldset><legend>Icon on this device (optional)</legend><div className="jg-robot-pick">
+          {ROBOT_VARIANTS.map(v => <button key={v} type="button" className="jg-u-btn" aria-label={v} aria-pressed={icon === v} onClick={() => setIcon(icon === v ? undefined : v)}><RobotIcon id="new-agent" name={v} size={24} variant={v} /></button>)}
+        </div></fieldset> : <>
         <label className="jg-ui-field">Summary<input maxLength={2000} value={f.summary} onChange={set("summary")} /></label>
         <label className="jg-ui-field">Instructions<textarea rows={6} maxLength={12000} value={f.instructions} onChange={set("instructions")} placeholder="How it should behave" /></label>
+        </>}
         {err && <p className="jg-u-error" role="alert">{err}</p>}
-        <div className="jg-ui-actions"><button type="button" className="jg-u-btn" onClick={onClose}>Cancel</button><button className="jg-u-btn jg-u-btn--primary" disabled={busy || !f.displayName.trim()}>{busy ? "Creating…" : "Create agent"}</button></div>
+        <div className="jg-ui-actions"><button type="button" className="jg-u-btn" onClick={onClose} disabled={busy}>Cancel</button><button className="jg-u-btn jg-u-btn--primary" disabled={busy || !f.displayName.trim() || (simple && !f.specialty.trim())}>{busy ? "Creating…" : "Create agent"}</button></div>
       </form>
     </Sheet>
   );

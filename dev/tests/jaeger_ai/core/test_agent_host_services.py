@@ -35,7 +35,7 @@ assert 'jaeger_agent' not in sys.modules
 def test_product_binds_authority_and_repair_without_alternate_implementations():
     from jaeger_ai.core.agent_host import bind_agent_host
     from jaeger_ai.core.entity import authority
-    from jaeger_ai.core.runtime import tool_repair
+    from jaeger_reliability import tool_repair
 
     bind_agent_host()
     assert host.service("authority") is authority

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.authority.kernel import AuthorityDecisionType, PolicyKernel, ProposedAction
-from jaeger_ai.core.authority.destructive import destructive_reason
+from jaeger_authority.destructive import destructive_reason
 from jaeger_ai.core.frameworks import connectors, delegate
 from jaeger_ai.core.frameworks.grants import FrameworkGrants
 

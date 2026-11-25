@@ -2,7 +2,7 @@
   "_ceilings": {
     "core_or_mind_imports_webui_api": 0,
     "jaeger_agent_imports_product": 44,
-    "jaeger_os_imports_product_or_agent": 1,
+    "jaeger_os_imports_product_or_agent": 0,
     "standalone_packages_import_umbrella_or_product": 0
   },
   "core_or_mind_imports_webui_api": {},
@@ -104,9 +104,5 @@
       "jaeger_ai.main"
     ]
   },
-  "jaeger_os_imports_product_or_agent": {
-    "packages/jaeger-os/jaeger_os/core/safety/command_guard.py": [
-      "jaeger_agent"
-    ]
-  }
+  "jaeger_os_imports_product_or_agent": {}
 }

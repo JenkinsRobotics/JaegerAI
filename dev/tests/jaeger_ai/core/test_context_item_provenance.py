@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from jaeger_agent import JaegerAgent, ProviderAdapter
 from jaeger_agent.loop.callbacks import AgentCallbacks
 from jaeger_agent.loop.context_provenance import ContextReference, observe_references
-from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
+from jaeger_memory.context_guard import ContextBudget, ContextGuard
 from jaeger_ai.core.context_compiler import ContextCompiler
 from jaeger_ai.core.entity.runtime import EntityRuntime
 from jaeger_ai.core.entity.memory import SemanticMemory

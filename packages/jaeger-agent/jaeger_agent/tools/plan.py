@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from jaeger_agent.util.tool_interrupt import is_interrupted
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 _STATUSES = ("pending", "in_progress", "completed")
 MAX_WAIT_S = 60.0

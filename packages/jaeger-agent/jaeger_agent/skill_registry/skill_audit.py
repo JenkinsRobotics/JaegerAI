@@ -22,7 +22,7 @@ def audit_catalog(
     """Audit every physical SKILL.md plus distribution/runtime contracts."""
     if available_tools is None:
         try:
-            from jaeger_os.core.tools.tool_registry import get_tools
+            from jaeger_tools.tool_registry import get_tools
             available_tools = {tool.name for tool in get_tools()}
         except Exception:  # noqa: BLE001
             available_tools = set()

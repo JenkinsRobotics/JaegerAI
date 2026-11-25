@@ -42,7 +42,7 @@ def test_notebook_insert_replace_delete_are_successful_and_persisted(tmp_path):
 def test_use_skill_accepts_new_instance_playbook_after_registration(tmp_path):
     from jaeger_agent import tools
     from jaeger_ai.core.instance.instance import InstanceLayout
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
     layout = InstanceLayout(root=tmp_path / "instance")
     layout.ensure_dirs()
     tools.bind(layout)
@@ -103,7 +103,7 @@ def test_mcp_inventory_reads_gateway_owned_external_catalog():
     ({"ok": True, "result": 0}, False),
 ])
 def test_loop_and_bridge_share_result_failure_contract(result, expected):
-    from jaeger_os.core.tools.tool_schema import tool_result_failed
+    from jaeger_tools.tool_schema import tool_result_failed
     assert tool_result_failed(result) is expected
 
 

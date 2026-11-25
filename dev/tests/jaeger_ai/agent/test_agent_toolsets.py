@@ -294,7 +294,7 @@ def test_list_tools_finds_delegation_by_toolset_and_description():
     delegate_task. A query matches the toolset name and full description."""
     from types import SimpleNamespace
 
-    import jaeger_os.core.tools.tool_registry as registry
+    import jaeger_tools.tool_registry as registry
     from jaeger_agent.tools.meta import list_tools
 
     fake = [SimpleNamespace(name="call_agent", description="Hand a bounded task to a standing specialist."),

@@ -23,7 +23,7 @@ from jaeger_agent import (
     clear_registry,
     register_tool_instance,
 )
-from jaeger_agent.util.context_guard import (
+from jaeger_memory.context_guard import (
     DIGEST_PREFIX,
     ContextBudget,
     ContextGuard,
@@ -659,7 +659,7 @@ def test_loop_passes_on_delta_only_when_listener_installed():
 def test_aggregator_emits_text_deltas():
     import threading
     from jaeger_agent.adapters.openai import _aggregate_chat_stream
-    from jaeger_agent.loop.interrupt import CallProgress
+    from jaeger_loop.interrupt import CallProgress
     from types import SimpleNamespace
 
     def _chunk(text):
@@ -681,7 +681,7 @@ def test_aggregator_emits_text_deltas():
 def test_aggregator_partial_stream_recovery_text_only():
     import threading
     from jaeger_agent.adapters.openai import _aggregate_chat_stream
-    from jaeger_agent.loop.interrupt import CallProgress
+    from jaeger_loop.interrupt import CallProgress
     from types import SimpleNamespace
 
     def _chunk(text):
@@ -707,7 +707,7 @@ def test_aggregator_partial_stream_recovery_text_only():
 def test_aggregator_partial_with_tool_call_in_flight_reraises():
     import threading
     from jaeger_agent.adapters.openai import _aggregate_chat_stream
-    from jaeger_agent.loop.interrupt import CallProgress
+    from jaeger_loop.interrupt import CallProgress
     from types import SimpleNamespace
 
     def _tool_chunk():

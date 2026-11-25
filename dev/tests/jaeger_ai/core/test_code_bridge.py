@@ -39,7 +39,7 @@ def tool_registry():
     The real registry is process-global; snapshot and restore it so a
     bridge test can't leak a fake tool into everything after it.
     """
-    from jaeger_os.core.tools import tool_registry as reg
+    from jaeger_tools import tool_registry as reg
 
     saved = dict(reg._registry)
     reg._registry.clear()
@@ -51,7 +51,7 @@ def tool_registry():
 
 
 def _register(reg, name, fn, **kw):
-    from jaeger_os.core.tools.tool_registry import register_tool_from_function
+    from jaeger_tools.tool_registry import register_tool_from_function
 
     fn.__name__ = name
     return register_tool_from_function(name=name, **kw)(fn)
@@ -315,7 +315,7 @@ def test_the_ceiling_default_is_generous_but_finite():
 def test_the_tool_is_registered_and_gated():
     """Registered on import, and carrying the same tier ``execute_code``
     does — the bridge grants no authority the model lacked."""
-    from jaeger_os.core.tools.tool_registry import get_tool, has_tool
+    from jaeger_tools.tool_registry import get_tool, has_tool
 
     import jaeger_ai.core.runtime.code_bridge_tool  # noqa: F401
 

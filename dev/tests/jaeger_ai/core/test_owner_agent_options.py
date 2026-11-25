@@ -133,7 +133,7 @@ def test_full_tools_env_overrides_scoping(layout, monkeypatch):
 def test_delegate_task_is_registered_and_core(layout, monkeypatch):
     import jaeger_ai.main as main
     from jaeger_agent.skill_registry.toolset_scoping import CORE
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
     monkeypatch.setattr(main, "_context_budget_for", lambda cfg: (None, None))
     owner_agent.owner_agent_options(layout, _cfg(), _client("ollama", "gemma-4-26b:latest"))
     names = {t.name for t in get_tools()}

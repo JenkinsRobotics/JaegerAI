@@ -83,7 +83,7 @@ def test_notify_skipped_on_non_macos(monkeypatch):
 
 def test_notify_is_registered_write_local():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert get_tier(tools["notify"]) == PermissionTier.WRITE_LOCAL

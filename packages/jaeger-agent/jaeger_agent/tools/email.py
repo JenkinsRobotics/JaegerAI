@@ -42,10 +42,10 @@ from jaeger_macos import (
     escape_applescript as _escape_applescript,
     resolve_mailbox_call as _resolve_call,
 )
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
-_TIMEOUT_S = 25
+_TIMEOUT_S = 40
 _MAX_FETCH = 25
 _FIELD_SEP = "|||"
 
@@ -1006,7 +1006,8 @@ def _batch_move_impl(
             repeat with idx from totalCount to 1 by -1
                 if (item idx of allIds) is in idList then
                     try
-                        move message idx of src to dst
+                        set m to message idx of src
+                        move m to dst
                         set moved to moved + 1
                     end try
                 end if
