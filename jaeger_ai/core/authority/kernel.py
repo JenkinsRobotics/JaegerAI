@@ -757,7 +757,13 @@ class PolicyKernel:
 
             ws_raw = (proposal.context or {}).get("workspace")
             ws_path = Path(ws_raw) if ws_raw else Path.cwd()
-            v2_verdict = BoundaryAndSecretsInspector().inspect(
+            trusted_roots: tuple[Path, ...] = ()
+            try:
+                from jaeger_agent.core.workspace import configured_trusted_paths
+                trusted_roots = tuple(configured_trusted_paths())
+            except Exception:  # noqa: BLE001 — fail closed to no extra trusted roots
+                trusted_roots = ()
+            v2_verdict = BoundaryAndSecretsInspector(allowed_roots=trusted_roots).inspect(
                 _V2Proposal(
                     tool_name=proposal.tool_name,
                     arguments=proposal.arguments,

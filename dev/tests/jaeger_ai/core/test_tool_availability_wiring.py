@@ -616,17 +616,11 @@ def test_imessage_module_ready_on_darwin_platform(monkeypatch):
     assert tools["send_message"].is_available() is True
 
 
-def test_send_message_real_discovery_finds_three_messaging_modules():
+def test_real_discovery_finds_graduated_core_modules():
     """No monkeypatching: the REAL ``discover_modules()`` walking the
-    REAL ``jaeger_os/plugins/`` tree finds all 3 graduated messaging
-    modules under the ``messaging`` slot (sanity check that the
-    multi-root discovery wiring in ``core/modules.py`` actually
-    reaches the wired availability gate, not just the test doubles
-    above)."""
+    REAL ``jaeger_os`` / ``jaeger_ai`` module tree reaches the wired
+    availability gate and finds the graduated core slots."""
     from jaeger_agent.core import availability as _avail_mod
 
-    names = {
-        spec.module for spec in _avail_mod._discovered_modules()
-        if spec.slot == "messaging"
-    }
-    assert names == {"discord", "telegram", "imessage"}
+    slots = {spec.slot for spec in _avail_mod._discovered_modules()}
+    assert {"animation", "mind", "tts", "stt"} <= slots

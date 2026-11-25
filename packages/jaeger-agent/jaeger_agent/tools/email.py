@@ -779,19 +779,23 @@ def _read_mail_impl(
             {src_call}
             set outLines to {{}}
             set idList to {{{id_list}}}
-            repeat with mid in idList
-                try
-                    set thisId to contents of mid
-                    set m to first message of src whose id is thisId
-                    set s to my _flatten(subject of m, 200)
-                    set sndr to my _flatten(sender of m, 200)
-                    set dt to (date received of m) as string
-                    set bodyText to ""
+            set allIds to id of messages of src
+            set totalCount to count of allIds
+            repeat with idx from 1 to totalCount
+                set thisId to item idx of allIds
+                if thisId is in idList then
                     try
-                        set bodyText to my _flatten(content of m, {_MAX_SNIPPET})
+                        set m to message idx of src
+                        set s to my _flatten(subject of m, 200)
+                        set sndr to my _flatten(sender of m, 200)
+                        set dt to (date received of m) as string
+                        set bodyText to ""
+                        try
+                            set bodyText to my _flatten(content of m, {_MAX_SNIPPET})
+                        end try
+                        set end of outLines to (thisId as string) & "{_FIELD_SEP}" & s & "{_FIELD_SEP}" & sndr & "{_FIELD_SEP}" & dt & "{_FIELD_SEP}" & bodyText
                     end try
-                    set end of outLines to (thisId as string) & "{_FIELD_SEP}" & s & "{_FIELD_SEP}" & sndr & "{_FIELD_SEP}" & dt & "{_FIELD_SEP}" & bodyText
-                end try
+                end if
             end repeat
             set AppleScript's text item delimiters to linefeed
             return (outLines as string)
@@ -984,6 +988,11 @@ def _batch_move_impl(
     id_list = ", ".join(ids)
     src_call = _resolve_call("src", acc, src)
     dst_call = _resolve_call("dst", acc, dst)
+    # Fetch all numeric IDs of ``src`` in ONE bulk AppleEvent, locate matching
+    # indices in memory, and move in DESCENDING index order so indices never
+    # shift as messages leave ``src``. Avoids BOTH Apple Mail's broken
+    # ``whose id is in idList`` (-1700) AND O(N) per-id ``whose`` scans that
+    # time out on Exchange/IMAP.
     script = f'''
     {_AS_RESOLVER}
     tell application "Mail"
@@ -992,13 +1001,15 @@ def _batch_move_impl(
             {dst_call}
             set moved to 0
             set idList to {{{id_list}}}
-            repeat with mid in idList
-                try
-                    set thisId to contents of mid
-                    set m to first message of src whose id is thisId
-                    move m to dst
-                    set moved to moved + 1
-                end try
+            set allIds to id of messages of src
+            set totalCount to count of allIds
+            repeat with idx from totalCount to 1 by -1
+                if (item idx of allIds) is in idList then
+                    try
+                        move message idx of src to dst
+                        set moved to moved + 1
+                    end try
+                end if
             end repeat
             return "MOVED:" & moved
         on error errMsg
@@ -1006,7 +1017,10 @@ def _batch_move_impl(
         end try
     end tell
     '''
-    res = run_applescript(script, timeout_seconds=20)
+    # Scale the timeout with batch size (Exchange moves can take several
+    # seconds per message); clamp below Mail.app's own 120s AppleEvent cap.
+    timeout_s = min(90, 25 + 6 * len(ids))
+    res = run_applescript(script, timeout_seconds=timeout_s)
     if not res.get("ok"):
         return _envelope(
             ok=False, moved=False,
@@ -1272,13 +1286,16 @@ def mark_mail(
             {src_call}
             set updated to 0
             set idList to {{{id_list}}}
-            repeat with mid in idList
-                try
-                    set thisId to contents of mid
-                    set m to first message of src whose id is thisId
-                    {mut_block}
-                    set updated to updated + 1
-                end try
+            set allIds to id of messages of src
+            set totalCount to count of allIds
+            repeat with idx from totalCount to 1 by -1
+                if (item idx of allIds) is in idList then
+                    try
+                        set m to message idx of src
+                        {mut_block}
+                        set updated to updated + 1
+                    end try
+                end if
             end repeat
             return "UPDATED:" & updated
         on error errMsg
@@ -1286,7 +1303,8 @@ def mark_mail(
         end try
     end tell
     '''
-    res = run_applescript(script, timeout_seconds=20)
+    timeout_s = min(90, 25 + 4 * len(ids))
+    res = run_applescript(script, timeout_seconds=timeout_s)
     if not res.get("ok"):
         return _envelope(
             ok=False, updated=0, error=res.get("error"),

@@ -207,3 +207,24 @@ def test_source_keyed_grants_and_actor_trust(tmp_path: Path) -> None:
     assert v3.decision == DecisionKind.DENY
     v4 = engine.evaluate(ActionProposal("remember", {"k": "v"}, workspace=tmp_path, actor="mcp:ext"))
     assert v4.decision == DecisionKind.DENY
+
+
+def test_boundary_inspector_honors_allowed_roots_but_locks_secrets(tmp_path: Path) -> None:
+    from jaeger_authority import BoundaryAndSecretsInspector
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    owner_docs = tmp_path / "Documents"
+    owner_docs.mkdir()
+    outside = tmp_path / "Untrusted"
+    outside.mkdir()
+
+    inspector = BoundaryAndSecretsInspector(allowed_roots=(owner_docs, Path("/"), Path.home()))
+    # Trusted owner folder is permitted
+    assert inspector.inspect(ActionProposal("write_file", {"path": str(owner_docs / "plan.md")}, workspace=ws)) is None
+    # Unlisted outside folder still requires approval (even though / and ~ were passed, they are ignored!)
+    v_out = inspector.inspect(ActionProposal("write_file", {"path": str(outside / "x.txt")}, workspace=ws))
+    assert v_out is not None and v_out.decision == DecisionKind.REQUIRE_APPROVAL
+    # Secret stores (~/.ssh) are ALWAYS denied
+    v_ssh = inspector.inspect(ActionProposal("write_file", {"path": str(Path.home() / ".ssh" / "authorized_keys")}, workspace=ws))
+    assert v_ssh is not None and v_ssh.decision == DecisionKind.DENY
