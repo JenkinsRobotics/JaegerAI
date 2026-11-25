@@ -135,8 +135,21 @@ class BoundaryAndSecretsInspector:
 
     name = "boundary_and_secrets"
 
-    def __init__(self, *, extra_denied_paths: Sequence[Path] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        extra_denied_paths: Sequence[Path] = (),
+        allowed_roots: Sequence[Path] = (),
+    ) -> None:
         self._extra_denied = tuple(p.expanduser().resolve(strict=False) for p in extra_denied_paths)
+        home = Path.home().resolve(strict=False)
+        fs_root = Path(os.path.sep).resolve(strict=False)
+        clean_allowed: list[Path] = []
+        for p in allowed_roots:
+            resolved = p.expanduser().resolve(strict=False)
+            if resolved not in {home, fs_root}:
+                clean_allowed.append(resolved)
+        self._allowed_roots = tuple(clean_allowed)
 
     def inspect(self, proposal: ActionProposal) -> PolicyVerdict | None:
         ws = proposal.workspace.expanduser().resolve(strict=False)
@@ -185,7 +198,11 @@ class BoundaryAndSecretsInspector:
                         )
                 in_ws = resolved == ws or ws in resolved.parents
                 in_tmp = str(resolved).startswith(("/tmp/", "/private/tmp/"))
-                if not in_ws and not in_tmp:
+                in_allowed = any(
+                    resolved == root or root in resolved.parents
+                    for root in self._allowed_roots
+                )
+                if not in_ws and not in_tmp and not in_allowed:
                     return PolicyVerdict(
                         DecisionKind.REQUIRE_APPROVAL,
                         f"Write target {resolved} escapes workspace {ws}.",

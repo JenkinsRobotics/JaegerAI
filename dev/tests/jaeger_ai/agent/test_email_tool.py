@@ -422,6 +422,8 @@ def test_batch_move_one_transaction(monkeypatch):
     assert "11" in script and "12" in script and "13" in script
     assert script.count("osascript") == 0  # it's the AppleScript body
     assert "every message" not in script
+    assert "whose id is in" not in script  # broken (-1700) on Apple Mail Exchange/IMAP
+    assert "id of messages of src" in script
     assert "Deleted Messages" in script  # trash alias expansion
 
 
