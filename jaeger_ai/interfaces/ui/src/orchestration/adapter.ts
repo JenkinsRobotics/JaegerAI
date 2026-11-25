@@ -78,8 +78,8 @@ export function liveAdapter(source: JaegerSource, gaps: GapProvider = derivedGap
   return {
     gaps,
     async snapshot() {
-      const [agents, summaries, handoffs, tasks] = await Promise.all([source.agents(), source.agentsSummary(), source.handoffs(), source.tasks()]);
-      return { agents, summaries, handoffs, tasks };
+      const [agents, summaries, handoffs, tasks, approvals] = await Promise.all([source.agents(), source.agentsSummary(), source.handoffs(), source.tasks(), source.pendingWorkApprovals?.().catch(() => null)]);
+      return { agents, summaries, handoffs, tasks, approvals };
     },
     follow: source.globalEvents ? (onEvent, signal) => source.globalEvents!(onEvent, signal) : undefined,
     exchange: (id) => source.handoffExchange(id),

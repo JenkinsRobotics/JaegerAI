@@ -112,7 +112,7 @@ def test_agent_uses_configured_fallback_when_local_inference_is_busy(adapter, mo
 
 
 def test_cancel_prevents_dispatch(configured,adapter):
-    from jaeger_agent.loop.interrupt import AgentInterrupted
+    from jaeger_loop.interrupt import AgentInterrupted
     interrupt=threading.Event();interrupt.set()
     with pytest.raises(AgentInterrupted):complete(configured,None,'hello',interrupt_event=interrupt)
     assert not adapter.calls
@@ -128,7 +128,7 @@ def test_cli_tool_descriptions_do_not_change_egress_policy(monkeypatch):
     calls = []
     monkeypatch.setattr(adapter, "call", lambda payload, interrupt, **kw: calls.append(payload))
     guarded = GovernedAdapter(adapter, ModelRoute("cli", "grok", "", False))
-    from jaeger_os.core.tools.tool_schema import ToolDef
+    from jaeger_tools.tool_schema import ToolDef
     from pydantic import BaseModel
     class EmptyArgs(BaseModel):
         pass

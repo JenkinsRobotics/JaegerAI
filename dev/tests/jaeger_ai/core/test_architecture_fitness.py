@@ -86,7 +86,7 @@ def test_agent_loop_defaults_to_ledger_executor():
 
 def test_send_email_declares_external_side_effect():
     import jaeger_agent.tools  # noqa: F401
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
 
     tool = get_tool("send_email")
     assert tool.side_effect == "external"

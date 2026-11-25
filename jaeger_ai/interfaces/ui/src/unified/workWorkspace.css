@@ -1,0 +1,35 @@
+.jg-work-toolbar, .jg-work-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--jg-space-2);
+}
+.jg-work-toolbar { margin-block: var(--jg-space-3); }
+.jg-work-toolbar > :is(input, select) { min-width: 0; max-width: 100%; }
+.jg-work-toolbar [aria-current="page"] { border-color: var(--jg-color-accent); background: var(--jg-color-active); }
+.jg-work-more > summary, .jg-work-rule summary { cursor: pointer; }
+.jg-work-more[open] { flex-basis: 100%; }
+.jg-work-more .jg-work-actions { margin-block-start: var(--jg-space-2); }
+.jg-work-secondary { margin-block: var(--jg-space-4); color: var(--jg-color-text-secondary); }
+.jg-work-secondary > summary { cursor: pointer; padding-block: var(--jg-space-2); }
+.jg-work-density { container-type: inline-size; }
+.jg-work-list { padding: 0; list-style: none; margin: 0; border-block-start: 1px solid var(--jg-color-border); }
+.jg-work-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--jg-space-2) var(--jg-space-4); align-items: center; padding: var(--jg-space-3); border-block-end: 1px solid var(--jg-color-border); }
+.jg-work-list > li small { display: block; overflow-wrap: anywhere; color: var(--jg-color-text-secondary); }
+.jg-work-agenda { max-width: 52rem; }
+.jg-work-agenda .jg-work-list > li { grid-template-columns: 5.5rem minmax(0, 1fr) auto; }
+.jg-work-agenda time { font-variant-numeric: tabular-nums; color: var(--jg-color-text-secondary); }
+.jg-work-agenda strong { overflow-wrap: anywhere; }
+.jg-work-rule { display: block; margin-block: var(--jg-space-3); color: var(--jg-color-text-secondary); }
+.jg-work-raw { overflow: auto; max-height: 36vh; white-space: pre-wrap; overflow-wrap: anywhere; }
+.jg-work-density .jg-tasklist__row { grid-template-columns: minmax(0, 3fr) minmax(6rem, 1fr) minmax(4rem, 1fr) minmax(5rem, 1fr); }
+@container (max-width: 580px) {
+  .jg-work-density .jg-tasklist__row { grid-template-columns: minmax(0, 1fr) auto; }
+  .jg-work-density .jg-tasklist__row > :nth-child(n + 3) { display: none; }
+}
+@container (max-width: 520px) {
+  .jg-work-list > li { grid-template-columns: minmax(0, 1fr); }
+  .jg-work-agenda .jg-work-list > li { grid-template-columns: 4.5rem minmax(0, 1fr); }
+  .jg-work-agenda .jg-work-list > li > button { grid-column: 2; justify-self: start; }
+  .jg-work-toolbar > input { flex: 1 1 100%; }
+}

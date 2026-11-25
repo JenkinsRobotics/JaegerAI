@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.core.cancellation import bind_turn_cancellation, current_cancellation
 from jaeger_agent.loop.callbacks import AgentCallbacks
-from jaeger_agent.loop.interrupt import AgentInterrupted, StaleCallTimeout
-from jaeger_agent.loop.loop_backstop import (
+from jaeger_loop.interrupt import AgentInterrupted, StaleCallTimeout
+from jaeger_loop.backstop import (
     MAX_TOOL_CALLS,
     call_signature,
     collapse_generated_repetition,
@@ -41,17 +41,17 @@ from jaeger_agent.loop.loop_backstop import (
     semantic_failure_signature,
     tool_budget_warning,
 )
-from jaeger_agent.loop.tool_result_safety import protect_tool_result
-from jaeger_agent.loop.turn_budget import TurnBudget, TurnBudgetLimits
-from jaeger_agent.loop.tool_dispatch_safety import (
+from jaeger_loop.safety import protect_tool_result
+from jaeger_loop.budget import TurnBudget, TurnBudgetLimits
+from jaeger_loop.safety import (
     cancelled_tool_result, paths_overlap, unique_tool_call_ids,
 )
-from jaeger_agent.schemas.message_types import Message, ToolCall
+from jaeger_contracts import Message, ToolCall
 from jaeger_agent.tool_executor import ToolExecutor
 from jaeger_agent.skill_registry.tool_selection import ToolSelection, in_agent_selection, tool_permitted
-from jaeger_os.core.tools.tool_registry import get_tools
-from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled, tool_result_failed
-from jaeger_agent.util.context_guard import ContextGuard, ContextOverflow
+from jaeger_tools.tool_registry import get_tools
+from jaeger_tools.tool_schema import ToolDef, dev_mode_enabled, tool_result_failed
+from jaeger_memory.context_guard import ContextGuard, ContextOverflow
 
 
 # Type alias for the skip-final finalizer. Takes the tool name, the
@@ -188,7 +188,7 @@ def _fallback_reachable(adapter: Any) -> bool:
 
 def _emit_fallback(adapters: list[Any], failed: Any, reason: str) -> None:
     """Report walking the adapter chain (or running out of it)."""
-    from jaeger_agent import live as _live
+    from jaeger_events import live as _live
     try:
         nxt = adapters[adapters.index(failed) + 1]
     except (ValueError, IndexError):
@@ -605,6 +605,7 @@ class JaegerAgent(AgentProviderStepMixin, AgentToolDispatchMixin):
         # surface and may inspect/load named groups through the meta-tools.
         # User wording must never silently widen authority or mutate the
         # model-visible schema before its first decision.
+        self._select_playlist_tool(route_query)
         self._select_named_tools(route_query)
 
         # Fresh per-turn state. Counters from a previous turn would
@@ -660,7 +661,7 @@ class JaegerAgent(AgentProviderStepMixin, AgentToolDispatchMixin):
             except Exception:  # noqa: BLE001 — a host hook must not break a turn
                 pass
 
-        from jaeger_agent import guardrails as _guardrails
+        from jaeger_authority import guardrails as _guardrails
         self.last_guardrail = None
         tripped = _guardrails.run("input", route_query)
         if tripped is not None:
@@ -776,10 +777,27 @@ class JaegerAgent(AgentProviderStepMixin, AgentToolDispatchMixin):
         named = {t.name for t in self._all_tools if t.name in words}
         self._tool_selection.inferred.update(named)
 
+    def _select_playlist_tool(self, route_query: str) -> None:
+        """Expose the existing read-only connector for an owner-supplied playlist URL."""
+        from jaeger_agent.skill_registry.toolset_scoping import is_untrusted_content
+        from jaeger_agent.tools.youtube_playlist import mentions_youtube_playlist
+
+        # Inferred visibility is not an authorization grant. Avoid carrying
+        # this one-task match into later turns.
+        inferred = self._tool_selection.inferred
+        if self._tool_selection.reasons.get("youtube_studio") == "YouTube playlist URL":
+            inferred.discard("youtube_studio")
+            self._tool_selection.reasons.pop("youtube_studio", None)
+        if self._tools_filter_locked or is_untrusted_content() or not mentions_youtube_playlist(route_query):
+            return
+        if "youtube_studio" not in inferred and any(t.name == "youtube_studio" for t in self._all_tools):
+            inferred.add("youtube_studio")
+            self._tool_selection.reasons["youtube_studio"] = "YouTube playlist URL"
+
     def _guard_output(self, text: str) -> str:
         """Output guardrail tripwire on the final answer: a tripped wire
         replaces the answer (in the transcript too) with a notice."""
-        from jaeger_agent import guardrails as _guardrails
+        from jaeger_authority import guardrails as _guardrails
         tripped = _guardrails.run("output", text or "") if text else None
         if tripped is None:
             return text
@@ -855,7 +873,7 @@ class JaegerAgent(AgentProviderStepMixin, AgentToolDispatchMixin):
                 # or markdown JSON). If no structured tool_calls were emitted,
                 # attempt repair before assuming the model finished speaking.
                 try:
-                    from jaeger_agent.parsing.tool_call_repair import repair_plain_text_tool_calls
+                    from jaeger_reliability.tool_repair import repair_plain_text_tool_calls
 
                     allowed_names = (
                         {getattr(t, "name", "") for t in (self.tools or []) if getattr(t, "name", "")}
@@ -887,7 +905,7 @@ class JaegerAgent(AgentProviderStepMixin, AgentToolDispatchMixin):
 
             # Live step status — after plain-text tool-call recovery, so a CLI or
             # local model that writes its calls as text still reads "continue".
-            from jaeger_agent import live as _live
+            from jaeger_events import live as _live
             _live.emit("loop.iteration", {
                 "index": iteration, "max": self.max_iterations,
                 "decision": "continue" if tool_calls else "answer",
@@ -1583,7 +1601,7 @@ class JaegerAgent(AgentProviderStepMixin, AgentToolDispatchMixin):
             row = discovery.row(tool)
             row['selected'] = tool.name in selected
             if row['selected'] and tool.name in self._tool_selection.inferred:
-                row['selection_reason'] = 'Matched this task'
+                row['selection_reason'] = self._tool_selection.reasons.get(tool.name) or 'Matched this task'
             rows.append({key: row[key] for key in ('tool', 'source', 'available', 'selected',
                                                 'selection_reason', 'unavailable_reason')})
         # Selected tools first; bound the user receipt without truncating model schemas.
@@ -1933,7 +1951,7 @@ def _classify_adapter_error(exc: BaseException) -> str:
         if reason == FailoverReason.AUTH.value:
             return "auth"
     try:
-        from jaeger_agent.core.errors import classify_exception
+        from jaeger_reliability.errors import classify_exception
         return classify_exception(exc)
     except Exception:  # noqa: BLE001 — classification must never mask the error
         return "unknown"

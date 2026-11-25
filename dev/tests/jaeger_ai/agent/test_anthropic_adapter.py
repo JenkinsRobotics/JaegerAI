@@ -15,7 +15,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from jaeger_agent import AnthropicAdapter
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools.tool_schema import ToolDef
 
 
 # ── fake SDK client ────────────────────────────────────────────────
@@ -395,7 +395,7 @@ def test_call_interrupt_mid_stream_closes_stream_and_raises():
     generating) and surface AgentInterrupted."""
     import threading
 
-    from jaeger_agent.loop.interrupt import AgentInterrupted
+    from jaeger_loop.interrupt import AgentInterrupted
 
     ev = threading.Event()
 

@@ -4,7 +4,7 @@ OpenAI Codex top-level rejection of combinators)."""
 
 from __future__ import annotations
 
-from jaeger_agent.parsing.schema_sanitizer import (
+from jaeger_reliability.schema_sanitizer import (
     sanitize_tool_schemas,
     strip_nullable_unions,
     strip_pattern_and_format,

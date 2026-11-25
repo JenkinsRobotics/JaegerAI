@@ -80,7 +80,7 @@ def test_clipboard_write_skipped_on_non_macos(monkeypatch):
 
 def test_clipboard_read_is_registered_read_only():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert get_tier(tools["clipboard_read"]) == PermissionTier.READ_ONLY
@@ -88,7 +88,7 @@ def test_clipboard_read_is_registered_read_only():
 
 def test_clipboard_write_is_registered_write_local():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert get_tier(tools["clipboard_write"]) == PermissionTier.WRITE_LOCAL

@@ -103,7 +103,7 @@ def test_tools_always_reach_the_model_even_for_unknown_family():
     class _Args(BaseModel):
         x: int = 1
 
-    from jaeger_os.core.tools.tool_schema import ToolDef
+    from jaeger_tools.tool_schema import ToolDef
     tool = ToolDef(name="bump", description="Bump.",
                    args_model=_Args, fn=lambda x=1: {"ok": True})
 
@@ -174,7 +174,7 @@ def test_stream_emits_deltas_and_ttft(monkeypatch):
 
 
 def test_interrupt_breaks_stream_at_token_boundary(monkeypatch):
-    from jaeger_agent.loop.interrupt import AgentInterrupted
+    from jaeger_loop.interrupt import AgentInterrupted
 
     ev = threading.Event()
     chunks = ["a"] * 50

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from jaeger_agent import JaegerAgent, ProviderAdapter, guardrails
-from jaeger_agent.guardrails import GuardrailResult
+from jaeger_agent import JaegerAgent, ProviderAdapter
+from jaeger_authority import guardrails
+from jaeger_authority.guardrails import GuardrailResult
 
 
 class _Echo(ProviderAdapter):

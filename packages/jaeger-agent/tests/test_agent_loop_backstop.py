@@ -7,7 +7,7 @@ thresholds and signatures match the pre-refactor pydantic-ai loop in
 
 from __future__ import annotations
 
-from jaeger_agent.loop.loop_backstop import (
+from jaeger_loop.backstop import (
     MAX_IDENTICAL_CALLS,
     MAX_SEMANTIC_FAILURES,
     MAX_TOOL_CALLS,
@@ -213,3 +213,35 @@ def test_two_mail_resolve_failures_halt():
     assert reason is not None
     assert "batch_move" in reason
     assert "failure" in reason
+
+
+def test_web_extract_failures_on_distinct_urls_do_not_collide():
+    sig_t1 = semantic_failure_signature(
+        "web_extract",
+        {"url": "https://site-a.example/page1"},
+        {"ok": False, "error": "ReadTimeout: timed out"},
+    )
+    sig_t2 = semantic_failure_signature(
+        "web_extract",
+        {"url": "https://site-b.example/page2"},
+        {"ok": False, "error": "ReadTimeout: timed out"},
+    )
+    sig_t1_again = semantic_failure_signature(
+        "web_extract",
+        {"url": "https://site-a.example/page2"},
+        {"ok": False, "error": "ReadTimeout: timed out"},
+    )
+    assert sig_t1 != sig_t2
+    assert sig_t1 == sig_t1_again
+
+    sig_403_a = semantic_failure_signature(
+        "web_extract",
+        {"url": "https://site-a.example/feed"},
+        {"ok": False, "error": "HTTPError: 403 Forbidden"},
+    )
+    sig_403_b = semantic_failure_signature(
+        "web_extract",
+        {"url": "https://site-b.example/feed"},
+        {"ok": False, "error": "HTTPError: 403 Forbidden"},
+    )
+    assert sig_403_a != sig_403_b

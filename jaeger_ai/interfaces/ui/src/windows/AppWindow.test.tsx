@@ -127,8 +127,7 @@ it("creates an agent from a character with its role and instructions", () => {
 
 it("relocates knowledge, workspace and Settings destinations without duplicate top-level pages", async () => {
   await mount("/research/knowledge");
-  expect(location.pathname).toBe("/agents/knowledge");
-  expect(subtab()).toBe("Memory & Skills");
+  expect(location.pathname + location.search).toBe("/library?section=knowledge");
   for (const [old, current, label] of [
     ["/work/workspace", "/research/workspace", "Research"],
     ["/work/checkpoints", "/settings/checkpoints", "Settings"],

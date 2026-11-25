@@ -14,8 +14,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from jaeger_agent import guardrails
-from jaeger_agent.guardrails import GuardrailResult
+from jaeger_authority import guardrails
+from jaeger_authority.guardrails import GuardrailResult
 
 logger = logging.getLogger(__name__)
 

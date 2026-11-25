@@ -31,7 +31,7 @@ from jaeger_ai.core.instance.commissioning_validation import (
 
 def test_write_file_is_an_authoritative_external_effect():
     from jaeger_agent.tools import files as _files  # noqa: F401
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
     tool = get_tool("write_file")
     assert tool is not None
     assert getattr(tool, "side_effect", "") == "external"

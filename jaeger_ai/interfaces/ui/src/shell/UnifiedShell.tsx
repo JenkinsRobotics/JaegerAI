@@ -9,17 +9,15 @@
  *   - Standalone SettingsView (never mounts legacy App.tsx)
  *   - Adaptive Desktop rail + iPhone/iPad bottom bar with iOS visualViewport keyboard handling
  */
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { chatTitle, groupChatsByDate, visibleChats } from "../agents/chats";
-import { visible } from "../agents/agentsLogic";
+import { label, visible } from "../agents/agentsLogic";
 import { JumpTo, type JumpAction } from "../agents/JumpTo";
 import { useAgentsStore } from "../agents/agentsStore";
 import type { JaegerSource } from "../api/source";
 import type { SessionRow } from "../api/types";
 import type { ClipState } from "../avatar/avatar";
 import { AvatarPanel } from "../avatar/AvatarPanel";
-import { JaegerAvatar } from "../avatar/JaegerAvatar";
-import { JaegerMark } from "../brand/JaegerMark";
 import { ChatPane } from "../chat/ChatPane";
 import { conversationPath, validConversationId } from "../chat/conversationLocation";
 import { contractHome, httpGetJson } from "../chat/homeSession";
@@ -45,6 +43,10 @@ import { ApprovalTray } from "../unified/ApprovalTray";
 import { SkeletonRows, ToastProvider } from "../unified/ui";
 import { sendJson } from "../unified/webui";
 import { useSizeClass } from "./breakpoints";
+import { SystemStatusButton } from "./SystemStatusButton";
+import { AgentFace } from "../unified/AgentFace";
+import { AppMenu } from "../popups/AppMenu";
+import { ChevronDown } from "lucide-react";
 import {
   canonicalDestinationOf,
   navigate,
@@ -56,16 +58,17 @@ import "../unified/design.css";
 import "./unifiedShell.css";
 
 const AgentsRoster = lazy(() => import("../unified/AgentsRoster").then((m) => ({ default: m.AgentsRoster })));
-const AgentsActivityPage = lazy(() => import("../orchestration/AgentsActivityPage").then((m) => ({ default: m.AgentsActivityPage })));
+const AgentsHome = lazy(() => import("../unified/AgentsHome").then((m) => ({ default: m.AgentsHome })));
 const CharactersPage = lazy(() => import("../unified/CharactersPage").then((m) => ({ default: m.CharactersPage })));
 const KnowledgePage = lazy(() => import("../unified/KnowledgePage").then((m) => ({ default: m.KnowledgePage })));
 const PixelOffice = lazy(() => import("../team/office/PixelOffice").then((m) => ({ default: m.PixelOffice })));
 const TasksWorkspace = lazy(() => import("../unified/TasksWorkspace").then((m) => ({ default: m.TasksWorkspace })));
+const WorkflowsPanel = lazy(() => import("../workflows/WorkflowsPanel").then(m => ({ default: m.WorkflowsPanel })));
 const TasksPage = lazy(() => import("../windows/TasksPage").then((m) => ({ default: m.TasksPage })));
 const AutomationsPanel = lazy(() => import("../automations/AutomationsPanel").then((m) => ({ default: m.AutomationsPanel })));
 const CalendarPage = lazy(() => import("../unified/CalendarPage").then((m) => ({ default: m.CalendarPage })));
 const ProcessView = lazy(() => import("../process/ProcessView").then((m) => ({ default: m.ProcessView })));
-const YouTubePage = lazy(() => import("../research/YouTubePage").then((m) => ({ default: m.YouTubePage })));
+const YouTubePage = lazy(() => import("../unified/YouTubeWorkspace").then((m) => ({ default: m.YouTubeWorkspace })));
 const StudioPage = lazy(() => import("../unified/StudioPage").then((m) => ({ default: m.StudioPage })));
 const CompanionPage = lazy(() => import("../unified/CompanionPage").then((m) => ({ default: m.CompanionPage })));
 const DocumentsPage = lazy(() => import("../unified/DocumentsPage").then((m) => ({ default: m.DocumentsPage })));
@@ -111,6 +114,7 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof matchMedia === "function" ? !matchMedia(COMPACT_QUERY).matches : true,
   );
+  const [settingsNavOpen, setSettingsNavOpen] = useState(true);
   const [avatarOpen, setAvatarOpen] = useState(storedAvatarDock);
   const [avatarState, setAvatarState] = useState<ClipState>("idle");
   const [workOpen, setWorkOpen] = useState(false);
@@ -119,6 +123,11 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
   const [searchText, setSearchText] = useState("");
   const [busy, setBusy] = useState(false);
   const [sessionError, setSessionError] = useState("");
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const agentMenuButton = useRef<HTMLButtonElement>(null);
+  const chatAgents = gw.agents.filter(a => !a.deleted && visible(a));
+  const primaryAgent = chatAgents.find(a => a.primary) ?? chatAgents.find(a => a.id === JAEGER_HOME_AGENT);
+  const primaryAgentId = primaryAgent?.id ?? JAEGER_HOME_AGENT;
 
   const linkedSession = route.page === "chat" ? route.params.get("session") : null;
   const linkedTopic = route.page === "chat" ? route.params.get("topic") : null;
@@ -144,12 +153,15 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
   useEffect(() => {
     if (linkedSession !== null || !gw.ready) return;
     if (sessionId && gw.sessions.some((s) => s.session_id === sessionId)) return;
-    const fallback = gw.sessions.find((s) => s.session_id === JAEGER_HOME_ID) ?? gw.sessions[0];
+    const available = gw.sessions.filter(s => !s.archived && !isBackgroundSession(s));
+    const fallback = available.find(s => s.session_id === `agent-${primaryAgentId}`)
+      ?? available.find(s => s.agent_id === primaryAgentId)
+      ?? available.find(s => s.session_id === JAEGER_HOME_ID);
     if (fallback) {
       setSessionId(fallback.session_id);
       try { localStorage.setItem(DEMO_SESSION_KEY, fallback.session_id); } catch { /* ignore */ }
     }
-  }, [gw.ready, gw.sessions, linkedSession, sessionId]);
+  }, [gw.ready, gw.sessions, linkedSession, sessionId, primaryAgentId]);
 
   // iOS Safari visualViewport keyboard-aware height
   useEffect(() => {
@@ -159,11 +171,16 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
     const update = () => {
       if (viewport.scale !== 1) {
         shell.style.removeProperty("--jg-viewport-height");
+        shell.style.removeProperty("--jg-viewport-top");
         delete shell.dataset.keyboard;
         return;
       }
+      const keyboard = window.innerHeight - viewport.height > 120;
       shell.style.setProperty("--jg-viewport-height", `${viewport.height}px`);
-      shell.dataset.keyboard = String(window.innerHeight - viewport.height > 120);
+      // Safari can pan the visual viewport to the input as well as shrink it.
+      // Keep the shell inside the visible area, but ignore stale offsets after dismissal.
+      shell.style.setProperty("--jg-viewport-top", `${keyboard ? Math.max(0, viewport.offsetTop || 0) : 0}px`);
+      shell.dataset.keyboard = String(keyboard);
     };
     update();
     viewport.addEventListener("resize", update);
@@ -206,6 +223,8 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
 
   const host = useMemo(() => {
     const h = new WebHost(source);
+    h.shellOwnsChrome = true;
+    h.openTask = id => navigate(`/work/tasks?task=${encodeURIComponent(id)}`);
     h.home = contractHome(
       httpGetJson(),
       {
@@ -215,7 +234,7 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
       },
       source.stream.bind(source),
     );
-    h.openDetails = () => navigate("/agents");
+    h.openDetails = id => navigate(`/agents?agent=${encodeURIComponent(id)}`);
     return h;
   }, [source]);
 
@@ -237,12 +256,37 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
     }
   }, []);
 
+  const openAgentChat = useCallback(async (agentId: string) => {
+    setSessionError("");
+    try {
+      if (source.agentHome) {
+        const home = await source.agentHome(agentId);
+        if (home.agent_id !== agentId || !home.session_id) throw new Error("Couldn’t verify this agent’s conversation.");
+        selectConversation(home.session_id);
+      } else {
+        const existing = gw.sessions.find(s => s.agent_id === agentId && !s.archived && !isBackgroundSession(s));
+        if (existing) selectConversation(existing.session_id);
+        else throw new Error("This agent doesn’t have an available conversation.");
+      }
+    } catch (error) { setSessionError(error instanceof Error ? error.message : String(error)); }
+  }, [source, gw.sessions, selectConversation]);
+
+  // Existing agent/profile links and the header switcher use the same home.
+  const agentLink = route.page === "chat" && !linkedSession ? route.params.get("agent") : null;
+  const handledAgentLink = useRef<string | null>(null);
+  useEffect(() => {
+    if (!agentLink) { handledAgentLink.current = null; return; }
+    if (!gw.ready || handledAgentLink.current === agentLink) return;
+    handledAgentLink.current = agentLink;
+    void openAgentChat(agentLink);
+  }, [agentLink, gw.ready, openAgentChat]);
+
   const startConversation = useCallback(async () => {
     if (busy) return;
     setBusy(true);
     setSessionError("");
     try {
-      if (source.kind === "live") {
+      if (source.kind === "live" && primaryAgentId === JAEGER_HOME_AGENT) {
         const res = await sendJson<{ session_id: string; topic: { topic_id: string } }>(
           "POST",
           `/v1/agents/${encodeURIComponent(JAEGER_HOME_AGENT)}/home/topics`,
@@ -250,7 +294,7 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
         );
         selectConversation(res.session_id, res.topic.topic_id);
       } else {
-        const row = await source.createSession({ agent_id: JAEGER_HOME_AGENT, title: "New chat" });
+        const row = await source.createSession({ agent_id: primaryAgentId, title: "New chat" });
         selectConversation(row.session_id);
       }
       void gw.refresh();
@@ -259,20 +303,21 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
     } finally {
       setBusy(false);
     }
-  }, [busy, source, selectConversation, gw]);
+  }, [busy, source, selectConversation, gw, primaryAgentId]);
 
+  const { markSessionUnavailable } = gw;
   const recoverMissing = useCallback((missingId: string) => {
-    gw.markSessionUnavailable(missingId);
+    markSessionUnavailable(missingId);
     if (sessionId === missingId) {
       setSessionId("");
       try { if (localStorage.getItem(DEMO_SESSION_KEY) === missingId) localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* ignore */ }
     }
-  }, [gw, sessionId]);
+  }, [markSessionUnavailable, sessionId]);
 
   const filteredSessions = useMemo(() => {
     const q = searchText.trim().toLowerCase();
     const base = visibleChats(
-      gw.sessions.filter((r) => !r.archived && !isBackgroundSession(r)),
+      gw.sessions.filter((r) => r.session_id !== JAEGER_HOME_ID && !r.archived && !isBackgroundSession(r)),
       sessionId,
     );
     const matched = q ? base.filter((r) => chatTitle(r).toLowerCase().includes(q)) : base;
@@ -281,12 +326,16 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
 
   const dateGroups = useMemo(() => groupChatsByDate(filteredSessions), [filteredSessions]);
   const currentRow = gw.sessions.find((r) => r.session_id === sessionId);
-  const activeAgent = gw.agents.find((a) => a.id === (currentRow?.agent_id || JAEGER_HOME_AGENT)) ?? gw.agents[0];
+  const activeAgent = gw.agents.find(a => a.id === currentRow?.agent_id)
+    ?? chatAgents.find(a => sessionId === `agent-${a.id}`) ?? primaryAgent;
+  const conversationTitle = currentRow ? chatTitle(currentRow) : "";
+  const activeAgentName = activeAgent ? label(activeAgent) : "Jaeger";
+  const agentsTab = route.page === "agents" ? (route.sub || "roster") : "roster";
   const headerLabel =
     dest === "chat"
       ? (currentRow ? chatTitle(currentRow) : "Jaeger")
       : dest === "agents"
-        ? "Agents & Characters"
+        ? (agentsTab === "characters" ? "Characters" : agentsTab === "team" ? "Office" : "Agents")
         : dest === "work"
           ? "Work"
           : dest === "library"
@@ -308,7 +357,6 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
   ], [startConversation, avatarOpen, toggleAvatarDock]);
 
   // Sub-tab helpers for the 5 consolidated destinations
-  const agentsTab = route.page === "agents" ? (route.sub || "roster") : "roster";
   const workTab =
     route.page === "automations" ? "automations"
       : route.page === "studio" ? "studio"
@@ -335,10 +383,10 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
           <div className="jg-ushell__header-start">
             <button
               type="button"
-              className="jg-ushell__icon-btn"
+              className="jg-ushell__icon-btn jg-ushell__navigation-toggle"
               aria-label="Toggle navigation"
-              aria-expanded={sidebarOpen}
-              onClick={() => setSidebarOpen((v) => !v)}
+              aria-expanded={dest === "settings" ? settingsNavOpen : sidebarOpen}
+              onClick={() => (dest === "settings" ? setSettingsNavOpen : setSidebarOpen)(v => !v)}
             >
               <PanelLeft size={18} />
             </button>
@@ -353,27 +401,32 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
             </button>
           </div>
 
-          <div className="jg-ushell__title" title={headerLabel}>
-            <JaegerAvatar portraitOverride={activeAgent?.avatar_url} state={!gw.ready || gw.error ? "connecting" : avatarState} />
-            <span>{headerLabel}</span>
-          </div>
+          {dest === "chat" ? <div className="jg-ushell__title jg-chat-heading">
+            <button ref={agentMenuButton} type="button" className="jg-chat-heading__agent" aria-haspopup="menu" aria-expanded={agentMenuOpen}
+              aria-label={`${activeAgentName} chat options`} onClick={() => setAgentMenuOpen(v => !v)}>
+              {activeAgent && <span aria-hidden="true"><AgentFace agent={activeAgent} size={24} /></span>}
+              <span>{activeAgentName}</span><ChevronDown size={13} aria-hidden="true" />
+            </button>
+            {conversationTitle && conversationTitle !== activeAgentName && <span className="jg-chat-heading__conversation" title={conversationTitle}>{conversationTitle}</span>}
+            <AppMenu open={agentMenuOpen} anchor={agentMenuOpen ? agentMenuButton.current : null} ariaLabel="Chat options" onClose={() => setAgentMenuOpen(false)}
+              items={[
+                ...(activeAgent ? [{ id: "profile", label: "Open agent profile" }] : []),
+                ...chatAgents.filter(a => a.id !== activeAgent?.id).map(a => ({ id: `agent:${a.id}`, label: `Switch to ${label(a)}${a.primary ? " (primary)" : ""}` })),
+                { id: "avatar", label: avatarOpen ? "Hide live avatar" : "Show live avatar" },
+                { id: "inspector", label: workOpen ? "Close tools & inspector" : "Open tools & inspector" },
+              ]}
+              onSelect={id => {
+                setAgentMenuOpen(false);
+                if (id === "profile" && activeAgent) navigate(`/agents?agent=${encodeURIComponent(activeAgent.id)}`);
+                else if (id.startsWith("agent:")) void openAgentChat(id.slice(6));
+                else if (id === "avatar") toggleAvatarDock();
+                else if (id === "inspector") { setWorkView(v => v || "tools"); setWorkOpen(v => !v); }
+              }} />
+          </div> : <div className="jg-ushell__title" title={headerLabel}><span>{headerLabel}</span></div>}
 
           <div className="jg-ushell__header-end">
             <ApprovalTray source={source} onOpenChat={() => navigate("/")} />
-            {dest === "chat" && (
-              <button
-                type="button"
-                className="jg-ushell__icon-btn"
-                aria-label="Toggle live avatar"
-                aria-pressed={avatarOpen}
-                title="Live Avatar (⌥⌘A)"
-                onClick={toggleAvatarDock}
-              >
-                <Bot size={17} />
-                <span>Avatar</span>
-              </button>
-            )}
-            <button
+            {(dest !== "chat" || workOpen) && <button
               type="button"
               className="jg-ushell__icon-btn"
               aria-label="Toggle tools workspace"
@@ -382,11 +435,11 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
               onClick={() => { setWorkView((v) => v || "tools"); setWorkOpen((v) => !v); }}
             >
               <PanelRight size={18} />
-            </button>
+            </button>}
           </div>
         </header>
 
-        <aside className="jg-ushell__sidebar" data-open={String(sidebarOpen)} aria-label="Primary navigation">
+        <aside className="jg-ushell__sidebar" data-open={String(dest !== "settings" && sidebarOpen)} aria-label="Primary navigation">
           <div className="jg-ushell__rail">
             <nav className="jg-ushell__rail-nav" aria-label="Destinations">
               {DEST_ITEMS.slice(0, 4).map(({ id, label, to, Icon }) => (
@@ -403,6 +456,8 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
                 </button>
               ))}
             </nav>
+            <div className="jg-ushell__rail-footer">
+            {!(dest === "settings" ? settingsNavOpen : sidebarOpen) && <SystemStatusButton source={source} ready={gw.ready} error={gw.error} host={gw.executionHost} compact onNavigate={navigate} />}
             <button
               type="button"
               className="jg-ushell__rail-btn"
@@ -413,13 +468,10 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
               <Settings size={20} />
               <span>Settings</span>
             </button>
+            </div>
           </div>
 
-          <section className="jg-ushell__context" hidden={!sidebarOpen} aria-label={`${headerLabel} sidebar`}>
-            <div className="jg-ushell__brand">
-              <span className="jg-ushell__brand-mark"><JaegerMark /><span>Jaeger</span></span>
-            </div>
-
+          {dest !== "settings" && <section className="jg-ushell__context" hidden={!sidebarOpen} aria-label={`${headerLabel} sidebar`}>
             {dest === "chat" && (
               <>
                 <button
@@ -474,9 +526,8 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
               <div className="jg-ushell__list">
                 <div className="jg-ushell__section-label">Entities</div>
                 {[
-                  ["roster", "Agents & Characters", "/agents"],
-                  ["characters", "Character Library", "/agents/characters"],
-                  ["knowledge", "Memory & Skills", "/agents/knowledge"],
+                  ["roster", "Agents", "/agents"],
+                  ["characters", "Characters", "/agents/characters"],
                   ["team", "Office (Optional)", "/agents/team"],
                 ].map(([id, title, to]) => (
                   <button key={id} type="button" className="jg-ushell__row" aria-current={agentsTab === id ? "page" : undefined} onClick={() => navigate(to)}>
@@ -487,21 +538,17 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
             )}
 
             {dest === "work" && (
-              <div className="jg-ushell__list">
-                <div className="jg-ushell__section-label">Work & Creation</div>
+              <nav className="jg-ushell__list" aria-label="Work sections">
                 {[
-                  ["tasks", "Tasks & Workflows", "/work/tasks"],
-                  ["automations", "Automations", "/automations"],
-                  ["youtube", "YouTube Production", "/work/youtube"],
-                  ["studio", "Imagine & Media Studio", "/studio"],
-                  ["calendar", "Calendar", "/work/calendar"],
-                  ["process", "Process & Runs", "/work/process"],
-                ].map(([id, title, to]) => (
-                  <button key={id} type="button" className="jg-ushell__row" aria-current={workTab === id ? "page" : undefined} onClick={() => navigate(to)}>
-                    {title}
-                  </button>
-                ))}
-              </div>
+                  { title: "Work", links: [["tasks", "Tasks", "/work/tasks"], ["calendar", "Schedule", "/work/calendar"]] },
+                  { title: "Create", links: [["youtube", "YouTube", "/work/youtube"], ["studio", "Media Studio", "/studio"]] },
+                ].map(group => <Fragment key={group.title}>
+                  <div className="jg-ushell__section-label">{group.title}</div>
+                  {group.links.map(([id, title, to]) => (
+                    <button key={id} type="button" className="jg-ushell__row" aria-current={workTab === id || (id === "tasks" && ["process", "feed"].includes(workTab)) || (id === "calendar" && workTab === "automations") ? "page" : undefined} onClick={() => navigate(to)}>{title}</button>
+                  ))}
+                </Fragment>)}
+              </nav>
             )}
 
             {dest === "library" && (
@@ -509,6 +556,7 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
                 <div className="jg-ushell__section-label">Assets & Files</div>
                 {[
                   ["media", "Media & Outputs", "/library?section=media"],
+                  ["knowledge", "Memory & Skills", "/library?section=knowledge"],
                   ["documents", "Documents", "/research/documents"],
                   ["research", "Research", "/research"],
                   ["workspace", "Files & Trusted Folders", "/research/workspace"],
@@ -520,32 +568,11 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
               </div>
             )}
 
-            {dest === "settings" && (
-              <div className="jg-ushell__list">
-                <div className="jg-ushell__section-label">System</div>
-                {[
-                  ["appearance", "Appearance", "/settings/appearance"],
-                  ["models", "Models & Failover", "/settings/models"],
-                  ["voice", "Voice & Audio", "/settings/voice"],
-                  ["integrations", "Integrations & MCP", "/settings/integrations"],
-                  ["machine", "Machine & Trusted Paths", "/settings/machine"],
-                  ["memory", "Memory & Profile", "/settings/memory"],
-                  ["checkpoints", "Checkpoints", "/settings/checkpoints"],
-                ].map(([id, title, to]) => (
-                  <button key={id} type="button" className="jg-ushell__row" aria-current={settingsTab === id ? "page" : undefined} onClick={() => navigate(to)}>
-                    {title}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="jg-ushell__footer" role="status">
-              <span>{gw.error ? "Connection error" : gw.ready ? (gw.executionHost ? `Connected · ${gw.executionHost}` : "Connected") : "Connecting…"}</span>
-            </div>
-          </section>
+            {sidebarOpen && <div className="jg-ushell__footer"><SystemStatusButton source={source} ready={gw.ready} error={gw.error} host={gw.executionHost} onNavigate={navigate} /></div>}
+          </section>}
         </aside>
 
-        {sidebarOpen && (
+        {dest !== "settings" && sidebarOpen && (
           <button
             type="button"
             className="jg-ushell__backdrop"
@@ -601,29 +628,13 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
 
           {dest === "agents" && (
             <section className="jg-ushell__page" aria-label="Agents and Characters">
-              <nav className="jg-ushell__subnav" aria-label="Agents sections">
-                {[
-                  ["roster", "Agents & Characters", "/agents"],
-                  ["characters", "Characters", "/agents/characters"],
-                  ["knowledge", "Memory & Skills", "/agents/knowledge"],
-                  ["team", "Office", "/agents/team"],
-                ].map(([id, title, to]) => (
-                  <button key={id} type="button" className="jg-ushell__subnav-btn" aria-current={agentsTab === id ? "page" : undefined} onClick={() => navigate(to)}>
-                    {title}
-                  </button>
-                ))}
-              </nav>
               <div className="jg-ushell__page-body">
                 <Suspense fallback={<PageFallback />}>
-                  {agentsTab === "knowledge" ? (
-                    <KnowledgePage source={source} agents={gw.agents} />
-                  ) : agentsTab === "team" ? (
+                  {agentsTab === "team" ? (
                     <PixelOffice source={source} onNavigate={navigate} params={route.params} />
                   ) : agentsTab === "characters" ? (
                     <CharactersPage characterId={route.params.get("character")} source={source} refresh={agentsStore.refresh} onNavigate={navigate} />
-                  ) : route.rest === "activity" ? (
-                    <AgentsActivityPage source={source} onNavigate={navigate} />
-                  ) : (
+                  ) : route.rest.endsWith("/avatar") ? (
                     <AgentsRoster
                       source={source}
                       store={agentsStore}
@@ -631,6 +642,10 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
                       onNavigate={navigate}
                       avatarFor={/^(.+)\/avatar$/.exec(route.rest)?.[1] ?? null}
                     />
+                  ) : (
+                    <AgentsHome key={route.params.get("agent") ?? "agents"} initialAgent={route.params.get("agent") ?? undefined}
+                      source={source} agents={agentsStore.agents} refresh={agentsStore.refresh} onNavigate={navigate}
+                      loading={agentsStore.loading} error={agentsStore.error} />
                   )}
                 </Suspense>
               </div>
@@ -639,24 +654,13 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
 
           {dest === "work" && (
             <section className="jg-ushell__page" aria-label="Work">
-              <nav className="jg-ushell__subnav" aria-label="Work sections">
-                {[
-                  ["tasks", "Tasks", "/work/tasks"],
-                  ["automations", "Automations", "/automations"],
-                  ["youtube", "YouTube", "/work/youtube"],
-                  ["studio", "Studio", "/studio"],
-                  ["calendar", "Calendar", "/work/calendar"],
-                  ["process", "Process", "/work/process"],
-                ].map(([id, title, to]) => (
-                  <button key={id} type="button" className="jg-ushell__subnav-btn" aria-current={workTab === id ? "page" : undefined} onClick={() => navigate(to)}>
-                    {title}
-                  </button>
-                ))}
-              </nav>
               <div className="jg-ushell__page-body">
                 <Suspense fallback={<PageFallback />}>
                   {workTab === "automations" && source.schedules ? (
-                    <AutomationsPanel controls={source.schedules} />
+                    <AutomationsPanel key={route.params.get("job") ?? route.params.get("new") ?? "list"} controls={source.schedules}
+                      initialNew={route.params.get("new") === "1"} initialJob={route.params.get("job")} onNavigate={navigate} />
+                  ) : workTab === "automations" ? (
+                    <div className="jg-u-page"><h1>Automations</h1><p>Scheduling isn’t available on this connection.</p></div>
                   ) : workTab === "youtube" ? (
                     <YouTubePage params={route.params} onNavigate={navigate} />
                   ) : workTab === "studio" ? (
@@ -664,11 +668,15 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
                   ) : workTab === "calendar" ? (
                     <CalendarPage source={source} onNavigate={navigate} />
                   ) : workTab === "process" ? (
-                    <ProcessView source={source} params={route.params} />
+                    <ProcessView source={source} params={route.params} onBack={() => navigate(route.params.get("task") ? `/work/tasks?task=${encodeURIComponent(route.params.get("task")!)}` : "/work/tasks")} />
                   ) : workTab === "feed" ? (
                     <CompanionPage page="feed" source={source} agents={gw.agents} onNavigate={navigate} />
                   ) : route.sub === "tasks" && route.rest === "gallery" ? (
                     <TasksPage source={source} />
+                  ) : route.sub === "tasks" && route.rest === "workflows" ? (
+                    source.workflows
+                      ? <WorkflowsPanel source={source} agents={gw.agents} onBack={() => navigate("/work/tasks")} />
+                      : <div className="jg-u-page"><h1>Saved workflows</h1><p>Workflows aren’t available on this connection.</p><button type="button" className="jg-u-btn" onClick={() => navigate("/work/tasks")}>Back to tasks</button></div>
                   ) : (
                     <TasksWorkspace source={source} agents={gw.agents} params={route.params} onNavigate={navigate} />
                   )}
@@ -679,21 +687,11 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
 
           {dest === "library" && (
             <section className="jg-ushell__page" aria-label="Library">
-              <nav className="jg-ushell__subnav" aria-label="Library sections">
-                {[
-                  ["media", "Media & Outputs", "/library?section=media"],
-                  ["documents", "Documents", "/research/documents"],
-                  ["research", "Research", "/research"],
-                  ["workspace", "Files & Folders", "/research/workspace"],
-                ].map(([id, title, to]) => (
-                  <button key={id} type="button" className="jg-ushell__subnav-btn" aria-current={libraryTab === id ? "page" : undefined} onClick={() => navigate(to)}>
-                    {title}
-                  </button>
-                ))}
-              </nav>
               <div className="jg-ushell__page-body">
                 <Suspense fallback={<PageFallback />}>
-                  {libraryTab === "documents" ? (
+                  {libraryTab === "knowledge" ? (
+                    <KnowledgePage source={source} agents={gw.agents} />
+                  ) : libraryTab === "documents" ? (
                     <DocumentsPage params={route.params} />
                   ) : libraryTab === "research" ? (
                     <ResearchPage source={source} agents={gw.agents} onNavigate={navigate} />
@@ -716,6 +714,8 @@ export function UnifiedShell({ source }: { source: JaegerSource }) {
                 tab={settingsTab}
                 segment={settingsSegment}
                 params={route.params}
+                navigationOpen={settingsNavOpen}
+                navigationFooter={<SystemStatusButton source={source} ready={gw.ready} error={gw.error} host={gw.executionHost} onNavigate={navigate} />}
                 onTab={(t) => navigate(t ? `/settings/${t}` : "/settings", { replace: Boolean(t && settingsTab) })}
                 onOpenConversation={(sid) => { selectConversation(sid); navigate("/"); }}
                 onClose={() => navigate("/")}

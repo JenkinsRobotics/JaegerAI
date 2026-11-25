@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from jaeger_agent.schemas.message_types import Message
+from jaeger_contracts import Message
 
 
 @dataclass

@@ -276,7 +276,7 @@ def test_oversized_review_never_sends_a_truncated_action_to_model():
 
 
 def test_python_traceback_progress_is_not_the_same_semantic_failure():
-    from jaeger_agent.loop.loop_backstop import semantic_failure_signature, loop_halt_reason
+    from jaeger_loop.backstop import semantic_failure_signature, loop_halt_reason
     header = 'Traceback (most recent call last):\n  File "repair.py", line 1, in <module>\n'
     args = {'command': 'python3 repair.py'}
     first = semantic_failure_signature('terminal', args, {'ok': False, 'stderr': header + 'ImportError: missing etree'})

@@ -17,7 +17,7 @@ from .adapters.local_llama import LocalLlamaAdapter
 from .adapters.mlx import MLXAdapter
 from .adapters.openai import OpenAIAdapter
 from .loop.callbacks import AgentCallbacks
-from .loop.interrupt import AgentInterrupted, StaleCallTimeout, interruptible_call
+from jaeger_loop.interrupt import AgentInterrupted, StaleCallTimeout, interruptible_call
 from .loop.jaeger_agent import JaegerAgent, SkipFinalFinalizer
 from .core.messages import (
     AgentActivity,
@@ -30,12 +30,12 @@ from .core.messages import (
     ToolEvent,
 )
 from .core.node import MindNode, make_mind_node
-from .parsing import schema_sanitizer
-from .schemas.message_types import Message, Role, ToolCall
+from jaeger_reliability import schema_sanitizer
+from jaeger_contracts import Message, Role, ToolCall
 from .tool_executor import DirectToolExecutor, LedgerToolExecutor, ToolExecutor
 from .util.retry_utils import jittered_backoff, retry_with_backoff
-from jaeger_os.core.tools.arg_coercion import coerce_args
-from jaeger_os.core.tools.tool_registry import (
+from jaeger_tools.arg_coercion import coerce_args
+from jaeger_tools.tool_registry import (
     clear_registry,
     get_tool,
     get_tools,
@@ -45,7 +45,7 @@ from jaeger_os.core.tools.tool_registry import (
     register_tool_instance,
     unregister_tool,
 )
-from jaeger_os.core.tools.tool_schema import ToolDef, dev_mode_enabled
+from jaeger_tools.tool_schema import ToolDef, dev_mode_enabled
 
 __version__ = "1.2.0"
 

@@ -35,7 +35,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 LEDGER_TAG = "[Work Ledger]"
 

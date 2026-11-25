@@ -17,10 +17,11 @@ export interface OrchestrationState {
   loadOlder?: () => Promise<void>;
   /** G1 history failed; the feed still shows the snapshot backfill. */
   historyError?: string;
+  snapshotStale: boolean;
 }
 
 const POLL_MS = 15000;
-const REFRESH_ON = new Set(["agent.handoff", "agent.handoff.finished", "task.created", "task.updated", "agent.created", "agent.updated"]);
+const REFRESH_ON = new Set(["agent.handoff", "agent.handoff.finished", "agent.status.changed", "task.created", "task.updated", "agent.created", "agent.updated", "approval.request", "approval.resolved", "approval.changes_requested", "turn.start", "turn.finish", "turn.failed", "turn.cancelled", "turn.unknown"]);
 
 export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffMs?: number; callerId?: string; /** Also re-read the snapshot on this interval while streaming (statuses that no event announces, e.g. a chat turn). */ refreshMs?: number } = {}): OrchestrationState & { live: ReturnType<typeof agentsLive> } {
   const [snapshot, setSnapshot] = useState<OrchestrationSnapshot>();
@@ -32,12 +33,14 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
   const [nonce, setNonce] = useState(0);
   const [nextBefore, setNextBefore] = useState<number>();
   const [historyError, setHistoryError] = useState<string>();
+  const [snapshotStale, setSnapshotStale] = useState(false);
   const seen = useRef(new Set<number>());
   const eventHandoffs = useRef(new Map<string, Handoff>());
   const snapRef = useRef<OrchestrationSnapshot | undefined>(undefined);
 
   const load = useCallback(async (initial = false) => {
-    let snap = await adapter.snapshot();
+    let snap = await adapter.snapshot().catch(error => { setSnapshotStale(true); throw error; });
+    setSnapshotStale(false);
     for (const h of eventHandoffs.current.values()) {
       const cur = snap.handoffs.find((x) => x.id === h.id);
       if (!cur || (cur.updated_at ?? 0) <= (h.updated_at ?? 0)) snap = patchHandoff(snap, h) ?? snap;
@@ -115,7 +118,7 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
   }, [adapter, nextBefore, opts.callerId]);
 
   const live = useMemo(() => (snapshot ? agentsLive(snapshot, adapter.gaps, overrides) : []), [snapshot, adapter.gaps, overrides]);
-  return { status, error, snapshot, rows, stream, live, historyError, retry: () => setNonce((n) => n + 1), loadOlder: nextBefore != null ? loadOlder : undefined };
+  return { status, error, snapshot, rows, stream, live, historyError, snapshotStale, retry: () => setNonce((n) => n + 1), loadOlder: nextBefore != null ? loadOlder : undefined };
 }
 
 /** Handoff events carry the full record ({handoff}). */

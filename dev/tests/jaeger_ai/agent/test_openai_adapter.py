@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 
 from jaeger_agent import OpenAIAdapter
 from jaeger_agent.adapters.openai import KNOWN_PROVIDERS
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools.tool_schema import ToolDef
 
 
 # ── fake SDK client ────────────────────────────────────────────────
@@ -445,7 +445,7 @@ def test_call_compat_providers_do_not_send_stream_options():
 def test_call_interrupt_mid_stream_closes_and_raises():
     """An interrupt observed between chunks must close the HTTP stream
     (so the server stops generating) and surface AgentInterrupted."""
-    from jaeger_agent.loop.interrupt import AgentInterrupted
+    from jaeger_loop.interrupt import AgentInterrupted
 
     ev = threading.Event()
 

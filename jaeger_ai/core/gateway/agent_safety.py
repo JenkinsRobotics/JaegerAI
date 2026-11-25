@@ -87,7 +87,7 @@ class _Shadow:
         self.store = store
 
     def _cp(self):
-        from jaeger_agent import checkpoints as cp
+        from jaeger_checkpoints import shadow_manager as cp
         return cp
 
     def _ready(self, wd: Path) -> bool:

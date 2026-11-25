@@ -8,7 +8,7 @@ import pytest
 from jaeger_agent.adapters.anthropic import AnthropicAdapter
 from jaeger_agent.adapters.openai import OpenAIAdapter
 from jaeger_agent.adapters.cli_stream import stream_delta
-from jaeger_agent.loop.interrupt import CallProgress, StaleCallTimeout, AgentInterrupted, interruptible_call
+from jaeger_loop.interrupt import CallProgress, StaleCallTimeout, AgentInterrupted, interruptible_call
 from jaeger_agent.loop.runtime_bridge import build_jaeger_agent, _adapter_for_client
 
 

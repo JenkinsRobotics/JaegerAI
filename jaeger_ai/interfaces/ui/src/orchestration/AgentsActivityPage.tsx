@@ -4,7 +4,6 @@
 import { useMemo } from "react";
 import { GatewayClient } from "../api/gateway";
 import type { JaegerSource } from "../api/source";
-import { PageHead } from "../unified/ui";
 import { derivedGaps, gatewayActivity, liveAdapter, type GapProvider } from "./adapter";
 import { OrchestrationPanes } from "./OrchestrationPanes";
 
@@ -17,10 +16,6 @@ export function AgentsActivityPage({ source, onNavigate }: { source: JaegerSourc
     return liveAdapter(source, gaps);
   }, [source]);
   return (
-    <div className="jg-u-page jg-orch-page">
-      <PageHead title="Activity" subtitle="What the lead handed off, who's working, and whether results were checked." actions={
-        <button type="button" className="jg-u-btn" onClick={() => onNavigate("/agents")}>Roster</button>} />
-      <OrchestrationPanes adapter={adapter} onNavigate={onNavigate} initialCaller={new URLSearchParams(location.search).get("agent_id") ?? undefined} />
-    </div>
+    <OrchestrationPanes embedded adapter={adapter} onNavigate={onNavigate} initialCaller={new URLSearchParams(location.search).get("agent_id") ?? undefined} />
   );
 }

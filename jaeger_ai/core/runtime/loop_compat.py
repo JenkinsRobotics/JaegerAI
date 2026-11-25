@@ -102,7 +102,7 @@ def _install_arg_key_cleanup() -> None:
 
 
 def _install_schedule_delivery() -> None:
-    from jaeger_os.core.tools.tool_registry import get_tool, has_tool
+    from jaeger_tools.tool_registry import get_tool, has_tool
 
     if not has_tool("schedule_prompt"):
         return

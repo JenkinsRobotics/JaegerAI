@@ -2,7 +2,7 @@
 import os
 import time
 
-from jaeger_agent import guardrails
+from jaeger_authority import guardrails
 from jaeger_ai.core.safety import guardrails as builtin
 
 

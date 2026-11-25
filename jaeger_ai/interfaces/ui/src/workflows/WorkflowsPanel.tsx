@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { keysWithPrefix } from "../lib/storageKeys";
 import type { JaegerSource, WorkflowAction, WorkflowDocument, WorkflowReceipt, WorkflowDefinition } from '../api/source';
 import type { Agent } from '../api/types';
+import { Badge, PageHead } from "../unified/ui";
+import "../unified/workWorkspace.css";
 interface Draft { raw: string; revision?: number }
 interface Intent { operationId: string; action: WorkflowAction; id: string; draft: Draft }
 const draftKey = (id: string) => `jaeger.ui.workflow.draft.v1.${encodeURIComponent(id)}`;
@@ -23,7 +25,7 @@ const settleIntent = (intent: Intent): Intent | undefined => {
   return savedIntents()[0];
 };
 const backups = () => { try { return keysWithPrefix(draftKey('new')+'.backup.').reverse().slice(0,10); } catch { return []; } };
-export function WorkflowsPanel({ source, agents }: { source: JaegerSource; agents: Agent[] }) {
+export function WorkflowsPanel({ source, agents, onBack }: { source: JaegerSource; agents: Agent[]; onBack?: () => void }) {
   const controls = source.workflows!;
   const [catalog, setCatalog] = useState<Awaited<ReturnType<typeof controls.list>>>(), [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState<string>(), [current, setCurrent] = useState<WorkflowDocument>(), [draft, setDraft] = useState<Draft>({raw:''});
@@ -92,14 +94,24 @@ export function WorkflowsPanel({ source, agents }: { source: JaegerSource; agent
   const definition = (() => { try { const value=JSON.parse(draft.raw); return value && typeof value.name==='string' && typeof value.description==='string' && Array.isArray(value.steps) && value.steps.every((step: {title?: unknown;instruction?: unknown})=>step&&typeof step.title==='string'&&typeof step.instruction==='string') ? value as WorkflowDefinition : undefined; } catch { return undefined; } })();
   const editable = !busy && !pending && !current?.archived && (selected==='new'||current?.id===selected);
   const setDefinition = (value: WorkflowDefinition) => update(JSON.stringify(value,null,2));
-  return <section aria-label="Workflows"><p>Versioned instruction workflows. Imported JSON is data; no URL is fetched or step executed while editing. Run proposals use existing Tasks and approvals.</p>
+  const newWorkflow = <button type="button" className="jg-u-btn jg-u-btn--primary" disabled={busy||Boolean(pending)||!catalog} onClick={()=>void open('new')}>New workflow</button>;
+  return <section aria-label="Workflows" className={onBack ? "jg-u-page jg-work-density" : undefined}>
+    {onBack ? <PageHead title="Saved workflows" subtitle="Keep a set of instructions you can reuse. Starting a workflow creates a task proposal for approval." actions={<>
+      <button type="button" className="jg-u-btn" onClick={onBack}>Back to tasks</button>{newWorkflow}
+    </>} /> : <p>Save reusable instructions. Starting a workflow creates a task proposal for approval.</p>}
     {catalogError&&<p role="alert">Could not load workflows: {catalogError}. Previous list retained.</p>}
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}{pending&&<p role="alert">A workflow action needs reconciliation. <button disabled={busy} onClick={()=>void check()}>Check saved workflow action</button></p>}
-    <button type="button" disabled={busy||Boolean(pending)||!catalog} onClick={()=>void open('new')}>New workflow</button><button type="button" disabled={busy} onClick={()=>setAttempt(n=>n+1)}>Refresh workflows</button>
-    <label>Paste workflow JSON<textarea aria-label="Import workflow JSON" value={imported} disabled={busy||Boolean(pending)} onChange={e=>{setImported(e.target.value);try{localStorage.setItem('jaeger.ui.workflow.import.v1',e.target.value);}catch(error){setError(String(error));}}}/></label><button type="button" disabled={busy||Boolean(pending)||!imported.trim()} onClick={reviewImport}>Review imported definition</button>
+    <div className="jg-work-toolbar">{!onBack && newWorkflow}<button type="button" className="jg-u-btn" disabled={busy} onClick={()=>setAttempt(n=>n+1)}>Refresh workflows</button></div>
     {!catalog && <WidgetCard title="Workflows" state={catalogError ? "error" : "loading"} message={catalogError ? `Could not load workflows: ${catalogError}` : "Loading workflows…"} />}
     {catalog?.workflows.length === 0 && <WidgetCard title="Workflows" state="empty" message="No workflows" />}
-    <ul>{catalog?.workflows.map(row=><li key={row.id}><button type="button" disabled={busy} onClick={()=>void open(row.id)}>{row.title} · revision {row.revision}{row.archived?' · Archived':''}</button></li>)}</ul>
+    {Boolean(catalog?.workflows.length) && <ul className="jg-work-list" aria-label="Workflow library">{catalog?.workflows.map(row=><li key={row.id}>
+      <button type="button" className="jg-u-btn" aria-pressed={selected === row.id} disabled={busy} onClick={()=>void open(row.id)}>{row.title}</button>
+      <Badge>{row.archived ? "Archived" : `Revision ${row.revision}`}</Badge>
+    </li>)}</ul>}
+    <details className="jg-work-secondary"><summary>Import a workflow</summary>
+      <label className="jg-ui-field">Paste workflow JSON<textarea aria-label="Import workflow JSON" value={imported} disabled={busy||Boolean(pending)} onChange={e=>{setImported(e.target.value);try{localStorage.setItem('jaeger.ui.workflow.import.v1',e.target.value);}catch(error){setError(String(error));}}}/></label>
+      <button type="button" className="jg-u-btn" disabled={busy||Boolean(pending)||!imported.trim()} onClick={reviewImport}>Review imported definition</button>
+    </details>
     {selected&&<>
       {definition&&<div className="jg-form"><label className="jg-form__field">Workflow name<input aria-label="Workflow name" value={definition.name} disabled={!editable} onChange={e=>setDefinition({...definition,name:e.target.value})}/></label><label className="jg-form__field">Description<textarea aria-label="Workflow description" value={definition.description} disabled={!editable} onChange={e=>setDefinition({...definition,description:e.target.value})}/></label>
       {definition.steps.map((step,index)=><WidgetCard key={index} title={`Step ${index+1}`}><label>Step {index+1} title<input aria-label={`Workflow step ${index+1} title`} value={step.title} disabled={!editable} onChange={e=>setDefinition({...definition,steps:definition.steps.map((s,i)=>i===index?{...s,title:e.target.value}:s)})}/></label><label>Instruction<textarea aria-label={`Workflow step ${index+1} instruction`} value={step.instruction} disabled={!editable} onChange={e=>setDefinition({...definition,steps:definition.steps.map((s,i)=>i===index?{...s,instruction:e.target.value}:s)})}/></label><button type="button" disabled={!editable||definition.steps.length<=1} onClick={()=>setDefinition({...definition,steps:definition.steps.filter((_,i)=>i!==index)})}>Remove instruction step</button></WidgetCard>)}

@@ -3,7 +3,7 @@
 import json
 import pytest
 
-from jaeger_agent.parsing.tool_call_repair import repair_plain_text_tool_calls
+from jaeger_reliability.tool_repair import repair_plain_text_tool_calls
 
 
 def test_repair_xml_function_tags():

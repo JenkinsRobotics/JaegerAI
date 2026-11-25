@@ -5,7 +5,7 @@ from __future__ import annotations
 
 def test_known_authoritative_tools_are_effect_ledger_classified() -> None:
     import jaeger_agent.tools  # noqa: F401 -- populate the process registry
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
 
     authoritative = {
         "browser",

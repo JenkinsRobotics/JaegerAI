@@ -1,4 +1,4 @@
-"""jaeger-orchestration: subagents with permission intersection, durable mailboxes, HubArbiter, cron."""
+"""jaeger-orchestration: Pregel DAG, durable WorkflowEngine, subagents, mailboxes, auth, scoped vars & cron."""
 
 from .orchestrator import (
     CronJob,
@@ -7,11 +7,55 @@ from .orchestrator import (
     SubagentOrchestrator,
     intersect_sandbox_profiles,
 )
+from .pregel import (
+    AttemptFencedQueue,
+    Command,
+    FencedJob,
+    GraphInterrupt,
+    PregelGraph,
+    PregelRunResult,
+    RunAuthorization,
+    ScopedVariables,
+    Send,
+    StaleAttemptError,
+    VarScope,
+    bind_authorization,
+    current_authorization,
+    interrupt,
+)
+from .workflow import (
+    StepRecord,
+    StepStatus,
+    WorkflowEngine,
+    WorkflowError,
+    WorkflowRun,
+    WorkflowStep,
+)
 
 __all__ = [
+    "AttemptFencedQueue",
+    "Command",
     "CronJob",
     "CronScheduler",
     "DurableMailbox",
+    "FencedJob",
+    "GraphInterrupt",
+    "PregelGraph",
+    "PregelRunResult",
+    "RunAuthorization",
+    "ScopedVariables",
+    "Send",
+    "StaleAttemptError",
+    "StepRecord",
+    "StepStatus",
     "SubagentOrchestrator",
+    "VarScope",
+    "WorkflowEngine",
+    "WorkflowError",
+    "WorkflowRun",
+    "WorkflowStep",
+    "bind_authorization",
+    "current_authorization",
+    "interrupt",
     "intersect_sandbox_profiles",
 ]

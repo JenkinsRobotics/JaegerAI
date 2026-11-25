@@ -60,7 +60,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 from jaeger_agent.delegation_context import (
     is_delegated_child_context,

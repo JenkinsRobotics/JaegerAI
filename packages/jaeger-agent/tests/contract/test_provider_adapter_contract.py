@@ -19,8 +19,8 @@ from jaeger_agent.adapters.hermes_xml import HermesXMLAdapter
 from jaeger_agent.adapters.local_llama import LocalLlamaAdapter
 from jaeger_agent.adapters.mlx import MLXAdapter
 from jaeger_agent.adapters.openai import OpenAIAdapter
-from jaeger_agent.schemas.message_types import Message
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_contracts import Message
+from jaeger_tools.tool_schema import ToolDef
 
 
 class FakeAdapter(ProviderAdapter):

@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools.tool_schema import ToolDef
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ def merge_cli_mcp_tools(*groups: list[ToolDef] | None) -> list[ToolDef]:
     missing = [name for name in REQUIRED_CLI_MCP_TOOLS if name not in by_name]
     if missing:
         try:
-            from jaeger_os.core.tools.tool_registry import get_tools
+            from jaeger_tools.tool_registry import get_tools
             for tool in get_tools():
                 name = getattr(tool, "name", "") or ""
                 if name in missing and name not in by_name:

@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from jaeger_agent.memory import memory as mem
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 
 def _identity(topic: str, insight_id: str) -> tuple[str, str]:

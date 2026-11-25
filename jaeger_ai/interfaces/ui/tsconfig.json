@@ -15,7 +15,13 @@
     "baseUrl": ".",
     "paths": {
       "@aether/ui": ["vendor/aether-ui/src/index.ts"],
-      "@aether/ui/*": ["vendor/aether-ui/*"]
+      "@aether/ui/*": ["vendor/aether-ui/*"],
+      "@jaeger/ui-protocol": ["../../../packages/jaeger-ui-protocol/src/index.ts"],
+      "@jaeger/ui-sdk": ["../../../packages/jaeger-ui-sdk/src/index.ts"],
+      "@jaeger/ui-kit": ["../../../packages/jaeger-ui-kit/src/index.ts"],
+      "@jaeger/ui-features": ["../../../packages/jaeger-ui-features/src/index.ts"],
+      "react": ["node_modules/@types/react/index.d.ts"],
+      "react/*": ["node_modules/@types/react/*"]
     }
   },
   "include": ["src", "vite.config.ts"]

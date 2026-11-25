@@ -15,7 +15,7 @@ import time
 from urllib.parse import urlparse
 
 from .openai import OpenAIAdapter
-from jaeger_agent.loop.interrupt import AgentInterrupted, CallProgress, interruptible_call
+from jaeger_loop.interrupt import AgentInterrupted, CallProgress, interruptible_call
 
 logger = logging.getLogger(__name__)
 

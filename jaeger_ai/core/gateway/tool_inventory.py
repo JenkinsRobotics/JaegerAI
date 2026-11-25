@@ -10,7 +10,7 @@ from jaeger_ai.core.redaction import redact_text
 
 
 def collect(query: str = '') -> dict[str, Any]:
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
     module = sys.modules.get('jaeger_ai.plugins.mcp.client')
     mcp = module.runtime_inventory() if module is not None else {'initialized': False, 'servers': [], 'tools': []}
     links = {tool['agent_name']: tool for tool in mcp['tools']}

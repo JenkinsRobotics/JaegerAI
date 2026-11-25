@@ -44,13 +44,13 @@ function SectionJump({ active, sections }: { active?: string; sections: { id: st
   }, [active]);
   return (
     <>
-      <nav className="jg-ui-toolbar" aria-label="Settings subsections">
+      {sections.length > 1 && <nav className="jg-ui-toolbar" aria-label="Settings subsections">
         {sections.map((s) => (
           <a className="jg-u-btn" key={s.id} href={`#set-${s.id}`}>
             {s.title}
           </a>
         ))}
-      </nav>
+      </nav>}
       {sections.map((s) => (
         <section id={`set-${s.id}`} key={s.id} aria-label={s.title}>
           <h2>{s.title}</h2>
@@ -68,6 +68,8 @@ export interface SettingsViewProps {
   tab?: SettingsTab;
   segment?: string;
   params: URLSearchParams;
+  navigationOpen?: boolean;
+  navigationFooter?: React.ReactNode;
   onTab: (tab: SettingsTab | "") => void;
   onOpenConversation: (sessionId: string) => void;
   onClose: () => void;
@@ -80,6 +82,8 @@ export function SettingsView({
   tab,
   segment,
   params,
+  navigationOpen,
+  navigationFooter,
   onTab,
   onOpenConversation,
   onClose,
@@ -93,6 +97,8 @@ export function SettingsView({
         open
         tab={tab}
         segment={segment}
+        navigationOpen={navigationOpen}
+        navigationFooter={navigationFooter}
         onTab={onTab}
         onClose={onClose}
         modelsContent={

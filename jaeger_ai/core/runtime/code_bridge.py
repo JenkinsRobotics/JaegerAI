@@ -162,7 +162,7 @@ def _dispatch(name: str) -> Any:
     registered, the same way the agent loop refreshes its catalogue
     mid-turn.
     """
-    from jaeger_os.core.tools.tool_registry import get_tool, has_tool
+    from jaeger_tools.tool_registry import get_tool, has_tool
 
     if not has_tool(name):
         raise KeyError(f"unknown tool {name!r}")
@@ -336,7 +336,7 @@ class _BridgeServer:
                     result = self._executor.execute(tool_def, args)
                 else:
                     result = tool_def.dispatch(args)
-            from jaeger_os.core.tools.tool_schema import tool_result_failed
+            from jaeger_tools.tool_schema import tool_result_failed
             if tool_result_failed(result):
                 error_type = result.get("error_type") or "tool_failed"
                 with self._lock:

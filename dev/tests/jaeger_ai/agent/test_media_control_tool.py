@@ -138,7 +138,7 @@ def test_now_playing_nothing_playing(monkeypatch):
 
 def test_media_control_is_registered_external_effect():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert get_tier(tools["media_control"]) == PermissionTier.EXTERNAL_EFFECT
@@ -146,7 +146,7 @@ def test_media_control_is_registered_external_effect():
 
 def test_now_playing_is_registered_read_only():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert get_tier(tools["now_playing"]) == PermissionTier.READ_ONLY

@@ -38,6 +38,20 @@ describe("scroll follow", () => {
       wasSticking: true,
     })).toBe(true);
   });
+  it("keeps following when keyboard resize moves the scroll offset upward", () => {
+    const input = {
+      prevScrollTop: 1200, scrollTop: 1080, gap: 200, thresholdPx: 64,
+      isProgrammatic: false, viewportResized: true, userInputActive: false, wasSticking: true,
+    };
+    expect(nextStickState(input)).toBe(true);
+    expect(nextStickState({ ...input, userInputActive: true })).toBe(false);
+  });
+  it("does not jump to the latest when keyboard dismissal clamps a history scroll", () => {
+    expect(nextStickState({
+      prevScrollTop: 1000, scrollTop: 895, gap: 5, thresholdPx: 64,
+      isProgrammatic: false, viewportResized: true, userInputActive: false, wasSticking: false,
+    })).toBe(false);
+  });
   it("re-engages when reader returns near bottom", () => {
     expect(nextStickState({
       prevScrollTop: 900,

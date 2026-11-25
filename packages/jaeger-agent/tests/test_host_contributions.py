@@ -30,7 +30,7 @@ from jaeger_agent.skill_registry import toolset_scoping
 @pytest.fixture()
 def app_tool(live_tools):
     """A tool contributed the way a host application would."""
-    from jaeger_os.core.tools.tool_registry import register_tool_from_function
+    from jaeger_tools.tool_registry import register_tool_from_function
 
     @register_tool_from_function(name="host_contributed_probe", side_effect="read")
     def _probe(what: str = "") -> dict:

@@ -158,7 +158,7 @@ def test_non_read_only_mcp_tool_asks_and_denial_blocks_the_call(monkeypatch):
     import pytest
     from jaeger_ai.plugins.mcp import client
     from jaeger_os.core.safety.permissions import PermissionDenied, PermissionPolicy, PermissionTier, use_policy
-    from jaeger_os.core.tools.tool_registry import get_tool, unregister_tool
+    from jaeger_tools.tool_registry import get_tool, unregister_tool
 
     calls = []
     monkeypatch.setattr(client, "call_mcp_tool", lambda q, a: calls.append((q, a)) or {"ok": True})
@@ -206,7 +206,7 @@ def test_connector_lifecycle_tools_registered_and_work(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
     from jaeger_agent.tools import connectors
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
     from jaeger_ai.plugins.mcp import client
 
     names = {t.name for t in get_tools()}

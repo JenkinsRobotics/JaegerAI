@@ -16,7 +16,6 @@ describe("router", () => {
   it("resolves sub-tabs, defaulting to the first", () => {
     expect(parseRoute("/work")).toMatchObject({ page: "work", sub: "tasks", rest: "" });
     expect(parseRoute("/work/tasks/gallery")).toMatchObject({ page: "work", sub: "tasks", rest: "gallery" });
-    expect(parseRoute("/research/knowledge").sub).toBe("knowledge");
     expect(parseRoute("/home").sub).toBe("tasks");
     expect(parseRoute("/home/widgets")).toMatchObject({ page: "settings", rest: "" });
   });
@@ -30,7 +29,7 @@ describe("router", () => {
   });
   it.each([
     ["/characters", "agents", "characters"], ["/tasks", "work", "tasks"], ["/calendar", "work", "calendar"],
-    ["/documents", "research", "documents"], ["/knowledge", "agents", "knowledge"],
+    ["/documents", "research", "documents"],
 
   ])("redirects retired %s to %s › %s", (old, page, sub) => {
     expect(parseRoute(old)).toMatchObject({ page, sub });
@@ -40,7 +39,7 @@ describe("router", () => {
     expect(canonicalPath("/tasks/gallery", "?x=1")).toBe("/work/tasks/gallery?x=1");
     expect(canonicalPath("/characters", "?character=jarvis")).toBe("/agents/characters?character=jarvis");
     expect(canonicalPath("/work/tasks")).toBeNull();
-    expect(Object.keys(LEGACY_PATHS).sort()).toEqual(["calendar", "characters", "compare", "documents", "integrations", "knowledge", "sharepoint", "tasks", "workspace"]);
+    expect(Object.keys(LEGACY_PATHS).sort()).toEqual(["calendar", "characters", "compare", "documents", "integrations", "sharepoint", "tasks", "workspace"]);
   });
   it("rewrites the old ?ui= links to the matching page", () => {
     expect(legacyRedirect("/", "?ui=apple")).toBe("/chat");
@@ -64,15 +63,22 @@ describe("Rev 3 complete destination migration", () => {
     ["/agents/hermes", "/settings"], ["/agents/openclaw", "/settings/integrations"],
     ["/work/pipeline", "/work"], ["/work/backlog", "/work"], ["/work/production", "/work"],
     ["/work/workspace", "/research/workspace"], ["/work/checkpoints", "/settings/checkpoints"],
-    ["/research/youtube", "/work/youtube"], ["/research/knowledge", "/agents/knowledge"], ["/research/sharepoint", "/settings/integrations/sharepoint"],
+    ["/research/youtube", "/work/youtube"], ["/research/sharepoint", "/settings/integrations/sharepoint"],
     ["/models", "/settings/models/library"], ["/models/library", "/settings/models/library"], ["/models/compare", "/settings/models/compare"], ["/models/usage", "/settings/models/usage"],
-    ["/knowledge", "/agents/knowledge"], ["/sharepoint", "/settings/integrations/sharepoint"], ["/compare", "/settings/models/compare"], ["/workspace", "/research/workspace"],
+    ["/sharepoint", "/settings/integrations/sharepoint"], ["/compare", "/settings/models/compare"], ["/workspace", "/research/workspace"],
   ])("moves %s to %s without losing queries or tails", (old, target) => {
     expect(canonicalPath(old, "?task=real-id")).toBe(`${target}?task=real-id`);
     expect(canonicalPath(`${old}/detail`, "?x=1")).toBe(`${target}/detail?x=1`);
     expect(canonicalPath(target)).toBeNull();
     expect(parseRoute(old)).toMatchObject(parseRoute(target));
   });
+});
+
+it.each(["/agents/knowledge", "/research/knowledge", "/knowledge"])("moves %s into Library and retains query parameters", (path) => {
+  const route = parseRoute(path, "?agent_id=jaeger");
+  expect(route.page).toBe("library");
+  expect(route.params.get("section")).toBe("knowledge");
+  expect(route.params.get("agent_id")).toBe("jaeger");
 });
 
 it("navigates home without a separate workspace mode", async () => {

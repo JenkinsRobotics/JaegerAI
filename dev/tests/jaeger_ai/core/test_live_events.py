@@ -158,7 +158,7 @@ def test_bridge_fires_turn_end_approval_error_once(store):
 def test_subagent_spans_nest_under_launching_tool():
     from contextvars import copy_context
     from concurrent.futures import ThreadPoolExecutor
-    from jaeger_agent import live
+    from jaeger_events import live
     from jaeger_ai.contract import trace
     from jaeger_ai.core.runtime import subagents
 
@@ -183,13 +183,13 @@ def test_subagent_spans_nest_under_launching_tool():
 
 
 def test_live_emit_is_noop_without_host():
-    from jaeger_agent import live
+    from jaeger_events import live
     live.emit("tool.progress", {"message": "x"})  # no emitter bound: nothing raises
     assert live.current_tool_call() is None
 
 
 def test_gateway_tool_events_use_the_loops_real_call_id(tmp_path, monkeypatch):
-    from jaeger_agent import live
+    from jaeger_events import live
     from jaeger_ai.core.gateway.server import JaegerGatewayApp, _live_activity_id
     from jaeger_ai.core.gateway.session_store import GatewaySessionStore
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
@@ -218,7 +218,7 @@ def test_gateway_tool_events_use_the_loops_real_call_id(tmp_path, monkeypatch):
 
 
 def test_hook_decisions_are_reported_as_nodes_under_the_tool():
-    from jaeger_agent import live
+    from jaeger_events import live
     from jaeger_agent.hooks import HookDecision, HookRegistry
     from jaeger_ai.contract import trace
     reg = HookRegistry()
@@ -258,7 +258,7 @@ def test_plugin_hooks_ride_the_agent_hook_registry(monkeypatch):
 
 def test_long_tool_gets_heartbeats_until_it_finishes(tmp_path, monkeypatch):
     import time as _t
-    from jaeger_agent import live
+    from jaeger_events import live
     from jaeger_ai.contract import trace
     from jaeger_ai.core.gateway import server as gw
     from jaeger_ai.core.gateway.session_store import GatewaySessionStore
@@ -286,7 +286,7 @@ def test_long_tool_gets_heartbeats_until_it_finishes(tmp_path, monkeypatch):
 
 
 def test_live_progress_reports_on_the_current_tool():
-    from jaeger_agent import live
+    from jaeger_events import live
     got = []
     with live.bind(lambda e, d: got.append((e, d))), live.tool_call("t1"):
         live.progress("halfway", fraction=1.7)
@@ -344,7 +344,7 @@ def test_older_turns_replay_from_per_session_history_past_the_window(tmp_path, m
 
 
 def test_live_emit_stamps_the_running_subagent():
-    from jaeger_agent import live
+    from jaeger_events import live
 
     got = []
     with live.bind(lambda e, d: got.append((e, d))):

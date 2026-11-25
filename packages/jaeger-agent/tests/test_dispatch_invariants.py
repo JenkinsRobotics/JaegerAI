@@ -6,9 +6,9 @@ from pydantic import BaseModel
 
 from jaeger_agent import JaegerAgent, ProviderAdapter
 from jaeger_agent.loop.callbacks import AgentCallbacks
-from jaeger_agent.loop.turn_budget import TurnBudgetLimits
-from jaeger_agent.loop.tool_dispatch_safety import paths_overlap
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_loop.budget import TurnBudgetLimits
+from jaeger_loop.safety import paths_overlap
+from jaeger_tools.tool_schema import ToolDef
 
 
 class Number(BaseModel):

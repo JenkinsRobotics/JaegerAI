@@ -442,84 +442,119 @@ class AgentLoop:
                 i += 1
         return results
 
-    def run_turn(self, prompt: str, *, max_steps: int = 20) -> Mapping[str, Any]:
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt},
-            {"role": "user", "content": prompt},
-        ]
-        ctx = TurnContext(session_id=self._session_id, messages=messages)
-        verify_guard = PostEditVerificationGuard(max_nudges=1) if self._verify_after_edit else None
-        self._emit("turn.start", {"prompt": prompt, "max_steps": max_steps})
+    def run_turn(
+        self,
+        prompt: str,
+        *,
+        max_steps: int = 20,
+        mailbox: Any = None,
+        cancel_scope: Any = None,
+    ) -> Mapping[str, Any]:
+        from .primitives import MailPriority, instantiate_middlewares_for_run
 
-        for step in range(1, max(1, max_steps) + 1):
-            ctx.step = step
-            if self._memory is not None:
-                ctx.messages = self._memory.compact(ctx.messages, max_tokens=self._max_context_tokens)
+        saved_middlewares = self._middlewares
+        self._middlewares = instantiate_middlewares_for_run(saved_middlewares, self._session_id)
+        try:
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": self._system_prompt},
+                {"role": "user", "content": prompt},
+            ]
+            ctx = TurnContext(session_id=self._session_id, messages=messages)
+            verify_guard = PostEditVerificationGuard(max_nudges=1) if self._verify_after_edit else None
+            self._emit("turn.start", {"prompt": prompt, "max_steps": max_steps})
 
-            self._emit("step.model_start", {"step": step})
-            resp = self._invoke_model(ctx)
-            content = str(resp.get("content") or "")
-            tool_calls = list(resp.get("tool_calls") or [])
+            for step in range(1, max(1, max_steps) + 1):
+                if cancel_scope is not None and getattr(cancel_scope, "is_cancelled", False):
+                    self._emit("turn.cancelled", {"step": step})
+                    return {
+                        "verdict": TurnVerdict.LOOP_HALTED.value,
+                        "content": "Cancelled by CancelScope.",
+                        "steps": step - 1,
+                        "messages": ctx.messages,
+                    }
+                if mailbox is not None:
+                    incoming = mailbox.drain()
+                    for m in incoming:
+                        if m.priority == MailPriority.ABORT:
+                            self._emit("turn.aborted", {"step": step, "reason": m.content})
+                            return {
+                                "verdict": TurnVerdict.LOOP_HALTED.value,
+                                "content": f"Aborted: {m.content}",
+                                "steps": step - 1,
+                                "messages": ctx.messages,
+                            }
+                        ctx.messages.append({"role": "user", "content": f"[STEER] {m.content}"})
 
-            assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
-            if tool_calls:
-                assistant_msg["tool_calls"] = tool_calls
-            ctx.messages.append(assistant_msg)
+                ctx.step = step
+                if self._memory is not None:
+                    ctx.messages = self._memory.compact(ctx.messages, max_tokens=self._max_context_tokens)
 
-            if not tool_calls:
-                if verify_guard is not None and step < max_steps:
-                    nudge = verify_guard.maybe_nudge(has_verify_tool=True)
-                    if nudge:
-                        ctx.messages.append({"role": "user", "content": nudge})
-                        self._emit("turn.verify_nudge", {"step": step, "files": list(verify_guard.mutated_files)})
-                        continue
-                cp_id = (
-                    self._memory.save_checkpoint(self._session_id, {"messages": ctx.messages, "step": step})
-                    if self._memory is not None
-                    else None
-                )
-                self._emit("turn.complete", {"step": step, "verdict": TurnVerdict.COMPLETE.value})
-                return {
-                    "verdict": TurnVerdict.COMPLETE.value,
-                    "content": content,
-                    "steps": step,
-                    "checkpoint_id": cp_id,
-                    "messages": ctx.messages,
-                }
+                self._emit("step.model_start", {"step": step})
+                resp = self._invoke_model(ctx)
+                content = str(resp.get("content") or "")
+                tool_calls = list(resp.get("tool_calls") or [])
 
-            batch_results = self._execute_tool_batch(ctx, tool_calls)
-            for tc, res in batch_results:
-                tc_id = str(tc.get("id") or f"call_{step}")
-                t_name = str(tc.get("name") or "")
-                t_args = tc.get("arguments", {})
-                if verify_guard is not None:
-                    verify_guard.record_tool_result(
-                        t_name,
-                        t_args if isinstance(t_args, Mapping) else None,
-                        ok=res.ok,
+                assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
+                if tool_calls:
+                    assistant_msg["tool_calls"] = tool_calls
+                ctx.messages.append(assistant_msg)
+
+                if not tool_calls:
+                    if verify_guard is not None and step < max_steps:
+                        nudge = verify_guard.maybe_nudge(has_verify_tool=True)
+                        if nudge:
+                            ctx.messages.append({"role": "user", "content": nudge})
+                            self._emit("turn.verify_nudge", {"step": step, "files": list(verify_guard.mutated_files)})
+                            continue
+                    cp_id = (
+                        self._memory.save_checkpoint(self._session_id, {"messages": ctx.messages, "step": step})
+                        if self._memory is not None
+                        else None
                     )
-                ctx.tool_history.append({"tool": t_name, "arguments": t_args, "ok": res.ok})
-                self._emit("tool.result", {"step": step, "tool": t_name, "ok": res.ok})
-                ctx.messages.append({
-                    "role": "tool",
-                    "name": t_name,
-                    "tool_call_id": tc_id,
-                    "content": res.output if res.ok else f"ERROR: {res.error}",
-                })
+                    self._emit("turn.complete", {"step": step, "verdict": TurnVerdict.COMPLETE.value})
+                    return {
+                        "verdict": TurnVerdict.COMPLETE.value,
+                        "content": content,
+                        "steps": step,
+                        "checkpoint_id": cp_id,
+                        "messages": ctx.messages,
+                    }
 
-            if self._reliability is not None and self._reliability.check_loop(ctx.tool_history):
-                self._emit("turn.loop_halted", {"step": step})
-                return {
-                    "verdict": TurnVerdict.LOOP_HALTED.value,
-                    "content": "Halted: repeated tool-call loop detected.",
-                    "steps": step,
-                    "messages": ctx.messages,
-                }
+                batch_results = self._execute_tool_batch(ctx, tool_calls)
+                for tc, res in batch_results:
+                    tc_id = str(tc.get("id") or f"call_{step}")
+                    t_name = str(tc.get("name") or "")
+                    t_args = tc.get("arguments", {})
+                    if verify_guard is not None:
+                        verify_guard.record_tool_result(
+                            t_name,
+                            t_args if isinstance(t_args, Mapping) else None,
+                            ok=res.ok,
+                        )
+                    ctx.tool_history.append({"tool": t_name, "arguments": t_args, "ok": res.ok})
+                    self._emit("tool.result", {"step": step, "tool": t_name, "ok": res.ok})
+                    ctx.messages.append({
+                        "role": "tool",
+                        "name": t_name,
+                        "tool_call_id": tc_id,
+                        "content": res.output if res.ok else f"ERROR: {res.error}",
+                    })
 
-        self._emit("turn.budget_exhausted", {"steps": max_steps})
-        return {
-            "verdict": TurnVerdict.BUDGET_EXHAUSTED.value,
-            "content": "Stopped: max_steps budget exhausted.",
-            "steps": max_steps,
-            "messages": ctx.messages,
-        }
+                if self._reliability is not None and self._reliability.check_loop(ctx.tool_history):
+                    self._emit("turn.loop_halted", {"step": step})
+                    return {
+                        "verdict": TurnVerdict.LOOP_HALTED.value,
+                        "content": "Halted: repeated tool-call loop detected.",
+                        "steps": step,
+                        "messages": ctx.messages,
+                    }
+
+            self._emit("turn.budget_exhausted", {"steps": max_steps})
+            return {
+                "verdict": TurnVerdict.BUDGET_EXHAUSTED.value,
+                "content": "Stopped: max_steps budget exhausted.",
+                "steps": max_steps,
+                "messages": ctx.messages,
+            }
+        finally:
+            self._middlewares = saved_middlewares

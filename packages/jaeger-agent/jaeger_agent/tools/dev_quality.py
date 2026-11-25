@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 
 def _checkpoint_store():

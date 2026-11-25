@@ -10,10 +10,10 @@ import { HandoffMarker } from "./HandoffMarker";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("avatar silhouettes", () => {
-  it("uses the static bundle portrait in agent lists for Jaeger while preserving image and preset overrides", () => {
-    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" />)).toContain('jg-clip-avatar');
-    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" src="/custom.png" />)).not.toContain('jg-clip-avatar');
-    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" preset="robot-square" />)).not.toContain('jg-clip-avatar');
+  it("uses Jaeger's own silhouette while preserving image and preset overrides", () => {
+    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" />)).toContain('jg-avatar__shape');
+    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" src="/custom.png" />)).toContain('/custom.png');
+    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" preset="robot-square" />)).toContain('jg-avatar__robot');
   });
   it("picks a stable shape per id, spread over the set, supervisor round", () => {
     expect(avatarShape("agent:swe")).toBe(avatarShape("agent:swe"));

@@ -66,3 +66,30 @@ def test_local_context_budgeter_prevents_256k_kv_cache_bloat() -> None:
     # Explicit operator setting or env override is always respected (clamped to model max)
     assert safe_local_context_window(262_144, host_ram_gb=32.0, configured_ctx=65_536) == 65_536
     assert safe_local_context_window(262_144, host_ram_gb=32.0, env_override="32768") == 32_768
+
+
+def test_response_fold_and_per_attempt_fallback_audit() -> None:
+    from jaeger_models import ResponseFold
+
+    fold = ResponseFold()
+    fold = fold.apply({"type": "reasoning_delta", "delta": "think "})
+    fold = fold.apply({"type": "text_delta", "delta": "hello "})
+    fold = fold.apply({"type": "text_delta", "delta": "world"})
+    fold = fold.apply({"type": "tool_call", "tool_call": {"id": "c1", "name": "read_file", "arguments": {}}})
+    fold = fold.apply({"type": "finish", "finish_reason": "tool_calls", "usage": {"input_tokens": 10}})
+    assert fold.text == "hello world"
+    assert fold.reasoning == "think "
+    assert len(fold.tool_calls) == 1 and fold.finish_reason == "tool_calls"
+    assert fold.usage["input_tokens"] == 10
+
+    seen_models: list[str] = []
+    primary = ReplayModel([RuntimeError("503 overloaded")], model_id="anthropic/claude-sonnet")
+    fb = ReplayModel([{"content": "ok"}], model_id="google/gemini-pro")
+    sf = StickyFallbackModel(
+        primary=primary,
+        fallbacks=(fb,),
+        prepare_request=lambda m, msgs, kw: (seen_models.append(m.name) or msgs, kw),
+    )
+    assert sf.complete([{"role": "user", "content": "hi"}])["content"] == "ok"
+    assert len(seen_models) == 2
+    assert [(a.model_name, a.ok) for a in sf.last_attempts] == [(primary.name, False), (fb.name, True)]

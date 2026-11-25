@@ -88,7 +88,7 @@ _TRANSITIVE = {"certifi", "pydantic", "msgspec", "urllib3", "charset_normalizer"
 
 def _tools() -> list[Any]:
     import jaeger_agent.tools  # noqa: F401 — registers the surface
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     return list(get_tools())
 

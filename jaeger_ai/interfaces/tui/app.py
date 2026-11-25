@@ -744,7 +744,7 @@ class JaegerTUI:
         if is_err:
             # Recognise common model-server failures and surface a clear,
             # actionable hint instead of the raw HTTP body.
-            from jaeger_agent.core.errors import friendly_error_text
+            from jaeger_reliability.errors import friendly_error_text
             body = friendly_error_text(body, model_name=self.model_name)
         else:
             self._last_answer = body   # for /copy
@@ -911,7 +911,7 @@ class JaegerTUI:
             # summing the JSON-serialised schema for every currently
             # visible tool. Cheap enough to recompute per refresh.
             try:
-                from jaeger_os.core.tools.tool_registry import get_tools
+                from jaeger_tools.tool_registry import get_tools
                 from jaeger_agent.skill_registry.toolset_scoping import tool_visible
                 import json as _json2
                 for t in get_tools():

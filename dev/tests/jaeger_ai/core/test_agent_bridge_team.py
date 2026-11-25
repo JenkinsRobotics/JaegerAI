@@ -116,7 +116,7 @@ async def test_real_gateway_team_preserves_actor_workspace_and_owner_approvals(
         "session": "ares:bridge-work",
         "request_id": "agent-ares-team",
     }
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
 
     with goal_scope(app, sid, rid, execution):
         with pytest.raises(PermissionError):
@@ -292,7 +292,7 @@ async def test_handoff_retry_cannot_cross_goal_and_fake_child_metadata_is_not_a_
     )
     with pytest.raises(PermissionError):
         origin(app, "ares:forged-child", child_request_id(handoff["request_id"]))
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
 
     parent = app.store.get_request("agent-ares-parent-two")
     with (

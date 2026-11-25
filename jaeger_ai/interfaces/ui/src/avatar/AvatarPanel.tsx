@@ -1,4 +1,3 @@
-import {JaegerAvatar} from "./JaegerAvatar";
 import type {ClipState} from "./avatar";
 /** Chat › avatar panel (§1): expanded column, 64 px rail, floating Mini, or hidden. Per-agent mode; ⌥⌘A toggles. */
 import "./avatar.css";
@@ -12,7 +11,7 @@ import { avatarStateFor, loadMode, nextMode, PREVIEW_STATES, saveMode, STATE_TEX
 import { useAvatar, useSpeech } from "./useAvatar";
 import type { SizeClass } from "../shell/breakpoints";
 
-export function AvatarPanel({ agent, presence, onOpenAgents, size, clipState="idle" }: { clipState?:ClipState; agent: Agent; presence?: string; onOpenAgents?: (id: string) => void; size: { cls: SizeClass; short: boolean } }) {
+export function AvatarPanel({ agent, presence, onOpenAgents, size }: { clipState?:ClipState; agent: Agent; presence?: string; onOpenAgents?: (id: string) => void; size: { cls: SizeClass; short: boolean } }) {
   const { cls, short } = size;
   const [mode, setModeState] = useState<PanelMode>(() => loadMode(agent.id, cls, short));
   const [still, setStill] = useState(false);
@@ -33,9 +32,8 @@ export function AvatarPanel({ agent, presence, onOpenAgents, size, clipState="id
   // Announce politely only when a state lasts > 1.5 s (§4).
   const [announced, setAnnounced] = useState("");
   useEffect(() => { const t = window.setTimeout(() => setAnnounced(`${name} is ${STATE_TEXT[state].toLowerCase()}`), 1500); return () => window.clearTimeout(t); }, [state, name]);
-  const builtin = agent.id === "native:jaeger" && !record?.avatar && !agent.avatar_url;
   const format = record?.avatar?.format ?? "portrait";
-  const stage = (compact: boolean) => builtin ? <JaegerAvatar name={name} state={clipState} size={compact ? 120 : 200} still={still} /> : (
+  const stage = (compact: boolean) => (
     <AvatarStage name={name} record={record} state={state} emotion={emotion} intensity={record?.live.intensity || 1} still={still} compact={compact}
       paused={mode === "hidden" || mode === "rail"} mouth={mouth} portrait={<AgentFace agent={agent} size={compact ? 120 : 200} />} />
   );
@@ -61,10 +59,10 @@ export function AvatarPanel({ agent, presence, onOpenAgents, size, clipState="id
         </span>
       </header>
       {stage(false)}
-      {!builtin && <div className="jg-av-strip" role="group" aria-label="Preview a state for 3 seconds">
+      {<div className="jg-av-strip" role="group" aria-label="Preview a state for 3 seconds">
         {PREVIEW_STATES.map((s) => <button key={s} type="button" className="jg-av-strip__item" data-state={s} aria-pressed={state === s} onClick={() => setPreview(s)}><i aria-hidden="true" className="jg-av-pill__dot" />{STATE_TEXT[s]}</button>)}
       </div>}
-      {!builtin && !record?.avatar && <p className="jg-av-hint">No avatar saved yet; showing {name}'s portrait. Set one in Agents › Avatar.</p>}
+      {!record?.avatar && <p className="jg-av-hint">No avatar saved yet. Set one in Agents › Avatar.</p>}
     </aside>
   );
 }

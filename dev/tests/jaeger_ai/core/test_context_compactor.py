@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from jaeger_ai.core.runtime.context_compactor import (
+from jaeger_memory.compactor import (
     DIGEST_TAG,
     compact_messages,
     estimate_tokens,

@@ -228,3 +228,62 @@ def test_boundary_inspector_honors_allowed_roots_but_locks_secrets(tmp_path: Pat
     # Secret stores (~/.ssh) are ALWAYS denied
     v_ssh = inspector.inspect(ActionProposal("write_file", {"path": str(Path.home() / ".ssh" / "authorized_keys")}, workspace=ws))
     assert v_ssh is not None and v_ssh.decision == DecisionKind.DENY
+
+
+def test_boundary_inspector_allows_explicit_safe_read_artifacts_while_denying_secrets(tmp_path: Path) -> None:
+    from jaeger_authority import BoundaryAndSecretsInspector
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    jaeger_home = Path.home() / ".jaeger"
+    tool_results = jaeger_home / "instances" / "truth" / "logs" / "tool_results"
+    inspector = BoundaryAndSecretsInspector(read_allowed_roots=(tool_results,))
+
+    # Read-only access to explicitly admitted tool_results artifact is allowed
+    assert inspector.inspect(
+        ActionProposal("read_file", {"path": str(tool_results / "out.json")}, workspace=ws, tier="read_only")
+    ) is None
+
+    # Writes under ~/.jaeger remain DENIED even inside read_allowed_roots
+    v_write = inspector.inspect(
+        ActionProposal("write_file", {"path": str(tool_results / "out.json")}, workspace=ws, tier="write_local")
+    )
+    assert v_write is not None and v_write.decision == DecisionKind.DENY
+
+    # Secrets, env files, and databases under ~/.jaeger remain DENIED even for read_file
+    for forbidden in (
+        jaeger_home / "secrets" / "youtube_api_key",
+        jaeger_home / "secrets.env",
+        jaeger_home / "gateway_sessions.sqlite3",
+        jaeger_home / "instances" / "truth" / "credentials" / "mxmem_token",
+        Path.home() / ".ssh" / "id_rsa",
+    ):
+        v = inspector.inspect(
+            ActionProposal("read_file", {"path": str(forbidden)}, workspace=ws, tier="read_only")
+        )
+        assert v is not None and v.decision == DecisionKind.DENY, f"Expected DENY for {forbidden}"
+
+
+def test_egress_inspector_banned_standing_grants_and_guardrails(tmp_path: Path) -> None:
+    from jaeger_authority import EgressInspector, GuardrailResult, guardrails, is_banned_standing_grant
+
+    eg = EgressInspector()
+    assert eg.inspect(ActionProposal("shell", {"command": "git push origin feature"}, workspace=tmp_path)).decision == DecisionKind.REQUIRE_APPROVAL
+    assert eg.inspect(ActionProposal("shell", {"command": "curl -X POST https://api.example.com -d '{}'"}, workspace=tmp_path)).decision == DecisionKind.REQUIRE_APPROVAL
+    assert eg.inspect(ActionProposal("shell", {"command": "git status"}, workspace=tmp_path)) is None
+
+    assert is_banned_standing_grant("bash -c 'echo hi'") is True
+    assert is_banned_standing_grant("python3 -c 'print(1)'") is True
+    assert is_banned_standing_grant("pytest -q") is False
+
+    guardrails.clear()
+    unreg = guardrails.register_input(
+        lambda txt: GuardrailResult(True, "blocked secret") if "SECRET" in txt else None,
+        name="secret_guard",
+    )
+    try:
+        hit = guardrails.run("input", "leak SECRET now")
+        assert hit is not None and hit.tripwire_triggered and hit.guardrail == "secret_guard"
+        assert guardrails.run("input", "normal prompt") is None
+    finally:
+        unreg()

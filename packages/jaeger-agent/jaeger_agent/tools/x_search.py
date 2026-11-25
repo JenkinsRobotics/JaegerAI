@@ -15,7 +15,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 _XAI_RESPONSES = "https://api.x.ai/v1/responses"
 _XAI_MODELS = ("grok-4.7", "grok-4", "grok-4-fast-non-reasoning")

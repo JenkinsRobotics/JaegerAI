@@ -76,7 +76,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:  # noqa: ARG001
         bind_agent_host()
 
     import jaeger_agent.tools  # noqa: F401 -- populate built-in tools
-    from jaeger_os.core.tools.tool_registry import snapshot_registry
+    from jaeger_tools.tool_registry import snapshot_registry
 
     _registry_snapshot = snapshot_registry()
 
@@ -84,7 +84,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:  # noqa: ARG001
 @pytest.fixture(autouse=True)
 def _restore_tool_registry() -> None:
     """Restore built-ins around every test that mutates the registry."""
-    from jaeger_os.core.tools.tool_registry import restore_registry
+    from jaeger_tools.tool_registry import restore_registry
 
     if _registry_snapshot is not None:
         restore_registry(_registry_snapshot)
@@ -95,7 +95,7 @@ def _restore_tool_registry() -> None:
 
 def _register_tool_surface() -> None:
     """Restore the captured built-in surface without reloading module state."""
-    from jaeger_os.core.tools.tool_registry import restore_registry
+    from jaeger_tools.tool_registry import restore_registry
     if _registry_snapshot is not None:
         restore_registry(_registry_snapshot)
 
@@ -103,5 +103,5 @@ def _register_tool_surface() -> None:
 @pytest.fixture()
 def live_tools():
     _register_tool_surface()
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
     return {tool.name: tool for tool in get_tools()}

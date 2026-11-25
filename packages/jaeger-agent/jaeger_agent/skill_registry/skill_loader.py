@@ -524,7 +524,7 @@ class _ToolCapturingAgent:
     ) -> Callable[..., Any]:
         """Lift one skill function into the framework-free registry.
         Captures the name so the skill becomes its own named toolset."""
-        from jaeger_os.core.tools.tool_registry import register_tool_from_function
+        from jaeger_tools.tool_registry import register_tool_from_function
         name = getattr(fn, "__name__", None)
         if name:
             self.captured.append(name)
@@ -792,7 +792,7 @@ def load_and_register(
         pass
     # The full agentic surface in one line: tools + tool-providing + recipe skills.
     try:
-        from jaeger_os.core.tools.tool_registry import get_tools
+        from jaeger_tools.tool_registry import get_tools
         print(f"[jaeger-skills] agentic surface: {len(get_tools())} tools · "
               f"{len(registered)} tool-providing skill(s) · {pb_count} recipe skill(s).",
               flush=True)

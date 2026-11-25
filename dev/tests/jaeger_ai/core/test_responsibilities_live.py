@@ -179,7 +179,7 @@ async def test_responsibility_arrives_live_over_sse(turn, responsibility):
 def test_loop_step_reads_continue_when_the_model_writes_its_tool_call_as_text(tmp_path, monkeypatch):
     """CLI and local lanes often emit tool calls as plain text; the live step
     status must be decided after recovery, or every step reads "answer"."""
-    from jaeger_agent import live
+    from jaeger_events import live
 
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     clear_registry()

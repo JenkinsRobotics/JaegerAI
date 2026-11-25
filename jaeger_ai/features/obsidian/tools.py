@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 from .adapter import VaultError, list_notes, read_note, search_notes, vault_root
 

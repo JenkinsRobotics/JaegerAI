@@ -13,7 +13,7 @@ import subprocess
 
 import pytest
 
-from jaeger_agent import checkpoints as cp
+from jaeger_checkpoints import shadow_manager as cp
 
 
 @pytest.fixture()
@@ -22,7 +22,10 @@ def instance(tmp_path, monkeypatch):
 
     layout = InstanceLayout(root=tmp_path / "inst")
     layout.root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("jaeger_agent.core.workspace.get_layout", lambda: layout)
+    cp.configure_checkpoints(
+        store_root_provider=lambda: layout.root / "checkpoints",
+        enabled_provider=lambda: False,
+    )
     monkeypatch.setenv("JAEGER_CHECKPOINTS", "1")
     cp.reset_manager()
     yield layout
@@ -43,9 +46,7 @@ def project(tmp_path):
 
 def test_disabled_by_default(instance, project, monkeypatch):
     monkeypatch.delenv("JAEGER_CHECKPOINTS", raising=False)
-    monkeypatch.setattr(
-        "jaeger_agent.instance_config.section", lambda name, layout=None: None)
-    m = cp.CheckpointManager()
+    m = cp.CheckpointManager(enabled_provider=lambda: False)
     assert m.enabled is False
     assert m.ensure_checkpoint(project) is None
 

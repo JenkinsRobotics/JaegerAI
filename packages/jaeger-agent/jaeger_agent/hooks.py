@@ -169,7 +169,7 @@ class HookRegistry:
 def _report(tool: str, decision: HookDecision) -> HookDecision:
     """Show a hook's decision on the live stream (no-op without a host).
     Never includes the rewritten arguments — they can hold secrets."""
-    from jaeger_agent import live
+    from jaeger_events import live
     live.emit("hook.decision", {"hook": decision.hook or "hook", "action": decision.action,
                                 "reason": str(decision.reason or "")[:300], "tool": tool})
     return decision

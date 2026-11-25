@@ -26,7 +26,7 @@ from jaeger_agent import (
     clear_registry,
     register_tool,
 )
-from jaeger_agent.util.context_guard import (
+from jaeger_memory.context_guard import (
     ContextBudget,
     ContextGuard,
     ContextOverflow,
@@ -281,7 +281,7 @@ def test_interrupted_turn_does_not_resurface_previous_turns_answer():
         flight — exactly what ``interruptible_call`` produces."""
 
         def call(self, formatted, interrupt_event, **kwargs):  # noqa: ARG002
-            from jaeger_agent.loop.interrupt import AgentInterrupted
+            from jaeger_loop.interrupt import AgentInterrupted
             interrupt_event.set()
             raise AgentInterrupted("cancelled")
 
@@ -410,7 +410,7 @@ def test_explicit_tools_list_bypasses_beta_gate(monkeypatch):
     deliberately — the beta gate must not second-guess an allowlist."""
     monkeypatch.delenv("JAEGER_DEV_MODE", raising=False)
     _register_beta_pair()
-    from jaeger_os.core.tools.tool_registry import get_tool
+    from jaeger_tools.tool_registry import get_tool
     beta_def = get_tool("beta_avatar")
     adapter = _ScriptedAdapter([
         {"role": "assistant", "content": "ok"},

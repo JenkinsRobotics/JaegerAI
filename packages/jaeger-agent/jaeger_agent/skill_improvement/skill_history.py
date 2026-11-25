@@ -75,7 +75,7 @@ def _builtin_taken(layout: Any, name: str) -> bool:
     if any(pb.find_playbook(v) is not None for v in variants):
         return True
     try:
-        from jaeger_os.core.tools.tool_registry import get_tools
+        from jaeger_tools.tool_registry import get_tools
         if any(t.name in variants for t in get_tools()):
             return True
     except Exception:  # noqa: BLE001 — registry lookup is best-effort

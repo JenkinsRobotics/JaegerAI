@@ -10,8 +10,8 @@ from jaeger_agent.adapters.cli_backend import (
     flatten_messages,
     parse_cli_text,
 )
-from jaeger_agent.schemas.message_types import Message
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_contracts import Message
+from jaeger_tools.tool_schema import ToolDef
 
 
 def test_flatten_messages_joins_system_and_transcript():
@@ -212,7 +212,7 @@ def test_stream_filters_split_tool_envelopes_without_dropping_prose():
 
 def test_tool_schemas_survive_cli_formatting_and_use_existing_repair():
     from pydantic import BaseModel
-    from jaeger_agent.parsing.tool_call_repair import repair_plain_text_tool_calls
+    from jaeger_reliability.tool_repair import repair_plain_text_tool_calls
     class Args(BaseModel):
         path: str
     tool=ToolDef(name='read_file',description='Read one file',args_model=Args,fn=lambda **_:None)

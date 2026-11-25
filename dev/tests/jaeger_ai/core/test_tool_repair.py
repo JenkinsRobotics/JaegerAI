@@ -1,5 +1,5 @@
 """Tests for tool call repair middleware."""
-from jaeger_ai.core.runtime.tool_repair import (
+from jaeger_reliability.tool_repair import (
     repair_json_string,
     safe_parse_tool_arguments,
     extract_xml_tool_call,

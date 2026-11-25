@@ -28,7 +28,7 @@ os.environ.setdefault("JAEGER_NO_ATTACH", "1")
 
 import pytest
 
-from jaeger_os.core.tools.tool_registry import restore_registry, snapshot_registry
+from jaeger_tools.tool_registry import restore_registry, snapshot_registry
 
 _REGISTRY_SNAPSHOT: dict | None = None
 

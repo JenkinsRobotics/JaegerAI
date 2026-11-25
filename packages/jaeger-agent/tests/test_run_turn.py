@@ -20,7 +20,7 @@ from jaeger_agent import (
     clear_registry,
     register_tool,
 )
-from jaeger_agent.loop.loop_backstop import MAX_IDENTICAL_CALLS, MAX_TOOL_CALLS
+from jaeger_loop.backstop import MAX_IDENTICAL_CALLS, MAX_TOOL_CALLS
 
 
 # ── stub adapter ───────────────────────────────────────────────────
@@ -253,7 +253,7 @@ def test_configured_tool_budget_replaces_legacy_global_limit():
         },
         {"role": "assistant", "content": "all inspected"},
     ])
-    from jaeger_agent.loop.turn_budget import TurnBudgetLimits
+    from jaeger_loop.budget import TurnBudgetLimits
 
     agent = JaegerAgent(
         adapter=adapter,

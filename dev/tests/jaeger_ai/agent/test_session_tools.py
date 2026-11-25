@@ -62,6 +62,6 @@ def test_session_search_read_uses_gateway_transcript():
 
 def test_session_search_registered_in_registry():
     from jaeger_ai.main import _register_builtins
-    from jaeger_os.core.tools.tool_registry import has_tool
+    from jaeger_tools.tool_registry import has_tool
     _register_builtins(None)
     assert has_tool("session_search") is True

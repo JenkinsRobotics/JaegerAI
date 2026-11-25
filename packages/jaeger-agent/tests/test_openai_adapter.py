@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools.tool_schema import ToolDef
 from pydantic import BaseModel, Field
 
 from jaeger_agent import OpenAIAdapter
@@ -470,7 +470,7 @@ def test_parse_response_preserves_cached_prompt_tokens():
 def test_call_interrupt_mid_stream_closes_and_raises():
     """An interrupt observed between chunks must close the HTTP stream
     (so the server stops generating) and surface AgentInterrupted."""
-    from jaeger_agent.loop.interrupt import AgentInterrupted
+    from jaeger_loop.interrupt import AgentInterrupted
 
     ev = threading.Event()
 
@@ -739,7 +739,7 @@ def test_reasoning_only_length_stop_is_not_an_empty_retry():
 
 def test_truncated_stream_is_an_error_and_closes_transport():
     from jaeger_agent.adapters.openai import _aggregate_chat_stream
-    from jaeger_agent.loop.interrupt import CallProgress
+    from jaeger_loop.interrupt import CallProgress
     stream = _FakeStream([_mk_chunk(content="partial")])
     seen = []
     with pytest.raises(RuntimeError, match="before confirming completion"):

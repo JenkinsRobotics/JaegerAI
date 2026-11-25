@@ -18,7 +18,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.core.workspace import _require_layout
 
 _SECRET_KEY = re.compile(r"(api_?key|_key$|^key$|token(?!s)|secret|password|passwd|credential|cookie|bearer|private)", re.I)

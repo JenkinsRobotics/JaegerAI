@@ -14,7 +14,7 @@ def bind_agent_host() -> None:
         "filesystem_authority": "jaeger_ai.core.authority.filesystem",
         "entity_events": "jaeger_ai.core.entity.events",
         "entity_runtime": "jaeger_ai.core.entity.runtime",
-        "tool_repair": "jaeger_ai.core.runtime.tool_repair",
+        "tool_repair": "jaeger_reliability.tool_repair",
         "instance_schemas": "jaeger_ai.core.instance.schemas",
         "cli_backends": "jaeger_ai.features.cli_backends.discovery",
         "agent_registry": "jaeger_ai.core.agent_registry",

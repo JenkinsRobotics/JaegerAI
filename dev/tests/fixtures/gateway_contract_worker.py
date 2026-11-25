@@ -151,7 +151,7 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
             counter = 0
             while not (state / "provider-release").exists():
                 if interrupt_event.wait(0.1):
-                    from jaeger_agent.loop.interrupt import AgentInterrupted
+                    from jaeger_loop.interrupt import AgentInterrupted
                     raise AgentInterrupted("contract provider interrupted")
                 counter += 1
                 if callable(on_delta):

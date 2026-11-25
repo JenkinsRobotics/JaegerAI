@@ -1,7 +1,7 @@
 """Deep Think is durable Gateway work, not a separate local execution queue."""
 from __future__ import annotations
 from typing import Any
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 
 def _submit(description: str, artifact_paths: list[str] | None = None) -> dict[str, Any]:

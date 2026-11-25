@@ -12,7 +12,7 @@ vi.mock("../avatar/AvatarPanel", () => ({
   AvatarPanel: ({ agent }: { agent: { id: string } }) => <aside data-avatar-panel={agent.id}>Live Avatar</aside>,
 }));
 vi.mock("../settings/SettingsView", () => ({
-  SettingsView: ({ tab }: { tab?: string }) => <div data-settings-standalone="1" data-tab={tab ?? ""}>Settings</div>,
+  SettingsView: ({ tab, navigationOpen }: { tab?: string; navigationOpen: boolean }) => <div data-settings-standalone="1" data-tab={tab ?? ""}>{navigationOpen && <nav aria-label="Settings sections">Settings</nav>}</div>,
 }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -52,6 +52,37 @@ describe("UnifiedShell (Phase 3 single-shell 5-destination consolidation)", () =
     expect(canonicalDestinationOf(parseRoute("/machine"))).toBe("settings");
   });
 
+  it("fits the visible iPhone viewport during keyboard pan and resets on dismissal", async () => {
+    const original = Object.getOwnPropertyDescriptor(window, "visualViewport");
+    const viewport = Object.assign(new EventTarget(), { height: window.innerHeight, offsetTop: 0, scale: 1 });
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
+    try {
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      await flush(() => { root!.render(<UnifiedShell source={new MockSource()} />); });
+      const shell = container.querySelector<HTMLElement>(".jg-ushell")!;
+      viewport.height = window.innerHeight - 280;
+      viewport.dispatchEvent(new Event("resize"));
+      viewport.offsetTop = 96;
+      viewport.dispatchEvent(new Event("scroll"));
+      expect(shell.style.getPropertyValue("--jg-viewport-height")).toBe(`${viewport.height}px`);
+      expect(shell.style.getPropertyValue("--jg-viewport-top")).toBe("96px");
+      expect(shell.dataset.keyboard).toBe("true");
+      viewport.height = window.innerHeight;
+      viewport.dispatchEvent(new Event("resize"));
+      expect(shell.style.getPropertyValue("--jg-viewport-top")).toBe("0px");
+      expect(shell.dataset.keyboard).toBe("false");
+      viewport.scale = 1.25;
+      viewport.dispatchEvent(new Event("resize"));
+      expect(shell.style.getPropertyValue("--jg-viewport-height")).toBe("");
+      expect(shell.style.getPropertyValue("--jg-viewport-top")).toBe("");
+    } finally {
+      if (original) Object.defineProperty(window, "visualViewport", original);
+      else delete (window as unknown as { visualViewport?: unknown }).visualViewport;
+    }
+  });
+
   it("renders one unified shell, preserves Chat across navigation, toggles live AvatarPanel, and mounts standalone Settings", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -71,14 +102,23 @@ describe("UnifiedShell (Phase 3 single-shell 5-destination consolidation)", () =
 
     // Live AvatarPanel is off by default (no idle rendering) and mounts on toggle
     expect(container.querySelector('[data-avatar-dock="1"]')).toBeNull();
-    const avatarBtn = container.querySelector<HTMLButtonElement>('button[aria-label="Toggle live avatar"]');
-    expect(avatarBtn).not.toBeNull();
-    await flush(() => { avatarBtn!.click(); });
+    const agentMenu = container.querySelector<HTMLButtonElement>('button[aria-label$="chat options"]');
+    expect(agentMenu).not.toBeNull();
+    await flush(() => { agentMenu!.click(); });
+    const avatarOption = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes("Show live avatar"));
+    expect(avatarOption).toBeTruthy();
+    await flush(() => { avatarOption!.click(); });
     expect(container.querySelector('[data-avatar-dock="1"]')).not.toBeNull();
 
     // Navigating to Settings mounts standalone SettingsView (NOT legacy App.tsx) and keeps Chat mounted
     await flush(() => { navigate("/settings/appearance"); });
     expect(container.querySelector('[data-settings-standalone="1"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Settings sidebar"]')).toBeNull();
+    expect(container.querySelectorAll('nav[aria-label="Settings sections"]')).toHaveLength(1);
+    await flush(() => { container!.querySelector<HTMLButtonElement>('[aria-label="Toggle navigation"]')!.click(); });
+    expect(container.querySelector('nav[aria-label="Settings sections"]')).toBeNull();
+    await flush(() => { container!.querySelector<HTMLButtonElement>('[aria-label="Toggle navigation"]')!.click(); });
+    expect(container.querySelectorAll('nav[aria-label="Settings sections"]')).toHaveLength(1);
     const chatSection = container.querySelector<HTMLElement>('section[aria-label="Chat"]');
     expect(chatSection).not.toBeNull();
     expect(chatSection!.hidden).toBe(true);

@@ -5,6 +5,7 @@ const CARDS = import.meta.glob("../assets/characters/*.png", { eager: true, quer
 /** `/characters/jarvis.png` (as stored in CHARACTERS) → the bundled asset URL, or null when there is no card. */
 export function cardUrlFor(url: string | null | undefined): string | null {
   if (!url) return null;
+  if (url.startsWith("/assets/avatar/")) return url;
   const name = url.split("/").pop();
   return CARDS[`../assets/characters/${name}`] ?? null;
 }

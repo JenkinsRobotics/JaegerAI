@@ -266,7 +266,7 @@ def _reported(kind: str, name: str, task: str, run: Any) -> dict[str, Any]:
     (jaeger_agent.live): started/finished nest under the launching tool call,
     and the child's own tool calls nest under this span."""
     import uuid as _uuid
-    from jaeger_agent import live as _live
+    from jaeger_events import live as _live
     sid = f"sub_{_uuid.uuid4().hex[:12]}"
     t0 = time.perf_counter()
     _live.emit("subagent.started", {"subagent_id": sid, "kind": kind, "name": name,
@@ -403,7 +403,7 @@ def _delegate_internal_run(client: Any, subtask: str) -> dict[str, Any]:
                 }
 
             def _on_progress(info: dict[str, Any]) -> None:
-                from jaeger_agent import live as _live
+                from jaeger_events import live as _live
                 _live.progress(f"step {info.get('step')}: {str(info.get('state') or 'RUNNING').lower()}",
                                step=info.get("step"))
                 bus = _main()._pipeline.get("event_bus")

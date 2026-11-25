@@ -10,12 +10,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.core.workspace import get_layout
 
 
 def _engine():
-    from jaeger_workflows import WorkflowEngine
+    from jaeger_orchestration import WorkflowEngine
 
     layout = get_layout()
     if layout is not None and getattr(layout, "root", None):

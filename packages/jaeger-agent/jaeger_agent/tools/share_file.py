@@ -12,7 +12,7 @@ import hashlib
 import mimetypes
 from pathlib import Path
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 _MAX_BYTES = 50 * 1024 * 1024
 _REFUSE = ("credentials", "secrets.env", ".ssh", "keychain", ".env")

@@ -1,82 +1,68 @@
-/** Calendar (unified UI): scheduled agent jobs on an agenda by next run, plus task due dates;
- * create, pause/resume, run now and delete through the gateway's schedule controls. */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { JaegerSource, ScheduleJob } from "../api/source";
 import type { Task } from "../api/types";
-import { Badge, Empty, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
+import { Badge, Empty, Segmented, SkeletonRows, PageHead } from "./ui";
+import "./workWorkspace.css";
+import { WorkScheduleTabs } from "./WorkScheduleTabs";
 
-const dayKey = (d: Date) => d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+const finished = new Set(["done", "completed", "completed_verified", "failed", "cancelled", "canceled", "denied", "rejected"]);
+const dayLabel = (d: Date) => d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+type Entry = { id: string; title: string; kind: "schedule" | "task"; at: Date; href: string };
+
+export function calendarEntries(schedules: ScheduleJob[], tasks: Task[]): Entry[] {
+  const entries: Entry[] = [];
+  for (const j of schedules) if (j.enabled && j.next_fire_at) entries.push({
+    id: j.id, title: j.name, kind: "schedule", at: new Date(j.next_fire_at), href: `/automations?job=${encodeURIComponent(j.id)}`,
+  });
+  for (const t of tasks) if (t.eta && !finished.has(String(t.state))) entries.push({
+    id: t.task_id, title: t.goal || "Untitled task", kind: "task",
+    at: new Date(typeof t.eta === "number" ? t.eta * (t.eta < 1e12 ? 1000 : 1) : t.eta),
+    href: `/work/tasks?task=${encodeURIComponent(t.task_id)}`,
+  });
+  return entries.filter(i => Number.isFinite(+i.at)).sort((a, b) => +a.at - +b.at);
+}
 
 export function CalendarPage({ source, onNavigate }: { source: JaegerSource; onNavigate: (to: string) => void }) {
-  const toast = useToast();
-  const [jobs, setJobs] = useState<ScheduleJob[] | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [err, setErr] = useState<string>();
-  const [creating, setCreating] = useState(false);
-  const [f, setF] = useState({ name: "", prompt: "", schedule: "0 9 * * 1-5", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
-  const load = useCallback(() => {
-    if (!source.schedules) { setErr("This gateway has no scheduler."); return; }
-    source.schedules.list().then((r) => { setJobs(r.jobs); setErr(undefined); }, (e: Error) => setErr(e.message));
-    source.tasks().then((t) => setTasks(t.filter((x) => x.eta && !["done", "cancelled", "failed"].includes(String(x.state)))), () => {});
+  const [data, setData] = useState<{ schedules: ScheduleJob[]; tasks: Task[]; warnings: string[] }>();
+  const [filter, setFilter] = useState<"all" | "schedule" | "task">("all");
+  useEffect(() => {
+    let alive = true;
+    const schedules = source.schedules;
+    void Promise.allSettled([schedules ? schedules.list().then(r => r.jobs) : Promise.resolve([]), source.tasks()]).then(([jobs, tasks]) => {
+      if (!alive) return;
+      setData({ schedules: jobs.status === "fulfilled" ? jobs.value : [], tasks: tasks.status === "fulfilled" ? tasks.value : [],
+        warnings: [...(!schedules ? ["Automations aren’t available on this connection."] : jobs.status === "rejected" ? ["Couldn’t load automation times."] : []),
+          ...(tasks.status === "rejected" ? ["Couldn’t load task due dates."] : [])] });
+    });
+    return () => { alive = false; };
   }, [source]);
-  useEffect(() => { load(); }, [load]);
-  const agenda = useMemo(() => {
-    const items: { at: Date; kind: "job" | "task"; job?: ScheduleJob; task?: Task }[] = [];
-    for (const j of jobs ?? []) if (j.enabled && j.next_fire_at) items.push({ at: new Date(j.next_fire_at), kind: "job", job: j });
-    for (const t of tasks) { const at = new Date(typeof t.eta === "number" ? t.eta * 1000 : String(t.eta)); if (!isNaN(+at)) items.push({ at, kind: "task", task: t }); }
-    items.sort((a, b) => +a.at - +b.at);
-    const days = new Map<string, typeof items>();
-    for (const i of items) days.set(dayKey(i.at), [...(days.get(dayKey(i.at)) ?? []), i]);
-    return [...days.entries()];
-  }, [jobs, tasks]);
-  const mutate = async (action: "pause" | "resume" | "run" | "delete" | "create", j?: ScheduleJob) => {
-    if (!source.schedules) return;
-    if (action === "delete" && !confirm(`Delete schedule “${j!.name}”?`)) return;
-    try {
-      const r = await source.schedules.mutate(action, action === "create" ? { operation_id: crypto.randomUUID(), ...f } : { operation_id: crypto.randomUUID(), job_id: j!.id, expected_revision: j!.config_revision });
-      if (!r.ok) throw new Error(r.error ?? "rejected");
-      toast(action === "create" ? "Schedule created" : action === "run" ? "Run requested" : `Schedule ${action}d`);
-      if (action === "create") setCreating(false);
-      load();
-    } catch (e) { toast((e as Error).message, "error"); }
-  };
-  return (
-    <div className="jg-u-page">
-      <PageHead title="Calendar" subtitle="Scheduled agent jobs and task due dates." actions={<><button type="button" className="jg-u-btn" onClick={() => onNavigate("/work/tasks")}>Tasks</button>{source.schedules && <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New schedule</button>}</>} />
-      {err && <p className="jg-u-error" role="alert">{err}</p>}
-      <div className="jg-ui-split">
-        <section className="jg-u-card" aria-label="Agenda">
-          <h2>Upcoming</h2>
-          {!jobs && !err ? <SkeletonRows n={4} /> : !agenda.length ? <Empty title="Nothing scheduled" action={source.schedules ? <button type="button" className="jg-u-btn" onClick={() => setCreating(true)}>Schedule a job</button> : undefined} /> : agenda.map(([day, items]) => (
-            <div key={day} className="jg-kn__group"><h3>{day}</h3>
-              <ul className="jg-u-list">{items.map((i, k) => (
-                <li key={k} className="jg-cal__item"><time>{i.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time>
-                  <span className="jg-u-row__text"><strong>{i.job?.name ?? i.task?.goal}</strong><span>{i.kind === "job" ? `Schedule · ${i.job!.cron}` : `Task due · ${i.task!.state}`}</span></span></li>))}</ul></div>))}
-        </section>
-        <aside className="jg-ui-inspector" aria-label="Schedules">
-          <h3>All schedules</h3>
-          {!jobs ? <SkeletonRows /> : !jobs.length ? <p className="jg-u-note">No schedules.</p> : (
-            <ul className="jg-u-list">{jobs.map((j) => (
-              <li key={j.id} className="jg-cal__job"><strong>{j.name}</strong> <Badge tone={j.enabled ? "ok" : undefined}>{j.enabled ? "On" : "Paused"}</Badge>
-                <small>{j.cron}{j.timezone ? ` · ${j.timezone}` : ""}{j.next_fire_at ? ` · next ${new Date(j.next_fire_at).toLocaleString()}` : ""}</small>
-                <small className="jg-cal__prompt">{j.prompt}</small>
-                <div className="jg-ui-toolbar">
-                  <button type="button" className="jg-u-icon-btn" onClick={() => void mutate(j.enabled ? "pause" : "resume", j)}>{j.enabled ? "Pause" : "Resume"}</button>
-                  <button type="button" className="jg-u-icon-btn" onClick={() => void mutate("run", j)}>Run now</button>
-                  <button type="button" className="jg-u-icon-btn" onClick={() => void mutate("delete", j)}>Delete</button>
-                </div></li>))}</ul>)}
-        </aside>
-      </div>
-      {creating && (
-        <Sheet title="New schedule" onClose={() => setCreating(false)}>
-          <form className="jg-stack" onSubmit={(e) => { e.preventDefault(); void mutate("create"); }}>
-            <label className="jg-ui-field">Name<input required maxLength={80} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Morning briefing" /></label>
-            <label className="jg-ui-field">What should Jaeger do?<textarea required rows={4} value={f.prompt} onChange={(e) => setF({ ...f, prompt: e.target.value })} /></label>
-            <label className="jg-ui-field">Schedule (cron)<input required value={f.schedule} onChange={(e) => setF({ ...f, schedule: e.target.value })} /></label>
-            <label className="jg-ui-field">Time zone<input value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} /></label>
-            <div className="jg-ui-actions"><button type="button" className="jg-u-btn" onClick={() => setCreating(false)}>Cancel</button><button className="jg-u-btn jg-u-btn--primary" disabled={!f.name.trim() || !f.prompt.trim()}>Create</button></div>
-          </form>
-        </Sheet>)}
+  const entries = useMemo(() => calendarEntries(data?.schedules ?? [], data?.tasks ?? []).filter(i => filter === "all" || i.kind === filter), [data, filter]);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const overdue = entries.filter(i => i.kind === "task" && i.at < today);
+  const days = new Map<string, Entry[]>();
+  for (const i of entries) if (i.at >= today || i.kind === "schedule") {
+    const label = i.at.toDateString() === today.toDateString() ? "Today" : dayLabel(i.at);
+    days.set(label, [...(days.get(label) ?? []), i]);
+  }
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const rows = (items: Entry[], showDate = false) => <ul className="jg-work-list">{items.map(i => <li key={`${i.kind}:${i.id}`}>
+    <time dateTime={i.at.toISOString()}>{showDate ? i.at.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : i.at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</time>
+    <span><strong>{i.title}</strong><small>{i.kind === "task" ? "Task due" : "Automation run"}</small></span>
+    <button type="button" className="jg-u-btn" onClick={() => onNavigate(i.href)}>{i.kind === "task" ? "Open task" : "Open automation"}</button>
+  </li>)}</ul>;
+  return <div className="jg-u-page jg-work-density">
+    <PageHead title="Schedule" subtitle="See upcoming runs and task deadlines by day." actions={source.schedules && <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => onNavigate("/automations?new=1")}>New automation</button>} />
+    <WorkScheduleTabs active="agenda" onNavigate={onNavigate} />
+    <div className="jg-work-toolbar">
+      <Segmented label="Calendar entries" value={filter} onChange={setFilter} options={[{ value: "all", label: "All" }, { value: "schedule", label: "Automations" }, { value: "task", label: "Task deadlines" }]} />
+      <small className="jg-u-note">{timeZone}</small>
     </div>
-  );
+    {data?.warnings.map(w => <p className="jg-u-note" role="status" key={w}>{w}</p>)}
+    <div className="jg-work-agenda" aria-label="Work agenda">
+      {!data ? <SkeletonRows /> : !entries.length ? <Empty title={data.warnings.length ? "No dates available to show" : "No dates to show"}>Due dates and the next run of each active automation appear here.</Empty> : <>
+        {overdue.length > 0 && <section aria-label="Overdue tasks"><h2>Overdue <Badge tone="warn">{overdue.length}</Badge></h2>{rows(overdue, true)}</section>}
+        {[...days].map(([day, items]) => <section key={day} aria-label={day}><h2>{day}</h2>{rows(items)}</section>)}
+      </>}
+    </div>
+  </div>;
 }

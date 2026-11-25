@@ -26,7 +26,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 from jaeger_agent.core.workspace import (
     SandboxError,
     _audit,
@@ -1234,7 +1234,23 @@ def search_offloaded_output(
         except Exception:
             state_root = Path.home() / ".jaeger"
 
-    offloader = ToolOutputOffloader(state_root)
+    extra_dirs: list[Path] = []
+    try:
+        layout = _require_layout()
+        logs_dir = getattr(layout, "logs_dir", None)
+        if logs_dir:
+            extra_dirs.append(Path(logs_dir) / "tool_results")
+    except Exception:
+        pass
+    active_file = state_root / "active_instance"
+    try:
+        active_name = active_file.read_text(encoding="utf-8").strip() if active_file.is_file() else ""
+        if active_name:
+            extra_dirs.append(state_root / "instances" / active_name / "logs" / "tool_results")
+    except OSError:
+        pass
+
+    offloader = ToolOutputOffloader(state_root, extra_dirs=extra_dirs)
     try:
         matches = offloader.grep(
             filename_or_path,

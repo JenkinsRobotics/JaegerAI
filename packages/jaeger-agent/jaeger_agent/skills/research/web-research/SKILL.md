@@ -15,7 +15,7 @@ metadata:
     category: research
     related_skills:
     - log-calculations
-    version: 1.0.0
+    version: 1.1.0
     platforms:
     - linux
     - macos
@@ -29,9 +29,21 @@ metadata:
 
 # WEB RESEARCH — SEARCH -> EXTRACT -> CITE
 
-Two tools, used in a strict order: `web_search` finds candidate pages (title +
-url + snippet only — NOT enough to answer from), `web_extract` fetches one
-page's real text. Never answer from a snippet alone.
+Choose the access method based on the user's goal, not just the URL.
+
+1. Prefer the first-party connector when it can do the job. For a YouTube playlist,
+   use `youtube_studio(action="playlist", url_or_id=...)` before generic web tools.
+2. For an ordinary public page, search to discover sources, then open or extract them
+   before citing. If the user already gave the source, start there.
+3. If the page is interactive, signed-in, or renders its content dynamically, use an
+   authorized browser session. Ask the user to sign in when necessary. Never export
+   cookies or put credentials in a prompt or command.
+4. A timeout may justify one retry if it is transient. A rejected request, missing
+   authorization, unsupported action, or protected file denial needs a different route.
+   Changing mirror hosts is not a new strategy.
+5. On a material blocker or strategy change, use the available progress surface to say
+   what failed, what you are trying next, and whether the user needs to do anything.
+   Verify the result before claiming success; distinguish confirmed findings from gaps.
 
 ## THE TOOLS (exact)
 ```

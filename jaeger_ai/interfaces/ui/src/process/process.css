@@ -22,6 +22,23 @@
 .jg-pv__title { display: inline-flex; align-items: center; gap: 6px; font-weight: 650; font-size: 15px; }
 .jg-pv__field { display: inline-flex; align-items: center; gap: 8px; color: var(--jg-pv-muted); }
 .jg-pv__field select { max-width: 24rem; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--jg-pv-line); background: var(--jg-pv-surface); color: var(--jg-color-text); }
+.jg-pv.jg-pv--runs { display: flex; flex-direction: column; gap: var(--jg-space-4); height: auto; min-height: 100%; padding: var(--jg-space-5) var(--jg-space-6) var(--jg-space-7); }
+.jg-pv--runs .jg-pv__main { grid-template-columns: minmax(0, 1fr); }
+.jg-pv--runs .jg-pv__main.has-inspector { grid-template-columns: minmax(0, 1fr) minmax(13rem, 32%); }
+.jg-pv--runs .jg-pv__canvas { height: clamp(20rem, 48vh, 38rem); }
+.jg-pv--runs .jg-pv__field, .jg-pv--runs .jg-pv__field select { min-width: 0; }
+.jg-pv--runs .jg-pv__switch { border-bottom: 1px solid var(--jg-pv-line); padding-bottom: var(--jg-space-3); }
+.jg-pv--runs .jg-pv-wf__row { min-height: 36px; }
+.jg-pv__secondary { color: var(--jg-pv-muted); }
+.jg-pv__secondary summary { cursor: pointer; padding-block: var(--jg-space-2); }
+.jg-pv__secondary .jg-pv__resps { margin-block-start: var(--jg-space-2); }
+@container jg-pv (max-width: 680px) {
+  .jg-pv--runs .jg-pv__main.has-inspector { grid-template-columns: minmax(0, 1fr); }
+  .jg-pv--runs .jg-pv__field select { max-width: min(24rem, 100%); }
+  .jg-pv--runs .jg-pv__field { flex: 1 1 100%; }
+  .jg-pv--runs .jg-pv-wf__head, .jg-pv--runs .jg-pv-wf__row { grid-template-columns: minmax(0, 1fr) minmax(0, 30%) 3.5rem; }
+}
+@media (max-width: 760px) { .jg-pv.jg-pv--runs { padding-inline: var(--jg-space-4); } }
 .jg-pv__check { display: inline-flex; gap: 6px; align-items: center; color: var(--jg-pv-muted); }
 .jg-pv__link { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--jg-pv-line); color: var(--jg-pv-muted); text-transform: capitalize; }
 .jg-pv__link.is-live { color: var(--jg-proc-succeeded); }

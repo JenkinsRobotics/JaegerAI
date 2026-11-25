@@ -21,7 +21,7 @@ from contextvars import ContextVar
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 from jaeger_agent.cognition.effects import EffectLedger
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools.tool_schema import ToolDef
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,7 @@ class DirectToolExecutor:
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
         from jaeger_agent.skill_registry.tool_selection import tool_permitted
         from jaeger_agent.core.cancellation import current_cancellation
-        from jaeger_agent.loop.tool_dispatch_safety import cancelled_tool_result
+        from jaeger_loop.safety import cancelled_tool_result
         cancelled = current_cancellation()
         if cancelled is not None and cancelled.is_set():
             return cancelled_tool_result()
@@ -196,7 +196,7 @@ class DirectToolExecutor:
         # cross this replaceable boundary: JaegerAgent._execute_prepared turns
         # them into structured model feedback and can still distinguish a bad
         # argument from a permission denial or an indeterminate side effect.
-        from jaeger_agent.telemetry import mark, tool_span
+        from jaeger_events import mark, tool_span
         with tool_span(tool.name) as current:
             result = tool.dispatch(dict(arguments))
             if isinstance(result, dict) and result.get("ok") is False:
@@ -317,7 +317,7 @@ class HookedToolExecutor:
                 # Evaluate through canonical authority boundary
                 auth_decision = authority.authorize(proposal)
                 authority_evaluated = True
-                from jaeger_agent import live as _live
+                from jaeger_events import live as _live
                 _needs = (not auth_decision.is_authorized
                           and auth_decision.status == AuthorizationStatus.REQUIRES_CONFIRMATION)
                 _live.emit("policy.decision", {
@@ -351,7 +351,7 @@ class HookedToolExecutor:
                         auth_decision.policy_name,
                         auth_decision.reason,
                     )
-                    from jaeger_agent import live as _live
+                    from jaeger_events import live as _live
                     _live.emit("hook.decision", {"hook": f"authority:{auth_decision.policy_name or 'policy'}",
                                                  "action": "deny", "tool": tool.name,
                                                  "reason": str(auth_decision.reason or "")[:300]})
@@ -384,7 +384,7 @@ class HookedToolExecutor:
                     tool.name,
                     hook_decision.reason,
                 )
-                from jaeger_agent import live as _live
+                from jaeger_events import live as _live
                 _live.emit("hook.decision", {"hook": "shell:pre_tool_call", "action": "deny", "tool": tool.name,
                                              "reason": str(hook_decision.reason or "")[:300]})
                 return {
@@ -421,7 +421,7 @@ class HookedToolExecutor:
         # A turn may be cancelled while waiting for authorization. Refuse before
         # checkpoints/ledger claim an effect, not only between model iterations.
         from jaeger_agent.core.cancellation import current_cancellation
-        from jaeger_agent.loop.tool_dispatch_safety import cancelled_tool_result
+        from jaeger_loop.safety import cancelled_tool_result
         cancelled = current_cancellation()
         if cancelled is not None and cancelled.is_set():
             return cancelled_tool_result()
@@ -542,12 +542,18 @@ class CheckpointingToolExecutor:
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
         if tool.name in MUTATING_TOOLS:
             try:
-                from jaeger_agent import checkpoints
-                from jaeger_agent.core.workspace import get_project_root
+                from jaeger_checkpoints import manager as checkpoint_manager
+                from jaeger_checkpoints import configure_checkpoints
+                from jaeger_agent.core.workspace import get_layout, get_project_root
+                from jaeger_agent import instance_config
 
+                configure_checkpoints(
+                    store_root_provider=lambda: get_layout().root / "checkpoints",
+                    enabled_provider=lambda: bool(getattr(instance_config.section("checkpoints"), "enabled", False)),
+                )
                 root = get_project_root()
                 if root is not None:
-                    checkpoints.manager().ensure_checkpoint(
+                    checkpoint_manager().ensure_checkpoint(
                         root, f"before {tool.name}")
             except Exception:  # noqa: BLE001 — never block the call
                 logger.debug("checkpoint before %r skipped", tool.name,
@@ -656,7 +662,7 @@ class LedgerToolExecutor:
         legacy_key = f"{prefix}:{tool_name}:{payload}"
         if self._run_id is None or tool_name not in {"terminal", "exec_command"}:
             return legacy_key
-        from jaeger_agent.live import current_tool_call
+        from jaeger_events.live import current_tool_call
 
         call_id = current_tool_call()
         if not call_id or self._ledger.get(legacy_key) is not None:
@@ -670,7 +676,7 @@ class LedgerToolExecutor:
     def _validate(tool: ToolDef, args: dict[str, Any]) -> Exception | None:
         """Coerce and validate before claiming an external side effect."""
         try:
-            from jaeger_os.core.tools.arg_coercion import coerce_args
+            from jaeger_tools.arg_coercion import coerce_args
             coerced = coerce_args(args, tool.args_model.model_json_schema())
             tool.args_model.model_validate(coerced)
             return None

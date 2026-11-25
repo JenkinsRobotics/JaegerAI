@@ -36,7 +36,7 @@ def complete(config, layout, text, *, model=None, provider=None, system_prompt="
              default_client=None, controls=None):
     from jaeger_ai.contract.channel_messages import model_content
     from jaeger_agent.loop.runtime_bridge import _adapter_for_client
-    from jaeger_agent.loop.interrupt import AgentInterrupted
+    from jaeger_loop.interrupt import AgentInterrupted
 
     interrupt = interrupt_event or threading.Event()
     if interrupt.is_set():
@@ -53,7 +53,7 @@ def complete(config, layout, text, *, model=None, provider=None, system_prompt="
         messages.append(current)
     context = getattr(adapter, "context_window", None) or getattr(getattr(client, "ext", None), "ctx", None)
     if context:
-        from jaeger_agent.util.context_guard import ContextGuard, ContextBudget
+        from jaeger_memory.context_guard import ContextGuard, ContextBudget
         reserve = min(getattr(adapter, "max_tokens", 1024), max(1, context // 2))
         guard = ContextGuard(ContextBudget(ctx_window=context, reserve_for_completion=reserve))
         messages = guard.trim_to_fit(messages, system_prompt=system_prompt, tools=[]).messages

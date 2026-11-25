@@ -51,13 +51,13 @@ from jaeger_agent.dialects import (
     strip_think_blocks,
     textify_tool_history,
 )
-from jaeger_agent.loop.interrupt import (
+from jaeger_loop.interrupt import (
     AgentInterrupted,
     CallProgress,
     interruptible_call,
 )
-from jaeger_agent.schemas.message_types import Message, ToolCall
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_contracts import Message, ToolCall
+from jaeger_tools.tool_schema import ToolDef
 from .base import ProviderAdapter
 from .hermes_xml import HERMES_TOOL_INSTRUCTIONS, _render_tools_block
 

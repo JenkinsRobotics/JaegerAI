@@ -1,9 +1,8 @@
 import {ChatOrganizer} from "./ChatOrganizer";
 import type {Organization,OrganizationAction} from "../api/organization";
 import { ConversationSection } from "./ConversationSection";
-import {JaegerAvatar} from "../avatar/JaegerAvatar";
+import { AgentAvatar } from "../agents/AgentAvatar";
 import { JaegerMark } from "../brand/JaegerMark";
-import {type ClipState} from "../avatar/avatar";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent, SessionRow } from "../api/types";
@@ -301,7 +300,6 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [executionHost, setExecutionHost] = useState('');
   const [shareOrigin, setShareOrigin] = useState(location.origin);
   const [ready, setReady] = useState(false);
-  const [avatarState, setAvatarState] = useState<ClipState>("idle");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const unavailableSessions = useRef(new Set<string>());
@@ -644,7 +642,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Pencil size={18} /></button>
         </div>
         <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : headerTitle}>
-          <span className="jg-stable-demo__profile-avatar"><JaegerAvatar portraitOverride={agent?.avatar_url} state={!ready || error ? "connecting" : avatarState} /></span>
+          <span className="jg-stable-demo__profile-avatar"><AgentAvatar id={agent?.id ?? "native:jaeger"} name={agent?.display_name ?? agent?.name ?? "Jaeger"} src={agent?.avatar_url} size={30} /></span>
           <span className="jg-stable-demo__profile-copy"><strong>{workspacePage ? routeTitle[route.page] : headerTitle}</strong></span>
         </div>
         <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
@@ -743,7 +741,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
 
       {error && <p className="jg-stable-demo__connection-alert" role="alert"><span>{error}</span><button type="button" onClick={() => location.reload()}>Reconnect</button></p>}
       <section className="jg-stable-demo__body" hidden={workspacePage} aria-label="Chat">
-        {session && ready && !invalidLinkedSession && (linkedSession === null || linkedSession === session) ? <ChatPane onAvatarState={setAvatarState} host={host} sessionId={session} topicId={isJaegerHome(session) ? topic : null} agents={agent ? [agent] : agents} onSessionMissing={recoverMissingSession} /> : !ready || !historyReady || historyError || session ?
+        {session && ready && !invalidLinkedSession && (linkedSession === null || linkedSession === session) ? <ChatPane host={host} sessionId={session} topicId={isJaegerHome(session) ? topic : null} agents={agent ? [agent] : agents} onSessionMissing={recoverMissingSession} /> : !ready || !historyReady || historyError || session ?
           <div className="jg-stable-demo__empty" role="status"><h1>{error || historyError ? "Waiting to reconnect" : "Restoring your conversation"}</h1><p>{error || historyError ? "Jaeger is temporarily unavailable. Your saved conversation will return when the connection is restored." : "Loading your saved conversation from Jaeger."}</p></div> :
           <div className="jg-stable-demo__empty"><span className="jg-stable-demo__eyebrow">YOUR AI COMPANION</span><h1>What would you like to work on?</h1><p>Talk with Jaeger, follow a task, or explore your files.<br />Your conversation stays here when you return.</p>
           <button type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "Start conversation"}</button></div>}

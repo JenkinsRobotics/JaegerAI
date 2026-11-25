@@ -28,9 +28,9 @@ import tempfile
 import time
 from typing import Any
 
-from jaeger_agent.loop.interrupt import AgentInterrupted, CallProgress, interruptible_call
-from jaeger_agent.schemas.message_types import Message
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_loop.interrupt import AgentInterrupted, CallProgress, interruptible_call
+from jaeger_contracts import Message
+from jaeger_tools.tool_schema import ToolDef
 
 from .base import ProviderAdapter
 from .cli_stream import collect_stream, VisibleTextStream

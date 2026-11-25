@@ -8,6 +8,36 @@
 .jg-orch-grid { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "nav" "main"; gap: var(--orch-gap); padding: var(--orch-pad); height: 100%; min-height: 0; box-sizing: border-box; position: relative; }
 .jg-orch-nav { grid-area: nav; min-width: 0; display: flex; flex-direction: column; gap: var(--jg-space-2); }
 .jg-orch-main { grid-area: main; min-width: 0; min-height: 0; overflow: auto; }
+.jg-u-page.jg-agents-home { display: flex; flex-direction: column; }
+.jg-agents-home > * { flex-shrink: 0; }
+.jg-orch[data-embedded] { height: auto; }
+.jg-orch[data-embedded] .jg-orch-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main"; padding: 0; height: auto; }
+.jg-orch[data-embedded] .jg-orch-main { overflow: visible; }
+.jg-orch-work-group > summary { cursor: pointer; padding: var(--jg-space-3); overflow-wrap: anywhere; }
+.jg-orch-jobs { display: grid; gap: var(--jg-space-3); width: 100%; max-width: 32rem; }
+.jg-orch-jobs h2, .jg-orch-jobs h3, .jg-orch-jobs p { margin: 0; }
+.jg-orch-jobs h3 { margin-block-end: var(--jg-space-2); }
+.jg-orch-jobs p { color: var(--jg-color-text-secondary); overflow-wrap: anywhere; }
+.jg-orch-jobs .jg-orch-rows { gap: var(--jg-space-1); }
+.jg-orch-job { min-width: 0; border: 1px solid var(--jg-color-border-tertiary); border-radius: var(--jg-radius-m); background: var(--jg-color-elevated); }
+.jg-orch-job__head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; min-height: 44px; gap: var(--jg-space-2); padding: var(--jg-space-1) var(--jg-space-2); list-style: none; }
+.jg-orch-job__head::-webkit-details-marker { display: none; }
+.jg-orch-job__head::before { content: ""; width: .4em; height: .4em; border: solid currentColor; border-width: 1px 1px 0 0; transform: rotate(45deg); }
+.jg-orch-job__details[open] > .jg-orch-job__head::before { transform: rotate(135deg); }
+.jg-orch-job__identity { display: grid; min-width: 0; }
+.jg-orch-job__identity strong, .jg-orch-job__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-orch-job__meta { color: var(--jg-color-text-secondary); font-size: var(--jg-text-footnote); }
+.jg-orch-job__body { display: grid; justify-items: start; gap: var(--jg-space-2); padding: var(--jg-space-2) var(--jg-space-3); border-top: 1px solid var(--jg-color-border-tertiary); }
+.jg-orch-job details { max-width: 100%; overflow-wrap: anywhere; }
+.jg-orch-job summary, .jg-orch-diagnostics > summary { cursor: pointer; }
+.jg-orch-diagnostics { margin-block: var(--jg-space-4); }
+@container orch (max-width: 1199px) {
+  .jg-orch[data-embedded] .jg-orch-inspector { position: fixed; top: auto; bottom: 0; max-height: 80dvh; z-index: 31; }
+  .jg-orch[data-embedded] .jg-orch-scrim { position: fixed; z-index: 30; }
+}
+@container orch (min-width: 1200px) {
+  .jg-orch[data-embedded][data-inspector="open"] .jg-orch-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 20rem); grid-template-areas: "main insp"; }
+}
 
 /* medium 600–839: team becomes a horizontal strip above the feed */
 @container orch (min-width: 600px) {

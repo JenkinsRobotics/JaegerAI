@@ -38,7 +38,7 @@ export function postChipText(entry: Post): string {
 }
 
 /** A message another agent posted into this chat: avatar + name, its text, the handoff/task line, links. */
-export function PostMessage({ entry, links, onOpenHandoff, onOpenChat, onReply, onOpenTaskArtifacts }: { entry: Post; links: Open; onOpenTaskArtifacts?:(taskId:string)=>void; onReply?: (handoffId: string) => void; onOpenHandoff?: (handoffId: string) => void; onOpenChat?: (sessionId: string) => void }) {
+export function PostMessage({ entry, links, onOpenHandoff, onOpenChat, onReply, onOpenTaskArtifacts, onViewTask }: { entry: Post; links: Open; onViewTask?: (taskId: string) => void; onOpenTaskArtifacts?:(taskId:string)=>void; onReply?: (handoffId: string) => void; onOpenHandoff?: (handoffId: string) => void; onOpenChat?: (sessionId: string) => void }) {
   const chip = postChipText(entry);
   const canOpen = entry.post !== "task_result" && entry.handoffId && onOpenHandoff;
   return (
@@ -55,6 +55,7 @@ export function PostMessage({ entry, links, onOpenHandoff, onOpenChat, onReply, 
             ? <button type="button" className="jg-post__chip" onClick={() => onOpenHandoff!(entry.handoffId!)}>{chip}</button>
             : <span className="jg-post__chip">{chip}</span>}
           {entry.taskId&&onOpenTaskArtifacts&&<button type="button" onClick={()=>onOpenTaskArtifacts(entry.taskId!)}>Open task artifacts</button>}
+          {entry.taskId && onViewTask && <button type="button" className="jg-post__link" onClick={() => onViewTask(entry.taskId!)}>View task</button>}
           {entry.childSessionId && onOpenChat && (
             <button type="button" className="jg-post__link" onClick={() => onOpenChat(entry.childSessionId!)}>Open chat</button>
           )}

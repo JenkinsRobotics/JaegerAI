@@ -453,6 +453,31 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-turn-activity__body { padding:12px 16px; display:flex; flex-direction:column; gap:12px; overflow-wrap:anywhere; }
 .jg-turn-activity__body p { margin:0; }
 
+/* The unified shell owns the header. Keep its composer the same visual width as the conversation. */
+.jg-chat[data-shell-chrome] .jg-composer {
+  width: min(calc(100% - 32px), 48rem);
+  min-height: 0;
+  border-radius: var(--jg-radius-l);
+  gap: 3px;
+  padding: 8px 10px;
+}
+.jg-chat[data-shell-chrome] .jg-composer__input { min-height: 32px; }
+.jg-chat[data-shell-chrome] .jg-chat__scroll { -webkit-mask-image: none; mask-image: none; }
+.jg-chat[data-shell-chrome] .jg-chat__column { padding-top: var(--jg-space-5); }
+.jg-chat[data-shell-chrome] .jg-composer__bar .jg-voice-mode__trigger:not(.jg-send) { display: grid; }
+.jg-chat-controls { position: relative; flex: none; }
+.jg-chat-controls > button[aria-expanded="true"] { color: var(--jg-color-text); background: var(--jg-color-active); }
+.jg-chat-controls__panel { position: absolute; z-index: 71; inset-inline-start: 0; bottom: calc(100% + 8px); display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 12rem; padding: 6px; border: 1px solid var(--jg-color-border); border-radius: var(--jg-radius-m); background: var(--jg-color-elevated); box-shadow: var(--jg-shadow-card); }
+.jg-chat-controls__panel[hidden] { display: none; }
+.jg-chat[data-shell-chrome] .jg-composer__bar .jg-chat-controls__panel .jg-runtime-trigger { width: auto; max-width: 14rem; padding: 0 8px; }
+.jg-chat[data-shell-chrome] .jg-composer__bar .jg-chat-controls__panel .jg-runtime-trigger > span { display: inline; }
+.jg-chat-tasks { display: grid; gap: 4px; margin-block: var(--jg-space-2); }
+.jg-chat-task { display: flex; align-items: center; justify-content: space-between; gap: var(--jg-space-3); border: 1px solid var(--jg-color-border); border-radius: var(--jg-radius-m); padding: var(--jg-space-2) var(--jg-space-3); }
+.jg-chat-task > div { min-width: 0; }
+.jg-chat-task strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--jg-font-small); }
+.jg-chat-task small { color: var(--jg-color-text-secondary); }
+.jg-chat-task > button { flex: none; }
+
 /* Ordered work stream: commentary stays in the transcript; detail stays optional. */
 .jg-turn-activity { align-self: stretch; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .jg-turn-activity .jg-steps__summary { padding: 8px 0; gap: 9px; min-height: 44px; text-align: left; color: var(--jg-color-text-secondary); }

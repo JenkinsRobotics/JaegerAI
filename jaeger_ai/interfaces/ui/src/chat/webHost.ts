@@ -111,6 +111,9 @@ const STOP_OUTCOME: Partial<Record<TurnState, string>> = {
 export class WebHost implements ChatHost {
   readonly kind: HostKind = "web";
   capabilities: HostCapabilities = { voice: false };
+  /** The unified WebUI supplies the conversation header and compact composer. */
+  shellOwnsChrome = false;
+  openTask?: (taskId: string) => void;
   /** Set by the app: the agent's one home chat, its pages and history (Grok-style sessions). */
   home?: HomeSessions;
   /** Set by the app: the header menu's History opens the agent's older chats. */
@@ -134,6 +137,10 @@ export class WebHost implements ChatHost {
   constructor(protected readonly source: JaegerSource, private readonly backoffMs?: number[]) {}
 
   get taskArtifacts(){return this.source.taskArtifacts;}
+  async listConversationTasks(sessionId: string) {
+    if (!this.shellOwnsChrome || typeof this.source.tasks !== "function") return [];
+    return (await this.source.tasks()).filter(task => task.provenance?.session_id === sessionId);
+  }
   get sessionFiles() { return this.source.sessionFiles; }
 
   setAgentNames(names: Map<string, string>) { this.agentNames = names; }

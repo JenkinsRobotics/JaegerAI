@@ -11,7 +11,7 @@ import contextvars
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 NOTES_MAX_CHARS = 16000
 _notes_dir: contextvars.ContextVar[Path | None] = contextvars.ContextVar("jaeger_agent_notes_dir", default=None)

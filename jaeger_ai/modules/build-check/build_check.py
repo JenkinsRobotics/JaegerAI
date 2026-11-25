@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_tools.tool_registry import register_tool_from_function
 
 #: First words a check command may start with.
 CHECK_COMMANDS = frozenset({"npm", "node", "python3", "pytest", "make", "swift", "git", "ls", "test"})

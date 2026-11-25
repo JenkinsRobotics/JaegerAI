@@ -29,7 +29,7 @@ import sys
 
 from pydantic import BaseModel
 
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools.tool_schema import ToolDef
 from jaeger_agent.core.availability import (
     _TOOL_TO_PLUGIN,
     wire_availability_checks,

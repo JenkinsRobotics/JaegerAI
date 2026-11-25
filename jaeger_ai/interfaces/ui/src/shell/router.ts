@@ -51,7 +51,7 @@ export function canonicalDestinationOf(route: Route): CanonicalDestination {
 
 /** Sub-tabs of merged pages, in display order; the first is the default. */
 export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: string }[]>> = {
-  agents: [{ id: "roster", title: "Agents" }, { id: "team", title: "Team" }, { id: "characters", title: "Characters" }, { id: "knowledge", title: "Memory & Skills" }],
+  agents: [{ id: "roster", title: "Agents" }, { id: "team", title: "Team" }, { id: "characters", title: "Characters" }],
   // One Tasks view (2026-11-15): Pipeline, Backlog and Production were retired; their old links land on Tasks.
   work: [{ id: "tasks", title: "Tasks" }, { id: "process", title: "Process" }, { id: "calendar", title: "Calendar" }, { id: "youtube", title: "YouTube" }],
   research: [{ id: "runs", title: "Research" }, { id: "documents", title: "Documents" }, { id: "workspace", title: "Workspace" }],
@@ -63,7 +63,6 @@ export const LEGACY_PATHS: Record<string, string> = {
   tasks: "/work/tasks",
   calendar: "/work/calendar",
   documents: "/research/documents",
-  knowledge: "/agents/knowledge",
   sharepoint: "/settings/integrations/sharepoint",
   compare: "/settings/models/compare",
   integrations: "/settings/integrations",
@@ -91,6 +90,11 @@ export function pathOf(page: PageId, sub?: string): string {
 /** Old top-level paths (/characters, /tasks/gallery?x=1 …) → the new path, or null when already current. */
 export function canonicalPath(pathname: string, search = ""): string | null {
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  if (["agents/knowledge", "research/knowledge", "knowledge"].includes(parts.join("/"))) {
+    const params = new URLSearchParams(search);
+    params.set("section", "knowledge");
+    return `/library?${params}`;
+  }
   if (parts[0] === "settings" && parts[1] && LEGACY_SETTINGS[parts[1]]) return `/settings/${LEGACY_SETTINGS[parts[1]]}${search}`;
   const moved: Record<string, string> = {
     "/home/widgets": "/settings", "/home/overview": "/work", "/home": "/work",
@@ -98,7 +102,7 @@ export function canonicalPath(pathname: string, search = ""): string | null {
     "/agents/hermes": "/settings", "/settings/integrations/hermes": "/settings", "/agents/openclaw": "/settings/integrations", "/settings/integrations/openclaw": "/settings/integrations",
     "/work/pipeline": "/work", "/work/backlog": "/work", "/work/production": "/work",
     "/work/workspace": "/research/workspace", "/work/checkpoints": "/settings/checkpoints",
-    "/research/youtube": "/work/youtube", "/research/knowledge": "/agents/knowledge", "/research/sharepoint": "/settings/integrations/sharepoint",
+    "/research/youtube": "/work/youtube", "/research/sharepoint": "/settings/integrations/sharepoint",
   };
   // Longest prefix first: keep deep-link tails and queries without redirecting current paths.
   const path = `/${parts.join("/")}`;
@@ -113,7 +117,15 @@ export function canonicalPath(pathname: string, search = ""): string | null {
 /** Parse a location (path + search). "/" and unknown paths open DEFAULT_PAGE (Chat); retired paths resolve to their new tab. */
 export function parseRoute(pathname: string, search = ""): Route {
   const legacy = canonicalPath(pathname);
-  if (legacy) pathname = legacy;
+  if (legacy) {
+    const index = legacy.indexOf("?");
+    pathname = index === -1 ? legacy : legacy.slice(0, index);
+    if (index !== -1) {
+      const merged = new URLSearchParams(search);
+      new URLSearchParams(legacy.slice(index)).forEach((value, key) => merged.set(key, value));
+      search = merged.toString();
+    }
+  }
   const params = new URLSearchParams(search);
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
   const head = (parts[0] ?? DEFAULT_PAGE) as PageId;

@@ -9,7 +9,7 @@ def test_read_authority_denial_is_definitive(tmp_path):
 
     from jaeger_agent import JaegerAgent
     from jaeger_agent.core.workspace import ReadAccessDenied
-    from jaeger_os.core.tools.tool_schema import ToolDef
+    from jaeger_tools.tool_schema import ToolDef
 
     class Args(BaseModel):
         path: str

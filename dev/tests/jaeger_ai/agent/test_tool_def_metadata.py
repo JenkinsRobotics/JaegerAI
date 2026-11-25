@@ -17,8 +17,8 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from jaeger_agent.dialects import normalize_tool_name
-from jaeger_os.core.tools.tool_schema import ToolDef
-from jaeger_os.core.tools.tool_registry import (
+from jaeger_tools.tool_schema import ToolDef
+from jaeger_tools.tool_registry import (
     get_tool, register_tool_from_function, unregister_tool,
 )
 

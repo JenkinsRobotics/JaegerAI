@@ -4,8 +4,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from jaeger_agent.schemas.message_types import Message
-from .interrupt import AgentInterrupted, StaleCallTimeout
+from jaeger_contracts import Message
+from jaeger_loop.interrupt import AgentInterrupted, StaleCallTimeout
 
 
 def _ja(name: str) -> Any:
@@ -400,7 +400,7 @@ class AgentProviderStepMixin:
         original_budget = self.context_guard.budget if self.context_guard is not None else None
         for adapter in adapters:
             if last_exc is not None and not _fallback_reachable(adapter):
-                from jaeger_agent import live as _live
+                from jaeger_events import live as _live
                 _live.emit("reliability.fallback_skipped", {"adapter": getattr(adapter, "describe", lambda: type(adapter).__name__)(), "reason": "unreachable"})
                 continue
             if original_budget is not None:
@@ -541,7 +541,7 @@ class AgentProviderStepMixin:
                     # was the last adapter, the caller sees ``stalled``.
                     last_exc = exc
                     self.last_halt_reason = "stalled"
-                    from jaeger_agent import live as _live
+                    from jaeger_events import live as _live
                     _live.emit("reliability.timeout", {"what": "model call", "adapter": adapter.describe(),
                                                        "after_s": self.stale_call_timeout_s})
                     if attempt < self._STALE_RETRIES and not self._interrupt_event.is_set():
@@ -577,7 +577,7 @@ class AgentProviderStepMixin:
                     if not stream_emitted and attempt < cap and not self._interrupt_event.is_set():
                         attempt += 1
                         delay = _retry_delay(kind, attempt)
-                        from jaeger_agent import live as _live
+                        from jaeger_events import live as _live
                         _live.emit("reliability.retry", {"adapter": adapter.describe(), "kind": str(kind).lower(),
                                                          "attempt": attempt, "of": cap, "delay_s": round(delay, 2),
                                                          "error": type(exc).__name__})

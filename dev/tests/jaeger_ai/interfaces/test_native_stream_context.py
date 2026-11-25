@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from jaeger_agent.loop.interrupt import interruptible_call
+from jaeger_loop.interrupt import interruptible_call
 from jaeger_ai.main import current_turn_sink, stream_delta_sink
 
 

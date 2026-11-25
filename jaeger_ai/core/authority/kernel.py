@@ -706,7 +706,7 @@ class PolicyKernel:
         ):
             return None
         try:
-            from jaeger_ai.core.authority.destructive import destructive_reason
+            from jaeger_authority.destructive import destructive_reason
             from jaeger_authority import evasion_reason as _v2_evasion
 
             cid = canonical_tool_id(proposal.tool_name)
@@ -763,7 +763,32 @@ class PolicyKernel:
                 trusted_roots = tuple(configured_trusted_paths())
             except Exception:  # noqa: BLE001 — fail closed to no extra trusted roots
                 trusted_roots = ()
-            v2_verdict = BoundaryAndSecretsInspector(allowed_roots=trusted_roots).inspect(
+            read_safe_roots: list[Path] = []
+            try:
+                state_root = _pure_state_root()
+                inst_root = _resolve_instance_root(proposal, allow_runtime=False)
+                if inst_root is None and state_root is not None:
+                    active_file = state_root / "active_instance"
+                    if active_file.is_file():
+                        active_name = active_file.read_text(encoding="utf-8").strip()
+                        if active_name:
+                            cand = state_root / "instances" / active_name
+                            if cand.is_dir():
+                                inst_root = cand
+                if inst_root is not None:
+                    read_safe_roots.extend((
+                        inst_root / "logs" / "tool_results",
+                        inst_root / "workspace",
+                        inst_root / "skills",
+                    ))
+                if state_root is not None:
+                    read_safe_roots.append(state_root / "offload")
+            except Exception:  # noqa: BLE001
+                pass
+            v2_verdict = BoundaryAndSecretsInspector(
+                allowed_roots=trusted_roots,
+                read_allowed_roots=tuple(read_safe_roots),
+            ).inspect(
                 _V2Proposal(
                     tool_name=proposal.tool_name,
                     arguments=proposal.arguments,

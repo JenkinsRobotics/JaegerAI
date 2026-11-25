@@ -8,8 +8,8 @@ from jaeger_agent.skill_registry import toolset_scoping as scopes
 from jaeger_agent.skill_registry.tool_selection import ToolSelection, selection_scope
 from jaeger_agent.tools.meta import list_tools, load_tools, describe_tool
 from jaeger_agent.tool_executor import DirectToolExecutor, tool_allowlist
-from jaeger_os.core.tools import tool_registry as registry
-from jaeger_os.core.tools.tool_schema import ToolDef
+from jaeger_tools import tool_registry as registry
+from jaeger_tools.tool_schema import ToolDef
 
 class Args(BaseModel):
     pass
@@ -174,7 +174,7 @@ def test_explicit_loading_matches_discovery_metadata():
 
 
 def test_small_window_budgets_schemas_and_routes_only_admitted_request():
-    from jaeger_agent.util.context_guard import ContextGuard, ContextBudget
+    from jaeger_memory.context_guard import ContextGuard, ContextBudget
     from jaeger_agent.task_port import task_scope
     for name in ('list_tools', 'load_tools', 'describe_tool', 'read_file', 'get_time'):
         add(name)
@@ -199,7 +199,7 @@ def test_small_window_budgets_schemas_and_routes_only_admitted_request():
 
 
 def test_explicit_tool_list_is_never_silently_budgeted():
-    from jaeger_agent.util.context_guard import ContextGuard, ContextBudget
+    from jaeger_memory.context_guard import ContextGuard, ContextBudget
     tool = add('required', 'long ' * 10000)
     agent = JaegerAgent(adapter=Adapter(),tools=[tool],scope_tools=True,
         context_guard=ContextGuard(ContextBudget(ctx_window=2048)))
@@ -240,9 +240,9 @@ def test_named_tool_is_not_selected_for_untrusted_content():
 
 def test_discovery_survives_large_intent_and_exact_load_survives_budget():
     from jaeger_agent.skill_registry.tool_selection import budget_visible_tools
-    from jaeger_agent.util.context_guard import ContextBudget, ContextGuard
-    from jaeger_os.core.tools.tool_registry import _synthesize_args_model
-    from jaeger_os.core.tools.arg_coercion import coerce_args
+    from jaeger_memory.context_guard import ContextBudget, ContextGuard
+    from jaeger_tools.tool_registry import _synthesize_args_model
+    from jaeger_tools.arg_coercion import coerce_args
     from pydantic import ValidationError
     guard = ContextGuard(ContextBudget(ctx_window=4096, reserve_for_completion=1024))
     discovery = [add(n) for n in ('list_tools','describe_tool','load_tools')]

@@ -27,14 +27,11 @@ describe("AvatarPanel", () => {
     await act(async () => { fireEvent.keyDown(window, { code: "KeyA", altKey: true, metaKey: true }); });
     expect(screen.getByRole("img", { name: /Jaeger avatar/ })).toBeTruthy();
   });
-  it("animates the built-in Jaeger character unless Still is selected", async () => {
+  it("uses the agent icon when Jaeger has no saved avatar", async () => {
     const native = { id: "native:jaeger", name: "Jaeger" } as Agent;
     const { container } = render(<AvatarPanel agent={native} clipState="working" size={{ cls: "expanded", short: false }} />);
-    expect(await screen.findByRole("img", { name: "Jaeger avatar" })).toBeTruthy();
-    expect(container.querySelector('.jg-jaeger-avatar[data-motion="rigged"]')).toBeTruthy();
-    expect(container.querySelector('.jg-jaeger-avatar[data-pose="3"] .jg-jaeger-pose[title="Calculating"]')).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Still" }));
-    expect(container.querySelector('.jg-jaeger-avatar[data-motion="still"]')).toBeTruthy();
+    expect(await screen.findByRole("img", { name: /^Jaeger avatar,/ })).toBeTruthy();
+    expect(container.querySelector('.jg-jaeger-avatar')).toBeNull();
   });
 });
 

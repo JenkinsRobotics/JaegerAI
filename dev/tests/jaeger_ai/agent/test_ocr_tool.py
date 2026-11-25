@@ -153,7 +153,7 @@ def test_ocr_file_recognition_exception_never_raises(monkeypatch, tmp_path):
 
 def test_ocr_file_is_registered_read_only():
     from jaeger_os.core.safety.permissions import PermissionTier, get_tier
-    from jaeger_os.core.tools.tool_registry import get_tools
+    from jaeger_tools.tool_registry import get_tools
 
     tools = {t.name: t.fn for t in get_tools()}
     assert "ocr_file" in tools
