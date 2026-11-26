@@ -1,201 +1,25 @@
-# AGENTS.md — JaegerAI Engineering Doctrine & Operational Standards
+# JaegerAI — Developer & Agent Operating Guide
 
-## What Jaeger is
+This repository is a **100% modular, local-first cognitive AI platform** built on **29 standalone Python packages** and **5 standalone React 19 UI packages** under `packages/`.
 
-**Core mission:** *Help humanity, one human at a time.*
+## Golden Rules
 
-JaegerAI is Jenkins Robotics' **persistent personal intelligence platform**, built on the reusable **JaegerAgent** execution framework (`packages/jaeger-agent`). Its default persistent companion identity is **Truth** (user-customizable without losing `entity_id` or continuity).
+1. **Zero in-repo runtime junk:** Virtual environments live outside the repo at `~/.jaeger/venv` (override via `JAEGER_VENV`), UI production builds live at `~/.cache/jaeger/ui-rebuild-mainscreen/dist`, and Python bytecode cache lives outside the repo (`PYTHONDONTWRITEBYTECODE=1`).
+2. **Strict package layering:** Standalone packages under `packages/jaeger-*` MUST NEVER import `jaeger_ai`, `jaeger_agent`, or `jaeger_os`. Enforced automatically by `dev/tests/test_package_layering.py`.
+3. **Zero external infrastructure daemons:** Use embedded SQLite WAL and in-process `asyncio` — no Redis, Postgres, RabbitMQ, or Docker required.
+4. **32 GB Apple Silicon budget:** Respect `jaeger_orchestration.ResourceGovernor` (`OWNER_WORK > AWARENESS_SAFETY > IDLE_LIFE`), max 1 heavy model resident at a time, and hard-pruned camera frame buffers.
+5. **User-owned identity:** Never hardcode personal names, channels, or founder narratives into platform code; user identity lives in `~/.jaeger/identity.json`.
+6. **Fail-closed safety:** External side effects (publishing, spending, sending external messages, motor motion while E-Stop is latched) require explicit owner approval or operator E-Stop release.
 
-- **Truth-seeking is a system-wide architectural invariant** below the persona layer (`core/prompt_identity.py`, `core/world/`): observations, verified facts, hypotheses, predictions, preferences, and unknowns remain explicitly separated, backed by evidence, contradiction detection, and atomic correction.
-- **Human flourishing is the operating objective** (`features/human_needs/`), strictly user-owned, non-intrusive, and exportable.
-- **Characters are summonable simulated personalities** (`features/personality/`) with scoped memory and Council synthesis — never silently inheriting private user tools or overriding Truth's epistemic rules.
-- **One persistent intelligence** coordinates models (cloud + local), tools, computer-use, specialists, characters, devices, and autonomous improvement loops.
-
-| Component | Responsibility |
-|---|---|
-| Models | Reasoning, perception, generation (cloud + local, full model context limits) |
-| Tools | Computers, browsers, files, applications |
-| Execution engine | Plan, act, observe, continue (`JaegerAgent`) |
-| Memory and state | Persistent episodic, epistemic semantic (`core/world`), and human-needs state |
-| Decision layer | Fast local routing and structured choices |
-| Orchestration | Coordinate models, specialists, and Character Councils |
-| Permissions | User-controlled execution boundaries (`core/authority/kernel.py`) |
-| Evaluation | Verify results, track contradictions, and measure improvement |
-| Scheduler / events | Trigger ongoing authorized autonomous work |
-
-**When auditing, evaluate the actual codebase fresh against these system components, the Truth/Human-Flourishing architecture, and working runtime evidence — never parrot legacy docs.**
-
----
-
-Telegraph style. Root rules only. Applies to all human contributors, subagents, and AI coding assistants.
-
-Current product definition: [`docs/PRODUCT.md`](docs/PRODUCT.md). The existing repository is the starting implementation; current software structure, legacy documentation, and incomplete functionality do not define or constrain the intended end-state architecture. The dedicated Mac Studio runtime remains protected from development modifications without separate authorization.
-
----
-
-## 1. Zero In-Repo State & Clean Architecture Doctrine
-
-The repository source tree must remain pristine, deterministic, and free of runtime side-effects.
-
-* **No In-Repo Runtime State:**
-  * All persistent databases, session transcripts, agent identities, logs, sockets, and scratch workspaces belong strictly in `~/.jaeger/` (or `$JAEGER_STATE_DIR`), **NEVER** in the repository tree (`<repo>/.jaeger_ai/`, `<repo>/.jaeger_agent/`).
-* **No In-Repo Virtual Environments:**
-  * The development and execution environment lives in `~/.jaeger/venv` (or `$JAEGER_VENV`). Never build or commit `.venv` in the repository root.
-* **No In-Repo Bytecode or Test Caches:**
-  * `PYTHONDONTWRITEBYTECODE=1` and `PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"` must remain enforced across all runners, CLIs, and test suites.
-  * Pytest caches must resolve to `~/.cache/pytest` (configured in `pyproject.toml`).
-  * Never commit or tolerate `__pycache__/` or `.pytest_cache/` in the source tree.
-* **No Cosmetic Band-Aids:**
-  * Never create `.vscode/settings.json` or `.gitignore` hacks to mask unwanted runtime files generated by the application. If a junk file appears, diagnose and eliminate the code generating it at its root.
-
----
-
-## 2. Root-Cause Repair Doctrine
-
-* **Solve at the Architectural Producer:**
-  * Never compensate downstream for upstream design failures. When a bug, leak, or pollution occurs, find the exact function responsible and fix the invariant there.
-* **Direct Inspection Required:**
-  * Never guess file locations, dependencies, or framework behavior from memory. Inspect the code, configuration, and dependency contracts directly before taking action.
-* **Proof Over Assumptions:**
-  * Every fix, refactor, or cleanup must be accompanied by automated verification (tests, CLI runs, and disk assertions). Diff-only review is rejected.
-
----
-
-## 3. Resilience & Gateway Continuity
-
-* **Gateway Architecture:**
-  * The Jaeger Gateway (`jaeger_ai.core.gateway.server`) runs as an isolated daemon on `127.0.0.1:33418` (loopback only; `JAEGER_GATEWAY_HOST` is the explicit opt-out), launched by **`jaeger gateway daemon`**. The port is one constant, `GATEWAY_PORT` in `jaeger_ai/contract/ports.py` (`JAEGER_GATEWAY_PORT` overrides it). The old port `:8810` is retired (2026-10-17): nothing listens there and no client falls back to it. It owns persistent SQLite session state and broadcasts SSE multi-client events.
-  * **`jaeger gateway` and `jaeger gateway daemon` both run the Jaeger Gateway.** The external Agentgateway (MCP `:8811`, A2A `:8812`) was archived on 2026-11-16 (C7). MCP is on `:8792`, A2A is the a2a service.
-  * Current Mac client: `jaeger_ai/interfaces/macos-shell`; shared frontend: `jaeger_ai/interfaces/ui`. `apps/macos` and `apps/web` alias those canonical paths. The WebUI server side is `jaeger_ai/core/gateway/webapp`, served by the Gateway on `:8790`. The old SwiftUI/Qt desktop frontends are archived outside the repo; no automatic fallback is permitted.
-  * Session state resolves through `operator_state_root()`: `JAEGER_STATE_DIR` → `JAEGER_HOME` → `~/.jaeger`, landing at `<state root>/gateway_sessions.sqlite3`. Anything opening that database directly must use the same resolver — reading `JAEGER_HOME` alone means a sandboxed run silently opens the operator's live store and collides with the daemon's ownership lease.
-* **Tool Call Resilience:**
-  * All model-generated tool calls must pass through `jaeger_ai.core.runtime.tool_repair` to automatically recover from malformed JSON, markdown fences, Python literals, or single quotes without failing the user's turn.
-
----
-
-## 4. System Topology
-
-Verified against running code. Every port, path and command below was
-exercised; none are aspirational.
-
-### Daemons and ports
-
-| Process | Bind | Launch | Owns |
-|---|---|---|---|
-| Jaeger Gateway | `127.0.0.1:33418` | `jaeger gateway daemon` | sessions, SSE, approvals |
-| Jaeger WebUI | `:8790` | served by the Gateway | browser UI |
-| MCP HTTP | `127.0.0.1:8792` | launchd `jaeger-mcp-http` | tool surface for MCP clients |
-| Voice | `127.0.0.1:8794` | `scripts/run-jaeger-voice.sh` (launchd) | local speech |
-| MCP server | stdio / `--http` | `jaeger mcp` | tool surface |
-| A2A server | loopback `:8796` | `jaeger a2a` | agent-to-agent JSON-RPC |
-
-### IPC
-
-* **NDJSON over AF_UNIX** — `<instance>/run/bridge.sock`, via `jaeger bridge`.
-  The native app and TUI speak this for turn execution.
-* **REST + SSE** — `:33418`. Sessions and live events. The gateway serves
-  **`/health`**, not `/v1/health` (the latter 404s).
-
-### Clients
-
-| Client | Stack | Transport |
-|---|---|---|
-| `jaeger_ai/interfaces/macos-shell` (= `apps/macos`) | AppKit + WKWebView native host | shared UI → Gateway |
-| `jaeger_ai/interfaces/ui` (= `apps/web`) | React + TypeScript shared frontend | Gateway / authenticated WebUI proxy |
-| `jaeger_ai/core/gateway/webapp` | WebUI server side and sign-in, inside the Gateway | in-process |
-| `jaeger_ai/interfaces/ide` | VS Code extension sidebar | REST+SSE `:33418`, native daemon lifecycle |
-| `jaeger_ai/interfaces/tui` | `prompt_toolkit` | AF_UNIX bridge |
-
-The canonical shared frontend uses React, TypeScript and Vite. The native
-shell is Swift/AppKit; preserve its existing bundle identity and permission boundaries.
-
-### Canonical vs. Legacy Reference Table
-
-| Canonical (Authoritative) | Legacy / Shadow / Alias (Do NOT Edit) | Distinction & Invariant |
-|---|---|---|
-| `jaeger gateway daemon` (`:33418`) | Agentgateway (`:8811`, `:8812`, archived 2026-11-16) | `daemon` owns Jaeger sessions & SSE; there is no external proxy. |
-| `packages/jaeger-agent/` | `jaeger_ai/vendor/` | `jaeger-agent` is live uv workspace; `vendor/` is deleted and forbidden. |
-| `jaeger_ai/interfaces/macos-shell` | `apps/macos` | Canonical native shell; old SwiftUI target is not an automatic fallback. |
-| `jaeger_ai/interfaces/ui` | `apps/web` | Canonical shared frontend, served by the Gateway on `:8790`. |
-| `~/.jaeger/` (`operator_state_root`) | `<repo>/.jaeger_*`, root shims | Zero in-repo state; databases belong strictly in operator home. |
-| `./scripts/verify.sh` | Manual ad-hoc test invocations | Single-command deterministic test pipeline before turn completion. |
-
-### Run locally & verify
+## Daily Commands
 
 ```bash
-jaeger gateway daemon                       # :33418 — start first
-                                            # :8790 WebUI comes up with the Gateway
-./scripts/verify-stack-smoke.py             # Gateway, WebUI, MCP and voice health
-bash jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh # external dev bundle; does not install/start services
-./scripts/verify.sh                         # deterministic test & hygiene verification pipeline
+./install.sh --profile full     # One-command reproducible install
+./jaeger doctor                 # Verify packages, binaries, WebUI & live Gateway
+./jaeger status                 # Live Gateway, 32 GB RAM, Mind Loop, Droid & Minecraft
+./jaeger                        # Interactive streaming terminal chat (TUI)
+./jaeger ask "<prompt>"         # Single-turn prompt against live Gateway
+./jaeger start                  # Start Gateway (:33418) + 5-Tab Studio WebUI (:8790)
+./jaeger open                   # Open http://127.0.0.1:8790 in default browser
+./jaeger verify                 # Run full backend + frontend + build verification
 ```
-
-Isolate a scratch instance with `JAEGER_STATE_DIR=/tmp/gw-iso` — it isolates
-the session store, so a test run cannot touch the operator's live database.
-
-### Current operator release path
-
-Until the operator changes this policy, ordinary product changes land directly
-on `master`; do not create a feature branch for them. A requested live change
-is incomplete after commit or push. After focused verification, push the exact
-commit to `origin/master` and deploy in place on the Mac Studio: every launchd
-job runs from `~/GitHub/JaegerAI`, so `git pull` there, restart the changed
-service with `launchctl kickstart -k gui/501/com.jenkinsrobotics.jaeger-<service>`
-(never MCP 8792 unless asked), and rebuild the UI with
-`python3 jaeger_ai/interfaces/ui/scripts/build-external.py`. Report completion
-only after a live check (`/health`, a chat on 8790) on the deployed commit. The
-old SSH deploy into `~/.jaeger/source` is archived on the Desktop.
-
-
----
-
-## 5. Repository Structure & Boundaries
-
-```text
-JaegerAI/
-├── apps/               # Client aliases — SYMLINKS to the real targets below
-├── clients/            # Client SDKs connecting to the Gateway
-├── dev/                # Test suites (dev/tests) and driver scripts (dev/scripts)
-├── docs/               # Technical specifications and architectural docs
-├── integrations/       # External service and platform adapters
-├── jaeger              # Single operator entrypoint script (executes ~/.jaeger/venv)
-├── jaeger_ai/          # Core engine — see docs/architecture/STRUCTURE.md for the full map
-│   ├── core/           # Shared engine: gateway (sessions, :33418), frameworks, models
-│   ├── features/       # One folder per feature, each with its own README.md
-│   ├── interfaces/     # Client surfaces ONLY (macos-shell, ui, ide, tui, bridge)
-│   └── assets/         # Icons + the WebUI extension scripts (single mount point)
-├── packages/           # Monorepo standalone packages (jaeger-os, jaeger-agent, etc.)
-└── scripts/            # Host and deployment scripts
-```
-
-### Where a new file goes
-
-Three homes, one question each. Getting this wrong is how the tree drifted
-before, so answer them in order:
-
-1. **Could the operator switch it off and still have Jaeger?** → `features/<name>/`,
-   and it gets a `README.md` in the same commit. Every feature folder has one;
-   keep it that way.
-2. **Do two or more features need it?** → `jaeger_ai/core/`. `core/frameworks/`
-   (per-framework turn execution) lives there because the WebUI and the Gateway
-   both call it.
-3. **Is it only *how a human or peer connects*?** → `jaeger_ai/interfaces/`.
-   A window, a terminal, a socket. Never business logic — that was the mistake
-   that put turn execution under `interfaces/` for months.
-
-**One definition per fact.** A value two layers both need — a framework name,
-a port, a wire constant — is defined in `jaeger_ai/contract/` and imported.
-Never typed twice. Copies do not fail loudly: both files look right and only
-the behaviour is wrong. A dead `ports.py` carried
-`ANIMATION_BRIDGE_DEFAULT_PORT = 9999` against the live `8765` for months, and
-the framework table was re-derived in eight places before two of them
-disagreed and misrouted a conversation.
-
-**No compat shims.** When a module moves, repoint its importers in the same
-change and delete the old path. A re-export left behind doubles the places a
-reader has to look, and twelve of them had accumulated by 2026-09.
-
-**One copy of every file.** If a file must be reachable from two places, it gets
-one home and the other place references it. Never a second copy — four had
-silently diverged from their originals by 2026-09, and editing the stale one
-changed nothing with no error to say so.

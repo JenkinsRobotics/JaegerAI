@@ -1,4 +1,4 @@
-# JaegerAI — 100% Standalone Modular Agentic Framework + Thin Product Composition Root
+# JaegerAI — 100% Standalone Modular Cognitive Platform + Thin Product Composition Root
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -7,27 +7,40 @@ exclude = [
     "packages/jaeger-ui-protocol",
     "packages/jaeger-ui-sdk",
     "packages/jaeger-ui-kit",
+    "packages/jaeger-ui-avatar",
     "packages/jaeger-ui-features",
 ]
 
 [tool.uv.sources]
-jaeger-kokoro-tts = { workspace = true }
-jaeger-whisper-stt = { workspace = true }
-jaeger-contracts = { workspace = true }
 jaeger-authority = { workspace = true }
+jaeger-avatar = { workspace = true }
+jaeger-business = { workspace = true }
+jaeger-channels = { workspace = true }
+jaeger-checkpoints = { workspace = true }
+jaeger-cognition = { workspace = true }
+jaeger-contracts = { workspace = true }
+jaeger-droid = { workspace = true }
+jaeger-embodiment-minecraft = { workspace = true }
+jaeger-evals = { workspace = true }
 jaeger-events = { workspace = true }
 jaeger-gateway = { workspace = true }
+jaeger-hardware = { workspace = true }
+jaeger-kokoro-tts = { workspace = true }
 jaeger-loop = { workspace = true }
+jaeger-lsp = { workspace = true }
+jaeger-macos = { workspace = true }
+jaeger-mcp = { workspace = true }
 jaeger-memory = { workspace = true }
 jaeger-models = { workspace = true }
 jaeger-orchestration = { workspace = true }
+jaeger-protocols = { workspace = true }
+jaeger-realtime = { workspace = true }
 jaeger-reliability = { workspace = true }
-jaeger-tools = { workspace = true }
-jaeger-mcp = { workspace = true }
-jaeger-macos = { workspace = true }
-jaeger-lsp = { workspace = true }
-jaeger-checkpoints = { workspace = true }
 jaeger-skills = { workspace = true }
+jaeger-tools = { workspace = true }
+jaeger-vision = { workspace = true }
+jaeger-whisper-stt = { workspace = true }
+jaeger-youtube = { workspace = true }
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -35,17 +48,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-ai"
-description = "JaegerAI: Thin product composition root wired onto 15 standalone backend + 4 frontend modular packages"
+description = "JaegerAI: Persistent, local-first modular AI platform (29 standalone Python + 5 React 19 packages)"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dynamic = ["version"]
 dependencies = [
     "aiohttp>=3.10",
+    "httpx>=0.27",
+    "mcp>=1.0",
     "pydantic>=2.7",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
-jaeger = "jaeger_ai.__main__:main"
+jaeger = "jaeger_ai.cli:main"
 
 [tool.setuptools]
 include-package-data = false
@@ -57,29 +73,3 @@ version = { attr = "jaeger_ai.__version__" }
 include = ["jaeger_ai*"]
 exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__"]
 namespaces = true
-
-[tool.ruff]
-cache-dir = "~/.cache/ruff"
-
-[tool.pytest.ini_options]
-cache_dir = "~/.cache/pytest"
-pythonpath = [
-    ".",
-    "packages/jaeger-contracts/src",
-    "packages/jaeger-events/src",
-    "packages/jaeger-gateway/src",
-    "packages/jaeger-reliability/src",
-    "packages/jaeger-models/src",
-    "packages/jaeger-authority/src",
-    "packages/jaeger-memory/src",
-    "packages/jaeger-tools/src",
-    "packages/jaeger-lsp/src",
-    "packages/jaeger-checkpoints/src",
-    "packages/jaeger-loop/src",
-    "packages/jaeger-orchestration/src",
-    "packages/jaeger-skills/src",
-    "packages/jaeger-mcp/src",
-    "packages/jaeger-macos/src",
-]
-testpaths = ["dev/tests"]
-addopts = ["--import-mode=importlib"]
