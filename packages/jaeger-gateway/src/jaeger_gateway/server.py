@@ -11,7 +11,8 @@ from typing import Any, Callable
 
 from aiohttp import web
 from jaeger_avatar import AvatarError, build_viseme_timeline
-from jaeger_youtube import plan_phased_research, probe_youtube_toolchain
+from jaeger_cognition import CharacterOverlay
+from jaeger_youtube import export_episode_to_otio, plan_phased_research, probe_youtube_toolchain
 
 from .auth import GatewayAuthPolicy
 from .coordinator import RunCoordinator
@@ -36,18 +37,24 @@ def create_gateway_app(
     governor: Any = None,
     cognition_loop: Any = None,
     world_model: Any = None,
+    identity_store: Any = None,
     avatar_store: Any = None,
     business_store: Any = None,
     youtube_store: Any = None,
+    media_archive: Any = None,
     channel_hub: Any = None,
     minecraft_embodiment: Any = None,
     jp01_embodiment: Any = None,
+    droid_embodiment: Any = None,
     voice_presence: Any = None,
     vision_buffer: Any = None,
     memory_store: Any = None,
     learning_store: Any = None,
     skills_provider: Callable[[], list[dict[str, Any]]] | None = None,
     mcp_provider: Callable[[], list[dict[str, Any]]] | None = None,
+    mcp_upsert: Callable[..., list[dict[str, Any]]] | None = None,
+    mcp_delete: Callable[[str], list[dict[str, Any]]] | None = None,
+    mcp_reload: Callable[[], list[dict[str, Any]]] | None = None,
     static_ui_dir: Path | None = None,
 ) -> web.Application:
     """Create the standalone aiohttp Gateway + optional static WebUI application."""
@@ -276,12 +283,16 @@ def create_gateway_app(
                 minecraft_embodiment.estop(reason)
             if jp01_embodiment is not None:
                 jp01_embodiment.estop(reason)
+            if droid_embodiment is not None:
+                droid_embodiment.estop(reason)
         else:
             governor.release_estop()
             if minecraft_embodiment is not None:
                 minecraft_embodiment.release_estop()
             if jp01_embodiment is not None:
                 jp01_embodiment.latch.release(source="operator")
+            if droid_embodiment is not None:
+                droid_embodiment.release_estop()
         return web.json_response({"ok": True, "resources": governor.snapshot()})
 
     async def get_cognition_state(_request: web.Request) -> web.Response:
@@ -499,6 +510,7 @@ def create_gateway_app(
     async def embodiment_status(_request: web.Request) -> web.Response:
         return web.json_response({
             "ok": True,
+            "droid": droid_embodiment.observe() if droid_embodiment is not None else None,
             "minecraft": minecraft_embodiment.observe() if minecraft_embodiment is not None else None,
             "jp01": jp01_embodiment.observe() if jp01_embodiment is not None else None,
             "voice": voice_presence.snapshot() if voice_presence is not None else None,
@@ -510,11 +522,130 @@ def create_gateway_app(
         body = await request.json()
         action = str(body.get("action") or "")
         params = dict(body.get("params") or {})
-        emb = minecraft_embodiment if target == "minecraft" else (jp01_embodiment if target == "jp01" else None)
+        emb = (
+            minecraft_embodiment
+            if target == "minecraft"
+            else (jp01_embodiment if target == "jp01" else (droid_embodiment if target == "droid" else None))
+        )
         if emb is None:
             return web.json_response({"ok": False, "error": f"unknown embodiment:{target}"}, status=404)
         res = emb.act(action, params)
         return web.json_response(dict(res), status=200 if res.get("ok") else 409)
+
+    async def get_identity(_request: web.Request) -> web.Response:
+        if identity_store is None:
+            return web.json_response({"ok": False, "error": "identity store unavailable"}, status=501)
+        return web.json_response({
+            "ok": True,
+            "identity": identity_store.get().to_dict(),
+            "compiled_prompt": identity_store.compile_system_prompt(),
+        })
+
+    async def put_identity(request: web.Request) -> web.Response:
+        if identity_store is None:
+            return web.json_response({"ok": False, "error": "identity store unavailable"}, status=501)
+        body = await request.json()
+        prof = identity_store.update(**body)
+        return web.json_response({"ok": True, "identity": prof.to_dict()})
+
+    async def post_identity_character(request: web.Request) -> web.Response:
+        if identity_store is None:
+            return web.json_response({"ok": False, "error": "identity store unavailable"}, status=501)
+        body = await request.json()
+        if "activate_only" in body:
+            try:
+                prof = identity_store.set_active_character(body.get("character_id"))
+                return web.json_response({"ok": True, "identity": prof.to_dict()})
+            except KeyError as exc:
+                return web.json_response({"ok": False, "error": str(exc)}, status=404)
+        cid = str(body.get("character_id") or "").strip()
+        if not cid:
+            return web.json_response({"ok": False, "error": "character_id is required"}, status=400)
+        overlay = CharacterOverlay(
+            character_id=cid,
+            name=str(body.get("name") or cid.capitalize()),
+            style=str(body.get("style") or "Expressive companion"),
+            voice_id=str(body.get("voice_id") or ""),
+            avatar_preset=str(body.get("avatar_preset") or "studio_cel"),
+            notes=str(body.get("notes") or ""),
+        )
+        prof = identity_store.upsert_character(overlay, activate=bool(body.get("activate", True)))
+        return web.json_response({"ok": True, "identity": prof.to_dict()}, status=201)
+
+    async def upsert_mcp_server(request: web.Request) -> web.Response:
+        if mcp_upsert is None:
+            return web.json_response({"ok": False, "error": "mcp upsert unavailable"}, status=501)
+        body = await request.json()
+        try:
+            servers = mcp_upsert(body, connect=bool(body.get("connect", False)))
+            return web.json_response({"ok": True, "servers": servers}, status=201)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def delete_mcp_server(request: web.Request) -> web.Response:
+        if mcp_delete is None:
+            return web.json_response({"ok": False, "error": "mcp delete unavailable"}, status=501)
+        servers = mcp_delete(request.match_info["name"])
+        return web.json_response({"ok": True, "servers": servers})
+
+    async def reload_mcp_servers(_request: web.Request) -> web.Response:
+        if mcp_reload is None:
+            return web.json_response({"ok": False, "error": "mcp reload unavailable"}, status=501)
+        servers = mcp_reload()
+        return web.json_response({"ok": True, "servers": servers})
+
+    async def droid_devices(request: web.Request) -> web.Response:
+        if droid_embodiment is None:
+            return web.json_response({"ok": False, "error": "droid embodiment unavailable"}, status=501)
+        refresh = request.query.get("refresh", "0").lower() in ("1", "true", "yes")
+        devs = droid_embodiment.refresh_devices() if refresh else droid_embodiment.observe()["devices"]
+        return web.json_response({"ok": True, "devices": devs})
+
+    async def droid_capture(request: web.Request) -> web.Response:
+        if droid_embodiment is None:
+            return web.json_response({"ok": False, "error": "droid embodiment unavailable"}, status=501)
+        body = await request.json() if request.can_read_body else {}
+        res = droid_embodiment.capture_frame(
+            device_index=str(body.get("device_index") or "0"),
+            summary=str(body.get("summary") or ""),
+        )
+        return web.json_response(res, status=200 if res.get("ok") else 409)
+
+    async def youtube_export_otio(request: web.Request) -> web.Response:
+        if youtube_store is None:
+            return web.json_response({"ok": False, "error": "youtube store unavailable"}, status=501)
+        ep = youtube_store.get_episode(request.match_info["episode_id"])
+        if ep is None:
+            return web.json_response({"ok": False, "error": "episode not found"}, status=404)
+        fps = float(request.query.get("fps") or "24.0")
+        return web.json_response({"ok": True, "otio": export_episode_to_otio(ep, fps=fps)})
+
+    async def list_media_archive(request: web.Request) -> web.Response:
+        if media_archive is None:
+            return web.json_response({"ok": True, "items": []})
+        items = media_archive.search(
+            query=request.query.get("q") or "",
+            project_id=request.query.get("project_id") or None,
+            kind=request.query.get("kind") or None,
+            limit=int(request.query.get("limit") or "50"),
+        )
+        return web.json_response({"ok": True, "items": [i.to_dict() for i in items], "count": len(items)})
+
+    async def add_media_archive(request: web.Request) -> web.Response:
+        if media_archive is None:
+            return web.json_response({"ok": False, "error": "media archive unavailable"}, status=501)
+        body = await request.json()
+        item = media_archive.add(
+            kind=str(body.get("kind") or "camera"),
+            source_path=str(body.get("source_path") or ""),
+            project_id=str(body.get("project_id") or "general"),
+            channel_tag=str(body.get("channel_tag") or ""),
+            scene_description=str(body.get("scene_description") or ""),
+            transcript=str(body.get("transcript") or ""),
+            is_reconstructed=bool(body.get("is_reconstructed", False)),
+            tags=list(body.get("tags") or []),
+        )
+        return web.json_response({"ok": True, "item": item.to_dict()}, status=201)
 
     async def minecraft_checkpoint(request: web.Request) -> web.Response:
         if minecraft_embodiment is None:
@@ -660,6 +791,12 @@ def create_gateway_app(
     app.router.add_post("/v1/models/select", select_model)
     app.router.add_get("/v1/skills", list_skills)
     app.router.add_get("/v1/mcp/servers", list_mcp_servers)
+    app.router.add_post("/v1/mcp/servers", upsert_mcp_server)
+    app.router.add_delete("/v1/mcp/servers/{name}", delete_mcp_server)
+    app.router.add_post("/v1/mcp/reload", reload_mcp_servers)
+    app.router.add_get("/v1/identity", get_identity)
+    app.router.add_put("/v1/identity", put_identity)
+    app.router.add_post("/v1/identity/character", post_identity_character)
     app.router.add_get("/v1/workflows", list_workflows)
     app.router.add_post("/v1/workflows", create_workflow)
     app.router.add_post("/v1/workflows/dry-run", dry_run_workflow)
@@ -683,11 +820,16 @@ def create_gateway_app(
     app.router.add_get("/v1/youtube/episodes", youtube_list_episodes)
     app.router.add_post("/v1/youtube/episodes", youtube_create_episode)
     app.router.add_post("/v1/youtube/episodes/{episode_id}/advance", youtube_advance_episode)
+    app.router.add_get("/v1/youtube/episodes/{episode_id}/otio", youtube_export_otio)
     app.router.add_post("/v1/youtube/research/plan", youtube_plan_research)
+    app.router.add_get("/v1/media/archive", list_media_archive)
+    app.router.add_post("/v1/media/archive", add_media_archive)
     app.router.add_get("/v1/channels/status", channels_status)
     app.router.add_post("/v1/channels/send", channels_send)
     app.router.add_get("/v1/embodiment/status", embodiment_status)
     app.router.add_post("/v1/embodiment/{body}/act", embodiment_act)
+    app.router.add_get("/v1/droid/devices", droid_devices)
+    app.router.add_post("/v1/droid/capture", droid_capture)
     app.router.add_post("/v1/embodiment/minecraft/checkpoint", minecraft_checkpoint)
     app.router.add_post("/v1/presence/voice/hear", presence_voice_hear)
 

@@ -76,6 +76,7 @@ COMPANION_PKGS=(
 )
 
 DROID_PKGS=(
+  jaeger-droid
   jaeger-hardware
 )
 

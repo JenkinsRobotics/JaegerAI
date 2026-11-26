@@ -17,12 +17,19 @@ from jaeger_authority import MacOsSeatbeltSandbox, PolicyEngine, UnconfinedSandb
 from jaeger_avatar import AvatarStore
 from jaeger_business import BusinessStore
 from jaeger_channels import ChannelHub
-from jaeger_cognition import CognitiveLifeLoop, WorldModelStore
+from jaeger_cognition import CharacterOverlay, CognitiveLifeLoop, IdentityStore, WorldModelStore
+from jaeger_droid import HostDroidEmbodiment
 from jaeger_embodiment_minecraft import MinecraftEmbodiment
 from jaeger_events import EventBus
 from jaeger_hardware import JP01Embodiment
 from jaeger_loop import AgentLoop, TurnContext
-from jaeger_mcp import LiveMCPManager, load_mcp_server_configs
+from jaeger_mcp import (
+    LiveMCPManager,
+    MCPServerConfig,
+    load_mcp_server_configs,
+    remove_mcp_server_config,
+    save_mcp_server_config,
+)
 from jaeger_memory import PersistentLearningStore, SqliteStateMemory
 from jaeger_models import (
     ConversationCacheMarkStore,
@@ -36,7 +43,7 @@ from jaeger_reliability import ReliabilityEngine
 from jaeger_skills import scan_skill
 from jaeger_tools import ToolRegistry, register_builtin_tools
 from jaeger_vision import RollingFrameBuffer
-from jaeger_youtube import YouTubeStudioStore
+from jaeger_youtube import MediaArchiveStore, YouTubeStudioStore
 
 from .auth import GatewayAuthPolicy
 from .coordinator import RunCoordinator
@@ -149,14 +156,17 @@ class ModularGatewayRuntime:
         self.dry_run = DryRunSimulator()
         self.governor = ResourceGovernor(memory_cap_gb=24.0, idle_cooldown_s=60.0)
         self.world = WorldModelStore(self.state_dir)
+        self.identity = IdentityStore(self.state_dir)
         self.avatars = AvatarStore(self.state_dir)
         self.business = BusinessStore(self.state_dir)
         self.youtube = YouTubeStudioStore(self.state_dir)
+        self.media_archive = MediaArchiveStore(self.state_dir)
         self.channels = ChannelHub(self.state_dir)
         self.minecraft = MinecraftEmbodiment(self.state_dir)
         self.jp01 = JP01Embodiment(dry_run=True)
         self.voice_presence = RealtimeVoiceSession()
         self.vision = RollingFrameBuffer(max_frames=6, max_total_mb=24.0)
+        self.droid = HostDroidEmbodiment(vision_buffer=self.vision, world_model=self.world, probe_on_init=False)
         self.governor.register_idle_preempt_hook(lambda reason: self.minecraft.pause(reason=reason))
         self.cognition = CognitiveLifeLoop(
             world=self.world,
@@ -193,7 +203,8 @@ class ModularGatewayRuntime:
         )
 
         self.cache_health = ConversationCacheMarkStore()
-        mcp_configs = load_mcp_server_configs(self.state_dir / "mcp_servers.json")
+        self._mcp_config_path = self.state_dir / "mcp_servers.json"
+        mcp_configs = load_mcp_server_configs(self._mcp_config_path)
         self.mcp = LiveMCPManager(mcp_configs)
         if mcp_configs:
             try:
@@ -234,10 +245,7 @@ class ModularGatewayRuntime:
                 events=self.events,
                 middlewares=[_SseLoopMiddleware(session_id, generation, hub)],
                 session_id=session_id,
-                system_prompt=(
-                    "You are Jaeger, a standalone modular autonomous engineering and personal assistant. "
-                    "Use tools accurately, verify edits, and be concise and honest."
-                ),
+                system_prompt=self.identity.compile_system_prompt(),
             )
             return loop.run_turn(prompt, max_steps=20)
         finally:
@@ -291,6 +299,39 @@ class ModularGatewayRuntime:
                 })
         return found
 
+    def _upsert_mcp_server(self, spec: Mapping[str, Any], *, connect: bool = True) -> list[dict[str, Any]]:
+        name = str(spec.get("name") or "").strip()
+        if not name:
+            raise ValueError("MCP server name is required")
+        url = str(spec.get("url") or "").strip()
+        cmd = str(spec.get("command") or "").strip()
+        transport = str(spec.get("transport") or ("streamable_http" if url else "stdio")).strip().lower()
+        cfg = MCPServerConfig(
+            name=name,
+            transport=transport,
+            command=cmd,
+            args=tuple(str(a) for a in (spec.get("args") or ())),
+            env={str(k): str(v) for k, v in (spec.get("env") or {}).items()},
+            url=url,
+            headers={str(k): str(v) for k, v in (spec.get("headers") or {}).items()},
+            timeout_s=float(spec.get("timeout_s") or 30.0),
+            enabled=bool(spec.get("enabled", True)),
+            sandbox_workspace=str(spec.get("sandbox_workspace") or ""),
+        )
+        configs = save_mcp_server_config(self._mcp_config_path, cfg)
+        if connect:
+            return self.mcp.reload(configs, registry=self.tools)
+        self.mcp._configs = {c.name: c for c in configs if c.enabled}  # noqa: SLF001
+        return self.mcp.list_servers_health()
+
+    def _delete_mcp_server(self, name: str) -> list[dict[str, Any]]:
+        configs = remove_mcp_server_config(self._mcp_config_path, name)
+        return self.mcp.reload(configs, registry=self.tools)
+
+    def _reload_mcp_servers(self) -> list[dict[str, Any]]:
+        configs = load_mcp_server_configs(self._mcp_config_path)
+        return self.mcp.reload(configs, registry=self.tools)
+
     def build_app(self, *, serve_ui: bool = False) -> web.Application:
         return create_gateway_app(
             store=self.store,
@@ -306,18 +347,24 @@ class ModularGatewayRuntime:
             governor=self.governor,
             cognition_loop=self.cognition,
             world_model=self.world,
+            identity_store=self.identity,
             avatar_store=self.avatars,
             business_store=self.business,
             youtube_store=self.youtube,
+            media_archive=self.media_archive,
             channel_hub=self.channels,
             minecraft_embodiment=self.minecraft,
             jp01_embodiment=self.jp01,
+            droid_embodiment=self.droid,
             voice_presence=self.voice_presence,
             vision_buffer=self.vision,
             memory_store=self.memory,
             learning_store=self.learning,
             skills_provider=self._discover_skills,
             mcp_provider=self.mcp.list_servers_health,
+            mcp_upsert=self._upsert_mcp_server,
+            mcp_delete=self._delete_mcp_server,
+            mcp_reload=self._reload_mcp_servers,
             static_ui_dir=self.static_ui_dir if serve_ui else None,
         )
 
