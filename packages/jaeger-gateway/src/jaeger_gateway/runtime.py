@@ -13,8 +13,10 @@ from typing import Any, Mapping
 
 from aiohttp import web
 
-from jaeger_authority import MacOsSeatbeltSandbox, PolicyEngine, UnconfinedSandbox
+from jaeger_authority import MacOsSeatbeltSandbox, PolicyEngine, UnconfinedSandbox, redact_text
 from jaeger_avatar import AvatarStore
+from jaeger_business import BusinessStore
+from jaeger_channels import ChannelHub
 from jaeger_cognition import CognitiveLifeLoop, WorldModelStore
 from jaeger_events import EventBus
 from jaeger_loop import AgentLoop, TurnContext
@@ -30,6 +32,7 @@ from jaeger_orchestration import DryRunSimulator, PriorityTier, ResourceGovernor
 from jaeger_reliability import ReliabilityEngine
 from jaeger_skills import scan_skill
 from jaeger_tools import ToolRegistry, register_builtin_tools
+from jaeger_youtube import YouTubeStudioStore
 
 from .auth import GatewayAuthPolicy
 from .coordinator import RunCoordinator
@@ -100,8 +103,8 @@ class _SseLoopMiddleware:
                 "call_id": call_id,
                 "tool": tool_name,
                 "ok": res.ok,
-                "output": str(res.output or "")[:2000],
-                "error": res.error,
+                "output": redact_text(str(res.output or ""))[:2000],
+                "error": redact_text(str(res.error)) if res.error else res.error,
                 "duration_ms": duration_ms,
                 "step": ctx.step,
             },
@@ -143,6 +146,9 @@ class ModularGatewayRuntime:
         self.governor = ResourceGovernor(memory_cap_gb=24.0, idle_cooldown_s=60.0)
         self.world = WorldModelStore(self.state_dir)
         self.avatars = AvatarStore(self.state_dir)
+        self.business = BusinessStore(self.state_dir)
+        self.youtube = YouTubeStudioStore(self.state_dir)
+        self.channels = ChannelHub(self.state_dir)
         self.cognition = CognitiveLifeLoop(
             world=self.world,
             governor=self.governor,
@@ -291,6 +297,9 @@ class ModularGatewayRuntime:
             cognition_loop=self.cognition,
             world_model=self.world,
             avatar_store=self.avatars,
+            business_store=self.business,
+            youtube_store=self.youtube,
+            channel_hub=self.channels,
             memory_store=self.memory,
             learning_store=self.learning,
             skills_provider=self._discover_skills,

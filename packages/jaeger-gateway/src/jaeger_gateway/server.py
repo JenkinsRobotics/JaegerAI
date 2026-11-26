@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from aiohttp import web
 from jaeger_avatar import AvatarError, build_viseme_timeline
+from jaeger_youtube import plan_phased_research, probe_youtube_toolchain
 
 from .auth import GatewayAuthPolicy
 from .coordinator import RunCoordinator
@@ -36,6 +37,9 @@ def create_gateway_app(
     cognition_loop: Any = None,
     world_model: Any = None,
     avatar_store: Any = None,
+    business_store: Any = None,
+    youtube_store: Any = None,
+    channel_hub: Any = None,
     memory_store: Any = None,
     learning_store: Any = None,
     skills_provider: Callable[[], list[dict[str, Any]]] | None = None,
@@ -367,6 +371,118 @@ def create_gateway_app(
         path, mime = hit
         return web.FileResponse(path, headers={"Content-Type": mime})
 
+    async def get_business_team(_request: web.Request) -> web.Response:
+        if business_store is None:
+            return web.json_response({"ok": True, "team": [], "budgets": {}})
+        return web.json_response({
+            "ok": True,
+            "team": business_store.list_team(),
+            "budgets": business_store.budget_summary(),
+            "projects": [p.to_dict() for p in business_store.list_projects()],
+        })
+
+    async def create_business_project(request: web.Request) -> web.Response:
+        if business_store is None:
+            return web.json_response({"ok": False, "error": "business store unavailable"}, status=501)
+        body = await request.json()
+        proj = business_store.create_project(
+            name=str(body.get("name") or "New Initiative"),
+            kind=str(body.get("kind") or "youtube_channel"),
+            stage=str(body.get("stage") or "planning"),
+            owner_role=str(body.get("owner_role") or "producer"),
+            budget_usd=float(body.get("budget_usd", 50.0)),
+            approval_required=bool(body.get("approval_required", True)),
+            metadata=dict(body.get("metadata") or {}),
+        )
+        return web.json_response({"ok": True, "project": proj.to_dict()}, status=201)
+
+    async def record_business_spend(request: web.Request) -> web.Response:
+        if business_store is None:
+            return web.json_response({"ok": False, "error": "business store unavailable"}, status=501)
+        body = await request.json()
+        ok, reason = business_store.record_spend(
+            project_id=str(body.get("project_id") or ""),
+            role_id=str(body.get("role_id") or "ops"),
+            amount_usd=float(body.get("amount_usd", 0.0)),
+            description=str(body.get("description") or ""),
+            approved_by=str(body.get("approved_by") or ""),
+        )
+        return web.json_response(
+            {"ok": ok, "reason": reason, "budgets": business_store.budget_summary()},
+            status=200 if ok else 403,
+        )
+
+    async def youtube_tools(_request: web.Request) -> web.Response:
+        models_info = models_provider() if models_provider is not None else {}
+        model_ids = [str(m.get("id") or "") for m in (models_info.get("models") or []) if isinstance(m, dict)]
+        return web.json_response({"ok": True, "tools": probe_youtube_toolchain(model_ids)})
+
+    async def youtube_list_episodes(_request: web.Request) -> web.Response:
+        if youtube_store is None:
+            return web.json_response({"ok": True, "episodes": []})
+        return web.json_response({"ok": True, "episodes": [e.to_dict() for e in youtube_store.list_episodes()]})
+
+    async def youtube_create_episode(request: web.Request) -> web.Response:
+        if youtube_store is None:
+            return web.json_response({"ok": False, "error": "youtube store unavailable"}, status=501)
+        body = await request.json()
+        ep = youtube_store.create_episode(
+            title=str(body.get("title") or "Untitled Episode"),
+            topic=str(body.get("topic") or ""),
+            target_duration_s=int(body.get("target_duration_s", 480)),
+            hook=str(body.get("hook") or ""),
+            script_md=str(body.get("script_md") or ""),
+        )
+        return web.json_response({"ok": True, "episode": ep.to_dict()}, status=201)
+
+    async def youtube_advance_episode(request: web.Request) -> web.Response:
+        if youtube_store is None:
+            return web.json_response({"ok": False, "error": "youtube store unavailable"}, status=501)
+        eid = request.match_info["episode_id"]
+        body = await request.json()
+        ok, reason, ep = youtube_store.advance_stage(
+            eid,
+            target_stage=str(body.get("stage") or ""),
+            owner_approved=body.get("owner_approved"),
+            approval_note=str(body.get("approval_note") or ""),
+        )
+        return web.json_response(
+            {"ok": ok, "reason": reason, "episode": ep.to_dict() if ep else None},
+            status=200 if ok else (404 if reason == "episode_not_found" else 403),
+        )
+
+    async def youtube_plan_research(request: web.Request) -> web.Response:
+        body = await request.json()
+        plan = plan_phased_research(
+            str(body.get("source") or ""),
+            video_ids=list(body.get("video_ids") or []),
+            llm_model=str(body.get("llm_model") or "gemma4:12b"),
+            vlm_model=str(body.get("vlm_model") or "qwen3-vl:8b"),
+        )
+        return web.json_response({"ok": True, "plan": plan})
+
+    async def channels_status(_request: web.Request) -> web.Response:
+        if channel_hub is None:
+            return web.json_response({"ok": True, "channels": {}, "outbox": []})
+        return web.json_response({
+            "ok": True,
+            "channels": channel_hub.status(),
+            "outbox": [m.to_dict() for m in channel_hub.list_outbox(limit=25)],
+        })
+
+    async def channels_send(request: web.Request) -> web.Response:
+        if channel_hub is None:
+            return web.json_response({"ok": False, "error": "channel hub unavailable"}, status=501)
+        body = await request.json()
+        msg = channel_hub.enqueue(
+            channel=str(body.get("channel") or "local_log"),
+            recipient=str(body.get("recipient") or "owner"),
+            body=str(body.get("body") or ""),
+            approved=bool(body.get("approved", False)),
+            dry_run=bool(body.get("dry_run", False)),
+        )
+        return web.json_response({"ok": True, "message": msg.to_dict()}, status=201)
+
     async def list_learning(request: web.Request) -> web.Response:
         if learning_store is None:
             return web.json_response({"ok": True, "entries": []})
@@ -510,6 +626,16 @@ def create_gateway_app(
     app.router.add_put("/v1/avatars/{agent_id}", put_avatar)
     app.router.add_put("/v1/avatars/{agent_id}/live", put_avatar_live)
     app.router.add_get("/v1/avatars/{agent_id}/visemes", get_avatar_visemes)
+    app.router.add_get("/v1/business/team", get_business_team)
+    app.router.add_post("/v1/business/projects", create_business_project)
+    app.router.add_post("/v1/business/spend", record_business_spend)
+    app.router.add_get("/v1/youtube/tools", youtube_tools)
+    app.router.add_get("/v1/youtube/episodes", youtube_list_episodes)
+    app.router.add_post("/v1/youtube/episodes", youtube_create_episode)
+    app.router.add_post("/v1/youtube/episodes/{episode_id}/advance", youtube_advance_episode)
+    app.router.add_post("/v1/youtube/research/plan", youtube_plan_research)
+    app.router.add_get("/v1/channels/status", channels_status)
+    app.router.add_post("/v1/channels/send", channels_send)
 
     if cognition_loop is not None:
         async def _start_cognition(_app: web.Application) -> None:
