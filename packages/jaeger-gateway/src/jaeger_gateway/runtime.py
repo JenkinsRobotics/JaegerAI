@@ -18,7 +18,9 @@ from jaeger_avatar import AvatarStore
 from jaeger_business import BusinessStore
 from jaeger_channels import ChannelHub
 from jaeger_cognition import CognitiveLifeLoop, WorldModelStore
+from jaeger_embodiment_minecraft import MinecraftEmbodiment
 from jaeger_events import EventBus
+from jaeger_hardware import JP01Embodiment
 from jaeger_loop import AgentLoop, TurnContext
 from jaeger_mcp import LiveMCPManager, load_mcp_server_configs
 from jaeger_memory import PersistentLearningStore, SqliteStateMemory
@@ -29,9 +31,11 @@ from jaeger_models import (
     build_default_model,
 )
 from jaeger_orchestration import DryRunSimulator, PriorityTier, ResourceGovernor, WorkflowEngine
+from jaeger_realtime import RealtimeVoiceSession
 from jaeger_reliability import ReliabilityEngine
 from jaeger_skills import scan_skill
 from jaeger_tools import ToolRegistry, register_builtin_tools
+from jaeger_vision import RollingFrameBuffer
 from jaeger_youtube import YouTubeStudioStore
 
 from .auth import GatewayAuthPolicy
@@ -149,6 +153,11 @@ class ModularGatewayRuntime:
         self.business = BusinessStore(self.state_dir)
         self.youtube = YouTubeStudioStore(self.state_dir)
         self.channels = ChannelHub(self.state_dir)
+        self.minecraft = MinecraftEmbodiment(self.state_dir)
+        self.jp01 = JP01Embodiment(dry_run=True)
+        self.voice_presence = RealtimeVoiceSession()
+        self.vision = RollingFrameBuffer(max_frames=6, max_total_mb=24.0)
+        self.governor.register_idle_preempt_hook(lambda reason: self.minecraft.pause(reason=reason))
         self.cognition = CognitiveLifeLoop(
             world=self.world,
             governor=self.governor,
@@ -159,6 +168,7 @@ class ModularGatewayRuntime:
                 state=str(st.get("mode") or "observing"),
             ),
         )
+        self.cognition.register_idle_life_handler("minecraft", lambda _snap: self.minecraft.act("idle_tick"))
         self.store = GatewayStore(self.state_dir / "modular_gateway.sqlite3")
         self.hub = SessionEventHub()
         self.reliability = ReliabilityEngine(repeat_threshold=4)
@@ -300,6 +310,10 @@ class ModularGatewayRuntime:
             business_store=self.business,
             youtube_store=self.youtube,
             channel_hub=self.channels,
+            minecraft_embodiment=self.minecraft,
+            jp01_embodiment=self.jp01,
+            voice_presence=self.voice_presence,
+            vision_buffer=self.vision,
             memory_store=self.memory,
             learning_store=self.learning,
             skills_provider=self._discover_skills,

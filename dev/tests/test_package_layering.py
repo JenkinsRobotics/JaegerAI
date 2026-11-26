@@ -26,6 +26,12 @@ STANDALONE_PACKAGE_SRC_ROOTS = [
     "packages/jaeger-business/src",
     "packages/jaeger-youtube/src",
     "packages/jaeger-channels/src",
+    "packages/jaeger-embodiment-minecraft/src",
+    "packages/jaeger-hardware/src",
+    "packages/jaeger-realtime/src",
+    "packages/jaeger-vision/src",
+    "packages/jaeger-evals/src",
+    "packages/jaeger-protocols/src",
     "packages/jaeger-mcp/src",
     "packages/jaeger-macos/src",
 ]
