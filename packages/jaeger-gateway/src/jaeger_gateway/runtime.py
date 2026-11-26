@@ -189,7 +189,11 @@ class ModularGatewayRuntime:
             self.state_dir / "offload",
             self.state_dir / "instances" / "truth" / "logs" / "tool_results",
         )
-        self.policy = PolicyEngine(read_allowed_roots=safe_read_roots)
+        self.policy = PolicyEngine(
+            read_allowed_roots=safe_read_roots,
+            global_stop_fn=lambda: bool(self.governor.snapshot().get("estop_active")),
+            embodiment_enabled=True,
+        )
         self.sandbox = MacOsSeatbeltSandbox() if sys.platform == "darwin" else UnconfinedSandbox()
         self.tools = ToolRegistry(
             workspace=self.workspace,
