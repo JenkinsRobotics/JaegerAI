@@ -10,7 +10,13 @@ from .canonical import (
     is_owner_actor,
     is_untrusted_actor,
 )
-from . import guardrails
+from . import guardrails, profiles
+from .profiles import (
+    list_seatbelt_profiles,
+    load_codex_sbpl,
+    load_gemini_policy_rules,
+    load_gemini_sb,
+)
 from .destructive import (
     BANNED_STANDING_GRANT_PREFIXES,
     destructive_reason,

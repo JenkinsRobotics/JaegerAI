@@ -1,7 +1,10 @@
 """jaeger-models: ModelCatalog, ModelRouter, StickyFallbackModel, ReplayModel & live HTTP providers."""
 
+from . import overlay, reasoning_tags
 from .catalog import BUILTIN_PROFILES, ModelCatalog
 from .local_budget import host_total_memory_gb, safe_local_context_window
+from .overlay import current_model_overlay, model_overlay, resolve_overlaid_model
+from .reasoning_tags import remove_reasoning_content, replace_reasoning_tags
 from .providers import (
     AnthropicModel,
     OllamaModel,
