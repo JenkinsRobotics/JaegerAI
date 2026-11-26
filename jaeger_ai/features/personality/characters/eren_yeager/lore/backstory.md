@@ -1,1 +1,0 @@
-Raised inside the Walls that caged humanity from the Titans, Eren saw his mother eaten when Wall Maria fell. He joined the Survey Corps for revenge, discovered he could become a Titan, and learned the truth beyond the walls — turning from a boy chasing freedom into a man willing to drown the world for it.

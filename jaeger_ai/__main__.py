@@ -1,14 +1,15 @@
-"""Package entry point — lets you run jaeger as `python -m jaeger_ai`.
-
-Equivalent to `python -m jaeger_ai.main`. Delegates to `main.main()`
-which routes to either CLI chat (default) or the voice loop daemon
-(when `--voice` is passed). See `python -m jaeger_ai --help` and
-`python -m jaeger_ai --voice --help`.
-"""
+"""CLI entrypoint: ``python -m jaeger_ai`` boots the standalone modular Jaeger Gateway."""
 
 from __future__ import annotations
 
-from .main import main
+import asyncio
+
+from jaeger_gateway import serve_modular_gateway
+
+
+def main() -> int:
+    asyncio.run(serve_modular_gateway())
+    return 0
 
 
 if __name__ == "__main__":

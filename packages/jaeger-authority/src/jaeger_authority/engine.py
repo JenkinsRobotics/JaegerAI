@@ -32,6 +32,7 @@ class PolicyEngine:
         rules: PermissionRules | None = None,
         global_stop_fn: Callable[[], bool] | None = None,
         extra_denied_paths: Sequence[Path] = (),
+        read_allowed_roots: Sequence[Path] = (),
         pre_hook: HookFn | None = None,
         extra_inspectors: Sequence[ToolInspector] = (),
     ) -> None:
@@ -40,7 +41,10 @@ class PolicyEngine:
         self._pre_hook = pre_hook
         self._safety_inspectors: tuple[ToolInspector, ...] = (
             ActorTrustInspector(),
-            BoundaryAndSecretsInspector(extra_denied_paths=extra_denied_paths),
+            BoundaryAndSecretsInspector(
+                extra_denied_paths=extra_denied_paths,
+                read_allowed_roots=read_allowed_roots,
+            ),
             DestructiveAndEvasionInspector(),
             *extra_inspectors,
         )
