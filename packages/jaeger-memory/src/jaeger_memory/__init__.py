@@ -1,11 +1,23 @@
 """jaeger-memory: SQLite WAL checkpoints+writes, history invariants, context guard, compaction, offloading."""
 
-from . import compactor, context_guard, history, history_processors
+from . import compactor, context_guard, history, history_processors, learning, statusbar
 from .history_processors import (
     CacheControlHistoryProcessor,
     DefaultHistoryProcessor,
     LastNObservations,
     TagToolCallObservations,
+)
+from .learning import (
+    VALID_SCOPES,
+    LearningEntry,
+    PersistentGoal,
+    PersistentLearningStore,
+)
+from .statusbar import (
+    EPHEMERAL_MARKER,
+    StatusProvider,
+    build_ephemeral_status_message,
+    inject_ephemeral_status,
 )
 from .compactor import (
     DEFAULT_KEEP_TURNS,

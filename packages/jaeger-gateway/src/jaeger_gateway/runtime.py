@@ -17,14 +17,14 @@ from jaeger_authority import MacOsSeatbeltSandbox, PolicyEngine, UnconfinedSandb
 from jaeger_events import EventBus
 from jaeger_loop import AgentLoop, TurnContext
 from jaeger_mcp import LiveMCPManager, load_mcp_server_configs
-from jaeger_memory import SqliteStateMemory
+from jaeger_memory import PersistentLearningStore, SqliteStateMemory
 from jaeger_models import (
     ConversationCacheMarkStore,
     OllamaModel,
     bind_stream_sink,
     build_default_model,
 )
-from jaeger_orchestration import WorkflowEngine
+from jaeger_orchestration import DryRunSimulator, PriorityTier, ResourceGovernor, WorkflowEngine
 from jaeger_reliability import ReliabilityEngine
 from jaeger_skills import scan_skill
 from jaeger_tools import ToolRegistry, register_builtin_tools
@@ -135,7 +135,10 @@ class ModularGatewayRuntime:
 
         self.events = EventBus()
         self.memory = SqliteStateMemory(self.state_dir)
+        self.learning = PersistentLearningStore(self.state_dir)
         self.workflows = WorkflowEngine(self.state_dir / "workflows.sqlite3")
+        self.dry_run = DryRunSimulator()
+        self.governor = ResourceGovernor(memory_cap_gb=24.0, idle_cooldown_s=60.0)
         self.store = GatewayStore(self.state_dir / "modular_gateway.sqlite3")
         self.hub = SessionEventHub()
         self.reliability = ReliabilityEngine(repeat_threshold=4)
@@ -189,20 +192,27 @@ class ModularGatewayRuntime:
         generation: int,
         hub: SessionEventHub,
     ) -> Mapping[str, Any]:
-        loop = AgentLoop(
-            model=self.model,
-            tools=self.tools,
-            memory=self.memory,
-            reliability=self.reliability,
-            events=self.events,
-            middlewares=[_SseLoopMiddleware(session_id, generation, hub)],
-            session_id=session_id,
-            system_prompt=(
-                "You are Jaeger, a standalone modular autonomous engineering and personal assistant. "
-                "Use tools accurately, verify edits, and be concise and honest."
-            ),
-        )
-        return loop.run_turn(prompt, max_steps=20)
+        self.governor.begin_owner_work(reason=f"session:{session_id}")
+        model_id = getattr(self.model, "model_id", self.model.name)
+        self.governor.acquire_heavy_model(model_id, tier=PriorityTier.OWNER_WORK, owner_tag=session_id)
+        try:
+            loop = AgentLoop(
+                model=self.model,
+                tools=self.tools,
+                memory=self.memory,
+                reliability=self.reliability,
+                events=self.events,
+                middlewares=[_SseLoopMiddleware(session_id, generation, hub)],
+                session_id=session_id,
+                system_prompt=(
+                    "You are Jaeger, a standalone modular autonomous engineering and personal assistant. "
+                    "Use tools accurately, verify edits, and be concise and honest."
+                ),
+            )
+            return loop.run_turn(prompt, max_steps=20)
+        finally:
+            self.governor.release_heavy_model(model_id)
+            self.governor.end_owner_work()
 
     def _runtime_info(self) -> dict[str, Any]:
         ollama_probe = self.model.probe() if isinstance(self.model, OllamaModel) else {"ok": True}
@@ -262,7 +272,10 @@ class ModularGatewayRuntime:
             models_provider=self._models_info,
             model_selector=self._select_model,
             workflows_engine=self.workflows,
+            dry_run_simulator=self.dry_run,
+            governor=self.governor,
             memory_store=self.memory,
+            learning_store=self.learning,
             skills_provider=self._discover_skills,
             mcp_provider=self.mcp.list_servers_health,
             static_ui_dir=self.static_ui_dir if serve_ui else None,
