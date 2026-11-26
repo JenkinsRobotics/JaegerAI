@@ -1,6 +1,7 @@
 """jaeger-tools: ToolDef, ToolRegistry, ToolRouter, RwLock dispatcher, progressive discovery, EditEngines, RepoMap."""
 
-from . import arg_coercion, builtins, router, search, tool_registry, tool_schema
+from . import aider_search_replace, arg_coercion, builtins, router, search, tool_registry, tool_schema
+from .aider_search_replace import RelativeIndenter, search_and_replace
 from .arg_coercion import COMMON_PARAM_ALIASES, coerce_args
 from .builtins import register_builtin_tools
 from .diagnostics import Diagnostic, DiagnosticReport, diagnose_file
