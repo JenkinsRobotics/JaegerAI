@@ -1,0 +1,391 @@
+From 14bb6a510e210dbaf57ba0ed96dbb2de948317d4 Mon Sep 17 00:00:00 2001
+From: shuwalker <88289370+shuwalker@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 19:26:02 -0800
+Subject: [PATCH] Preserve incomplete durable work and isolate IDE verification
+ fixtures
+
+---
+ .../jaeger_ai/core/test_gateway_task_owner.py |  64 +++++++++++
+ docs/PROGRESS.md                              | 100 ++++++++++++++++++
+ docs/README.md                                |   1 +
+ jaeger_ai/core/tasks/owner.py                 |  12 ++-
+ .../ide/tests/activation-wiring.test.js       |  17 ++-
+ .../interfaces/ide/tests/gateway-url.test.js  |  20 +++-
+ scripts/verify.sh                             |  14 ++-
+ 7 files changed, 218 insertions(+), 10 deletions(-)
+ create mode 100644 docs/PROGRESS.md
+
+diff --git a/dev/tests/jaeger_ai/core/test_gateway_task_owner.py b/dev/tests/jaeger_ai/core/test_gateway_task_owner.py
+index 8a684676..9c793fb9 100644
+--- a/dev/tests/jaeger_ai/core/test_gateway_task_owner.py
++++ b/dev/tests/jaeger_ai/core/test_gateway_task_owner.py
+@@ -209,6 +209,70 @@ def _finish_worker(owner, tid, result, *, status='completed', exhaust=False):
+     return owner.store.get_task(tid)
+ 
+ 
++@pytest.mark.parametrize(('result', 'expected'), [
++    ({'halt_reason': 'yielded', 'output': 'Draft written; validation remains'}, TaskState.QUEUED),
++    ({'halt_reason': 'needs_owner', 'error': 'Choose the source'}, TaskState.NEEDS_OWNER),
++    ({'halt_reason': 'blocked', 'error': 'Required input unavailable'}, TaskState.BLOCKED),
++    ({'error': 'Validation failed'}, TaskState.FAILED),
++    ({'halt_reason': 'context_overflow'}, TaskState.FAILED),
++])
++def test_partial_artifact_cannot_override_worker_stop(owner, result, expected):
++    tid = owner.submit('Build and validate report', context=context(owner), artifacts=['report.txt'])['task_id']
++    (owner.store.db_path.parent / 'report.txt').write_text('unfinished draft')
++    finished = _finish_worker(owner, tid, result, exhaust=True)
++    assert finished.state == expected
++    if expected == TaskState.QUEUED:
++        assert finished.payload['attempt'] == 1
++        assert owner.gateway.store.get_session('parent')['messages'] == []
++    elif expected == TaskState.FAILED:
++        assert finished.error == result.get('error', result.get('halt_reason'))
++
++
++@pytest.mark.parametrize('first_result', [
++    {'halt_reason': 'yielded', 'output': 'Draft written; validate next'},
++    {'error': 'Validation failed', 'output': 'Draft written; validate next'},
++])
++def test_partial_checkpoint_resumes_after_owner_restart(owner, first_result):
++    """Persist real receipts/files; replace only the model worker with bounded work."""
++    tid = owner.submit('Build and validate report', context=context(owner), artifacts=['report.txt'])['task_id']
++    path = owner.store.db_path.parent / 'report.txt'
++    path.write_text('unfinished draft')
++    first = _finish_worker(owner, tid, first_result)
++    assert first.state == TaskState.QUEUED
++    assert owner.gateway.store.get_session('parent')['messages'] == []
++
++    # Reopen the database and event bus, not just the in-memory owner.
++    store = GatewaySessionStore(owner.store.db_path)
++    gateway = SimpleNamespace(store=store, event_bus=GatewayEventBus(store=store), _running_tasks={})
++    restored = GatewayTaskOwner(gateway)
++    restored.store.update_task(tid, lambda task: setattr(task, 'next_execution', 0))
++    launches = []
++
++    async def run():
++        def start(admitted, sid, prompt):
++            launches.append(admitted['request_id'])
++            assert 'Draft written; validate next' in prompt
++            async def work():
++                assert path.read_text() == 'unfinished draft'
++                path.write_text('validated final report')
++                store.complete_request(admitted['request_id'], status='completed',
++                                       result={'output': 'Report validated'})
++            gateway._running_tasks[admitted['request_id']] = asyncio.create_task(work())
++        gateway._start_admitted_turn = start
++        await restored.tick()
++        await asyncio.gather(*restored._active.values())
++        await restored.tick()
++        await restored.stop()
++    asyncio.run(run())
++    assert launches == [f'{tid}:1']
++    finished = restored.store.get_task(tid)
++    assert finished.state == TaskState.COMPLETED_VERIFIED
++    assert finished.error is None
++    assert path.read_text() == 'validated final report'
++    assert [m['content'] for m in store.get_session('parent')['messages']] == ['Report validated']
++    assert finished.payload['verification'][0]['sha256']
++
++
+ def test_worker_evidence_is_the_only_completed_verified_path(owner):
+     """task -> worker Result -> verifier -> authoritative_transition."""
+     bare = (
+diff --git a/docs/PROGRESS.md b/docs/PROGRESS.md
+new file mode 100644
+index 00000000..1fdec7f3
+--- /dev/null
++++ b/docs/PROGRESS.md
+@@ -0,0 +1,100 @@
++# Jaeger implementation progress
++
++## 2026-11-18 — preserve incomplete background work
++
++Owner directive: finish the existing product in verified increments; protect the
++Mac Studio runtime. This checkpoint is development-only, not a deployed release.
++
++### Working now
++
++The existing Gateway task owner persists admission, checkpoints, retries,
++cancellation and result delivery. Reused it; no new scheduler or runtime owner.
++Reproduced a defect where an unfinished artifact caused a yielded, blocked,
++needs-owner or errored worker receipt to become `completed_verified`.
++
++The owner now considers worker errors and halt reasons before artifact verification.
++Yielded work remains queued; owner questions and blockers retain their states;
++failed work uses the existing bounded retry policy. Successful recovery clears
++the previous error. Tests reopen the SQLite store and event bus, resume the next
++attempt from its checkpoint, write the final artifact and deliver one result.
++The worker in these tests is deterministic Python, not a live model.
++
++### Changes
++
++- `jaeger_ai/core/tasks/owner.py`: correct completion precedence and stale errors.
++- `dev/tests/jaeger_ai/core/test_gateway_task_owner.py`: seven regression cases,
++  including checkpoint/retry recovery after reopening persisted state.
++- `scripts/verify.sh`: add `tasks` target and include it in backend verification.
++- Two IDE activation fixtures: disposable mocked home and subscription disposal,
++  preventing operator-state writes and test servers surviving fixture teardown.
++
++### Validation
++
++| Check | Observed result |
++| --- | --- |
++| New regressions before repair | Six failures: partial artifacts falsely completed work |
++| New regressions after repair | Seven passed (added error-retry recovery case) |
++| `./scripts/verify.sh tasks` | 52 passed |
++| Gateway durability (backend pipeline) | 14 passed |
++| Git and repository hygiene | Passed; 8 hygiene tests; disk scan found no source caches/state |
++| IDE fixture regressions | 9 passed; process exited normally |
++| IDE suite (full pipeline) | 300 passed |
++| Full pipeline | Stops at shared UI: `tsc: command not found`; isolated checkout has no frontend dependencies |
++| Backend pipeline | Stops at interaction tiers: 5 failed, 1 passed |
++| Original commit comparison | Same five tier failures reproduced at unmodified `e0060074` |
++| Live service health, read-only | Gateway/WebUI/voice HTTP 200; MCP HTTP 401 (auth enforced) |
++
++The five existing tier failures concern the tier enum, autonomy default, settings
++catalog, admission of an invalid tier while a session is busy, and proactive
++background admission semantics. These require inspection against intended
++product behavior, not simply changing tests to pass.
++
++### Eight framework responsibilities: evidence boundary
++
++| Responsibility | This session's evidence |
++| --- | --- |
++| Models | Existing routing preserved; no live inference acceptance performed |
++| Tools | Existing Gateway executor reused; no live computer-operation proof |
++| Execution loop | Bounded deterministic worker resumed persisted partial work |
++| State and memory | Real SQLite checkpoint, receipt and delivery tests passed; long-term memory not qualified |
++| Permissions | Proposal/approval and cancellation regression coverage passed; autonomy tier gate still failing |
++| Orchestration | Existing task ownership retained; no specialist deployment/acceptance performed |
++| Reliability | Recovery, cancellation and duplicate-delivery regression coverage passed |
++| Events | Persisted event bus/delivery tests passed; native UI acceptance not performed |
++
++### Runtime-boundary incident
++
++During an initial full verification rerun with loopback sockets allowed, existing
++IDE activation fixtures used the real OS home and ignored subscription disposal.
++They wrote `~/.jaeger/run/vscode-bridge.json` and left test listeners alive.
++Stopped only the identified test children (PIDs 62982 and 62992). Removed the
++descriptor only after confirming its PID matched those children. Its previous
++contents were not captured, so restoration of any prior descriptor cannot be
++claimed. No credentials were printed. The two fixtures now isolate the mocked
++home and dispose their subscriptions; subsequent IDE runs exited normally, and
++the operator descriptor remained absent. Host-model bridge discovery may need
++owner-authorized restoration if it was in use. No production service was
++restarted, rebuilt, uninstalled or deployed; production tracked source and HEAD
++remain unchanged. Existing untracked user files were left alone.
++
++### Artifacts and continuation
++
++- Base: `e00600741ed11ebb0d05480f1f51eecb4eb528d9`.
++- Isolated branch: `codex/durable-task-recovery`.
++- Working copy: `/private/tmp/jaeger-autonomy-dev-20261118`.
++- Durable review package:
++  `~/Documents/JaegerAI-Development/2026-11-18-durable-task-recovery/`.
++  Contains commit metadata, patch, incremental Git bundle, this report and logs.
++- Logs: `jaeger-autonomy-*.log`; keep failed runs as evidence alongside passing runs.
++
++First milestone remains unqualified: health endpoints do not prove a working
++chat/voice loop. Persistent background execution has a repaired, tested slice;
++this does not prove autonomous model-driven self-development or a video pipeline.
++No fabricated progress percentage; one background completion defect eliminated
++in development, plus a verification isolation defect repaired.
++
++Next task: reconcile the failing interaction-tier/background admission contract
++against the owner's intended autonomy, then verify an authorized bounded task
++through the actual isolated Gateway and model. Install development-only frontend
++dependencies before claiming the full verification gate. Production deployment
++and restarts still require separate permission under the latest directive.
+diff --git a/docs/README.md b/docs/README.md
+index 212889cc..47e27145 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -17,6 +17,7 @@ Operator instructions live in the root [README](../README.md); contributor workf
+ | [TRUST.md](TRUST.md) | CURRENT REFERENCE | On-device trust boundaries |
+ | [EXTENSION_GUIDE.md](EXTENSION_GUIDE.md) | CURRENT AUTHORITATIVE | Public capability / provider contracts |
+ | [getting-started.md](getting-started.md) | CURRENT REFERENCE | First-run path |
++| [PROGRESS.md](PROGRESS.md) | VERIFIED CHECKPOINTS | Owner-requested implementation progress, evidence and remaining blockers |
+ | [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) | CURRENT AUTHORITATIVE | Topology and ownership |
+ | [architecture/MAIN_LOOP.md](architecture/MAIN_LOOP.md) | CURRENT AUTHORITATIVE | One Gateway turn path |
+ | [architecture/STRUCTURE.md](architecture/STRUCTURE.md) | CURRENT REFERENCE | Directory map |
+diff --git a/jaeger_ai/core/tasks/owner.py b/jaeger_ai/core/tasks/owner.py
+index a66ee91d..fc987ba4 100644
+--- a/jaeger_ai/core/tasks/owner.py
++++ b/jaeger_ai/core/tasks/owner.py
+@@ -661,7 +661,15 @@ class GatewayTaskOwner:
+         result = row.get('result') or {}
+         if status in {'admitted', 'running'}:
+             return
+-        verified, evidence = self.verify(task, result) if status == 'completed' else (False, '')
++        # A completed request may only be a checkpoint or a request for input.
++        # Files written before that stop are not proof the objective finished.
++        # Respect the worker outcome before inspecting artifacts, including on
++        # recovery from a persisted receipt (no worker is rerun in that case).
++        incomplete = result.get('error') or result.get('halt_reason')
++        verified, evidence = (
++            self.verify(task, result) if status == 'completed' and not incomplete
++            else (False, str(incomplete or ''))
++        )
+         def settle(current):
+             if current.state == TaskState.CANCELLED:
+                 return
+@@ -674,7 +682,7 @@ class GatewayTaskOwner:
+             elif verified:
+                 try:
+                     authoritative_transition(
+-                        current, TaskState.COMPLETED_VERIFIED, evidence=evidence,
++                        current, TaskState.COMPLETED_VERIFIED, evidence=evidence, error=None,
+                     )
+                 except CompletionError as exc:
+                     authoritative_transition(current, TaskState.FAILED, error=str(exc))
+diff --git a/jaeger_ai/interfaces/ide/tests/activation-wiring.test.js b/jaeger_ai/interfaces/ide/tests/activation-wiring.test.js
+index 643367fc..56164773 100644
+--- a/jaeger_ai/interfaces/ide/tests/activation-wiring.test.js
++++ b/jaeger_ai/interfaces/ide/tests/activation-wiring.test.js
+@@ -2,10 +2,14 @@
+ // The shipped entry (package.json "main") must activate the in-IDE chat: the
+ // conversation panel and one streaming @jaeger participant, alongside the
+ // controller sidebar and native Gateway model, without registering an id twice.
+-const { test } = require('node:test');
++const { test, after } = require('node:test');
+ const assert = require('node:assert/strict');
+ const path = require('node:path');
+ const Module = require('node:module');
++const os = require('node:os');
++const fs = require('node:fs');
++const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'jaeger-activation-home-'));
++after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+ 
+ const root = path.join(__dirname, '..');
+ const manifest = require('../package.json');
+@@ -21,6 +25,7 @@ function inert() {
+ 
+ function activateEntry(appName = 'Visual Studio Code') {
+   const commands = [], participants = [], views = [], executed = [];
++  const subscriptions = [];
+   const vscode = new Proxy({
+     ExtensionMode: { Production: 1, Development: 2, Test: 3 },
+     commands: { registerCommand: (id, fn) => { commands.push(id); return { dispose() {} }; }, executeCommand: async (...args) => { executed.push(args); } },
+@@ -39,6 +44,7 @@ function activateEntry(appName = 'Visual Studio Code') {
+   const original = Module._load;
+   Module._load = function (request, parent, isMain) {
+     if (request === 'vscode') return vscode;
++    if (request === 'node:os') return { ...os, homedir: () => testHome };
+     if (request === './contract.json') return { gatewayUrl: 'http://127.0.0.1:1' };
+     return original.call(this, request, parent, isMain);
+   };
+@@ -46,13 +52,18 @@ function activateEntry(appName = 'Visual Studio Code') {
+   cached.forEach(k => delete require.cache[k]);
+   try {
+     const entry = require(path.join(root, manifest.main));
+-    const api = entry.activate({ extensionMode: 1, subscriptions: { push() {} }, extensionUri: { toString: () => 'ext' }, extensionPath: root,
++    const api = entry.activate({ extensionMode: 1, subscriptions, extensionUri: { toString: () => 'ext' }, extensionPath: root,
+       secrets: { get: async () => undefined, store: async () => {}, onDidChange: () => ({ dispose() {} }) },
+       globalState: { get: () => undefined, update: async () => {} }, workspaceState: { get: () => undefined, update: async () => {} },
+       globalStorageUri: { fsPath: path.join(require('node:os').tmpdir(), 'jaeger-wiring-test') } });
+     entry.deactivate?.();
+     return { api, commands, participants, views, executed };
+-  } finally { Module._load = original; }
++  } finally {
++    // VS Code disposes these on unload; the fixture must do the same, including
++    // the host-model bridge's HTTP server and its isolated discovery file.
++    for (const item of subscriptions.reverse()) item?.dispose?.();
++    Module._load = original;
++  }
+ }
+ 
+ test('package.json main is extension.js and keeps the chat panel in ordinary VS Code', () => {
+diff --git a/jaeger_ai/interfaces/ide/tests/gateway-url.test.js b/jaeger_ai/interfaces/ide/tests/gateway-url.test.js
+index c5747592..4bb554ec 100644
+--- a/jaeger_ai/interfaces/ide/tests/gateway-url.test.js
++++ b/jaeger_ai/interfaces/ide/tests/gateway-url.test.js
+@@ -1,8 +1,12 @@
+ 'use strict';
+ // jaeger.gatewayUrl written as <origin>/v1 or <origin>/v1/ means the same Gateway.
+-const { test } = require('node:test');
++const { test, after } = require('node:test');
+ const assert = require('node:assert/strict');
+ const { Gateway, localEndpoint, normalizeGatewayUrl } = require('../gateway');
++const os = require('node:os');
++const fs = require('node:fs');
++const testHome = fs.mkdtempSync(require('node:path').join(os.tmpdir(), 'jaeger-url-home-'));
++after(() => fs.rmSync(testHome, { recursive: true, force: true }));
+ 
+ test('/v1 and /v1/ normalize to the origin the client expects', () => {
+   for (const value of ['http://127.0.0.1:43418/v1', 'http://127.0.0.1:43418/v1/', 'http://127.0.0.1:43418/', 'http://127.0.0.1:43418', ' http://127.0.0.1:43418/v1 ']) {
+@@ -35,15 +39,23 @@ test('the shipped entry activates with a /v1 gatewayUrl (no "must not contain a
+     Uri: { joinPath: () => ({}), parse: s => ({ toString: () => s }), file: s => ({ fsPath: s }) },
+   });
+   const original = Module._load;
+-  Module._load = function (r, p, m) { return r === 'vscode' ? vscode : original.call(this, r, p, m); };
++  const subscriptions = [];
++  Module._load = function (r, p, m) {
++    if (r === 'vscode') return vscode;
++    if (r === 'node:os') return { ...os, homedir: () => testHome };
++    return original.call(this, r, p, m);
++  };
+   for (const k of Object.keys(require.cache)) if (k.startsWith(root + path.sep) && !k.includes(`${path.sep}tests${path.sep}`)) delete require.cache[k];
+   try {
+     const ext = require(path.join(root, 'extension.js'));
+-    const api = ext.activate({ extensionMode: 2, subscriptions: { push() {} }, extensionUri: {}, extensionPath: root,
++    const api = ext.activate({ extensionMode: 2, subscriptions, extensionUri: {}, extensionPath: root,
+       secrets: { get: async () => undefined, store: async () => {}, onDidChange: () => ({ dispose() {} }) },
+       globalState: { get: () => undefined, update: async () => {} }, workspaceState: { get: () => undefined, update: async () => {} },
+       globalStorageUri: { fsPath: require('node:os').tmpdir() } });
+     assert.equal(api.getGateway().url, 'http://127.0.0.1:43418');
+     ext.deactivate?.();
+-  } finally { Module._load = original; }
++  } finally {
++    for (const item of subscriptions.reverse()) item?.dispose?.();
++    Module._load = original;
++  }
+ });
+diff --git a/scripts/verify.sh b/scripts/verify.sh
+index eeae3027..6e4acbd2 100755
+--- a/scripts/verify.sh
++++ b/scripts/verify.sh
+@@ -74,6 +74,14 @@ run_frontend() {
+   fi
+ }
+ 
++run_tasks() {
++  echo "[back-end:tasks] Checking durable admission, checkpoint recovery and result delivery..."
++  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
++    dev/tests/jaeger_ai/core/test_durable_tasks.py \
++    dev/tests/jaeger_ai/core/test_gateway_task_owner.py \
++    dev/tests/jaeger_ai/core/test_background_delivery.py
++}
++
+ run_backend() {
+   echo "=================================================="
+   echo "  [TIER 2: BACK END] Core Gateway, Engine & Skills"
+@@ -81,6 +89,7 @@ run_backend() {
+   echo "[back-end:gateway] Running Gateway durability, SQLite sessions & event store..."
+   "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_gateway_durability.py -q --no-header
+   echo "[+] Gateway session durability tests passed."
++  run_tasks
+   echo "[back-end:tiers] Running 3-Tier Interaction Contract (Chat, Agent, Jaeger)..."
+   "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
+   echo "[+] Tier contract tests passed."
+@@ -175,6 +184,9 @@ case "${TARGET}" in
+   gateway)
+     "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_gateway_durability.py dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
+     ;;
++  tasks)
++    run_tasks
++    ;;
+   skills)
+     "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
+     ;;
+@@ -187,7 +199,7 @@ case "${TARGET}" in
+     ;;
+   *)
+     echo "Unknown target: ${TARGET}"
+-    echo "Usage: ./scripts/verify.sh [frontend | backend | wiring | all | git | hygiene]"
++    echo "Usage: ./scripts/verify.sh [frontend | backend | tasks | wiring | all | git | hygiene]"
+     exit 1
+     ;;
+ esac
+-- 
+2.54.0 (Apple Git-157)
+

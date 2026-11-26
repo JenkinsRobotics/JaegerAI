@@ -162,6 +162,7 @@ def _cmd_bench(args) -> int:
         return 1
     secs = len(audio) / KOKORO_SAMPLE_RATE
     print(f"  voice        {args.voice}")
+    print(f"  compute      {tts.compute}")
     print(f"  model load   {load_s:6.2f}s   (once — warm() moves this off boot)")
     print(f"  synthesis    {synth_s:6.2f}s   for {secs:.2f}s of audio")
     print(f"  RTF          {synth_s / max(1e-9, secs):6.2f}    (<1 = faster than real time)")
