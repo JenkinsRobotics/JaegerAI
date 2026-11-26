@@ -7,6 +7,7 @@ pure, stateless, and free of runtime side effects.
 
 from .ports import (
     PORT_PROTOCOLS,
+    EmbodimentPort,
     EventBusPort,
     ExecutionLoopPort,
     ModelPort,
@@ -68,6 +69,7 @@ __all__ = [
     "ApprovalRequirementKind",
     "AutonomyMode",
     "DecisionKind",
+    "EmbodimentPort",
     "EventBusPort",
     "EventEnvelope",
     "ExecutionLoopPort",

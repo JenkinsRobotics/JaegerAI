@@ -40,6 +40,10 @@ def create_gateway_app(
     business_store: Any = None,
     youtube_store: Any = None,
     channel_hub: Any = None,
+    minecraft_embodiment: Any = None,
+    jp01_embodiment: Any = None,
+    voice_presence: Any = None,
+    vision_buffer: Any = None,
     memory_store: Any = None,
     learning_store: Any = None,
     skills_provider: Callable[[], list[dict[str, Any]]] | None = None,
@@ -265,10 +269,19 @@ def create_gateway_app(
         if governor is None:
             return web.json_response({"ok": False, "error": "governor unavailable"}, status=501)
         body = await request.json()
+        reason = str(body.get("reason") or "operator_api")
         if bool(body.get("active", True)):
-            governor.trigger_estop(str(body.get("reason") or "operator_api"))
+            governor.trigger_estop(reason)
+            if minecraft_embodiment is not None:
+                minecraft_embodiment.estop(reason)
+            if jp01_embodiment is not None:
+                jp01_embodiment.estop(reason)
         else:
             governor.release_estop()
+            if minecraft_embodiment is not None:
+                minecraft_embodiment.release_estop()
+            if jp01_embodiment is not None:
+                jp01_embodiment.latch.release(source="operator")
         return web.json_response({"ok": True, "resources": governor.snapshot()})
 
     async def get_cognition_state(_request: web.Request) -> web.Response:
@@ -483,6 +496,43 @@ def create_gateway_app(
         )
         return web.json_response({"ok": True, "message": msg.to_dict()}, status=201)
 
+    async def embodiment_status(_request: web.Request) -> web.Response:
+        return web.json_response({
+            "ok": True,
+            "minecraft": minecraft_embodiment.observe() if minecraft_embodiment is not None else None,
+            "jp01": jp01_embodiment.observe() if jp01_embodiment is not None else None,
+            "voice": voice_presence.snapshot() if voice_presence is not None else None,
+            "vision": vision_buffer.stats() if vision_buffer is not None else None,
+        })
+
+    async def embodiment_act(request: web.Request) -> web.Response:
+        target = request.match_info["body"]
+        body = await request.json()
+        action = str(body.get("action") or "")
+        params = dict(body.get("params") or {})
+        emb = minecraft_embodiment if target == "minecraft" else (jp01_embodiment if target == "jp01" else None)
+        if emb is None:
+            return web.json_response({"ok": False, "error": f"unknown embodiment:{target}"}, status=404)
+        res = emb.act(action, params)
+        return web.json_response(dict(res), status=200 if res.get("ok") else 409)
+
+    async def minecraft_checkpoint(request: web.Request) -> web.Response:
+        if minecraft_embodiment is None:
+            return web.json_response({"ok": False, "error": "minecraft unavailable"}, status=501)
+        body = await request.json() if request.can_read_body else {}
+        cp = minecraft_embodiment.checkpoint(reason=str(body.get("reason") or "manual"))
+        return web.json_response(dict(cp))
+
+    async def presence_voice_hear(request: web.Request) -> web.Response:
+        if voice_presence is None:
+            return web.json_response({"ok": False, "error": "voice presence unavailable"}, status=501)
+        body = await request.json()
+        dec = voice_presence.on_heard_transcript(
+            str(body.get("transcript") or ""),
+            in_active_dialog=bool(body.get("in_active_dialog", False)),
+        )
+        return web.json_response({"ok": True, "decision": dec.to_dict(), "voice": voice_presence.snapshot()})
+
     async def list_learning(request: web.Request) -> web.Response:
         if learning_store is None:
             return web.json_response({"ok": True, "entries": []})
@@ -636,6 +686,10 @@ def create_gateway_app(
     app.router.add_post("/v1/youtube/research/plan", youtube_plan_research)
     app.router.add_get("/v1/channels/status", channels_status)
     app.router.add_post("/v1/channels/send", channels_send)
+    app.router.add_get("/v1/embodiment/status", embodiment_status)
+    app.router.add_post("/v1/embodiment/{body}/act", embodiment_act)
+    app.router.add_post("/v1/embodiment/minecraft/checkpoint", minecraft_checkpoint)
+    app.router.add_post("/v1/presence/voice/hear", presence_voice_hear)
 
     if cognition_loop is not None:
         async def _start_cognition(_app: web.Application) -> None:
