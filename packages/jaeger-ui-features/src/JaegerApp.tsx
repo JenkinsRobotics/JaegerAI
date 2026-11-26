@@ -178,6 +178,10 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const [skills, setSkills] = useState<SkillRow[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServerRow[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
+  const [episodes, setEpisodes] = useState<Array<{ episode_id: string; title: string; stage: string; assigned_role: string; owner_approved: boolean; timeline_clips: StudioClip[] }>>([]);
+  const [newEpTitle, setNewEpTitle] = useState("");
+  const [teamRoles, setTeamRoles] = useState<Array<{ role_id: string; title: string; mission: string; default_model: string }>>([]);
+  const [budgets, setBudgets] = useState<{ daily_cap_usd?: number; daily_spent_usd?: number; daily_remaining_usd?: number }>({});
   const [dryRunResult, setDryRunResult] = useState<string>("");
   const [dryRunBusy, setDryRunBusy] = useState(false);
 
@@ -318,8 +322,13 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
       void fetchJson(`${baseUrl}/v1/tools`).then((d) => setTools(d.tools ?? []));
       void fetchJson(`${baseUrl}/v1/skills`).then((d) => setSkills(d.skills ?? []));
       void fetchJson(`${baseUrl}/v1/mcp/servers`).then((d) => setMcpServers(d.servers ?? []));
+      void fetchJson(`${baseUrl}/v1/business/team`).then((d) => {
+        if (Array.isArray(d.team) && d.team.length > 0) setTeamRoles(d.team);
+        if (d.budgets) setBudgets(d.budgets);
+      });
     } else if (dest === "tasks") {
       void fetchJson(`${baseUrl}/v1/workflows`).then((d) => setWorkflows(d.workflows ?? []));
+      void fetchJson(`${baseUrl}/v1/youtube/episodes`).then((d) => setEpisodes(d.episodes ?? []));
     } else if (dest === "memory") {
       void fetchJson(`${baseUrl}/v1/memory/facts`).then((d) => setFacts(d.facts ?? []));
       void fetchJson(`${baseUrl}/v1/memory/learning`).then((d) => setLearning(d.entries ?? []));
@@ -756,11 +765,72 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         {dest === "tasks" && (
           <div className="jg-content" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <StudioTimeline
-              projectTitle="YouTube Channel Studio · Episode 01"
-              clips={DEFAULT_STUDIO_CLIPS}
+              projectTitle={episodes[0] ? `YouTube Studio · ${episodes[0].title}` : "YouTube Channel Studio · Episode 01"}
+              clips={episodes[0]?.timeline_clips?.length ? episodes[0].timeline_clips : DEFAULT_STUDIO_CLIPS}
               onDryRun={() => void runSafeDryRun()}
               dryRunBusy={dryRunBusy}
             />
+            <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <strong>YouTube Channel Episodes (32 GB Phased Pipeline)</strong>
+                <span className="jg-pill">Owner Approval Required to Publish</span>
+              </div>
+              <form
+                style={{ display: "flex", gap: 8 }}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!newEpTitle.trim()) return;
+                  const r = await fetch(`${baseUrl}/v1/youtube/episodes`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ title: newEpTitle.trim(), target_duration_s: 480 }),
+                  });
+                  if (r.ok) {
+                    setNewEpTitle("");
+                    const d = await fetchJson(`${baseUrl}/v1/youtube/episodes`);
+                    setEpisodes(d.episodes ?? []);
+                  }
+                }}
+              >
+                <input
+                  className="jg-input"
+                  value={newEpTitle}
+                  placeholder="New YouTube episode title (e.g. Ep 01: 24/7 Local Autonomous Droid)..."
+                  onChange={(e) => setNewEpTitle(e.target.value)}
+                />
+                <button type="submit" className="jg-btn jg-btn-primary">+ Create Episode</button>
+              </form>
+              {episodes.map((ep) => (
+                <div
+                  key={ep.episode_id}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderTop: "1px solid var(--jg-border-subtle)" }}
+                >
+                  <div>
+                    <strong>{ep.title}</strong>
+                    <div className="jg-muted">Stage: {ep.stage} · Lead: {ep.assigned_role} · Clips: {ep.timeline_clips.length}</div>
+                  </div>
+                  {!ep.owner_approved ? (
+                    <button
+                      type="button"
+                      className="jg-btn"
+                      onClick={async () => {
+                        await fetch(`${baseUrl}/v1/youtube/episodes/${encodeURIComponent(ep.episode_id)}/advance`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ stage: "ready_to_publish", owner_approved: true, approval_note: "Approved in Studio UI" }),
+                        });
+                        const d = await fetchJson(`${baseUrl}/v1/youtube/episodes`);
+                        setEpisodes(d.episodes ?? []);
+                      }}
+                    >
+                      Approve to Publish
+                    </button>
+                  ) : (
+                    <span className="jg-pill">Approved</span>
+                  )}
+                </div>
+              ))}
+            </div>
             {dryRunResult && (
               <div className="jg-card">
                 <strong>Safe-Mode Dry-Run Result:</strong> <span className="jg-muted">{dryRunResult}</span>
@@ -812,13 +882,23 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         {dest === "tools" && (
           <div className="jg-content" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div>
-              <h3 style={{ marginTop: 0 }}>Autonomous Business Team Roles</h3>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <h3 style={{ margin: 0 }}>Autonomous Business Team Roles</h3>
+                {budgets.daily_cap_usd !== undefined && (
+                  <span className="jg-pill">
+                    Daily Budget: ${budgets.daily_spent_usd?.toFixed(2) ?? "0.00"} / ${budgets.daily_cap_usd.toFixed(2)}
+                  </span>
+                )}
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10 }}>
-                {BUSINESS_TEAM_ROLES.map((role) => (
+                {(teamRoles.length > 0
+                  ? teamRoles.map((r) => ({ id: r.role_id, title: r.title, focus: r.mission, badge: r.default_model }))
+                  : BUSINESS_TEAM_ROLES.map((r) => ({ id: r.id, title: r.title, focus: r.focus, badge: "Ready" }))
+                ).map((role) => (
                   <div key={role.id} className="jg-card">
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <strong>{role.title}</strong>
-                      <span className="jg-pill">Ready</span>
+                      <span className="jg-pill">{role.badge}</span>
                     </div>
                     <p className="jg-muted" style={{ marginBottom: 0 }}>{role.focus}</p>
                   </div>

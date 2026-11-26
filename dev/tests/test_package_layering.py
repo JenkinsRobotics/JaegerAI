@@ -23,6 +23,9 @@ STANDALONE_PACKAGE_SRC_ROOTS = [
     "packages/jaeger-skills/src",
     "packages/jaeger-cognition/src",
     "packages/jaeger-avatar/src",
+    "packages/jaeger-business/src",
+    "packages/jaeger-youtube/src",
+    "packages/jaeger-channels/src",
     "packages/jaeger-mcp/src",
     "packages/jaeger-macos/src",
 ]

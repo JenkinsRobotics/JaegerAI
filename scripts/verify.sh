@@ -4,14 +4,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
-STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-gateway/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src:${REPO_ROOT}/packages/jaeger-cognition/src:${REPO_ROOT}/packages/jaeger-avatar/src"
+STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-gateway/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src:${REPO_ROOT}/packages/jaeger-cognition/src:${REPO_ROOT}/packages/jaeger-avatar/src:${REPO_ROOT}/packages/jaeger-business/src:${REPO_ROOT}/packages/jaeger-youtube/src:${REPO_ROOT}/packages/jaeger-channels/src"
 export PYTHONPATH="${STANDALONE_SRC_PATHS}:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 VENV_PY="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 TARGET="${1:-all}"
 
 run_backend() {
-  echo "=== [BACKEND] 17 Standalone Packages + E2E + Layering + Hygiene ==="
+  echo "=== [BACKEND] 20 Standalone Packages + E2E + Layering + Hygiene ==="
   "${VENV_PY}" -B -m pytest -q --no-header -p no:cacheprovider \
     packages/jaeger-contracts/tests \
     packages/jaeger-models/tests \
@@ -30,6 +30,9 @@ run_backend() {
     packages/jaeger-skills/tests \
     packages/jaeger-cognition/tests \
     packages/jaeger-avatar/tests \
+    packages/jaeger-business/tests \
+    packages/jaeger-youtube/tests \
+    packages/jaeger-channels/tests \
     dev/tests
 }
 

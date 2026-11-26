@@ -26,6 +26,7 @@ from .destructive import (
 )
 from .engine import PolicyEngine
 from .guardrails import GuardrailResult
+from .redact import SENSITIVE_QUERY_PARAMS, redact_object, redact_text
 from .inspectors import (
     ActorTrustInspector,
     BoundaryAndSecretsInspector,
@@ -62,6 +63,7 @@ __all__ = [
     "PermissionRules",
     "PolicyEngine",
     "PrecedenceAndAutonomyInspector",
+    "SENSITIVE_QUERY_PARAMS",
     "SHELL_TOOL_IDS",
     "ToolInspector",
     "UnconfinedSandbox",
@@ -73,5 +75,7 @@ __all__ = [
     "is_banned_standing_grant",
     "is_owner_actor",
     "is_untrusted_actor",
+    "redact_object",
+    "redact_text",
     "shell_command_reason",
 ]
