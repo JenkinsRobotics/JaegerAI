@@ -8,6 +8,12 @@ from .budget import (
     SchemaBudgetReport,
     enforce_mcp_schema_budget,
 )
+from .client import (
+    LiveMCPManager,
+    MCPServerConfig,
+    MCPServerHealth,
+    load_mcp_server_configs,
+)
 from .policy import ALLOWED_TOOL_POLICY_KEYS, MASK, MCPToolPolicy, SECRET_KEY_RE, agent_tool_name, redact_secrets
 from .protocol import MCPPromptSpec, ReconnectPolicy, build_roots_payload
 from .sandbox import build_mcp_seatbelt_profile, wrap_stdio_with_seatbelt

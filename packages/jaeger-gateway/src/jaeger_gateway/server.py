@@ -31,14 +31,21 @@ def create_gateway_app(
     workflows_engine: Any = None,
     memory_store: Any = None,
     skills_provider: Callable[[], list[dict[str, Any]]] | None = None,
+    mcp_provider: Callable[[], list[dict[str, Any]]] | None = None,
     static_ui_dir: Path | None = None,
 ) -> web.Application:
     """Create the standalone aiohttp Gateway + optional static WebUI application."""
     policy = auth or GatewayAuthPolicy(allow_loopback_unauthenticated=True)
     started_at = time.time()
+    allowed_hosts = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "testserver"})
 
     @web.middleware
     async def auth_middleware(request: web.Request, handler: Any) -> web.StreamResponse:
+        raw_host = (request.headers.get("Host") or "").strip().lower()
+        if raw_host:
+            host_only = raw_host.split("]")[0] + "]" if raw_host.startswith("[") else raw_host.split(":")[0]
+            if host_only and host_only not in allowed_hosts and (request.remote or "") in ("127.0.0.1", "::1", ""):
+                return web.json_response({"ok": False, "error": "invalid Host header (DNS rebinding blocked)"}, status=403)
         if request.path == "/health" or not request.path.startswith("/v1/"):
             return await handler(request)
         decision = policy.verify_http(request.headers, remote_addr=request.remote or "")
@@ -185,6 +192,10 @@ def create_gateway_app(
         items = skills_provider() if skills_provider is not None else []
         return web.json_response({"ok": True, "skills": items, "count": len(items)})
 
+    async def list_mcp_servers(_request: web.Request) -> web.Response:
+        items = mcp_provider() if mcp_provider is not None else []
+        return web.json_response({"ok": True, "servers": items, "count": len(items)})
+
     async def list_workflows(request: web.Request) -> web.Response:
         if workflows_engine is None:
             return web.json_response({"ok": True, "workflows": []})
@@ -276,6 +287,7 @@ def create_gateway_app(
     app.router.add_get("/v1/models", list_models)
     app.router.add_post("/v1/models/select", select_model)
     app.router.add_get("/v1/skills", list_skills)
+    app.router.add_get("/v1/mcp/servers", list_mcp_servers)
     app.router.add_get("/v1/workflows", list_workflows)
     app.router.add_post("/v1/workflows", create_workflow)
     app.router.add_post("/v1/workflows/{run_id}/approve", approve_workflow_step)
