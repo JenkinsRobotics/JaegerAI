@@ -233,8 +233,8 @@ class ModularGatewayRuntime:
         """Expose Droid Mode, VR Avatar, Minecraft, JP01, YouTube Studio, Business & Goals directly to AgentLoop."""
         import json as _json
 
-        def _ok(obj: Any) -> ToolResult:
-            return ToolResult(ok=True, output=_json.dumps(obj, ensure_ascii=False, indent=2))
+        def _ok(tool_name: str, obj: Any) -> ToolResult:
+            return ToolResult(tool_name=tool_name, ok=True, output=_json.dumps(obj, ensure_ascii=False, indent=2))
 
         def _reg(
             name: str,
@@ -247,9 +247,9 @@ class ModularGatewayRuntime:
         ) -> None:
             def _wrapped(args: Mapping[str, Any]) -> ToolResult:
                 try:
-                    return _ok(fn(args))
+                    return _ok(name, fn(args))
                 except Exception as exc:  # noqa: BLE001
-                    return ToolResult(ok=False, error=str(exc))
+                    return ToolResult(tool_name=name, ok=False, error=str(exc))
 
             self.tools.register(
                 ToolSpec(

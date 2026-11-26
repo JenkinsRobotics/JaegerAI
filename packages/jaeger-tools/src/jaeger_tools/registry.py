@@ -82,7 +82,7 @@ class ToolRegistry:
     def get_spec(self, tool_name: str) -> ToolSpec | None:
         return self._tools.get(tool_name)
 
-    def list_tools(self, *, query: str | None = None, limit: int = 20) -> Sequence[Mapping[str, Any]]:
+    def list_tools(self, *, query: str | None = None, limit: int = 64) -> Sequence[Mapping[str, Any]]:
         available = [t for t in self._tools.values() if t.is_available()]
         if query:
             q_tokens = set(re.findall(r"[a-z0-9_]+", query.lower()))

@@ -46,7 +46,8 @@ def test_runtime_registers_embodiment_and_studio_tools(tmp_path: Path) -> None:
 
     rt = ModularGatewayRuntime(state_dir=tmp_path / "state", workspace=tmp_path)
     try:
-        names = {t["name"] for t in rt.tools.list_tools(limit=200)}
+        # Must appear under DEFAULT list_tools() limit (no silent truncation!)
+        names = {t["name"] for t in rt.tools.list_tools()}
         for expected in (
             "droid_devices",
             "droid_act",
@@ -61,5 +62,11 @@ def test_runtime_registers_embodiment_and_studio_tools(tmp_path: Path) -> None:
             "persistent_goals",
         ):
             assert expected in names, f"missing platform tool: {expected}"
+
+        # Execute each core platform tool directly to guarantee ToolResult(tool_name=...) works
+        assert rt.tools.execute("droid_devices", {"refresh": False}).ok is True
+        assert rt.tools.execute("avatar_express", {"emotion": "happy", "state": "speaking"}).ok is True
+        assert rt.tools.execute("minecraft_status", {}).ok is True
+        assert rt.tools.execute("business_team", {}).ok is True
     finally:
         rt.close()
