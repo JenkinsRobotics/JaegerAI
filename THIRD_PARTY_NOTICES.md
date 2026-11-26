@@ -25,5 +25,6 @@ This repository incorporates adapted modular components, specifications, and ref
 | **smolagents** (`huggingface/smolagents`) | Apache-2.0 | Rolling multimodal frame pruning, periodic planning step, `SafeSerializer` |
 | **Amica** (`semperai/amica`) | MIT | Studio VRM 0.x/1.0 Three.js rig patterns (3-point studio lighting, ACESFilmic, AutoBlink, pointer eye saccades, relaxed stance solver, emotion & viseme lip-sync blending) |
 | **OpenReel Video** (`Augani/openreel-video`) | MIT | Multi-track NLE studio timeline component (`StudioTimeline`) for YouTube & media production |
+| **Voyager** (`MineDojo/Voyager`) | MIT | Headless Mineflayer Minecraft JS control primitives (`control_primitives/*.js`) and lifelong skill-library pattern |
 
 Full upstream license texts are preserved in each donor module's header or `LICENSE` attribution block when extracted.

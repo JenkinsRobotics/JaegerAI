@@ -30,3 +30,21 @@ def test_minecraft_embodiment_persistence_and_preemption(tmp_path: Path) -> None
     mc2.estop("operator_halt")
     res = mc2.act("move_to", {"x": 200})
     assert res["ok"] is False and "estop" in res["error"]
+
+
+def test_voyager_control_primitives_and_skill_library(tmp_path: Path) -> None:
+    from jaeger_embodiment_minecraft import MinecraftSkillLibrary, load_control_primitives
+
+    prims = load_control_primitives()
+    assert "mineBlock" in prims and "craftItem" in prims and len(prims) >= 10
+
+    lib = MinecraftSkillLibrary(tmp_path)
+    s1 = lib.upsert_skill(
+        name="craftWoodenPickaxe",
+        description="Gather oak logs, craft planks, sticks, and a wooden pickaxe",
+        code="async function craftWoodenPickaxe(bot) { /* verified */ }",
+        tags=["craft", "pickaxe", "wood"],
+    )
+    assert s1.version == 1 and s1.verified_runs == 1
+    hits = lib.retrieve("need a wooden pickaxe to mine stone")
+    assert hits and hits[0].name == "craftWoodenPickaxe"
