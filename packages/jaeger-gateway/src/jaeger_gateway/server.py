@@ -29,7 +29,10 @@ def create_gateway_app(
     models_provider: Callable[[], dict[str, Any]] | None = None,
     model_selector: Callable[[str], dict[str, Any]] | None = None,
     workflows_engine: Any = None,
+    dry_run_simulator: Any = None,
+    governor: Any = None,
     memory_store: Any = None,
+    learning_store: Any = None,
     skills_provider: Callable[[], list[dict[str, Any]]] | None = None,
     mcp_provider: Callable[[], list[dict[str, Any]]] | None = None,
     static_ui_dir: Path | None = None,
@@ -105,9 +108,10 @@ def create_gateway_app(
         if not prompt:
             return web.json_response({"ok": False, "error": "prompt is required"}, status=400)
         req_id = body.get("request_id")
+        strategy = str(body.get("multitask_strategy") or "enqueue")
         try:
-            rid, fut = coordinator.submit(sid, prompt, request_id=req_id)
-        except RequestConflictError as exc:
+            rid, fut = coordinator.submit(sid, prompt, request_id=req_id, multitask_strategy=strategy)
+        except (RequestConflictError, RuntimeError) as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=409)
         if body.get("wait"):
             res = await asyncio.to_thread(fut.result, 180.0)
@@ -225,6 +229,103 @@ def create_gateway_app(
         run = workflows_engine.approve_step(rid, step_id, approved=approved, note=note)
         return web.json_response({"ok": True, "workflow": run.to_dict()})
 
+    async def dry_run_workflow(request: web.Request) -> web.Response:
+        if dry_run_simulator is None:
+            return web.json_response({"ok": False, "error": "dry-run simulator unavailable"}, status=501)
+        body = await request.json()
+        report = dry_run_simulator.simulate_workflow(
+            str(body.get("name") or "Workflow"),
+            list(body.get("steps") or []),
+            initial_context=dict(body.get("context") or {}),
+        )
+        return web.json_response({"ok": True, "dry_run": report.to_dict()})
+
+    async def system_resources(_request: web.Request) -> web.Response:
+        if governor is None:
+            return web.json_response({"ok": True, "resources": {}})
+        return web.json_response({"ok": True, "resources": governor.snapshot()})
+
+    async def set_idle_life(request: web.Request) -> web.Response:
+        if governor is None:
+            return web.json_response({"ok": False, "error": "governor unavailable"}, status=501)
+        body = await request.json()
+        governor.set_idle_life_enabled(bool(body.get("enabled", True)))
+        return web.json_response({"ok": True, "resources": governor.snapshot()})
+
+    async def set_estop(request: web.Request) -> web.Response:
+        if governor is None:
+            return web.json_response({"ok": False, "error": "governor unavailable"}, status=501)
+        body = await request.json()
+        if bool(body.get("active", True)):
+            governor.trigger_estop(str(body.get("reason") or "operator_api"))
+        else:
+            governor.release_estop()
+        return web.json_response({"ok": True, "resources": governor.snapshot()})
+
+    async def list_learning(request: web.Request) -> web.Response:
+        if learning_store is None:
+            return web.json_response({"ok": True, "entries": []})
+        q = (request.query.get("q") or "").strip()
+        scope = (request.query.get("scope") or "").strip() or None
+        limit = int(request.query.get("limit", "50"))
+        items = (
+            learning_store.recall(q, scopes=[scope] if scope else None, limit=limit)
+            if q
+            else learning_store.list_entries(scope=scope, limit=limit)
+        )
+        return web.json_response({"ok": True, "entries": [e.to_dict() for e in items], "count": len(items)})
+
+    async def add_learning(request: web.Request) -> web.Response:
+        if learning_store is None:
+            return web.json_response({"ok": False, "error": "learning store unavailable"}, status=501)
+        body = await request.json()
+        content = str(body.get("content") or "").strip()
+        if not content:
+            return web.json_response({"ok": False, "error": "content is required"}, status=400)
+        entry = learning_store.add(
+            scope=str(body.get("scope") or "learned_knowledge"),
+            subject=str(body.get("subject") or "owner"),
+            content=content,
+            importance=float(body.get("importance", 0.6)),
+            tags=list(body.get("tags") or []),
+            parent_ids=list(body.get("parent_ids") or []),
+        )
+        return web.json_response({"ok": True, "entry": entry.to_dict()}, status=201)
+
+    async def forget_learning(request: web.Request) -> web.Response:
+        if learning_store is None:
+            return web.json_response({"ok": False, "error": "learning store unavailable"}, status=501)
+        eid = request.match_info["entry_id"]
+        cascade = request.query.get("cascade", "true").lower() not in ("0", "false", "no")
+        removed = learning_store.forget(eid, cascade=cascade)
+        return web.json_response({"ok": True, "removed": removed, "count": len(removed)})
+
+    async def list_goals(request: web.Request) -> web.Response:
+        if learning_store is None:
+            return web.json_response({"ok": True, "goals": []})
+        domain = (request.query.get("domain") or "").strip() or None
+        status = (request.query.get("status") or "").strip() or None
+        goals = learning_store.list_goals(domain=domain, status=status)
+        return web.json_response({"ok": True, "goals": [g.to_dict() for g in goals], "count": len(goals)})
+
+    async def upsert_goal(request: web.Request) -> web.Response:
+        if learning_store is None:
+            return web.json_response({"ok": False, "error": "learning store unavailable"}, status=501)
+        body = await request.json()
+        title = str(body.get("title") or "").strip()
+        if not title:
+            return web.json_response({"ok": False, "error": "title is required"}, status=400)
+        goal = learning_store.upsert_goal(
+            goal_id=body.get("goal_id"),
+            domain=str(body.get("domain") or "business"),
+            title=title,
+            status=str(body.get("status") or "active"),
+            priority=int(body.get("priority", 2)),
+            checkpoint=dict(body.get("checkpoint") or {}),
+            notes=str(body.get("notes") or ""),
+        )
+        return web.json_response({"ok": True, "goal": goal.to_dict()}, status=201)
+
     async def list_facts(_request: web.Request) -> web.Response:
         if memory_store is None:
             return web.json_response({"ok": True, "facts": []})
@@ -290,10 +391,19 @@ def create_gateway_app(
     app.router.add_get("/v1/mcp/servers", list_mcp_servers)
     app.router.add_get("/v1/workflows", list_workflows)
     app.router.add_post("/v1/workflows", create_workflow)
+    app.router.add_post("/v1/workflows/dry-run", dry_run_workflow)
     app.router.add_post("/v1/workflows/{run_id}/approve", approve_workflow_step)
+    app.router.add_get("/v1/system/resources", system_resources)
+    app.router.add_post("/v1/system/idle-life", set_idle_life)
+    app.router.add_post("/v1/system/estop", set_estop)
     app.router.add_get("/v1/memory/facts", list_facts)
     app.router.add_post("/v1/memory/facts", put_fact)
     app.router.add_delete("/v1/memory/facts/{key}", delete_fact)
+    app.router.add_get("/v1/memory/learning", list_learning)
+    app.router.add_post("/v1/memory/learning", add_learning)
+    app.router.add_delete("/v1/memory/learning/{entry_id}", forget_learning)
+    app.router.add_get("/v1/memory/goals", list_goals)
+    app.router.add_post("/v1/memory/goals", upsert_goal)
     app.router.add_get("/v1/diagnostics", diagnostics)
 
     # Optional static WebUI bundle serving (SPA fallback to index.html)

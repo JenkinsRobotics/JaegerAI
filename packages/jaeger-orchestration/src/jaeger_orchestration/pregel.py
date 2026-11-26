@@ -6,12 +6,15 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import json
+import sqlite3
 import threading
 import time
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 
@@ -70,14 +73,151 @@ class PregelRunResult:
     steps_executed: int = 0
 
 
-class PregelGraph:
-    """Superstep-based DAG/graph runner supporting Send() map-reduce & interrupt()/Command(resume=...)."""
+@dataclass(frozen=True)
+class PregelCheckpoint:
+    checkpoint_id: str
+    run_id: str
+    step: int
+    node: str
+    status: str  # "step" | "interrupted" | "completed"
+    state: dict[str, Any]
+    parent_checkpoint_id: str | None = None
+    created_at: float = field(default_factory=time.time)
 
-    def __init__(self, *, reducers: Mapping[str, Callable[[Any, Any], Any]] | None = None) -> None:
+
+class SqlitePregelCheckpointer:
+    """Durable SQLite WAL checkpointer for PregelGraph (survives restarts + time-travel fork)."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = Path(db_path).expanduser().resolve()
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        with self._lock, self._connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS pregel_checkpoints (
+                    checkpoint_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    step INTEGER NOT NULL,
+                    node TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    state_json TEXT NOT NULL,
+                    parent_checkpoint_id TEXT,
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_pregel_run_step
+                    ON pregel_checkpoints(run_id, step ASC, created_at ASC);
+                """
+            )
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self._db_path), timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
+    def save(
+        self,
+        *,
+        run_id: str,
+        step: int,
+        node: str,
+        status: str,
+        state: Mapping[str, Any],
+        parent_checkpoint_id: str | None = None,
+    ) -> PregelCheckpoint:
+        cid = f"cp_{uuid.uuid4().hex[:12]}"
+        now = time.time()
+        clean_state = copy.deepcopy(dict(state))
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO pregel_checkpoints
+                (checkpoint_id, run_id, step, node, status, state_json, parent_checkpoint_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (cid, run_id, int(step), node, status, json.dumps(clean_state, default=str), parent_checkpoint_id, now),
+            )
+        return PregelCheckpoint(
+            checkpoint_id=cid,
+            run_id=run_id,
+            step=int(step),
+            node=node,
+            status=status,
+            state=clean_state,
+            parent_checkpoint_id=parent_checkpoint_id,
+            created_at=now,
+        )
+
+    def get_history(self, run_id: str) -> list[PregelCheckpoint]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT checkpoint_id, run_id, step, node, status, state_json, parent_checkpoint_id, created_at
+                FROM pregel_checkpoints
+                WHERE run_id = ?
+                ORDER BY step ASC, created_at ASC
+                """,
+                (run_id,),
+            ).fetchall()
+        return [
+            PregelCheckpoint(
+                checkpoint_id=r[0],
+                run_id=r[1],
+                step=int(r[2]),
+                node=r[3],
+                status=r[4],
+                state=json.loads(r[5] or "{}"),
+                parent_checkpoint_id=r[6],
+                created_at=float(r[7]),
+            )
+            for r in rows
+        ]
+
+    def get_checkpoint(self, checkpoint_id: str) -> PregelCheckpoint | None:
+        with self._lock, self._connect() as conn:
+            r = conn.execute(
+                """
+                SELECT checkpoint_id, run_id, step, node, status, state_json, parent_checkpoint_id, created_at
+                FROM pregel_checkpoints
+                WHERE checkpoint_id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+        if r is None:
+            return None
+        return PregelCheckpoint(
+            checkpoint_id=r[0],
+            run_id=r[1],
+            step=int(r[2]),
+            node=r[3],
+            status=r[4],
+            state=json.loads(r[5] or "{}"),
+            parent_checkpoint_id=r[6],
+            created_at=float(r[7]),
+        )
+
+    def latest_interrupted(self, run_id: str) -> PregelCheckpoint | None:
+        hist = self.get_history(run_id)
+        if not hist or hist[-1].status != "interrupted":
+            return None
+        return hist[-1]
+
+
+class PregelGraph:
+    """Superstep-based durable DAG/graph runner supporting Send(), interrupt()/Command(), & time-travel fork."""
+
+    def __init__(
+        self,
+        *,
+        reducers: Mapping[str, Callable[[Any, Any], Any]] | None = None,
+        checkpointer: SqlitePregelCheckpointer | None = None,
+    ) -> None:
         self._nodes: dict[str, Callable[[dict[str, Any]], Any]] = {}
         self._edges: dict[str, list[str]] = {}
         self._conditional_edges: dict[str, Callable[[dict[str, Any]], str | Sequence[str | Send] | None]] = {}
         self._reducers: dict[str, Callable[[Any, Any], Any]] = dict(reducers or {})
+        self._checkpointer = checkpointer
         self._entry: str | None = None
         self._suspended: dict[str, tuple[str, dict[str, Any], int]] = {}
 
@@ -112,6 +252,34 @@ class PregelGraph:
             else:
                 state[k] = v
 
+    def get_state_history(self, run_id: str) -> list[PregelCheckpoint]:
+        if self._checkpointer is None:
+            return []
+        return self._checkpointer.get_history(run_id)
+
+    def fork_from(
+        self,
+        checkpoint_id: str,
+        *,
+        update: Mapping[str, Any] | None = None,
+        goto: str | None = None,
+        new_run_id: str | None = None,
+        max_steps: int = 100,
+    ) -> PregelRunResult:
+        """Time-travel fork: branch a new run from any historical checkpoint with optional state overrides."""
+        if self._checkpointer is None:
+            raise RuntimeError("fork_from requires a SqlitePregelCheckpointer")
+        cp = self._checkpointer.get_checkpoint(checkpoint_id)
+        if cp is None:
+            raise KeyError(f"Unknown checkpoint_id={checkpoint_id!r}")
+        state = copy.deepcopy(cp.state)
+        if update:
+            self._merge(state, update)
+        fork_rid = new_run_id or f"pg_fork_{uuid.uuid4().hex[:8]}"
+        start_node = goto or cp.node
+        self._suspended[fork_rid] = (start_node, state, cp.step)
+        return self.invoke(Command(goto=start_node), run_id=fork_rid, max_steps=max_steps)
+
     def invoke(
         self,
         initial_state: Mapping[str, Any] | Command,
@@ -120,10 +288,18 @@ class PregelGraph:
         max_steps: int = 100,
     ) -> PregelRunResult:
         rid = run_id or f"pg_{uuid.uuid4().hex[:10]}"
+        last_cp_id: str | None = None
         if isinstance(initial_state, Command):
-            if rid not in self._suspended:
+            if rid in self._suspended:
+                start_node, state, steps = self._suspended.pop(rid)
+            elif self._checkpointer is not None:
+                cp = self._checkpointer.latest_interrupted(rid)
+                if cp is None:
+                    raise KeyError(f"No interrupted run found for run_id={rid!r}")
+                start_node, state, steps = cp.node, copy.deepcopy(cp.state), cp.step
+                last_cp_id = cp.checkpoint_id
+            else:
                 raise KeyError(f"No interrupted run found for run_id={rid!r}")
-            start_node, state, steps = self._suspended.pop(rid)
             if initial_state.update:
                 self._merge(state, initial_state.update)
             queue: list[tuple[str, Mapping[str, Any] | None]] = [
@@ -149,6 +325,16 @@ class PregelGraph:
                     out = fn(node_input)
                 except GraphInterrupt as intr:
                     self._suspended[rid] = (node_name, dict(state), steps)
+                    if self._checkpointer is not None:
+                        cp = self._checkpointer.save(
+                            run_id=rid,
+                            step=steps,
+                            node=node_name,
+                            status="interrupted",
+                            state=state,
+                            parent_checkpoint_id=last_cp_id,
+                        )
+                        last_cp_id = cp.checkpoint_id
                     return PregelRunResult(
                         run_id=rid,
                         status="interrupted",
@@ -161,6 +347,16 @@ class PregelGraph:
                 steps += 1
                 if isinstance(out, Mapping):
                     self._merge(state, out)
+                if self._checkpointer is not None:
+                    cp = self._checkpointer.save(
+                        run_id=rid,
+                        step=steps,
+                        node=node_name,
+                        status="step",
+                        state=state,
+                        parent_checkpoint_id=last_cp_id,
+                    )
+                    last_cp_id = cp.checkpoint_id
 
                 if node_name in self._conditional_edges:
                     routed = self._conditional_edges[node_name](state)
@@ -178,6 +374,15 @@ class PregelGraph:
                     if (nxt, None) not in queue:
                         queue.append((nxt, None))
 
+            if self._checkpointer is not None:
+                self._checkpointer.save(
+                    run_id=rid,
+                    step=steps,
+                    node="__end__",
+                    status="completed",
+                    state=state,
+                    parent_checkpoint_id=last_cp_id,
+                )
             return PregelRunResult(
                 run_id=rid,
                 status="completed",

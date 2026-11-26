@@ -57,8 +57,24 @@ class RunCoordinator:
         prompt: str,
         *,
         request_id: str | None = None,
+        multitask_strategy: str = "enqueue",
     ) -> tuple[str, Future[Mapping[str, Any]]]:
-        """Admit a request idempotently, enqueue on the session fiber, and ring the doorbell."""
+        """Admit a request idempotently with LangGraph-style multitask strategy (enqueue|reject|interrupt)."""
+        strat = (multitask_strategy or "enqueue").strip().lower()
+        with self._doorbell:
+            is_busy = session_id in self._active_sessions or bool(self._queues.get(session_id))
+            if strat == "reject" and is_busy:
+                raise RuntimeError(f"Session {session_id!r} already has an active or queued run")
+            if strat == "interrupt" and is_busy:
+                # Supersede queued work and mint a fresh event generation to fence any active worker
+                pending = self._queues.get(session_id)
+                if pending:
+                    while pending:
+                        dropped = pending.popleft()
+                        if not dropped.future.done():
+                            dropped.future.set_result({"ok": False, "verdict": "interrupted", "content": ""})
+                self._hub.open_generation(session_id)
+
         req, is_replay = self._store.admit_request(session_id, prompt, request_id=request_id)
         rid = req["request_id"]
         fut: Future[Mapping[str, Any]] = Future()
