@@ -47,15 +47,33 @@ from .engine import (
     KOKORO_VOICE,
     KokoroTTS,
 )
-from .node import Synthesizer, TTSNode
+try:
+    from .node import Synthesizer, TTSNode
+except ImportError:
+    Synthesizer = Any  # type: ignore[assignment,misc]
+    TTSNode = Any  # type: ignore[assignment,misc]
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 
 __all__ = [
     "TTSNode", "Synthesizer", "KokoroTTS",
     "KOKORO_VOICE", "KOKORO_LANG", "KOKORO_SAMPLE_RATE",
-    "KokoroTTSConfig", "make_tts_node", "__version__",
+    "KokoroTTSConfig", "make_tts_node", "open_voice", "__version__",
 ]
+
+
+def open_voice(*, voice: str = KOKORO_VOICE, language: str = KOKORO_LANG) -> KokoroTTS:
+    """A loaded, primed voice for a caller that plays the audio itself.
+
+    The ``tts`` slot's direct call, next to ``make_tts_node`` (the bus
+    node). Whatever module fills the slot exports this name and returns
+    an object with ``synth(text)`` (float32 mono chunks, as rendered),
+    ``sample_rate`` and ``compute``. No bus, no audio device.
+    """
+    tts = KokoroTTS(voice=voice, lang=language)
+    for _ in tts.synth("ready"):    # first render pays the warm-up, not the first line
+        pass
+    return tts
 
 
 def make_tts_node(bus: Any, config: dict[str, Any]) -> TTSNode:

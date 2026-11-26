@@ -24,9 +24,18 @@ jaeger-os>=0.9.0
 
 # --- the Kokoro engine itself ---
 kokoro>=0.9.4
+# Kokoro on the Apple GPU: 3-4x faster than PyTorch on the CPU. Apple
+# Silicon only; anywhere else the engine uses the PyTorch path above.
+# 0.6.4 is the version it was run on.
+mlx-audio>=0.6.4; sys_platform == "darwin" and platform_machine == "arm64"
 sounddevice>=0.4.6
 numpy>=1.26
 huggingface_hub>=0.24
+# Kokoro's English text front end (Misaki) needs this spaCy model at
+# start-up; without it Misaki tries a download and exits the process.
+# Pinned by hash. A direct URL: PyPI would refuse it on upload, so this
+# line moves when the module is published there.
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
 
 # --- dev tooling (uncomment if doing JaegerKokoroTTS development) ---
 # pytest>=8.0

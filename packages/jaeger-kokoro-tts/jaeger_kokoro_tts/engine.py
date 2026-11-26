@@ -15,6 +15,7 @@ Public surface (consumed by ``node.py``'s ``Synthesizer`` protocol):
 from __future__ import annotations
 
 import os
+import platform
 import re
 import sys
 import threading
@@ -22,8 +23,19 @@ import time
 from pathlib import Path
 from typing import Any
 
-from jaeger_os.app.logging import log
-from jaeger_os.core.audio import FarEndReference
+import numpy as np
+
+import logging as _logging
+
+_LOGGER = _logging.getLogger("jaeger_kokoro_tts")
+
+
+def log(component: str, message: str, *, level: str = "info") -> None:
+    fn = getattr(_LOGGER, level if level in ("debug", "info", "warning", "error") else ("warning" if level == "warn" else "info"))
+    fn("[%s] %s", component, message)
+
+
+FarEndReference = Any
 
 
 KOKORO_VOICE = "af_heart"
@@ -45,7 +57,14 @@ KOKORO_SAMPLE_RATE = 24000
 # download) but log loudly so a slow boot has an obvious cause on the
 # console; item 2 (voice warm off the boot critical path) keeps that
 # download from wedging the app either way.
+#: The same Kokoro weights converted for Apple's MLX, which runs them on
+#: the GPU. Measured on an M1 Max, 8.6 s of speech: 0.39 s on MLX against
+#: 1.3-2.3 s for PyTorch on the CPU (PyTorch does not pick the Apple GPU
+#: by itself, and when told to, its first sentence takes 11 s).
+KOKORO_MLX_REPO = "mlx-community/Kokoro-82M-bf16"
+_APPLE_SILICON = sys.platform == "darwin" and platform.machine() == "arm64"
 _KOKORO_MODEL_FILENAMES = {
+    KOKORO_MLX_REPO: "kokoro-v1_0.safetensors",
     "hexgrad/Kokoro-82M": "kokoro-v1_0.pth",
     "hexgrad/Kokoro-82M-v1.1-zh": "kokoro-v1_1-zh.pth",
 }
@@ -76,7 +95,7 @@ def ensure_hf_offline_if_cached(
     required = [
         "config.json",
         _KOKORO_MODEL_FILENAMES.get(repo_id, _KOKORO_MODEL_FILENAMES["hexgrad/Kokoro-82M"]),
-        f"voices/{voice}.pt",
+        f"voices/{voice}.{'safetensors' if repo_id == KOKORO_MLX_REPO else 'pt'}",
     ]
     missing = [
         f for f in required
@@ -202,6 +221,147 @@ REFERENCE_SAMPLE_RATE = 16000
 # Markdown stripping for TTS — agents emit asterisks, code fences, link
 # syntax, etc., and Kokoro reads them literally otherwise.
 # ---------------------------------------------------------------------------
+class _MlxResult:
+    """One synthesised chunk, shaped like kokoro's: ``.audio`` is float32.
+    ``marks`` are its lip marks (see :func:`lip_marks`)."""
+    __slots__ = ("audio", "marks")
+
+    def __init__(self, audio: Any, marks: list | None = None) -> None:
+        self.audio = audio
+        self.marks = marks or []
+
+
+# Sounds the lips make that audio alone cannot tell from n/t/s: m/b/p press
+# the lips shut ("p"), f/v tuck the lower lip under the teeth ("f").
+_LIPS = {"p": "p", "b": "p", "m": "p", "f": "f", "v": "f"}
+_FRAME_S = 0.025     # one Kokoro duration frame
+
+
+def lip_marks(phonemes: str, frames: list, vocab: dict) -> list:
+    """``[start, end, kind]`` in seconds from the chunk's start for each lip
+    closure, from Kokoro's own phoneme lengths (``frames``: <bos> first, one
+    per phoneme, <eos> last).
+
+    Moved here from Jaeger Avatar, where it was checked by ear and level on
+    "Mom bought a big puppy": each b/p's silent closure falls inside its
+    mark. The model skips phonemes it has no id for, so they are skipped
+    here too, keeping each length on its own sound.
+    """
+    marks = []
+    t = max(0, frames[0] - 3) * _FRAME_S   # the sound runs 3 frames ahead of <bos>
+    for ph, n in zip([p for p in phonemes if p in vocab], frames[1:-1]):
+        if ph in _LIPS:
+            marks.append([round(t, 3), round(t + n * _FRAME_S, 3), _LIPS[ph]])
+        t += n * _FRAME_S
+    return marks
+
+
+def _marks_of(result: Any, vocab: dict | None) -> list:
+    """A result's lip marks: its own, or made from its phoneme timings."""
+    marks = getattr(result, "marks", None)
+    if marks is not None:
+        return list(marks)
+    lengths = getattr(result, "pred_dur", None)
+    phonemes = getattr(result, "phonemes", None)
+    if lengths is None or not phonemes or not vocab:
+        return []
+    return lip_marks(phonemes, [int(n) for n in lengths.tolist()], vocab)
+
+
+# Kokoro pads every clip with dead air (measured 2026-11-11 in Jaeger Avatar:
+# 0.28-0.43 s before the voice, 0.49 s after). Seconds of it kept before and
+# after the voice — the values Jaeger Avatar's own voice code was tuned to by
+# ear. A speaker that swallows its first milliseconds wants more lead: set
+# ``KokoroTTS.trim`` on that robot; ``None`` leaves Kokoro's padding alone.
+TRIM = (0.012, 0.09)
+_FADE_S = 0.006      # a cut edge ramps over this long, so it does not click
+
+
+def _trimmed(audio: Any, marks: list, trim: tuple | None) -> tuple[Any, list]:
+    """``audio`` without the dead air around the voice, and ``marks`` moved
+    to match. Sound that is voice from edge to edge, or has no voice at
+    all, comes back as it was."""
+    if trim is None or not len(audio):
+        return audio, marks
+    level = np.abs(audio)
+    loud = np.nonzero(level > max(0.012, float(level.max()) * 0.03))[0]
+    if not len(loud):
+        return audio, marks
+    rate = KOKORO_SAMPLE_RATE
+    start = max(0, int(loud[0]) - int(rate * trim[0]))
+    end = min(len(audio), int(loud[-1]) + 1 + int(rate * trim[1]))
+    if start == 0 and end == len(audio):
+        return audio, marks
+    audio = np.array(audio[start:end], dtype=np.float32)
+    fade = min(int(rate * _FADE_S), len(audio) // 2)
+    if fade and start:
+        audio[:fade] *= np.linspace(0, 1, fade, dtype=np.float32)
+    if fade and end < len(level):
+        audio[-fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
+    cut = start / rate
+    return audio, [[round(max(0.0, a - cut), 3), round(b - cut, 3), kind]
+                   for a, b, kind in marks if b - cut > 0]
+
+
+class SpeechChunk(np.ndarray):
+    """One chunk of speech: float32 mono sound, plus ``marks`` — its lip
+    marks, ``[start, end, "p" | "f"]`` in seconds from the chunk's start.
+
+    ponytail: an ndarray with one extra field, so every caller that only
+    wants sound keeps working unchanged. A copy or a slice has no marks
+    (they were timed for the whole chunk). A plain (sound, marks) pair if
+    a caller ever needs to serialise chunks.
+    """
+    marks: list = []
+
+    @classmethod
+    def of(cls, audio: Any, marks: list | None = None) -> "SpeechChunk":
+        chunk = np.asarray(audio, dtype=np.float32).reshape(-1).view(cls)
+        chunk.marks = list(marks or [])
+        return chunk
+
+
+class _MlxPipeline:
+    """Kokoro on the Apple GPU, called exactly like kokoro's ``KPipeline``
+    so the rest of the engine cannot tell which one it has."""
+
+    def __init__(self, lang: str) -> None:
+        import mlx.core as mx
+        from mlx_audio.tts.utils import load_model
+        # A small buffer cache roughly halves the time per line (measured
+        # in Jaeger Avatar, which runs the same model the same way).
+        mx.set_cache_limit(128 * 1024 * 1024)
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):   # it print()s on load
+            self._model = load_model(KOKORO_MLX_REPO)
+            self._pipe = self._model._get_pipeline(lang)
+        self._lang, self._vocab = lang, self._model.vocab
+        # ponytail: one render at a time. Two threads rendering at once
+        # worked when tried, but MLX does not promise it; drop the lock
+        # only if overlapping voices are ever wanted.
+        self._lock = threading.Lock()
+
+    def _pipe_for(self, voice: str):
+        # A Kokoro voice's first letter is its language. A British voice asked
+        # for on an American pipeline is read with British rules (the model
+        # keeps one pipeline per language).
+        # ponytail: American and British only, the two Jaeger Avatar offers;
+        # any other voice is read with the language the engine was opened in.
+        lang = voice[:1]
+        if lang == self._lang or lang not in ("a", "b"):
+            return self._pipe
+        return self._model._get_pipeline(lang)
+
+    def __call__(self, text: str, *, voice: str, speed: float = 1.0):
+        with self._lock:
+            for r in self._pipe_for(voice)(text, voice=voice, speed=speed):
+                if r.audio is not None:
+                    yield _MlxResult(
+                        np.array(r.audio, dtype=np.float32).reshape(-1),
+                        _marks_of(r, self._vocab))
+
+
 def clean_for_tts(text: str) -> str:
     """Strip markdown the agent might emit so TTS doesn't read it literally.
     Removes code fences, inline code backticks, bold/italic asterisks,
@@ -303,7 +463,13 @@ class KokoroTTS:
                 raise FileNotFoundError(
                     f"Incomplete bundled Kokoro assets at {self._bundled_assets}"
                 )
+        self.trim: tuple[float, float] | None = TRIM   # dead air kept around the voice; see TRIM
         self._pipeline: Any = None
+        #: What Kokoro runs on, once loaded: "mlx" (Apple GPU), "cuda" or
+        #: "cpu". Not called ``backend``: on the players that word means
+        #: the audio output.
+        self.compute = ""
+        self.sample_rate = KOKORO_SAMPLE_RATE
         self._pipeline_lock = threading.Lock()
         self.bus = bus
         # Only used on the no-bus path. With a bus, the audio_io driver
@@ -429,6 +595,42 @@ class KokoroTTS:
             if self._pipeline is None:
                 import warnings
 
+                # The Apple GPU first, on Apple Silicon only: anywhere else
+                # MLX is not installable and PyTorch (CUDA, else the CPU)
+                # is the fast path. JAEGER_KOKORO_BACKEND=torch forces
+                # the PyTorch path (to compare voices, or if MLX misbehaves);
+                # =mlx makes a failed MLX load an error instead of a fallback.
+                want = os.environ.get("JAEGER_KOKORO_BACKEND", "auto").lower()
+                if want == "mlx" or (want == "auto" and _APPLE_SILICON):
+                    set_offline = "HF_HUB_OFFLINE" not in os.environ
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            import mlx_audio  # noqa: F401 — absent off Apple Silicon
+                            ensure_hf_offline_if_cached(KOKORO_MLX_REPO, self.voice)
+                            # Same espeak path fix as below, and the same
+                            # ordering: after misaki.espeak is imported.
+                            import misaki.espeak  # noqa: F401
+                            ensure_short_espeak_paths()
+                            self._pipeline = _MlxPipeline(self.lang)
+                        self.compute = "mlx"
+                        log("kokoro", "Kokoro on the Apple GPU (MLX).")
+                        return self._pipeline
+                    except Exception as exc:  # noqa: BLE001
+                        if want == "mlx":
+                            raise
+                        if set_offline:   # do not leave PyTorch unable to download
+                            os.environ.pop("HF_HUB_OFFLINE", None)
+                            try:
+                                import huggingface_hub.constants as _c
+                                _c.HF_HUB_OFFLINE = False
+                            except Exception:  # noqa: BLE001
+                                pass
+                        log("kokoro", f"MLX not usable ({type(exc).__name__}: "
+                            f"{exc}); using PyTorch, which is 3-4x slower on "
+                            "a Mac. `pip install mlx-audio` restores the GPU "
+                            "path.", level="warn")
+
                 # Boot-never-blocks-on-network: decide offline vs. online
                 # BEFORE touching kokoro/huggingface_hub at all. See
                 # ensure_hf_offline_if_cached()'s docstring.
@@ -454,9 +656,10 @@ class KokoroTTS:
                     # misaki's own call clobbers it. See
                     # ensure_short_espeak_paths()'s docstring for the
                     # full root-cause writeup.
-                    from kokoro import KModel, KPipeline
+                    from kokoro import KPipeline
                     ensure_short_espeak_paths()
                     if self._bundled_assets is not None:
+                        from kokoro import KModel
                         model = KModel(
                             repo_id="hexgrad/Kokoro-82M",
                             config=str(self._bundled_assets / "config.json"),
@@ -471,6 +674,11 @@ class KokoroTTS:
                         self._pipeline = KPipeline(
                             lang_code=self.lang, repo_id="hexgrad/Kokoro-82M",
                         )
+                    try:
+                        self.compute = next(
+                            self._pipeline.model.parameters()).device.type
+                    except Exception:  # noqa: BLE001 — a report, never a blocker
+                        self.compute = "cpu"
         return self._pipeline
 
     def _pipeline_voice(self) -> str:
@@ -569,6 +777,7 @@ class KokoroTTS:
         return {
             "warmed": True, "seconds": total,
             "player_device": player_device,
+            "compute": self.compute,
             "load_s": round(load_s, 3),
             "prime_s": round(prime_s, 3),
         }
@@ -592,6 +801,38 @@ class KokoroTTS:
         audio, _ = self._synthesize(cleaned)
         return audio
 
+    def synth(self, text: str, *, voice: str | None = None, rate: float = 1.0):
+        """Text -> float32 mono chunks at :attr:`sample_rate`, each handed
+        over as soon as it is rendered, opening no audio device.
+
+        For a caller that plays (or streams, or lip-syncs) the audio
+        itself. Same clean-up and SSML as ``render`` and ``speak``.
+        ``voice`` and ``rate`` are for this line only. Each chunk is a
+        :class:`SpeechChunk`: its ``marks`` say when the lips close (m/b/p)
+        or tuck (f/v), for whoever moves a mouth."""
+        cleaned = clean_for_tts(text)
+        if cleaned:
+            yield from self._chunks(cleaned, voice=voice, rate=rate)
+
+    def _chunks(self, text: str, *, voice: str | None = None, rate: float = 1.0):
+        import numpy as np
+
+        pipe = self._ensure_pipeline()
+        vocab = getattr(getattr(pipe, "model", None), "vocab", None)
+        low = text.lower()
+        ssml = "<break" in low or "<breath" in low or "<speak" in low
+        for kind, value in (_ssml_segments(text) if ssml else [("text", text)]):
+            if kind == "text":
+                for r in pipe(value, voice=voice or self._pipeline_voice(), speed=rate):
+                    if r.audio is not None:
+                        yield SpeechChunk.of(*_trimmed(
+                            np.asarray(r.audio, dtype=np.float32).reshape(-1),
+                            _marks_of(r, vocab), self.trim))
+            else:
+                n = int(KOKORO_SAMPLE_RATE * value / 1000)
+                if n > 0:
+                    yield SpeechChunk.of(np.zeros(n, dtype=np.float32))
+
     def _synthesize(
         self,
         text: str,
@@ -604,31 +845,13 @@ class KokoroTTS:
         (audio, has_ssml). Caller is responsible for playback."""
         import numpy as np
 
-        pipe = self._ensure_pipeline()
+        low = text.lower()
+        has_ssml = "<break" in low or "<breath" in low or "<speak" in low
         chunks: list[Any] = []
-        has_ssml = (
-            "<break" in text.lower()
-            or "<breath" in text.lower()
-            or "<speak" in text.lower()
-        )
-        if has_ssml:
-            for kind, value in _ssml_segments(text):
-                if kind == "text":
-                    for r in pipe(value, voice=voice or self._pipeline_voice(), speed=rate):
-                        if cancel_event is not None and cancel_event.is_set():
-                            return None, has_ssml
-                        if r.audio is not None:
-                            chunks.append(np.asarray(r.audio, dtype=np.float32))
-                else:
-                    n = int(KOKORO_SAMPLE_RATE * value / 1000)
-                    if n > 0:
-                        chunks.append(np.zeros(n, dtype=np.float32))
-        else:
-            for r in pipe(text, voice=voice or self._pipeline_voice(), speed=rate):
-                if cancel_event is not None and cancel_event.is_set():
-                    return None, has_ssml
-                if r.audio is not None:
-                    chunks.append(np.asarray(r.audio, dtype=np.float32))
+        for chunk in self._chunks(text, voice=voice, rate=rate):
+            if cancel_event is not None and cancel_event.is_set():
+                return None, has_ssml
+            chunks.append(chunk)
         if not chunks:
             return None, has_ssml
         return np.concatenate(chunks), has_ssml
@@ -751,31 +974,13 @@ class KokoroTTS:
                 if rendered is not None and not cancellation.is_set():
                     _enqueue_chunk(
                         np.asarray(rendered, dtype=np.float32))
-            elif has_ssml:
-                for kind, value in _ssml_segments(cleaned):
-                    if kind == "text":
-                        for r in pipe(
-                            value, voice=voice or self._pipeline_voice(), speed=rate,
-                        ):
-                            if cancellation.is_set():
-                                break
-                            if r.audio is None:
-                                continue
-                            _enqueue_chunk(
-                                np.asarray(r.audio, dtype=np.float32))
-                    else:  # silence_ms
-                        n = int(KOKORO_SAMPLE_RATE * value / 1000)
-                        if n > 0:
-                            _enqueue_chunk(np.zeros(n, dtype=np.float32))
             else:
-                for r in pipe(
-                    cleaned, voice=voice or self._pipeline_voice(), speed=rate,
-                ):
+                # The same chunks ``synth`` and ``render`` give, played as
+                # each one is ready: what is heard is what would be written.
+                for chunk in self._chunks(cleaned, voice=voice, rate=rate):
                     if cancellation.is_set():
                         break
-                    if r.audio is None:
-                        continue
-                    _enqueue_chunk(np.asarray(r.audio, dtype=np.float32))
+                    _enqueue_chunk(np.asarray(chunk, dtype=np.float32))
         except Exception as exc:  # noqa: BLE001
             return {
                 "spoken": False,
