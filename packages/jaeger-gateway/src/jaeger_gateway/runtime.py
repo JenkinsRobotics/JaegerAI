@@ -16,10 +16,17 @@ from aiohttp import web
 from jaeger_authority import MacOsSeatbeltSandbox, PolicyEngine, UnconfinedSandbox
 from jaeger_events import EventBus
 from jaeger_loop import AgentLoop, TurnContext
+from jaeger_mcp import LiveMCPManager, load_mcp_server_configs
 from jaeger_memory import SqliteStateMemory
-from jaeger_models import OllamaModel, build_default_model
+from jaeger_models import (
+    ConversationCacheMarkStore,
+    OllamaModel,
+    bind_stream_sink,
+    build_default_model,
+)
 from jaeger_orchestration import WorkflowEngine
 from jaeger_reliability import ReliabilityEngine
+from jaeger_skills import scan_skill
 from jaeger_tools import ToolRegistry, register_builtin_tools
 
 from .auth import GatewayAuthPolicy
@@ -38,23 +45,39 @@ class _SseLoopMiddleware:
         self._hub = hub
 
     def on_model_call(self, ctx: TurnContext, call_next: Any) -> Mapping[str, Any]:
-        resp = call_next(ctx)
-        thinking = str(resp.get("thinking") or "").strip()
-        if thinking:
+        streamed_any = False
+
+        def _sink(kind: str, delta: str) -> None:
+            nonlocal streamed_any
+            streamed_any = True
+            ev_name = "thinking.delta" if kind == "thinking" else "text.delta"
             self._hub.publish(
                 self._session_id,
-                "thinking.delta",
-                {"delta": thinking, "step": ctx.step},
+                ev_name,
+                {"delta": delta, "step": ctx.step},
                 generation=self._generation,
             )
-        content = str(resp.get("content") or "")
-        if content and not resp.get("tool_calls"):
-            self._hub.publish(
-                self._session_id,
-                "text.delta",
-                {"delta": content, "step": ctx.step},
-                generation=self._generation,
-            )
+
+        with bind_stream_sink(_sink):
+            resp = call_next(ctx)
+
+        if not streamed_any and not resp.get("streamed"):
+            thinking = str(resp.get("thinking") or "").strip()
+            if thinking:
+                self._hub.publish(
+                    self._session_id,
+                    "thinking.delta",
+                    {"delta": thinking, "step": ctx.step},
+                    generation=self._generation,
+                )
+            content = str(resp.get("content") or "")
+            if content and not resp.get("tool_calls"):
+                self._hub.publish(
+                    self._session_id,
+                    "text.delta",
+                    {"delta": content, "step": ctx.step},
+                    generation=self._generation,
+                )
         return resp
 
     def on_tool_call(self, ctx: TurnContext, tool_name: str, arguments: Mapping[str, Any], call_next: Any) -> Any:
@@ -136,6 +159,15 @@ class ModularGatewayRuntime:
             extra_read_roots=safe_read_roots,
         )
 
+        self.cache_health = ConversationCacheMarkStore()
+        mcp_configs = load_mcp_server_configs(self.state_dir / "mcp_servers.json")
+        self.mcp = LiveMCPManager(mcp_configs)
+        if mcp_configs:
+            try:
+                self.mcp.register_into_registry(self.tools)
+            except Exception:  # noqa: BLE001
+                pass
+
         self.model = build_default_model(model=model_id)
         self.static_ui_dir = static_ui_dir or self._default_ui_dir()
         self.auth = auth or GatewayAuthPolicy(allow_loopback_unauthenticated=True)
@@ -207,9 +239,15 @@ class ModularGatewayRuntime:
             if not root.is_dir():
                 continue
             for md in sorted(root.rglob("SKILL.md"))[:100]:
+                verdict = "safe"
+                try:
+                    verdict = scan_skill(md.parent, source="community").verdict
+                except Exception:  # noqa: BLE001
+                    verdict = "unknown"
                 found.append({
                     "name": md.parent.name,
                     "path": str(md),
+                    "security_verdict": verdict,
                 })
         return found
 
@@ -226,10 +264,12 @@ class ModularGatewayRuntime:
             workflows_engine=self.workflows,
             memory_store=self.memory,
             skills_provider=self._discover_skills,
+            mcp_provider=self.mcp.list_servers_health,
             static_ui_dir=self.static_ui_dir if serve_ui else None,
         )
 
     def close(self) -> None:
+        self.mcp.close()
         self.coordinator.close()
 
 
