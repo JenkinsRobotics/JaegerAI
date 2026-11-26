@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 from aiohttp import web
+from jaeger_avatar import AvatarError, build_viseme_timeline
 
 from .auth import GatewayAuthPolicy
 from .coordinator import RunCoordinator
@@ -31,6 +33,9 @@ def create_gateway_app(
     workflows_engine: Any = None,
     dry_run_simulator: Any = None,
     governor: Any = None,
+    cognition_loop: Any = None,
+    world_model: Any = None,
+    avatar_store: Any = None,
     memory_store: Any = None,
     learning_store: Any = None,
     skills_provider: Callable[[], list[dict[str, Any]]] | None = None,
@@ -262,6 +267,106 @@ def create_gateway_app(
             governor.release_estop()
         return web.json_response({"ok": True, "resources": governor.snapshot()})
 
+    async def get_cognition_state(_request: web.Request) -> web.Response:
+        if cognition_loop is None:
+            return web.json_response({"ok": True, "cognition": {}, "world": {}})
+        return web.json_response({
+            "ok": True,
+            "cognition": cognition_loop.state.to_dict(),
+            "world": world_model.snapshot() if world_model is not None else {},
+            "perceptions": [p.to_dict() for p in (world_model.recent_perceptions(limit=12) if world_model else [])],
+        })
+
+    async def post_perception(request: web.Request) -> web.Response:
+        if cognition_loop is None:
+            return web.json_response({"ok": False, "error": "cognition loop unavailable"}, status=501)
+        body = await request.json()
+        ev = cognition_loop.ingest_perception(
+            modality=str(body.get("modality") or "owner"),
+            kind=str(body.get("kind") or "event"),
+            payload=dict(body.get("payload") or {}),
+            salience=float(body.get("salience", 0.6)),
+        )
+        return web.json_response({"ok": True, "perception": ev.to_dict()}, status=201)
+
+    async def get_avatar(request: web.Request) -> web.Response:
+        if avatar_store is None:
+            return web.json_response({"ok": False, "error": "avatar store unavailable"}, status=501)
+        try:
+            data = avatar_store.get_agent_avatar(request.match_info["agent_id"])
+            return web.json_response({"ok": True, **data})
+        except AvatarError as exc:
+            return web.json_response({"ok": False, **exc.payload}, status=exc.status)
+
+    async def put_avatar(request: web.Request) -> web.Response:
+        if avatar_store is None:
+            return web.json_response({"ok": False, "error": "avatar store unavailable"}, status=501)
+        body = await request.json()
+        try:
+            data = avatar_store.set_agent_avatar(
+                request.match_info["agent_id"],
+                asset_sha=body.get("asset_sha"),
+                mode=str(body.get("mode") or "2d_character"),
+                display_name=str(body.get("display_name") or request.match_info["agent_id"].capitalize()),
+                accent_color=str(body.get("accent_color") or "#5B8DEF"),
+                preset=str(body.get("preset") or "studio_cel"),
+            )
+            return web.json_response({"ok": True, **data})
+        except AvatarError as exc:
+            return web.json_response({"ok": False, **exc.payload}, status=exc.status)
+
+    async def put_avatar_live(request: web.Request) -> web.Response:
+        if avatar_store is None:
+            return web.json_response({"ok": False, "error": "avatar store unavailable"}, status=501)
+        body = await request.json()
+        try:
+            live = avatar_store.set_live_state(
+                request.match_info["agent_id"],
+                emotion=body.get("emotion"),
+                intensity=body.get("intensity"),
+                state=body.get("state"),
+                amplitude=body.get("amplitude"),
+            )
+            return web.json_response({"ok": True, "live": live})
+        except AvatarError as exc:
+            return web.json_response({"ok": False, **exc.payload}, status=exc.status)
+
+    async def get_avatar_visemes(request: web.Request) -> web.Response:
+        text = str(request.query.get("text") or "Hello, Jaeger is online.")
+        timeline = build_viseme_timeline(text)
+        return web.json_response({"ok": True, **timeline})
+
+    async def list_avatar_assets(_request: web.Request) -> web.Response:
+        if avatar_store is None:
+            return web.json_response({"ok": True, "assets": []})
+        return web.json_response({"ok": True, "assets": avatar_store.list_assets()})
+
+    async def upload_avatar_asset(request: web.Request) -> web.Response:
+        if avatar_store is None:
+            return web.json_response({"ok": False, "error": "avatar store unavailable"}, status=501)
+        body = await request.json()
+        b64 = str(body.get("data_base64") or "")
+        name = str(body.get("name") or "avatar.vrm")
+        if "," in b64 and b64.startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        try:
+            raw = base64.b64decode(b64, validate=True)
+            rec = avatar_store.add_asset(raw, name)
+            return web.json_response({"ok": True, "asset": rec}, status=201)
+        except AvatarError as exc:
+            return web.json_response({"ok": False, **exc.payload}, status=exc.status)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def serve_avatar_asset(request: web.Request) -> web.StreamResponse:
+        if avatar_store is None:
+            return web.json_response({"ok": False, "error": "avatar store unavailable"}, status=501)
+        hit = avatar_store.get_asset_file(request.match_info["sha"])
+        if hit is None:
+            return web.json_response({"ok": False, "error": "asset not found"}, status=404)
+        path, mime = hit
+        return web.FileResponse(path, headers={"Content-Type": mime})
+
     async def list_learning(request: web.Request) -> web.Response:
         if learning_store is None:
             return web.json_response({"ok": True, "entries": []})
@@ -396,6 +501,25 @@ def create_gateway_app(
     app.router.add_get("/v1/system/resources", system_resources)
     app.router.add_post("/v1/system/idle-life", set_idle_life)
     app.router.add_post("/v1/system/estop", set_estop)
+    app.router.add_get("/v1/cognition/state", get_cognition_state)
+    app.router.add_post("/v1/cognition/perceive", post_perception)
+    app.router.add_get("/v1/avatars/assets", list_avatar_assets)
+    app.router.add_post("/v1/avatars/assets", upload_avatar_asset)
+    app.router.add_get("/v1/avatars/assets/{sha}/file", serve_avatar_asset)
+    app.router.add_get("/v1/avatars/{agent_id}", get_avatar)
+    app.router.add_put("/v1/avatars/{agent_id}", put_avatar)
+    app.router.add_put("/v1/avatars/{agent_id}/live", put_avatar_live)
+    app.router.add_get("/v1/avatars/{agent_id}/visemes", get_avatar_visemes)
+
+    if cognition_loop is not None:
+        async def _start_cognition(_app: web.Application) -> None:
+            cognition_loop.start()
+
+        async def _stop_cognition(_app: web.Application) -> None:
+            await cognition_loop.stop()
+
+        app.on_startup.append(_start_cognition)
+        app.on_cleanup.append(_stop_cognition)
     app.router.add_get("/v1/memory/facts", list_facts)
     app.router.add_post("/v1/memory/facts", put_fact)
     app.router.add_delete("/v1/memory/facts/{key}", delete_fact)

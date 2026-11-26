@@ -18,9 +18,13 @@
       "@jaeger/ui-sdk": ["../../../packages/jaeger-ui-sdk/src/index.ts"],
       "@jaeger/ui-kit": ["../../../packages/jaeger-ui-kit/src/index.ts"],
       "@jaeger/ui-kit/tokens.css": ["../../../packages/jaeger-ui-kit/src/tokens.css"],
+      "@jaeger/ui-avatar": ["../../../packages/jaeger-ui-avatar/src/index.ts"],
       "@jaeger/ui-features": ["../../../packages/jaeger-ui-features/src/index.ts"],
       "react": ["node_modules/@types/react/index.d.ts"],
-      "react/*": ["node_modules/@types/react/*"]
+      "react/*": ["node_modules/@types/react/*"],
+      "three": ["node_modules/@types/three/index.d.ts"],
+      "three/*": ["node_modules/@types/three/*"],
+      "@pixiv/three-vrm": ["node_modules/@pixiv/three-vrm/types/index.d.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

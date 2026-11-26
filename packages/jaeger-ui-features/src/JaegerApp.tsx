@@ -1,7 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, GatewayEventEnvelope, SessionSummary } from "@jaeger/ui-protocol";
 import { HttpSseTransport, SessionStore } from "@jaeger/ui-sdk";
-import { ApprovalCard, ScrollFollowMachine, ThinkingDisclosure, ToolCallCard } from "@jaeger/ui-kit";
+import {
+  ApprovalCard,
+  CommandPalette,
+  ContextXrayBar,
+  ScrollFollowMachine,
+  StreamingMarkdown,
+  StudioTimeline,
+  ThinkingDisclosure,
+  ToolCallCard,
+  type CommandItem,
+  type StudioClip,
+} from "@jaeger/ui-kit";
+import { AvatarStage, type VisemeFrame } from "@jaeger/ui-avatar";
 import { JAEGER_DESTINATIONS, type DestinationId } from "./destinations";
 
 interface GatewayRuntimeSnapshot {
@@ -13,12 +25,58 @@ interface GatewayRuntimeSnapshot {
   state_dir?: string;
 }
 
+interface ResourceSnapshot {
+  host_total_gb?: number;
+  host_available_gb?: number;
+  memory_cap_gb?: number;
+  active_owner_runs?: number;
+  idle_life_enabled?: boolean;
+  idle_life_allowed_now?: boolean;
+  idle_life_status?: string;
+  estop_active?: boolean;
+  preemption_count?: number;
+  active_heavy_model?: { model_id: string; tier: string; estimated_gb: number } | null;
+}
+
+interface CognitionSnapshot {
+  mode?: string;
+  emotion?: string;
+  focus?: string;
+  tick_count?: number;
+  uptime_s?: number;
+  last_action?: string;
+}
+
+interface AvatarRecord {
+  avatar?: {
+    mode?: "3d_vrm" | "2d_character" | "rive";
+    display_name?: string;
+    asset_sha?: string | null;
+  };
+  asset?: { uri?: string; format?: string; name?: string } | null;
+  live?: { emotion?: string; intensity?: number; state?: string; amplitude?: number };
+}
+
 interface ToolRow {
   name: string;
   description: string;
   tier: string;
   read_only: boolean;
   source: string;
+}
+
+interface SkillRow {
+  name: string;
+  path: string;
+  security_verdict?: string;
+}
+
+interface McpServerRow {
+  name: string;
+  transport: string;
+  connected: boolean;
+  tools_count: number;
+  error?: string;
 }
 
 interface WorkflowRow {
@@ -30,12 +88,49 @@ interface WorkflowRow {
   steps?: Array<{ id: string; name: string; record?: { status: string } }>;
 }
 
+interface LearningRow {
+  entry_id: string;
+  scope: string;
+  subject: string;
+  content: string;
+  importance: number;
+  recall_count: number;
+}
+
+interface GoalRow {
+  goal_id: string;
+  domain: string;
+  title: string;
+  status: string;
+  priority: number;
+  checkpoint?: Record<string, unknown>;
+}
+
 interface FactRow {
   subject: string;
   key: string;
   value: string;
-  category?: string | null;
 }
+
+const BUSINESS_TEAM_ROLES = [
+  { id: "producer", title: "Channel Producer", focus: "Owns multi-day YouTube & business schedules, delegates tasks, enforces approval gates." },
+  { id: "researcher", title: "Research & Trends Analyst", focus: "Runs phased on-device YouTube playlist research, OCR, audience & competitor briefs." },
+  { id: "writer", title: "Script & Copywriter", focus: "Drafts retention-first hooks, scripts, descriptions, newsletters, and sponsor outreach." },
+  { id: "designer", title: "Visual & Thumbnail Designer", focus: "Creates storyboard frames, thumbnail concepts, and Aether-styled studio graphics." },
+  { id: "engineer", title: "Software & Droid Engineer", focus: "Writes verified code edits via Aider fuzzy tools, tests, and JP01 / Minecraft embodiment." },
+  { id: "ops", title: "Business Ops & Channels", focus: "Manages Mail, Calendar, iMessage/Telegram relays, MCP integrations, and analytics." },
+];
+
+const DEFAULT_STUDIO_CLIPS: StudioClip[] = [
+  { id: "c1", track: "video", label: "Hook · JP01 Droid Live Demo", startSec: 0, durationSec: 22, status: "ready" },
+  { id: "c2", track: "video", label: "Build Breakdown · 32GB Local Stack", startSec: 24, durationSec: 78, status: "ready" },
+  { id: "c3", track: "video", label: "Minecraft Idle Persistence Demo", startSec: 105, durationSec: 55, status: "needs_review" },
+  { id: "c4", track: "broll", label: "Thumbnail A/B + Architecture Diagram", startSec: 14, durationSec: 40, status: "ready" },
+  { id: "c5", track: "voice", label: "Kokoro MLX Narration Track", startSec: 0, durationSec: 162, status: "ready" },
+  { id: "c6", track: "captions", label: "Whisper Auto-Synced Captions", startSec: 0, durationSec: 162, status: "ready" },
+];
+
+const EMOTION_OPTIONS = ["warm", "focused", "happy", "curious", "calm", "concerned", "surprised"];
 
 function NavIcon({ id }: { id: DestinationId }) {
   const paths: Record<DestinationId, string> = {
@@ -63,19 +158,41 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
       ? "dark"
       : "light",
   );
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [watchOpen, setWatchOpen] = useState(true);
+  const [watchTab, setWatchTab] = useState<"avatar" | "mind" | "artifacts">("avatar");
+
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [runStatus, setRunStatus] = useState<string>("idle");
+
   const [health, setHealth] = useState<GatewayRuntimeSnapshot>({});
+  const [resources, setResources] = useState<ResourceSnapshot>({});
+  const [cognition, setCognition] = useState<CognitionSnapshot>({});
+  const [avatarRec, setAvatarRec] = useState<AvatarRecord>({});
+  const [visemes, setVisemes] = useState<VisemeFrame[]>([]);
+
   const [tools, setTools] = useState<ToolRow[]>([]);
+  const [skills, setSkills] = useState<SkillRow[]>([]);
+  const [mcpServers, setMcpServers] = useState<McpServerRow[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
+  const [dryRunResult, setDryRunResult] = useState<string>("");
+  const [dryRunBusy, setDryRunBusy] = useState(false);
+
+  const [learning, setLearning] = useState<LearningRow[]>([]);
+  const [learningQuery, setLearningQuery] = useState("");
+  const [goals, setGoals] = useState<GoalRow[]>([]);
+  const [newGoalTitle, setNewGoalTitle] = useState("");
+  const [newGoalDomain, setNewGoalDomain] = useState<"youtube" | "business" | "minecraft">("youtube");
   const [facts, setFacts] = useState<FactRow[]>([]);
-  const [models, setModels] = useState<Array<{ id: string }>>([]);
-  const [activeModel, setActiveModel] = useState("");
   const [factKey, setFactKey] = useState("");
   const [factVal, setFactVal] = useState("");
+
+  const [models, setModels] = useState<Array<{ id: string }>>([]);
+  const [activeModel, setActiveModel] = useState("");
+  const [avatarUploadMsg, setAvatarUploadMsg] = useState("");
 
   const transportRef = useRef<HttpSseTransport | null>(null);
   const storeRef = useRef<SessionStore | null>(null);
@@ -87,13 +204,47 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (!transportRef.current) {
     transportRef.current = new HttpSseTransport({ baseUrl });
   }
 
+  const fetchJson = async (url: string): Promise<Record<string, any>> => {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) return {};
+      return (await r.json()) as Record<string, any>;
+    } catch {
+      return {};
+    }
+  };
+
+  const refreshSystem = async () => {
+    const [rHealth, rRes, rCog, rAva] = await Promise.all([
+      fetchJson(`${baseUrl}/health`),
+      fetchJson(`${baseUrl}/v1/system/resources`),
+      fetchJson(`${baseUrl}/v1/cognition/state`),
+      fetchJson(`${baseUrl}/v1/avatars/jaeger`),
+    ]);
+    setHealth(rHealth);
+    if (rRes.resources) setResources(rRes.resources);
+    if (rCog.cognition) setCognition(rCog.cognition);
+    if (rAva.avatar) setAvatarRec(rAva as AvatarRecord);
+  };
+
   const refreshSessions = async () => {
-    const res = await fetch(`${baseUrl}/v1/sessions`);
-    if (!res.ok) return;
+    const res = await fetch(`${baseUrl}/v1/sessions`).catch(() => null);
+    if (!res?.ok) return;
     const data = (await res.json()) as { sessions?: SessionSummary[] };
     const rows = data.sessions ?? [];
     setSessions(rows);
@@ -117,93 +268,72 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
 
   useEffect(() => {
     void refreshSessions();
-    void fetch(`${baseUrl}/health`)
-      .then((r) => r.json())
-      .then((d: GatewayRuntimeSnapshot) => setHealth(d))
-      .catch(() => {});
-  }, [baseUrl]);
-
-  useEffect(() => {
-    if (dest === "tools") {
-      void fetch(`${baseUrl}/v1/tools`)
-        .then((r) => r.json())
-        .then((d: { tools?: ToolRow[] }) => setTools(d.tools ?? []))
-        .catch(() => {});
-    } else if (dest === "tasks") {
-      void fetch(`${baseUrl}/v1/workflows`)
-        .then((r) => r.json())
-        .then((d: { workflows?: WorkflowRow[] }) => setWorkflows(d.workflows ?? []))
-        .catch(() => {});
-    } else if (dest === "memory") {
-      void fetch(`${baseUrl}/v1/memory/facts`)
-        .then((r) => r.json())
-        .then((d: { facts?: FactRow[] }) => setFacts(d.facts ?? []))
-        .catch(() => {});
-    } else if (dest === "settings") {
-      void fetch(`${baseUrl}/v1/models`)
-        .then((r) => r.json())
-        .then((d: { active?: string; models?: Array<{ id: string }> }) => {
-          setActiveModel(d.active ?? "");
-          setModels(d.models ?? []);
-        })
-        .catch(() => {});
-      void fetch(`${baseUrl}/health`)
-        .then((r) => r.json())
-        .then((d: GatewayRuntimeSnapshot) => setHealth(d))
-        .catch(() => {});
-    }
-  }, [dest, baseUrl]);
+    void refreshSystem();
+    const id = window.setInterval(() => void refreshSystem(), 12000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!activeSessionId || !transportRef.current) return;
-    const abort = new AbortController();
+    storeRef.current?.dispose();
     const store = new SessionStore(activeSessionId, transportRef.current);
     storeRef.current = store;
-
-    const unsub = store.subscribe((snap) => {
+    const unsub = store.subscribe(() => {
+      const snap = store.getSnapshot();
       setMessages(snap.messages);
       setRunStatus(snap.status);
-      scrollMachineRef.current.transition({ type: "CONTENT_APPENDED" });
-      setShowJump(scrollMachineRef.current.showJumpButton);
       if (scrollMachineRef.current.shouldAutoScroll) {
         scrollEndRef.current?.scrollIntoView({ behavior: "smooth" });
       }
     });
-
-    void fetch(`${baseUrl}/v1/sessions/${encodeURIComponent(activeSessionId)}/messages`)
-      .then((r) => r.json())
-      .then((d: { messages?: Array<{ id: number; role: "user" | "assistant"; content: string; created_at: number }> }) => {
-        const hydrated: ChatMessage[] = (d.messages ?? []).map((m) => ({
-          id: String(m.id),
+    const ac = new AbortController();
+    void fetch(`${baseUrl}/v1/sessions/${encodeURIComponent(activeSessionId)}/messages`, { signal: ac.signal })
+      .then((r) => (r.ok ? r.json() : { messages: [] }))
+      .then((d: { messages?: Array<{ id?: number; role: string; content: string; created_at?: number }> }) => {
+        const hist: ChatMessage[] = (d.messages ?? []).map((m, idx) => ({
+          id: `hist_${m.id ?? idx}`,
           session_id: activeSessionId,
-          role: m.role,
+          role: m.role === "user" ? "user" : "assistant",
           content: m.content,
           parts: [{ type: "text", text: m.content }],
-          created_at: m.created_at,
+          created_at: m.created_at ?? Date.now(),
         }));
-        setMessages(hydrated);
+        if (hist.length > 0 && store.getSnapshot().messages.length === 0) {
+          setMessages(hist);
+        }
       })
       .catch(() => {});
-
     void transportRef.current
-      .subscribe(
-        activeSessionId,
-        0,
-        (env: GatewayEventEnvelope) => {
-          store.applyEvent(env);
-        },
-        abort.signal,
-      )
+      .subscribe(activeSessionId, 0, (ev) => store.applyEvent(ev), ac.signal)
       .catch(() => {});
-
     return () => {
-      abort.abort();
+      ac.abort();
       unsub();
       store.dispose();
     };
   }, [activeSessionId, baseUrl]);
 
-  const handleSend = async () => {
+  useEffect(() => {
+    if (dest === "tools") {
+      void fetchJson(`${baseUrl}/v1/tools`).then((d) => setTools(d.tools ?? []));
+      void fetchJson(`${baseUrl}/v1/skills`).then((d) => setSkills(d.skills ?? []));
+      void fetchJson(`${baseUrl}/v1/mcp/servers`).then((d) => setMcpServers(d.servers ?? []));
+    } else if (dest === "tasks") {
+      void fetchJson(`${baseUrl}/v1/workflows`).then((d) => setWorkflows(d.workflows ?? []));
+    } else if (dest === "memory") {
+      void fetchJson(`${baseUrl}/v1/memory/facts`).then((d) => setFacts(d.facts ?? []));
+      void fetchJson(`${baseUrl}/v1/memory/learning`).then((d) => setLearning(d.entries ?? []));
+      void fetchJson(`${baseUrl}/v1/memory/goals`).then((d) => setGoals(d.goals ?? []));
+    } else if (dest === "settings") {
+      void fetchJson(`${baseUrl}/v1/models`).then((d) => {
+        setModels(d.models ?? []);
+        setActiveModel(d.active ?? "");
+      });
+      void refreshSystem();
+    }
+  }, [dest, baseUrl]);
+
+  const sendPrompt = async () => {
     const text = prompt.trim();
     if (!text) return;
     let sid = activeSessionId;
@@ -214,85 +344,207 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         body: JSON.stringify({ title: text.slice(0, 48) }),
       });
       if (!res.ok) return;
-      const created = (await res.json()) as { session: SessionSummary };
-      sid = created.session.session_id;
-      setSessions((prev) => [created.session, ...prev]);
+      const data = (await res.json()) as { session: SessionSummary };
+      sid = data.session.session_id;
+      setSessions((prev) => [data.session, ...prev]);
       setActiveSessionId(sid);
     }
     setPrompt("");
-    if (storeRef.current && sid === activeSessionId) {
+    if (storeRef.current) {
       await storeRef.current.sendPrompt(text);
-    } else if (transportRef.current) {
-      await transportRef.current.submitRun(sid, text, `req_${Date.now()}`);
+    } else {
+      await fetch(`${baseUrl}/v1/sessions/${encodeURIComponent(sid)}/runs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text }),
+      });
+    }
+    void refreshSystem();
+  };
+
+  const handleApproval = async (approvalId: string, decision: "approve" | "deny") => {
+    await fetch(`${baseUrl}/v1/approvals/${encodeURIComponent(approvalId)}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+    const ev: GatewayEventEnvelope = {
+      seq: Date.now(),
+      event: "approval.resolved",
+      payload: { approval_id: approvalId, decision },
+    };
+    void ev;
+  };
+
+  const runSafeDryRun = async () => {
+    setDryRunBusy(true);
+    try {
+      const res = await fetch(`${baseUrl}/v1/workflows/dry-run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "YouTube Episode Launch Pipeline",
+          steps: [
+            { id: "s1", name: "Playlist Research", action: "youtube_research", read_only: true },
+            { id: "s2", name: "Script Draft", action: "write_script", read_only: true },
+            { id: "s3", name: "Kokoro MLX Voiceover", action: "tts_render", read_only: true },
+            { id: "s4", name: "Publish to YouTube", action: "youtube_publish", side_effect: true },
+          ],
+        }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setDryRunResult(
+          `Dry-Run OK: ${d.dry_run.total_steps} steps simulated, ${d.dry_run.total_side_effect_steps} side-effect step(s) safely intercepted.`,
+        );
+      }
+    } finally {
+      setDryRunBusy(false);
     }
   };
 
-  const handleSaveFact = async () => {
-    if (!factKey.trim() || !factVal.trim()) return;
-    const res = await fetch(`${baseUrl}/v1/memory/facts`, {
+  const toggleIdleLife = async () => {
+    const next = !resources.idle_life_enabled;
+    const res = await fetch(`${baseUrl}/v1/system/idle-life`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: factKey.trim(), value: factVal.trim() }),
+      body: JSON.stringify({ enabled: next }),
     });
     if (res.ok) {
-      setFactKey("");
-      setFactVal("");
-      const list = (await (await fetch(`${baseUrl}/v1/memory/facts`)).json()) as { facts?: FactRow[] };
-      setFacts(list.facts ?? []);
+      const d = await res.json();
+      setResources(d.resources ?? {});
     }
   };
 
-  const handleSelectModel = async (modelId: string) => {
-    const res = await fetch(`${baseUrl}/v1/models/select`, {
+  const toggleEstop = async () => {
+    const next = !resources.estop_active;
+    const res = await fetch(`${baseUrl}/v1/system/estop`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: modelId }),
+      body: JSON.stringify({ active: next, reason: "ui_operator_button" }),
     });
     if (res.ok) {
-      const data = (await res.json()) as { active?: string };
-      setActiveModel(data.active ?? modelId);
+      const d = await res.json();
+      setResources(d.resources ?? {});
     }
   };
+
+  const triggerAvatarVisemeTest = async () => {
+    const res = await fetch(
+      `${baseUrl}/v1/avatars/jaeger/visemes?text=${encodeURIComponent("Hello! Jaeger is online and watching your studio.")}`,
+    );
+    if (res.ok) {
+      const d = await res.json();
+      setVisemes(d.frames ?? []);
+    }
+  };
+
+  const setAvatarEmotion = async (emotion: string) => {
+    const res = await fetch(`${baseUrl}/v1/avatars/jaeger/live`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ emotion, intensity: 0.8 }),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      setAvatarRec((prev) => ({ ...prev, live: d.live }));
+    }
+  };
+
+  const handleAvatarUpload = async (file: File) => {
+    setAvatarUploadMsg("Uploading...");
+    const b64 = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || ""));
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(file);
+    });
+    const up = await fetch(`${baseUrl}/v1/avatars/assets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: file.name, data_base64: b64 }),
+    });
+    if (!up.ok) {
+      const err = await up.json().catch(() => ({ error: "Upload failed" }));
+      setAvatarUploadMsg(`Error: ${err.error}`);
+      return;
+    }
+    const { asset } = await up.json();
+    const mode = asset.format === "vrm" || asset.format === "glb" ? "3d_vrm" : "2d_character";
+    const bind = await fetch(`${baseUrl}/v1/avatars/jaeger`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ asset_sha: asset.sha256, mode, display_name: "Jaeger" }),
+    });
+    if (bind.ok) {
+      setAvatarRec(await bind.json());
+      setAvatarUploadMsg(`Loaded ${asset.name} (${asset.format.toUpperCase()})`);
+    }
+  };
+
+  const estTokens = useMemo(
+    () => messages.reduce((sum, m) => sum + Math.ceil((m.content?.length ?? 0) / 4), 0),
+    [messages],
+  );
+
+  const paletteCommands: CommandItem[] = useMemo(
+    () => [
+      ...JAEGER_DESTINATIONS.map((d) => ({
+        id: `nav:${d.id}`,
+        label: `Open ${d.label}`,
+        group: "Navigate",
+        onSelect: () => setDest(d.id),
+      })),
+      { id: "act:new-chat", label: "New Conversation", group: "Action", onSelect: () => void createNewSession() },
+      { id: "act:watch", label: watchOpen ? "Hide Live Watch & VR Avatar" : "Show Live Watch & VR Avatar", group: "View", onSelect: () => setWatchOpen((v) => !v) },
+      { id: "act:theme", label: `Switch to ${theme === "dark" ? "Light" : "Dark"} Theme`, group: "View", onSelect: () => setTheme((t) => (t === "dark" ? "light" : "dark")) },
+      { id: "act:idle", label: resources.idle_life_enabled ? "Pause Idle Minecraft Life" : "Enable Idle Minecraft Life", group: "Body", onSelect: () => void toggleIdleLife() },
+      { id: "act:estop", label: resources.estop_active ? "Release Emergency Stop" : "Trigger Emergency Stop (E-Stop)", group: "Safety", onSelect: () => void toggleEstop() },
+    ],
+    [watchOpen, theme, resources.idle_life_enabled, resources.estop_active],
+  );
+
+  const avatarMode = avatarRec.avatar?.mode ?? "2d_character";
+  const avatarModelUrl = avatarRec.asset?.format === "vrm" || avatarRec.asset?.format === "glb" ? `${baseUrl}${avatarRec.asset.uri}` : null;
+  const avatarImageUrl = avatarRec.asset?.format === "image" ? `${baseUrl}${avatarRec.asset.uri}` : null;
+  const liveEmotion = avatarRec.live?.emotion || cognition.emotion || "warm";
+  const liveCogMode = resources.estop_active ? "estop" : cognition.mode || "observing";
 
   return (
     <div className="jg-app" data-testid="jaeger-modular-app">
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={paletteCommands} />
+
       <aside className="jg-sidebar">
         <div className="jg-brand">
           <span>Jaeger Modular</span>
-          <button
-            type="button"
-            className="jg-btn"
-            style={{ padding: "3px 7px", fontSize: "11px" }}
-            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-          >
-            {theme === "dark" ? "Light" : "Dark"}
-          </button>
+          <span className="jg-pill">{health.all_green === false ? "Degraded" : "Live"}</span>
         </div>
 
+        <button type="button" className="jg-btn" onClick={() => setPaletteOpen(true)}>
+          Quick Command <kbd className="jg-kbd">⌘K</kbd>
+        </button>
+
         <nav className="jg-nav" aria-label="Primary navigation">
-          {JAEGER_DESTINATIONS.map((d) => (
+          {JAEGER_DESTINATIONS.map((item) => (
             <button
-              key={d.id}
+              key={item.id}
               type="button"
               className="jg-nav-btn"
-              data-active={dest === d.id}
-              onClick={() => setDest(d.id)}
+              data-active={dest === item.id}
+              onClick={() => setDest(item.id)}
             >
-              <NavIcon id={d.id} />
-              <span>{d.label}</span>
+              <NavIcon id={item.id} />
+              <span>{item.label}</span>
             </button>
           ))}
         </nav>
 
-        <div style={{ borderTop: "1px solid var(--jg-border-subtle)", paddingTop: "10px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 6px 6px" }}>
-            <span style={{ fontSize: "11px", color: "var(--jg-text-muted)", fontWeight: 600 }}>SESSIONS</span>
-            <button type="button" className="jg-btn" style={{ padding: "2px 7px", fontSize: "11px" }} onClick={() => void createNewSession()}>
-              + New
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-            {sessions.map((s) => (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6 }}>
+          <button type="button" className="jg-btn jg-btn-primary" onClick={() => void createNewSession()}>
+            + New Chat
+          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {sessions.slice(0, 8).map((s) => (
               <button
                 key={s.session_id}
                 type="button"
@@ -303,7 +555,9 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                   setDest("chat");
                 }}
               >
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {s.title || s.session_id}
+                </span>
               </button>
             ))}
           </div>
@@ -312,113 +566,242 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
 
       <main className="jg-main">
         <header className="jg-header">
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <strong>{JAEGER_DESTINATIONS.find((d) => d.id === dest)?.label}</strong>
-            <span className="jg-pill">{health.model || "modular-runtime"}</span>
-            {dest === "chat" && <span className="jg-pill">{runStatus}</span>}
+            <span className="jg-pill">{health.model || activeModel || "modular"}</span>
+            {resources.host_available_gb !== undefined && (
+              <span className="jg-pill">
+                {resources.host_available_gb.toFixed(1)}/{resources.host_total_gb?.toFixed(0)} GB free
+              </span>
+            )}
           </div>
-          <span className="jg-pill" style={{ color: health.all_green ? "var(--jg-status-success)" : "var(--jg-text-secondary)" }}>
-            {health.all_green ? "Gateway Online" : "Connecting…"}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button type="button" className="jg-btn" onClick={() => setWatchOpen((v) => !v)}>
+              {watchOpen ? "Hide Avatar" : "Show Avatar"}
+            </button>
+            <button
+              type="button"
+              className={`jg-btn ${resources.estop_active ? "jg-btn-danger" : ""}`}
+              onClick={() => void toggleEstop()}
+            >
+              {resources.estop_active ? "E-STOP ON" : "E-Stop"}
+            </button>
+            <button type="button" className="jg-btn" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}>
+              {theme === "dark" ? "Light" : "Dark"}
+            </button>
+          </div>
         </header>
 
         {dest === "chat" && (
-          <>
-            <div
-              className="jg-content"
-              onScroll={(e) => {
-                const el = e.currentTarget;
-                const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-                scrollMachineRef.current.transition({ type: nearBottom ? "REACHED_BOTTOM" : "USER_SCROLL_UP" });
-                setShowJump(scrollMachineRef.current.showJumpButton);
-              }}
-            >
-              {messages.length === 0 && (
-                <div className="jg-card" style={{ maxWidth: "680px", margin: "40px auto", textAlign: "center" }}>
-                  <h2 style={{ margin: "0 0 8px", fontSize: "18px" }}>Jaeger Standalone Modular Framework</h2>
-                  <p style={{ margin: 0, color: "var(--jg-text-secondary)", fontSize: "13.5px" }}>
-                    100% modular backend (15 standalone packages) + modular frontend (@jaeger/ui-*).
-                    Ask a question, edit workspace files, run sandboxed commands, or manage workflows.
-                  </p>
-                </div>
-              )}
-              {messages.map((m) => (
-                <div key={m.id} className="jg-msg" data-role={m.role}>
-                  <div style={{ fontSize: "11px", color: "var(--jg-text-muted)", marginBottom: "4px", fontWeight: 600 }}>
-                    {m.role === "user" ? "You" : "Jaeger"}
+          <div className={`jg-workspace-split ${watchOpen ? "" : "is-drawer-closed"}`}>
+            <div className="jg-chat-column">
+              <div
+                className="jg-content"
+                onScroll={(e) => {
+                  const el = e.currentTarget;
+                  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+                  scrollMachineRef.current.transition(nearBottom ? { type: "REACHED_BOTTOM" } : { type: "USER_SCROLL_UP" });
+                  setShowJump(!nearBottom);
+                }}
+              >
+                {messages.length === 0 ? (
+                  <div className="jg-card" style={{ maxWidth: 680, margin: "28px auto" }}>
+                    <h3 style={{ marginTop: 0 }}>Jaeger Command Center</h3>
+                    <p style={{ color: "var(--jg-text-secondary)", marginBottom: 0 }}>
+                      Conversation is an interface to your persistent AI mind. Ask Jaeger to run YouTube research, edit code,
+                      manage your business team, or check on its autonomous world state — all under your 32 GB resource budget.
+                    </p>
                   </div>
-                  {m.parts.map((part, idx) => {
-                    if (part.type === "thinking") return <ThinkingDisclosure key={idx} part={part} />;
-                    if (part.type === "tool") return <ToolCallCard key={part.callId} part={part} />;
-                    if (part.type === "approval") {
-                      return (
-                        <ApprovalCard
-                          key={part.approvalId}
-                          approval={part}
-                          onDecision={(aid, dec) => void transportRef.current?.resolveApproval(aid, dec)}
-                        />
-                      );
-                    }
-                    return (
-                      <div key={idx} style={{ whiteSpace: "pre-wrap" }}>
-                        {part.text}
+                ) : (
+                  messages.map((m) => (
+                    <article key={m.id} className="jg-msg" data-role={m.role}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--jg-text-muted)", marginBottom: 6 }}>
+                        {m.role === "user" ? "You" : "Jaeger"}
                       </div>
-                    );
-                  })}
-                </div>
-              ))}
-              <div ref={scrollEndRef} />
+                      {m.parts.map((part, idx) => {
+                        if (part.type === "thinking") return <ThinkingDisclosure key={idx} part={part} />;
+                        if (part.type === "tool") return <ToolCallCard key={idx} part={part} />;
+                        if (part.type === "approval") {
+                          return <ApprovalCard key={idx} approval={part} onDecision={handleApproval} />;
+                        }
+                        return <StreamingMarkdown key={idx} text={part.text} streaming={runStatus === "running"} />;
+                      })}
+                    </article>
+                  ))
+                )}
+                <div ref={scrollEndRef} />
+                {showJump && (
+                  <button
+                    type="button"
+                    className="jg-btn jg-btn-primary"
+                    style={{ position: "sticky", bottom: 12, float: "right" }}
+                    onClick={() => {
+                      scrollMachineRef.current.transition({ type: "JUMP_REQUESTED" });
+                      scrollEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                      setShowJump(false);
+                    }}
+                  >
+                    Jump to Latest
+                  </button>
+                )}
+              </div>
+
+              <ContextXrayBar
+                usedTokens={estTokens}
+                maxTokens={32768}
+                hostTotalGb={resources.host_total_gb}
+                hostAvailableGb={resources.host_available_gb}
+                activeModel={health.model || activeModel}
+              />
+
+              <form
+                className="jg-composer"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void sendPrompt();
+                }}
+              >
+                <input
+                  className="jg-input"
+                  value={prompt}
+                  placeholder="Command Jaeger or your business team... (Cmd+K for quick actions)"
+                  onChange={(e) => setPrompt(e.target.value)}
+                />
+                <button type="submit" className="jg-btn jg-btn-primary" disabled={!prompt.trim() || runStatus === "running"}>
+                  {runStatus === "running" ? "Running..." : "Send"}
+                </button>
+              </form>
             </div>
 
-            {showJump && (
-              <div style={{ textAlign: "center", paddingBottom: "6px" }}>
-                <button
-                  type="button"
-                  className="jg-btn"
-                  onClick={() => {
-                    scrollMachineRef.current.transition({ type: "JUMP_REQUESTED" });
-                    scrollEndRef.current?.scrollIntoView({ behavior: "smooth" });
-                    setShowJump(false);
-                  }}
-                >
-                  Jump to latest
-                </button>
-              </div>
-            )}
+            {watchOpen && (
+              <aside className="jg-watch-drawer" aria-label="Live Watch & VR Avatar">
+                <div className="jg-tabs-inline">
+                  <button type="button" data-active={watchTab === "avatar"} onClick={() => setWatchTab("avatar")}>
+                    VR Avatar
+                  </button>
+                  <button type="button" data-active={watchTab === "mind"} onClick={() => setWatchTab("mind")}>
+                    Live Mind
+                  </button>
+                  <button type="button" data-active={watchTab === "artifacts"} onClick={() => setWatchTab("artifacts")}>
+                    Watch
+                  </button>
+                </div>
 
-            <form
-              className="jg-composer"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void handleSend();
-              }}
-            >
-              <input
-                className="jg-input"
-                placeholder="Ask Jaeger to inspect code, run checks, organize mail, or create a workflow…"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-              />
-              <button type="submit" className="jg-btn jg-btn-primary" disabled={!prompt.trim()}>
-                Send
-              </button>
-            </form>
-          </>
+                {watchTab === "avatar" && (
+                  <>
+                    <AvatarStage
+                      name={avatarRec.avatar?.display_name || "Jaeger"}
+                      mode={avatarMode}
+                      modelUrl={avatarModelUrl}
+                      imageUrl={avatarImageUrl}
+                      emotion={liveEmotion}
+                      cognitiveMode={liveCogMode}
+                      focusText={cognition.focus || "Aware & standing by"}
+                      amplitude={avatarRec.live?.amplitude ?? 0}
+                      visemes={visemes}
+                    />
+                    <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <strong style={{ fontSize: 12.5 }}>Expression & Lip-Sync</strong>
+                        <button type="button" className="jg-btn-ghost" onClick={() => void triggerAvatarVisemeTest()}>
+                          Test Lip-Sync
+                        </button>
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                        {EMOTION_OPTIONS.map((em) => (
+                          <button
+                            key={em}
+                            type="button"
+                            className="jg-btn-ghost"
+                            onClick={() => void setAvatarEmotion(em)}
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {watchTab === "mind" && (
+                  <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <strong style={{ fontSize: 13 }}>24/7 Cognitive Life Loop</strong>
+                    <div className="jg-muted">Mode: <strong>{liveCogMode}</strong></div>
+                    <div className="jg-muted">Focus: {cognition.focus || "Observing"}</div>
+                    <div className="jg-muted">Autonomous Ticks: {cognition.tick_count ?? 0}</div>
+                    <div className="jg-muted">Idle Minecraft: {resources.idle_life_status || "ready"}</div>
+                    <div className="jg-muted">Preemptions (Owner-First): {resources.preemption_count ?? 0}</div>
+                  </div>
+                )}
+
+                {watchTab === "artifacts" && (
+                  <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <strong style={{ fontSize: 13 }}>Embodiment & Session Watch</strong>
+                    <p className="jg-muted" style={{ margin: 0 }}>
+                      Switch here to monitor active YouTube renders, live browser pages, or headless Minecraft checkpoints.
+                    </p>
+                    <button type="button" className="jg-btn" onClick={() => setDest("tasks")}>
+                      Open YouTube Studio Timeline
+                    </button>
+                    <button type="button" className="jg-btn" onClick={() => setDest("memory")}>
+                      Inspect Multi-Day Goals
+                    </button>
+                  </div>
+                )}
+              </aside>
+            )}
+          </div>
         )}
 
         {dest === "tasks" && (
-          <div className="jg-content" style={{ display: "grid", gap: "12px", maxWidth: "860px" }}>
+          <div className="jg-content" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <StudioTimeline
+              projectTitle="YouTube Channel Studio · Episode 01"
+              clips={DEFAULT_STUDIO_CLIPS}
+              onDryRun={() => void runSafeDryRun()}
+              dryRunBusy={dryRunBusy}
+            />
+            {dryRunResult && (
+              <div className="jg-card">
+                <strong>Safe-Mode Dry-Run Result:</strong> <span className="jg-muted">{dryRunResult}</span>
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h3 style={{ margin: 0 }}>Durable Business & Engineering Workflows</h3>
+              <button
+                type="button"
+                className="jg-btn jg-btn-primary"
+                onClick={async () => {
+                  await fetch(`${baseUrl}/v1/workflows`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      name: "YouTube Channel Production Run",
+                      steps: [
+                        { id: "research", name: "Analyze Playlist & Trends" },
+                        { id: "script", name: "Draft Video Script", depends_on: ["research"] },
+                        { id: "publish", name: "Human Approval & Publish", depends_on: ["script"], requires_approval: true },
+                      ],
+                    }),
+                  });
+                  const r = await fetch(`${baseUrl}/v1/workflows`);
+                  if (r.ok) setWorkflows((await r.json()).workflows ?? []);
+                }}
+              >
+                + Launch YouTube Pipeline
+              </button>
+            </div>
             {workflows.length === 0 ? (
-              <div className="jg-card">No active durable workflows yet. Ask Jaeger in Chat to create one.</div>
+              <div className="jg-card">No active workflow runs yet. Launch a YouTube pipeline or run Safe Dry-Run above.</div>
             ) : (
-              workflows.map((wf) => (
-                <div key={wf.run_id} className="jg-card">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <strong>{wf.name}</strong>
-                    <span className="jg-pill">{wf.status}</span>
+              workflows.map((w) => (
+                <div key={w.run_id} className="jg-card">
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <strong>{w.name}</strong>
+                    <span className="jg-pill">{w.status}</span>
                   </div>
-                  <div style={{ fontSize: "12px", color: "var(--jg-text-secondary)", marginTop: "6px" }}>
-                    Run {wf.run_id} · {wf.total_steps} step(s)
+                  <div className="jg-muted" style={{ marginTop: 6 }}>
+                    Run ID: {w.run_id} · Steps: {w.total_steps} · Ready: {w.next_ready.join(", ") || "none"}
                   </div>
                 </div>
               ))
@@ -427,35 +810,173 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         )}
 
         {dest === "tools" && (
-          <div className="jg-content" style={{ display: "grid", gap: "10px", maxWidth: "920px" }}>
-            {tools.map((t) => (
-              <div key={t.name} className="jg-card" style={{ display: "flex", justifyContent: "space-between", gap: "12px" }}>
-                <div>
-                  <strong>{t.name}</strong>
-                  <div style={{ fontSize: "12.5px", color: "var(--jg-text-secondary)", marginTop: "3px" }}>
-                    {t.description}
+          <div className="jg-content" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <h3 style={{ marginTop: 0 }}>Autonomous Business Team Roles</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10 }}>
+                {BUSINESS_TEAM_ROLES.map((role) => (
+                  <div key={role.id} className="jg-card">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <strong>{role.title}</strong>
+                      <span className="jg-pill">Ready</span>
+                    </div>
+                    <p className="jg-muted" style={{ marginBottom: 0 }}>{role.focus}</p>
                   </div>
-                </div>
-                <span className="jg-pill">{t.read_only ? "read-only" : t.tier}</span>
+                ))}
               </div>
-            ))}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div className="jg-card">
+                <h4 style={{ marginTop: 0 }}>Installed Skills (Hermes Skills Guard)</h4>
+                {skills.length === 0 ? (
+                  <div className="jg-muted">No skills discovered yet.</div>
+                ) : (
+                  skills.map((s) => (
+                    <div key={s.path} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--jg-border-subtle)" }}>
+                      <span>{s.name}</span>
+                      <span className="jg-pill">{s.security_verdict || "scanned"}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="jg-card">
+                <h4 style={{ marginTop: 0 }}>Live MCP Servers</h4>
+                {mcpServers.length === 0 ? (
+                  <div className="jg-muted">No external MCP servers configured in ~/.jaeger/mcp_servers.json yet.</div>
+                ) : (
+                  mcpServers.map((m) => (
+                    <div key={m.name} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--jg-border-subtle)" }}>
+                      <span>{m.name} ({m.transport})</span>
+                      <span className="jg-pill">{m.connected ? `Connected (${m.tools_count})` : "Offline"}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div>
+              <h4>Registered Modular Tools ({tools.length})</h4>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10 }}>
+                {tools.map((t) => (
+                  <div key={t.name} className="jg-card">
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                      <strong>{t.name}</strong>
+                      <span className="jg-pill">{t.read_only ? "read-only" : t.tier}</span>
+                    </div>
+                    <p className="jg-muted" style={{ marginBottom: 0 }}>{t.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
         {dest === "memory" && (
-          <div className="jg-content" style={{ display: "grid", gap: "14px", maxWidth: "820px" }}>
-            <div className="jg-card" style={{ display: "flex", gap: "8px" }}>
+          <div className="jg-content" style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 900 }}>
+            <div className="jg-card">
+              <h3 style={{ marginTop: 0 }}>Persistent Multi-Day Goals (Business & Idle Minecraft Life)</h3>
+              <form
+                style={{ display: "flex", gap: 8, marginBottom: 10 }}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!newGoalTitle.trim()) return;
+                  await fetch(`${baseUrl}/v1/memory/goals`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ domain: newGoalDomain, title: newGoalTitle.trim(), priority: newGoalDomain === "minecraft" ? 3 : 1 }),
+                  });
+                  setNewGoalTitle("");
+                  const r = await fetch(`${baseUrl}/v1/memory/goals`);
+                  if (r.ok) setGoals((await r.json()).goals ?? []);
+                }}
+              >
+                <select className="jg-input" style={{ width: 150 }} value={newGoalDomain} onChange={(e) => setNewGoalDomain(e.target.value as "youtube" | "business" | "minecraft")}>
+                  <option value="youtube">YouTube</option>
+                  <option value="business">Business</option>
+                  <option value="minecraft">Minecraft (Idle)</option>
+                </select>
+                <input className="jg-input" placeholder="Add persistent goal (survives reboots)..." value={newGoalTitle} onChange={(e) => setNewGoalTitle(e.target.value)} />
+                <button type="submit" className="jg-btn jg-btn-primary">Add Goal</button>
+              </form>
+              {goals.length === 0 ? (
+                <div className="jg-muted">No persistent goals yet — add a YouTube milestone or idle Minecraft project!</div>
+              ) : (
+                goals.map((g) => (
+                  <div key={g.goal_id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--jg-border-subtle)" }}>
+                    <span><strong>[{g.domain}]</strong> {g.title}</span>
+                    <span className="jg-pill">P{g.priority} · {g.status}</span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="jg-card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <h3 style={{ margin: 0 }}>Memory 2.0 Learning Inspector (Cascading Forget)</h3>
+                <input
+                  className="jg-input"
+                  style={{ maxWidth: 260 }}
+                  placeholder="Recall search..."
+                  value={learningQuery}
+                  onChange={async (e) => {
+                    const q = e.target.value;
+                    setLearningQuery(q);
+                    const r = await fetch(`${baseUrl}/v1/memory/learning?q=${encodeURIComponent(q)}`);
+                    if (r.ok) setLearning((await r.json()).entries ?? []);
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: 10 }}>
+                {learning.length === 0 ? (
+                  <div className="jg-muted">No learned memories matched.</div>
+                ) : (
+                  learning.map((entry) => (
+                    <div key={entry.entry_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--jg-border-subtle)", gap: 10 }}>
+                      <div>
+                        <span className="jg-pill">{entry.scope}</span>{" "}
+                        <span>{entry.content}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="jg-btn-ghost"
+                        onClick={async () => {
+                          await fetch(`${baseUrl}/v1/memory/learning/${encodeURIComponent(entry.entry_id)}?cascade=true`, { method: "DELETE" });
+                          setLearning((prev) => prev.filter((x) => x.entry_id !== entry.entry_id));
+                        }}
+                      >
+                        Forget
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <form
+              className="jg-card"
+              style={{ display: "flex", gap: 8 }}
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!factKey.trim()) return;
+                await fetch(`${baseUrl}/v1/memory/facts`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ key: factKey.trim(), value: factVal.trim() }),
+                });
+                setFactKey("");
+                setFactVal("");
+                const r = await fetch(`${baseUrl}/v1/memory/facts`);
+                if (r.ok) setFacts((await r.json()).facts ?? []);
+              }}
+            >
               <input className="jg-input" placeholder="Fact key" value={factKey} onChange={(e) => setFactKey(e.target.value)} />
               <input className="jg-input" placeholder="Fact value" value={factVal} onChange={(e) => setFactVal(e.target.value)} />
-              <button type="button" className="jg-btn jg-btn-primary" onClick={() => void handleSaveFact()}>
-                Save
-              </button>
-            </div>
+              <button type="submit" className="jg-btn jg-btn-primary">Remember</button>
+            </form>
             {facts.map((f) => (
               <div key={`${f.subject}:${f.key}`} className="jg-card" style={{ display: "flex", justifyContent: "space-between" }}>
-                <div>
-                  <strong>{f.key}</strong>: {f.value}
-                </div>
+                <span><strong>{f.key}</strong>: {f.value}</span>
                 <span className="jg-pill">{f.subject}</span>
               </div>
             ))}
@@ -463,13 +984,63 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         )}
 
         {dest === "settings" && (
-          <div className="jg-content" style={{ display: "grid", gap: "14px", maxWidth: "760px" }}>
+          <div className="jg-content" style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 820 }}>
+            <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <h3 style={{ margin: 0 }}>32 GB Apple Silicon Governor & Body Controls</h3>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <span className="jg-pill">Host: {resources.host_available_gb ?? "?"} / {resources.host_total_gb ?? 32} GB free</span>
+                <span className="jg-pill">Idle Minecraft: {resources.idle_life_status ?? "ready"}</span>
+                <span className="jg-pill">Cognitive Mode: {liveCogMode}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="button" className="jg-btn" onClick={() => void toggleIdleLife()}>
+                  {resources.idle_life_enabled ? "Pause Idle Minecraft Life" : "Allow Idle Minecraft Life"}
+                </button>
+                <button
+                  type="button"
+                  className={`jg-btn ${resources.estop_active ? "jg-btn-danger" : ""}`}
+                  onClick={() => void toggleEstop()}
+                >
+                  {resources.estop_active ? "Release Emergency Stop" : "Trigger Emergency Stop"}
+                </button>
+              </div>
+            </div>
+
+            <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <h3 style={{ margin: 0 }}>VR Avatar Studio (VRM 0.x / 1.0, GLB, 2D Character)</h3>
+              <p className="jg-muted" style={{ margin: 0 }}>
+                Upload a <code>.vrm</code>, <code>.glb</code>, or 2D character portrait. 3D VRM models automatically use studio 3-point lighting, relaxed stance, auto-blink, eye-tracking saccades, and Kokoro lip-sync.
+              </p>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  type="file"
+                  accept=".vrm,.glb,.png,.webp,.jpg,.jpeg"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleAvatarUpload(f);
+                  }}
+                />
+                <button type="button" className="jg-btn" onClick={() => void triggerAvatarVisemeTest()}>
+                  Test Kokoro Viseme Sync
+                </button>
+                {avatarUploadMsg && <span className="jg-muted">{avatarUploadMsg}</span>}
+              </div>
+            </div>
+
             <div className="jg-card">
-              <h3 style={{ margin: "0 0 10px", fontSize: "14px" }}>Active Model</h3>
+              <h3 style={{ marginTop: 0 }}>Active Model (Local-First + Cloud)</h3>
               <select
                 className="jg-input"
                 value={activeModel}
-                onChange={(e) => void handleSelectModel(e.target.value)}
+                onChange={async (e) => {
+                  const next = e.target.value;
+                  setActiveModel(next);
+                  await fetch(`${baseUrl}/v1/models/select`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ model: next }),
+                  });
+                }}
               >
                 {models.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -477,12 +1048,6 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                   </option>
                 ))}
               </select>
-            </div>
-            <div className="jg-card">
-              <h3 style={{ margin: "0 0 8px", fontSize: "14px" }}>Runtime Diagnostics</h3>
-              <pre style={{ margin: 0, fontSize: "12px", fontFamily: "var(--jg-font-mono)", whiteSpace: "pre-wrap" }}>
-                {JSON.stringify(health, null, 2)}
-              </pre>
             </div>
           </div>
         )}

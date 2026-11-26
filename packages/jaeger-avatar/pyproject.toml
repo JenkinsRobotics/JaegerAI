@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-avatar"
+version = "0.1.0"
+description = "Standalone 2D/3D VR Avatar backend: VRM 0.x/1.0, GLB, Rive & 2D asset inspection, Character Card v3, live emotion/state, and Kokoro phoneme-to-viseme lip-sync."
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]
