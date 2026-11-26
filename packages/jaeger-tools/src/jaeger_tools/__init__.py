@@ -1,7 +1,8 @@
 """jaeger-tools: ToolDef, ToolRegistry, ToolRouter, RwLock dispatcher, progressive discovery, EditEngines, RepoMap."""
 
-from . import arg_coercion, router, search, tool_registry, tool_schema
+from . import arg_coercion, builtins, router, search, tool_registry, tool_schema
 from .arg_coercion import COMMON_PARAM_ALIASES, coerce_args
+from .builtins import register_builtin_tools
 from .diagnostics import Diagnostic, DiagnosticReport, diagnose_file
 from .editors import (
     ApplyPatchEditor,
@@ -56,6 +57,7 @@ __all__ = [
     "ToolVisibility",
     "arg_coercion",
     "build_repo_map",
+    "builtins",
     "clear_registry",
     "coerce_args",
     "dev_mode_enabled",
@@ -64,6 +66,7 @@ __all__ = [
     "get_tools",
     "has_tool",
     "lint_guarded_edit",
+    "register_builtin_tools",
     "register_tool",
     "register_tool_from_function",
     "register_tool_instance",

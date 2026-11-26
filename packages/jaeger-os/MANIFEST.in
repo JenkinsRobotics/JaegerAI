@@ -1,4 +1,0 @@
-global-exclude *.py[cod]
-global-exclude .DS_Store
-prune build
-prune dist

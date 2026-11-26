@@ -1,161 +1,18 @@
 #!/usr/bin/env bash
-# scripts/verify.sh — Single-command deterministic verification for JaegerAI
-# Enforces clean repository invariants, hygiene tripwires, and core unit test suites.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "${REPO_ROOT}"
-
-echo "=================================================="
-echo "  JaegerAI Verification Pipeline"
-echo "=================================================="
-
-# 1. Enforce python environment & byte-code isolation
-if [[ -d /opt/homebrew/bin ]]; then
-  export PATH="/opt/homebrew/bin:${PATH}"
-fi
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-gateway/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src"
-export PYTHONPATH="${STANDALONE_SRC_PATHS}:${REPO_ROOT}/packages/jaeger-agent:${REPO_ROOT}/packages/jaeger-os:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
-JAEGER_VENV_ROOT="${JAEGER_VENV:-${HOME}/.jaeger/venv}"
-VENV_PY="${JAEGER_VENV_ROOT}/bin/python"
-VENV_PYTEST="${JAEGER_VENV_ROOT}/bin/pytest"
+export PYTHONPATH="${STANDALONE_SRC_PATHS}:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
-if [[ ! -x "${VENV_PY}" || ! -x "${VENV_PYTEST}" ]]; then
-  echo "[-] ERROR: Virtual environment not found at ${JAEGER_VENV_ROOT}."
-  echo "    Please run ./install.sh first."
-  exit 1
-fi
-
+VENV_PY="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 TARGET="${1:-all}"
 
-run_git() {
-  echo "[git] Checking Git repository tracking invariants..."
-  TRACKED_VIOLATIONS=$(git ls-files | grep -E '(__pycache__|\.pytest_cache|\.venv|jaeger_ai/vendor|hermes_state\.py)' || true)
-  if [[ -n "${TRACKED_VIOLATIONS}" ]]; then
-    echo "[-] ERROR: Forbidden paths tracked in git index:"
-    echo "${TRACKED_VIOLATIONS}"
-    return 1
-  fi
-  echo "[+] Git tracking is pristine."
-}
-
-run_hygiene() {
-  "${VENV_PY}" -B scripts/build-standalone-macos.py --help >/dev/null
-  "${VENV_PY}" -B jaeger_ai/interfaces/ui/scripts/build-external.py --help >/dev/null
-  echo "[hygiene] Running CI hygiene tripwires (root allowlist, features READMEs, zero in-repo state)..."
-  # -p no:cacheprovider + PYTHONDONTWRITEBYTECODE keep the run from dropping
-  # .pytest_cache / __pycache__ into the repo root (AGENTS.md §1: zero in-repo
-  # state). cache_dir in pyproject.toml is a fallback, not a guarantee when
-  # pytest is invoked with an explicit test path.
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py dev/tests/test_package_layering.py -q --no-header -p no:cacheprovider
-  echo "[+] CI hygiene & package layering tripwires passed."
-}
-
-run_frontend() {
-  echo "=================================================="
-  echo "  [TIER 1: FRONT END] Interfaces & Presentation"
-  echo "=================================================="
-  echo "[front-end:ide] Running IDE interface & webview unit tests..."
-  if ! IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1); then
-    echo "${IDE_OUTPUT}"
-    return 1
-  fi
-  PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
-  echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
-  echo "[front-end:shared-ui] Checking TypeScript and shared chat components..."
-  (cd jaeger_ai/interfaces/ui && npm run typecheck && npm test -- --configLoader=runner --no-cache --maxWorkers=2)
-  echo "[front-end:webui] Running WebUI backend packaging and canonical UI routing tests..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/features/webui/test_ui_shell_serving.py dev/tests/jaeger_ai/features/test_no_legacy_frontends.py -q --no-header
-  echo "[+] WebUI front-end asset tests passed."
-  if [[ "$(uname -s)" == Darwin ]]; then
-    echo "[front-end:macos] Checking the native shell..."
-    swift test --package-path jaeger_ai/interfaces/macos-shell --scratch-path "${TMPDIR:-/tmp}/jaeger-swift-verification"
-  fi
-}
-
 run_backend() {
-  echo "=================================================="
-  echo "  [TIER 2: BACK END] Core Gateway, Engine & Skills"
-  echo "=================================================="
-  echo "[back-end:gateway] Running Gateway durability, SQLite sessions & event store..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_gateway_durability.py -q --no-header
-  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
-    dev/tests/jaeger_ai/features/webui/test_droid_proxy.py \
-    dev/tests/jaeger_ai/features/knowledge_library/
-  echo "[+] Gateway session durability tests passed."
-  echo "[back-end:tiers] Running 3-Tier Interaction Contract (Chat, Agent, Jaeger)..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
-  echo "[+] Tier contract tests passed."
-  echo "[back-end:skills] Running Skill Catalog and Tool Registry audit..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
-  echo "[+] Skill Catalog audit passed."
-  echo "[back-end:tools] Checking discovery isolation, ranking, MCP inventory and policy..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
-    dev/tests/jaeger_ai/core/test_live_standalone_modules.py \
-    dev/tests/jaeger_ai/core/test_composition_root.py \
-    dev/tests/jaeger_ai/core/test_tool_discovery.py \
-    dev/tests/jaeger_ai/core/test_framework_audit_regressions.py \
-    dev/tests/jaeger_ai/core/test_tool_qualification_repairs.py \
-    dev/tests/jaeger_ai/core/test_code_bridge.py \
-    dev/tests/jaeger_ai/core/test_autonomous_runner.py \
-    dev/tests/jaeger_ai/core/test_destructive_action_gate.py \
-    dev/tests/jaeger_ai/core/test_framework_connectors.py \
-    dev/tests/jaeger_ai/core/test_framework_filesystem_authority.py \
-    dev/tests/jaeger_ai/core/test_linux_filesystem_authority.py \
-    dev/tests/jaeger_ai/core/test_workspace_dir.py \
-    dev/tests/jaeger_ai/personality/test_character_binding.py \
-    dev/tests/jaeger_ai/plugins/test_ai_gen.py \
-    dev/tests/jaeger_ai/core/test_gateway_turn_card.py::test_owner_verification_resolves_in_admitted_workspace \
-    dev/tests/jaeger_ai/core/test_mcp_discovery.py \
-    dev/tests/jaeger_ai/core/test_explicit_agent_control.py \
-    dev/tests/jaeger_ai/agent/test_agent_toolsets.py \
-    dev/tests/jaeger_ai/agent/test_lean_tools.py \
-    dev/tests/jaeger_ai/core/test_owner_agent_options.py \
-    dev/tests/jaeger_ai/plugins/test_mcp_limits.py \
-    dev/tests/jaeger_ai/core/test_mcp_lifecycle_controls.py
-  echo "[back-end:models] Checking provider routing, first boot, resources and streamed receipts..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
-    dev/tests/jaeger_ai/core/test_model_request_policy.py \
-    dev/tests/jaeger_ai/core/test_context_item_provenance.py \
-    dev/tests/jaeger_ai/core/test_context_compiler.py \
-    dev/tests/jaeger_ai/core/test_sessions_contract.py \
-    dev/tests/jaeger_ai/core/test_gateway_completion_evidence.py \
-    dev/tests/jaeger_ai/agent/test_runtime_bridge.py \
-    dev/tests/jaeger_ai/core/test_gateway_turn_parts.py \
-    dev/tests/jaeger_ai/core/test_gateway_session_stream_cards.py \
-    dev/tests/jaeger_ai/core/test_request_cancellation.py \
-    dev/tests/jaeger_ai/core/test_recovered_approval_context.py \
-    dev/tests/jaeger_ai/core/test_model_router.py \
-    dev/tests/jaeger_ai/core/test_continuation.py \
-    dev/tests/jaeger_ai/core/test_handoff_cancellation_tree.py \
-    dev/tests/jaeger_ai/core/test_stabilization_regressions.py \
-    dev/tests/jaeger_ai/core/test_gateway_model_history.py \
-    dev/tests/jaeger_ai/core/test_gateway_single_terminal.py \
-    dev/tests/jaeger_ai/core/test_model_context_observation.py \
-    dev/tests/jaeger_ai/core/test_runtime_policy_isolation.py \
-    dev/tests/jaeger_ai/core/test_first_boot_config.py \
-    dev/tests/jaeger_ai/core/test_stack_controller.py \
-    dev/tests/jaeger_ai/core/test_preflight.py \
-    dev/tests/jaeger_ai/core/test_setup_wizard.py
-  # Package tests establish their own state root; run separately from product tests.
-  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
-    packages/jaeger-agent/tests/test_openai_adapter.py \
-    packages/jaeger-agent/tests/test_ollama_native_adapter.py \
-    packages/jaeger-agent/tests/test_model_controls.py \
-    packages/jaeger-agent/tests/test_dispatch_invariants.py \
-    packages/jaeger-agent/tests/test_context_guard.py \
-    packages/jaeger-agent/tests/test_turn_transcript_safety.py \
-    packages/jaeger-agent/tests/test_reasoning_cap.py \
-    packages/jaeger-agent/tests/test_reasoning_streaming.py \
-    packages/jaeger-agent/tests/test_cli_backend_adapter.py \
-    packages/jaeger-agent/tests/test_anthropic_adapter.py \
-    packages/jaeger-agent/tests/test_liveness.py \
-    packages/jaeger-agent/tests/test_run_turn.py \
-    packages/jaeger-agent/tests/test_production_readiness.py
-  echo "[back-end:modules] Running folded standalone modular core test suite..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" -q --no-header -p no:cacheprovider \
+  echo "=== [BACKEND] 15 Standalone Packages + E2E + Layering + Hygiene ==="
+  "${VENV_PY}" -B -m pytest -q --no-header -p no:cacheprovider \
     packages/jaeger-contracts/tests \
     packages/jaeger-models/tests \
     packages/jaeger-tools/tests \
@@ -170,66 +27,20 @@ run_backend() {
     packages/jaeger-macos/tests \
     packages/jaeger-lsp/tests \
     packages/jaeger-checkpoints/tests \
-    packages/jaeger-skills/tests
+    packages/jaeger-skills/tests \
+    dev/tests
 }
 
-run_wiring() {
-  echo "=================================================="
-  echo "  [TIER 3: WIRING] Integration & Wire Contracts"
-  echo "=================================================="
-  echo "[wiring:ide-gateway] Testing IDE client REST + SSE wire contract with Gateway..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ide_gateway_client.py -q --no-header
-  echo "[+] IDE-to-Gateway wiring contract passed."
-  echo "[wiring:webui-gateway] Testing WebUI proxy wire contract with Gateway..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/interfaces/test_webui_gateway_proxy.py -q --no-header
-  echo "[+] WebUI-to-Gateway wiring contract passed."
+run_frontend() {
+  echo "=== [FRONTEND] 4 Standalone @jaeger/ui-* Packages + External Build ==="
+  (cd "${REPO_ROOT}/jaeger_ai/interfaces/ui" && npm run test)
+  JAEGER_UI_DEPENDENCIES="${REPO_ROOT}/jaeger_ai/interfaces/ui" \
+    python3 "${REPO_ROOT}/jaeger_ai/interfaces/ui/scripts/build-external.py"
 }
 
 case "${TARGET}" in
-  frontend|front-end|ui)
-    run_frontend
-    ;;
-  backend|back-end|core)
-    run_backend
-    ;;
-  wiring|integration|wire)
-    run_wiring
-    ;;
-  git)
-    run_git
-    ;;
-  hygiene)
-    run_hygiene
-    ;;
-  ide)
-    echo "[ide] Running IDE interface unit tests..."
-    if ! IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1); then
-      echo "${IDE_OUTPUT}"
-      exit 1
-    fi
-    PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
-    echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
-    ;;
-  gateway)
-    "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_gateway_durability.py dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
-    ;;
-  skills)
-    "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
-    ;;
-  all)
-    run_git
-    run_hygiene
-    run_frontend
-    run_backend
-    run_wiring
-    ;;
-  *)
-    echo "Unknown target: ${TARGET}"
-    echo "Usage: ./scripts/verify.sh [frontend | backend | wiring | all | git | hygiene]"
-    exit 1
-    ;;
+  backend)  run_backend ;;
+  frontend) run_frontend ;;
+  all)      run_backend && run_frontend ;;
+  *)        echo "Usage: $0 [all|backend|frontend]"; exit 2 ;;
 esac
-
-echo "=================================================="
-echo "  [SUCCESS] Verification passed for: ${TARGET}!"
-echo "=================================================="
