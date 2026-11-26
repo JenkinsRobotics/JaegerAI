@@ -1,456 +1,77 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <strong>JaegerAI: a persistent personal intelligence platform by Jenkins Robotics</strong><br>
-  <em>Default companion: Truth · Evidence-seeking · Human flourishing · Model-independent & user-owned</em>
+  <strong>A persistent, asynchronous, event-driven cognitive platform — local-first on 32 GB Apple Silicon</strong><br>
+  <em>Conversation is an interface to the intelligence, not its execution loop.</em>
 </p>
 
 <p align="center">
-  <a href="#quick-start"><img src="https://img.shields.io/badge/▶_Get_Started-37B679?style=for-the-badge" alt="Get Started"></a>
-  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/📖_Guide-5865F2?style=for-the-badge" alt="Guide"></a>
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.13.0-2EA44F?style=for-the-badge" alt="Version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
+  <img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="Apache-2.0">
   <img src="https://img.shields.io/badge/python-3.11--3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11-3.12">
-</p>
-
-<p align="center">
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/stargazers"><img src="https://img.shields.io/github/stars/JenkinsRobotics/JaegerAI?style=social" alt="GitHub stars"></a>
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/network/members"><img src="https://img.shields.io/github/forks/JenkinsRobotics/JaegerAI?style=social" alt="GitHub forks"></a>
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/issues"><img src="https://img.shields.io/github/issues/JenkinsRobotics/JaegerAI" alt="GitHub issues"></a>
+  <img src="https://img.shields.io/badge/react-19%20%2B%20Three.js%20VRM-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React 19 + VRM">
+  <img src="https://img.shields.io/badge/memory-32GB%20Unified%20Budget-5B8DEF?style=for-the-badge" alt="32GB Budget">
 </p>
 
 ---
 
-## What JaegerAI is
+## Core Architecture
 
-**Core mission:** *Help humanity, one human at a time.*
+JaegerAI is a **100% modular, one-command reproducible AI platform** built with **zero external infrastructure daemons** (no Redis, Postgres, RabbitMQ, Docker, or Electron — pure embedded **SQLite WAL + in-process `asyncio`** + static Vite React 19 UI).
 
-JaegerAI is a platform for **persistent personal intelligence**, built on the reusable **JaegerAgent** execution framework (`packages/jaeger-agent`). Its default companion, **Truth**, is a proactive, evidence-seeking intelligence that develops a long-term relationship with its human, understands their goals and circumstances, and uses permitted tools to help improve their life.
+Every capability lives in an independently testable standalone package under `packages/`:
 
-- **Truth-seeking below the persona layer:** Truth distinguishes observations, verified facts, hypotheses, predictions, preferences, and unknowns — linking evidence, surfacing contradictions, and preserving correction history. Switching characters never disables truthfulness.
-- **Human flourishing as the objective:** User-controlled goals, opportunities, and measurable outcomes across physical well-being, security, belonging, competence/esteem, self-actualization, and self-transcendence — non-intrusive, inspectable, and fully exportable.
-- **One persistent intelligence, summonable characters:** Identity and memory persist across models, devices, and interfaces. Users can personalize Truth, summon characters with scoped memory, convene multi-character Councils evaluated by Truth, and delegate real digital work through JaegerAgent.
-- **Model-independent & user-owned:** Runs local-first with optional cloud models, enforces fail-closed tool permissions in code, and keeps memory, audit trails, and controls under the user's ownership.
-
-| Component | Responsibility |
-|---|---|
-| Models | Reasoning, perception, generation (cloud + local, full native context) |
-| Tools | Computers, browsers, files, applications |
-| Execution engine | Plan, act, observe, continue (`JaegerAgent`) |
-| Memory and state | Persistent episodic, epistemic world-state, and user-owned goals |
-| Decision layer | Fast local routing and structured choices |
-| Orchestration | Coordinate models, specialist agents, and Character Councils |
-| Permissions | User-controlled execution boundaries (`core/authority/kernel.py`) |
-| Evaluation | Verify results, track contradictions, and measure improvement |
-| Scheduler / events | Trigger ongoing authorized autonomous work |
-
-> **Note:** See [docs/PRODUCT.md](docs/PRODUCT.md) for the authoritative product definition and a truthful table of what is implemented & verified vs. partial vs. planned. The dedicated Mac Studio runtime remains protected from development modifications without separate authorization.
-
-## Current repository capabilities
-
-- **Work across your computer** — inspect and edit files, run code and shell
-  commands, use the clipboard, control supported applications, and analyze
-  images and documents under explicit permission policy.
-- **Research and communicate** — browse and extract web sources and work with
-  email, calendars, and contacts. Optional messaging plugins remain available
-  for deployments that need them, but are not required for remote access.
-- **Remember and organize** — maintain attributed persistent memory, search
-  prior sessions, manage tasks and Kanban work, and keep a knowledge library.
-- **Run ongoing work** — schedule jobs, execute background tasks, monitor
-  heartbeats, and delegate bounded work to installed agent runtimes.
-- **Use the model you choose** — run llama.cpp or MLX locally, connect to
-  hosted APIs and OpenAI-compatible servers, or use installed Claude, Codex,
-  Gemini, Grok, or Hermes CLIs as the active model.
-- **Use it locally or remotely** — use the native desktop app, Jaeger WebUI,
-  TUI, or voice loop locally; publish only the WebUI through Tailscale for
-  private remote access.
-
-Capabilities are discovered at runtime. Jaeger does not assume that a channel,
-device, model, or credential exists simply because the platform supports it.
-Permissions and availability gates determine what each assistant instance may
-actually use.
-
-The separately installable
-[JaegerAgent](https://github.com/JenkinsRobotics/jaeger-agent) mind module is
-the reusable brain other projects embed. It owns the engine-neutral agent
-loop, provider adapters, message schemas, context management, bus bridge, and
-`slot: mind` node. JaegerAI imports that package and supplies its product tool
-bundle, prompts, skills, memory, personality system, interfaces, installer,
-and defaults through explicit host hooks. The release repository vendors the
-coordinated source packages under `packages/` so one checkout is sufficient.
-
-It includes JaegerOS (the runtime foundation: bus, nodes, modules, supervisor,
-safety, wire contract, and capability layer) and builds the assistant platform
-on top:
-
-- **`modules/`** — optional provider-named application integrations.
-  JaegerKokoroTTS and JaegerWhisperSTT remain available for explicit tools or
-  app-specific features. The attached Multimodal face uses JaegerAgent's own
-  speech nodes; the legacy TUI retains a separate capture/STT adapter while
-  sharing agent-owned final speech.
-- **`core/`** — Jaeger AI's application lifecycle, instance integration,
-  policy, diagnostics, and the **`persona_first`** pipeline: an id/ego split
-  where a persona lane speaks to the user directly, in character, and
-  has exactly one tool — `perform_task(request)` — which runs the full
-  clean inner agentic loop (persona-off, all tools, hardened prompt).
-  The safety property in one line: *the conversational persona never executes
-  tools directly.*
-- **`personality/`** — characters (14 shipped) own identity + soul +
-  traits + lore as **State** (HEXACO/SPECIAL/Expression sliders),
-  compiled on change — never per turn — into a **View** the model
-  actually sees. An instance just *plays* a character; the character
-  isn't the instance.
-- **Memory** — subject-attributed SQLite (`subject/key/value/category/
-  source/tags/note`), current-view semantics, provenance-tracked.
-- **Skills** — self-contained (`SKILL.md` + optional tools + recipe);
-  the agent researches, writes, smoke-tests, benchmarks, and versions
-  its own skills.
-- **Its own faces** — the Swift app (default windowed UI), the TUI
-  (`jaeger_ai/interfaces/tui/`, the 0.1.0-lineage terminal surface,
-  preserved alongside newer surfaces per standing convention), voice
-  (via the `kokoro_tts`/`whisper_stt` engine-module extras), and the
-  canonical Mac host and shared UI. All faces are clients of one protocol.
-- **The client protocol** — `jaeger_ai/contract` (vendored from
-  JaegerAI) + `jaeger_ai/interfaces/client.py` (`JaegerClient`), a
-  versioned NDJSON wire contract any surface — including third-party
-  ones — speaks over `jaeger bridge`.
-- **`cli/`** — the `jaeger` command (every real verb: `status`, `config`,
-  `runtime`, `agent create/list/use/inspect/delete`, `update`, …).
-  JaegerAgent ships no product CLI — this application repo is where it lives.
-
-Optional engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS),
-[JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT))
-are independently usable components. They allow deployments to add speech
-without coupling the underlying runtime to the complete assistant product.
-
-## Quick start
-
-**New to JaegerAI?** Here's the fastest path from zero to your first conversation:
-
-```bash
-# 1. Clone and install (macOS: double-click "Install Jaeger AI.command" instead)
-git clone https://github.com/JenkinsRobotics/JaegerAI.git
-cd JaegerAI
-./install.sh
-
-# 2. Create your first AI agent (interactive setup wizard)
-./jaeger agent create
-
-# 3. Start chatting
-./jaeger                    # Mac app (if built) or terminal UI
-# OR
-./jaeger webui start        # Browser interface at http://localhost:8790
-```
-
-**What you'll need:**
-- **macOS 12+** or **Linux** (Ubuntu 22.04+ recommended)
-- **Python 3.11 or 3.12** ([download](https://www.python.org/downloads/) or `brew install python@3.12`)
-- **Xcode Command Line Tools** (macOS only): `xcode-select --install`
-- **~15 GB free disk** (for local models, Playwright browser, and Python packages)
-- **8 GB+ RAM** (16 GB recommended for local models)
-
-> **No local GPU?** No problem. JaegerAI works with cloud models (OpenAI, Anthropic, Ollama Cloud, etc.). You can also use local models via Ollama, llama.cpp, or MLX on Apple Silicon.
-
----
-
-## Install
-
-The standard method is the same as pre-split JaegerAI: clone, run
-`./install.sh`, keep current with `jaeger update`.
-
-**Choose your installation method:**
-
-| Method | Best For | Command |
-|--------|----------|---------|
-| **Double-click installer** | macOS users who want the easiest path | Double-click `Install Jaeger AI.command` |
-| **Clone + install** | Developers, Linux users, customization | `git clone ... && ./install.sh` |
-| **One-line curl** | CI, servers, minimal interaction | `curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JaegerAI/master/scripts/install.sh \| bash` |
-
-```bash
-git clone https://github.com/JenkinsRobotics/JaegerAI.git
-cd JaegerAI
-./install.sh                       # external venv + all five monorepo packages
-./jaeger update                    # later: git pull + reinstall deps, non-interactive
-```
-
-The installer builds wheels from this checkout's `packages/` directory in
-external temporary directories, then installs JaegerOS, JaegerAgent, the voice
-engines, and JaegerAI in dependency order. The environment defaults to
-`~/.jaeger/venv` (`JAEGER_VENV` overrides it). Run the installer after source
-updates to refresh installed code. Writable skills and operator state live
-under `~/.jaeger`, or the configured state directory.
-
-For development on a checkout, point the venv at the source instead of wheels
-so runtime code and repo code cannot drift (re-run after `./install.sh`, which
-reinstalls wheels):
-
-```bash
-~/.jaeger/venv/bin/pip install --no-deps --no-build-isolation \
-  -e . -e packages/jaeger-os -e packages/jaeger-agent \
-  -e packages/jaeger-whisper-stt -e packages/jaeger-kokoro-tts
-```
-
-For the MacBook development → Mac Studio test workflow, develop and verify on
-master, then select the exact tested commit on the Studio with
-`jaeger update --ref <commit>`. Quit the native app and stop Gateway/WebUI
-services first; the updater refuses to replace code while those services run.
-Use `--channel latest` to select master, or the default `stable` channel for the
-latest published stable release. Product updates pin the fetched commit;
-developer checkouts keep their existing fast-forward branch workflow.
-
-A successful update installs coordinated packages/UI, rebuilds the Mac shell,
-and checks migrations in a fresh process. It never restarts services. Reopen
-the rebuilt shell after restarting and check Settings → Update and recovery:
-the native build, Gateway startup revision, and source checkout must agree.
-`--check` checks local schemas only, not remote update availability.
-`jaeger update --rollback` restores the retained product code and reinstalls
-its packages; schema downgrades require the instance backup made before migration.
-Historical versions predating coordinated migration support need a separate
-installation rather than an in-place update.
-
-For the one-line installer, `JAEGER_INSTALL_ROOT` selects the source checkout;
-`JAEGER_STATE_DIR` (then `JAEGER_HOME`) selects operator state.
-
-The current native host is `jaeger_ai/interfaces/macos-shell`, loading the shared
-`jaeger_ai/interfaces/ui` frontend. Build with `bash
-jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh`; output is
-`~/.cache/jaeger/macos-shell/JaegerShell.app` (`JAEGER_MAC_BUILD` overrides it).
-This is currently a development bundle; production installation is deferred.
-No old SwiftUI app is selected as a fallback. Archived implementations and remaining runtime
-the recoverable Desktop archive are documented in
-scoped cleanup.
-
-The supported install is the repository installer above (or the one-line
-installer in [`scripts/install.sh`](scripts/install.sh)). It creates an
-isolated environment, installs the in-repository packages, builds the native
-app when Swift is available, and preserves instance state across upgrades.
-Direct `pip install jaeger-ai` from PyPI is not currently the release path.
-
-The application installs JaegerAgent's `multimodal-duplex` dependencies by
-default. The standalone JaegerAgent library keeps neural audio optional.
-There are no `kokoro_tts` or `whisper_stt` extras on the JaegerAI package.
-
-## Your first AI agent
-
-<details open>
-<summary><strong>🎯 Create your AI companion in 3 commands</strong></summary>
-
-```bash
-# 1. Create your agent (interactive wizard)
-./jaeger agent create
-
-# 2. Start chatting
-./jaeger                 # Mac app or terminal
-./jaeger webui start     # Or browser at http://localhost:8790
-```
-
-The wizard guides you through: **character** → **model** → **permissions** → **interface**.
-
-</details>
-
-**Quick reference:**
-
-```bash
-./jaeger agent list          # List all agents
-./jaeger agent use <name>    # Switch default agent
-./jaeger --agent <name>      # Launch specific agent
-./jaeger "one-shot prompt"   # Quick question, print answer, exit
-./jaeger --voice             # Voice mode (mic + speech)
-```
-
-**System checks:**
-
-```bash
-./jaeger multimodal --check              # Verify mic, camera, models
-./jaeger multimodal --audio full --check # Also verify voice duplex
-./jaeger doctor                          # Full environment check
-./jaeger status                          # See what's running
-```
-
-**Advanced:**
-
-```bash
-./jaeger multimodal                # Attach voice to running agent
-./jaeger launcher install          # Add to Applications/Launchpad
-./jaeger agent inspect             # View agent config (no model boot)
-./jaeger agent delete <name>       # Remove an agent
-```
-
-### Jaeger WebUI
-
-The browser interface is served by the Gateway itself on port `8790`. The
-frontend is `jaeger_ai/interfaces/ui` (React + TypeScript, shared with the Mac
-app); the server side is `jaeger_ai/core/gateway/webapp`, folded into the
-Gateway in R11. There is no separate WebUI process to run: when the Gateway is
-up, `http://127.0.0.1:8790` is up.
-
-```bash
-./jaeger webui status            # ports and health
-./jaeger webui url               # the browser URL
-```
-
-Port map (defaults chosen to avoid clashes):
-
-| Surface | Default | Notes |
-| --- | ---: | --- |
-| Jaeger Gateway | **33418** | Sessions, live events, approvals (loopback only) |
-| Jaeger WebUI | **8790** | Served by the Gateway |
-| Jaeger voice | **8794** | Local speech service (`scripts/run-jaeger-voice.sh`) |
-| Instance webhooks | **8793** | |
-| Jaeger MCP HTTP | **8792** | Native framework endpoint: `http://127.0.0.1:8792/mcp` |
-| Jaeger A2A | **8796** | Native AgentCard and JSON-RPC endpoint |
-
-`./scripts/verify-stack-smoke.py` checks the Gateway, WebUI, MCP and voice
-services in one go (`--live` adds a real chat turn).
-
-Codex, Claude Code and other MCP clients connect directly to
-`127.0.0.1:8792/mcp` (MCP) and `127.0.0.1:8796` (A2A). The external
-Agentgateway proxy (8811/8812) was archived on 2026-11-16.
-
-Remote access stays disabled by default. Publish only the WebUI through
-Tailscale Serve with:
-
-```bash
-./jaeger webui start --instance <agent-name> --tailscale
-```
-
-The WebUI proxies turns to the loopback Gateway, which is never exposed to the
-tailnet. Set a strong `JAEGER_REMOTE_ACCESS_TOKEN` for remote API clients.
-
-Remote requests must originate from Tailscale's `100.64.0.0/10` or
-`fd7a:115c:a1e0::/48` ranges and send `Authorization: Bearer
-$JAEGER_REMOTE_ACCESS_TOKEN` or hold a signed login session. Override the
-accepted ranges with `JAEGER_REMOTE_TRUSTED_NETWORKS`; forwarded-IP headers are
-ignored so an untrusted client cannot spoof a tailnet address.
-
-OIDC Authorization Code + PKCE is enabled only when all required allow-list
-settings are present: `JAEGER_OIDC_ISSUER`, `JAEGER_OIDC_CLIENT_ID`,
-`JAEGER_OIDC_ALLOW_CLAIM`, and `JAEGER_OIDC_ALLOW_VALUES`. Set
-`JAEGER_PUBLIC_BASE_URL` to the external HTTPS URL. Passkeys are instance
-scoped, use WebAuthn origin/RP validation, and are bootstrapped from an already
-authenticated session. The access policy lives in `features/remote_access`
-and the sign-in gate in `core/gateway/webapp/jaeger_signin.py`.
-
-### External agent delegates
-
-Jaeger can delegate a task to `claude`, `codex`, `grok`, `gemini`, `ollama`,
-`opencode`, or `cursor`. Each adapter lives in its own
-feature folder under `jaeger_agent/delegates/`. Ask Jaeger to call
-`list_delegate_runtimes` for live health/capabilities, then use
-`delegate_task(runtime="codex", goal="...")` or `runtime="auto"` for ranked
-routing. Set `JAEGER_OLLAMA_DELEGATE_MODEL` to enable the local Ollama delegate.
-Private and secret tasks are rejected unless the selected runtime is explicitly
-local.
-
-### CLI backends are models; delegates are workers
-
-The same installed CLIs (`claude`, `codex`, `grok`, `gemini`, `hermes`)
-are first-class **models** in Jaeger's own loop when they are on PATH.
-`jaeger backends` probes them; they appear in the model catalog as
-`cli:claude` (provider `claude-cli`, location `local-cli`). Select one
-as the active brain with `/model use cli claude` — Jaeger keeps tools,
-memory, and permissions. `delegate_task` is still the worker path: go
-do this whole job in that agent. Do not confuse the two.
-
-### Running the WebUI in development
-
-Build the frontend with `npm run build` in `jaeger_ai/interfaces/ui`; the
-Gateway serves the built bundle on `8790`. `npm test` runs the UI test suite.
-
-## Architecture
-
-JaegerAI separates the reusable runtime, agent engine, optional engines, and
-complete product so each layer can evolve without forcing a particular user
-interface or deployment shape:
-
-```
-JaegerOS      ← runtime, capability bus, nodes, supervision, and safety
-JaegerAgent   ← reusable agent loop, tools, skills, and model adapters
-JaegerAI      ← complete assistant product, policy, memory, and interfaces
-Modules       ← optional engines this product can install:
-                JaegerKokoroTTS (tts), JaegerWhisperSTT (stt).
-Deployments   ← desktop, server, team, embedded, or hardware configurations
-```
-
-The connection rule (from
-[`JAEGER_ECOSYSTEM.md`](https://github.com/JenkinsRobotics/JaegerAI/blob/main/packages/jaeger-os/dev/docs/vision/JAEGER_ECOSYSTEM.md)):
-**hosts expose capabilities · the assistant uses them through policy · the
-runtime coordinates execution · protocols connect external clients.** See
-[`THREE_TIER_STRUCTURE.md`](https://github.com/JenkinsRobotics/JaegerAI/blob/main/packages/jaeger-os/dev/docs/vision/THREE_TIER_STRUCTURE.md)
-for the full tier-map reasoning this repo is built against.
-
-## Ecosystem
-
-| Repo | Tier | What |
+| Layer | Standalone Packages | Purpose |
 |---|---|---|
-| JaegerOS (`packages/jaeger-os`) | Runtime | Bus, nodes, modules, supervisor, safety, contracts, and capabilities. |
-| JaegerAgent (`packages/jaeger-agent`) | Agent engine | Model adapters, agent loop, tools, skills, context, and delegation. |
-| **JaegerAI** | Assistant platform | This repository: the complete product, policy, memory, automation, and interfaces. |
-| [JaegerKokoroTTS](https://github.com/JenkinsRobotics/JaegerKokoroTTS) | Engine module (`tts` slot) | Streaming Kokoro speech synthesis. Optional extra of this repo. |
-| [JaegerWhisperSTT](https://github.com/JenkinsRobotics/JaegerWhisperSTT) | Engine module (`stt` slot) | Two-pass Whisper transcription with VAD + wake word. Optional extra of this repo. |
-| JP01 | Example deployment | A hardware deployment that runs the same assistant headlessly. |
-
-Two more repos round out the ecosystem without being part of the tier map
-themselves: [JaegerTemplate](https://github.com/JenkinsRobotics/JaegerTemplate)
-(the conventions every new ecosystem repo — this one included — started
-from) and [JP01_Firmware](https://github.com/JenkinsRobotics/JP01_Firmware)
-(the robot's Mac + Jetson body-side code JP01's headless install of this
-repo ultimately talks to).
-
-## Community & Support
-
-JaegerAI is an open-source project. We'd love to have you join us!
-
-| Resource | Link | What You'll Find |
-|----------|------|------------------|
-| 💬 **Discussions** | [GitHub Discussions](https://github.com/JenkinsRobotics/JaegerAI/discussions) | Ask questions, share setups, show off your agents |
-| 🐛 **Bug Reports** | [GitHub Issues](https://github.com/JenkinsRobotics/JaegerAI/issues) | Report bugs, request features |
-| 📖 **Documentation** | [docs/](docs/) | Guides, architecture, API reference |
-| 💡 **Ideas & Roadmap** | [GitHub Projects](https://github.com/JenkinsRobotics/JaegerAI/projects) | What we're building next |
-| 🤝 **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute code, docs, or ideas |
-| 📜 **Changelog** | [CHANGELOG.md](CHANGELOG.md) | What's new in each release |
-
-### Getting Help
-
-1. **Check the docs** — [Getting Started](docs/getting-started.md), Commands, Troubleshooting
-2. **Run diagnostics** — `./jaeger doctor` checks your setup
-3. **Search existing issues** — Your question might already be answered
-4. **Ask in Discussions** — For usage questions and community help
-5. **Open an issue** — For confirmed bugs or feature requests
-
-### Contributing
-
-We welcome contributions of all kinds:
-- 🐛 **Bug fixes** — Fix issues, improve stability
-- ✨ **Features** — New tools, interfaces, integrations
-- 📝 **Documentation** — Guides, examples, clarifications
-- 🎨 **Design** — UI/UX improvements, icons, branding
-- 🧪 **Testing** — Test coverage, benchmarks, scenarios
-- 💬 **Community** — Answer questions, review PRs
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
+| **Core Spine & Contracts** | `jaeger-contracts`, `jaeger-events`, `jaeger-reliability`, `jaeger-models` | Zero-dep `Protocol` ports (incl. `EmbodimentPort`), streaming Ollama/OpenAI/Anthropic providers, Hermes tool schema sanitization, prompt-cache collapse detection |
+| **Authority & Security** | `jaeger-authority`, `jaeger-skills`, `jaeger-mcp`, `jaeger-checkpoints` | Fail-closed policy engine, macOS Seatbelt `.sbpl`/`.sb` & `.toml` sandbox profiles, Hermes secret redaction (`redact_text`), Skills Guard AST auditor, live MCP 2.x client |
+| **Cognition & Memory 2.0** | `jaeger-cognition`, `jaeger-memory`, `jaeger-loop`, `jaeger-orchestration` | 24/7 `CognitiveLifeLoop` + SQLite WAL `WorldModelStore`, durable `SqlitePregelCheckpointer` with time-travel fork, safe zero-`eval` expressions, Dry-Run simulator, 32 GB `ResourceGovernor` (`OWNER_WORK > AWARENESS_SAFETY > IDLE_LIFE`), Memory 2.0 cascading forget & multi-day persistent goals |
+| **Autonomous Business & Studio** | `jaeger-business`, `jaeger-youtube`, `jaeger-channels` | 8-role autonomous business team with spend caps & mandatory owner approval gates; flagship 32 GB single-heavy-model phased YouTube Research + Episode Studio; redacted multi-channel relay |
+| **24/7 Presence & Embodiment** | `jaeger-kokoro-tts`, `jaeger-whisper-stt`, `jaeger-realtime`, `jaeger-vision`, `jaeger-embodiment-minecraft`, `jaeger-hardware` | Apple Silicon MLX Kokoro TTS (`lip_marks()` visemes), bus-free Whisper STT (`hearing.py`), `<ignore>/<reply>` voice gate + barge-in, hard-pruned rolling camera buffer, headless Mineflayer Minecraft idle persistence, and JP01 droid hardware (`EStopLatch` + bracket protocol) |
+| **Avatar & 5-Tab Studio UI** | `jaeger-avatar`, `@jaeger/ui-protocol`, `@jaeger/ui-sdk`, `@jaeger/ui-kit`, `@jaeger/ui-avatar`, `@jaeger/ui-features` | Grok-grade 2D/3D VRM 0.x/1.0 avatar stage (3-point studio lighting, relaxed stance, AutoBlink, eye saccades, Kokoro viseme lip-sync), OpenCode Patchmark streaming Markdown, OpenReel multi-track `StudioTimeline`, Context X-Ray, `Cmd+K` palette — all unified in 5 calm tabs |
+| **Evals & Interop** | `jaeger-evals`, `jaeger-protocols`, `jaeger-tools`, `jaeger-lsp`, `jaeger-macos`, `jaeger-gateway` | `SpanTree` trajectory evals, compaction integrity verifier, AG-UI / A2UI / ACP adapters, standalone `aiohttp` Gateway + WebUI server |
 
 ---
 
-## Development
+## Quick Start (One-Command Reproducible Setup)
 
 ```bash
-pytest dev/tests -m smoke          # ~30s sanity check
-pytest dev/tests                   # full suite
-./dev/benchmark/bench.py           # routing corpus — the ≥79/81 gate for any agentic-pipeline change
-./dev/benchmark/scenarios.py       # 51-case hermetic full-system scenario suite
-./dev/benchmark/scenarios.py --lane security   # the 15 security gates only
+git clone https://github.com/JenkinsRobotics/JaegerAI.git
+cd JaegerAI
+
+# Choose a profile: core | business | companion | droid | full
+./scripts/setup.sh --profile full
+
+# Verify environment & packages
+~/.jaeger/venv/bin/python scripts/doctor.py
+
+# Launch standalone Gateway (:33418) + 5-Tab Studio WebUI (:8790)
+~/.jaeger/venv/bin/python -m jaeger_gateway
 ```
 
-Test markers (`slow`, `integration`, `model`, `ui`, `subprocess`,
-`smoke`, `regression`) let CI and local iteration pick the right subset
-— see `pyproject.toml`. Follow the ecosystem's conventions: no doc
-describes behavior the code doesn't implement yet (mark it `(planned)`
-instead), and any commit that changes behavior keeps its docs truthful
-in the same commit.
+Open **http://127.0.0.1:8790** for the 5-Tab Studio UI (`Command`, `Work & Studio`, `Team & Tools`, `Memory & Life`, `Control & Body`) with the live dockable **VR Avatar & Mind Drawer**.
 
 ---
 
-## License
+## 32 GB Unified Memory 24/7 Discipline
 
-[Apache-2.0](LICENSE) © Jenkins Robotics
+JaegerAI enforces a hard 3-tier priority scheduler (`jaeger_orchestration.ResourceGovernor`) so a single 32 GB Apple Silicon machine can stay aware 24/7 while doing real work:
+
+1. **Tier 1 — `OWNER_WORK` (Highest):** Instant preemption of idle background tasks; reserves the single heavy model slot (LLM *or* VLM, never both simultaneously).
+2. **Tier 2 — `AWARENESS_SAFETY`:** Lightweight 24/7 Kokoro MLX TTS, Whisper STT, rolling-pruned camera frames (max 6 resident frames), and hardware/software E-Stop latch.
+3. **Tier 3 — `IDLE_LIFE`:** When the owner is away and RAM headroom is healthy, Jaeger autonomously pursues multi-day persistent goals (e.g., headless Mineflayer Minecraft at ~150 MB RAM / 0 GPU) and saves an instant SQLite WAL checkpoint the millisecond owner work arrives.
+
+---
+
+## Verification
+
+Run the entire standalone backend + AST layering + frontend Vitest + theme-token + TypeScript + external Vite build + no-mock suite with one command:
+
+```bash
+./scripts/verify.sh all
+```
+
+---
+
+## License & Attributions
+
+JaegerAI is licensed under the **Apache License 2.0**. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attributions to all permissively licensed MIT and Apache-2.0 open-source components incorporated into our modular packages.
