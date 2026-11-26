@@ -1,27 +1,7 @@
-#!/bin/bash
-# jaeger — the operator command (the one thing you run).
-#
-# Dispatches:
-#   jaeger                      run the ACTIVE agent (no --instance needed)
-#   jaeger --instance NAME      run a specific agent
-#   jaeger --voice ...          run the agent in voice mode
-#   jaeger dev [flag]           developer toolbox (jaeger_ai.cli.devtools):
-#                               dev app/TUI boot, or pass
-#                               --stop/--status/--health/--dev-gui/…
-#   jaeger agent ...            manage agents: create / list / use /
-#                               inspect / delete / clear
-#   jaeger skills|personality|status|roadmap|avatar    operator console
-#   jaeger setup [name]         create an agent (terminal wizard; `setup gui` = windowed)
-#   jaeger quickstart           first run: free brain, agent, launchd, menu app
-#   jaeger doctor               environment + readiness check
-#
-# Management subcommands go to the console (jaeger_ai.cli); everything
-# else runs the agent (jaeger_ai.cli.run). Picks the repo's .venv interpreter
-# directly to sidestep pyenv shims.
+#!/usr/bin/env bash
+# jaeger — clean operator launcher for JaegerAI (CLI / TUI / Gateway / Doctor / Setup).
 set -euo pipefail
 
-# Resolve symlinks (install.sh links /usr/local/bin/jaeger → here) so
-# REPO_ROOT is the real install dir, not the symlink's.
 SELF="${BASH_SOURCE[0]}"
 while [ -L "$SELF" ]; do
   DIR="$(cd "$(dirname "$SELF")" && pwd)"
@@ -29,32 +9,21 @@ while [ -L "$SELF" ]; do
   [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
 done
 REPO_ROOT="$(cd "$(dirname "$SELF")" && pwd)"
-# The environment lives outside the checkout (AGENTS.md §1), wherever
-# install.sh put it: $JAEGER_VENV, else ~/.jaeger/venv. A repository .venv is
-# never a fallback: an in-checkout environment masks a missing install.
 VENV_PY="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 
-if [ ! -x "$VENV_PY" ]; then
-  echo "[jaeger] Python environment not found at ${JAEGER_VENV:-~/.jaeger/venv} — run ./install.sh first" >&2
+if [[ "${1:-}" == "setup" ]]; then
+  shift
+  exec bash "${REPO_ROOT}/scripts/setup.sh" "$@"
+fi
+
+if [[ ! -x "${VENV_PY}" ]]; then
+  echo "[jaeger] Environment not installed yet at ${JAEGER_VENV:-~/.jaeger/venv}." >&2
+  echo "Run: ./install.sh  (or ./jaeger setup --profile full)" >&2
   exit 1
 fi
 
-# Keep repo completely clean of __pycache__ junk (mirroring OpenClaw standard)
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
-export JAEGER_INSTALL_ROOT="$REPO_ROOT"
-# A GUI child usually starts outside the checkout. Bind this source launcher
-# to its own package instead of silently importing an older installed wheel.
-export PYTHONPATH="$REPO_ROOT:$REPO_ROOT/packages/jaeger-agent:$REPO_ROOT/packages/jaeger-os:$REPO_ROOT/packages/jaeger-kokoro-tts:$REPO_ROOT/packages/jaeger-whisper-stt${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
-# Accessory/menu-bar Process() often inherits a closed stdin. CPython 3.12
-# then fatals in init_sys_streams (EBADF) before any Python code runs.
-if ! { true <&0; } 2>/dev/null; then
-  exec 0</dev/null
-fi
-
-# Dispatch now lives in jaeger_ai.cli.entry — ONE routing table behind both
-# this wrapper and the installed `jaeger` console script. It re-execs the same
-# `python -m <module>` (or launch.py) targets this case statement used to, so
-# behaviour is unchanged; see jaeger_ai/cli/entry.py:_route for the table.
-exec "$VENV_PY" -m jaeger_ai.cli.entry "$@"
+exec "${VENV_PY}" -B -m jaeger_ai "$@"
