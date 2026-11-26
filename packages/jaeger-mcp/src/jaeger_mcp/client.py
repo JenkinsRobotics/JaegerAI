@@ -280,23 +280,28 @@ class LiveMCPManager:
             orig = spec["original_name"]
             namespaced = spec["name"]
 
+            from jaeger_contracts import ToolResult
+            from jaeger_tools import ToolSpec
+
             def _make_handler(s: str, o: str):
-                def _handler(args: Mapping[str, Any]) -> Any:
+                def _handler(args: Mapping[str, Any]) -> ToolResult:
                     res = self.call_tool(s, o, args)
                     if not res.get("ok"):
-                        raise RuntimeError(str(res.get("error") or "MCP tool failed"))
-                    return res.get("output") or ""
+                        return ToolResult(ok=False, error=str(res.get("error") or "MCP tool failed"))
+                    return ToolResult(ok=True, output=str(res.get("output") or ""))
 
                 return _handler
 
             registry.register(
-                name=namespaced,
-                description=spec.get("description") or f"MCP tool {orig} on {srv}",
-                schema=spec.get("schema") or {"type": "object", "properties": {}},
-                handler=_make_handler(srv, orig),
-                read_only=False,
-                tier="mcp",
-                source=f"mcp:{srv}",
+                ToolSpec(
+                    name=namespaced,
+                    description=spec.get("description") or f"MCP tool {orig} on {srv}",
+                    schema=spec.get("schema") or {"type": "object", "properties": {}},
+                    handler=_make_handler(srv, orig),
+                    read_only=False,
+                    tier="write_local",
+                    source=f"mcp:{srv}",
+                )
             )
             count += 1
         return count
