@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-droid"
+version = "0.1.0"
+description = "Droid Mode: connected host gimbal camera (Insta360 Link / UVC PTZ), mic & speakers implementing EmbodimentPort"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]

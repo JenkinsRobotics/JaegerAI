@@ -13,6 +13,8 @@ from .client import (
     MCPServerConfig,
     MCPServerHealth,
     load_mcp_server_configs,
+    remove_mcp_server_config,
+    save_mcp_server_config,
 )
 from .policy import ALLOWED_TOOL_POLICY_KEYS, MASK, MCPToolPolicy, SECRET_KEY_RE, agent_tool_name, redact_secrets
 from .protocol import MCPPromptSpec, ReconnectPolicy, build_roots_payload

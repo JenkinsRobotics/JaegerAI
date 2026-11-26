@@ -92,6 +92,58 @@ def load_mcp_server_configs(config_path: Path) -> list[MCPServerConfig]:
     return configs
 
 
+def save_mcp_server_config(config_path: Path, cfg: MCPServerConfig) -> list[MCPServerConfig]:
+    """Persist or update one MCP server entry in ``mcp_servers.json`` (Claude/Cursor/Jaeger format)."""
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    raw: dict[str, Any] = {}
+    if config_path.is_file():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                raw = loaded
+        except Exception:  # noqa: BLE001
+            raw = {}
+    servers = raw.get("mcpServers") if isinstance(raw.get("mcpServers"), dict) else {}
+    entry: dict[str, Any] = {
+        "transport": cfg.transport,
+        "enabled": cfg.enabled,
+        "timeout_s": cfg.timeout_s,
+    }
+    if cfg.command:
+        entry["command"] = cfg.command
+        entry["args"] = list(cfg.args)
+    if cfg.env:
+        entry["env"] = dict(cfg.env)
+    if cfg.url:
+        entry["url"] = cfg.url
+    if cfg.headers:
+        entry["headers"] = dict(cfg.headers)
+    if cfg.sandbox_workspace:
+        entry["sandbox_workspace"] = cfg.sandbox_workspace
+    servers[cfg.name] = entry
+    raw["mcpServers"] = servers
+    tmp = config_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, config_path)
+    return load_mcp_server_configs(config_path)
+
+
+def remove_mcp_server_config(config_path: Path, name: str) -> list[MCPServerConfig]:
+    """Remove an MCP server entry by name from ``mcp_servers.json``."""
+    if not config_path.is_file():
+        return []
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    if isinstance(raw, dict) and isinstance(raw.get("mcpServers"), dict):
+        raw["mcpServers"].pop(name, None)
+        tmp = config_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, config_path)
+    return load_mcp_server_configs(config_path)
+
+
 class LiveMCPManager:
     """Manages live MCP client sessions, schema budgets, health probes, and tool calls."""
 
@@ -252,6 +304,22 @@ class LiveMCPManager:
     def list_servers_health(self) -> list[dict[str, Any]]:
         return [h.to_dict() for h in self._health.values()]
 
+    def reload(self, configs: Sequence[MCPServerConfig], *, registry: Any = None) -> list[dict[str, Any]]:
+        """Hot-reload MCP connections & tools without restarting the host Gateway."""
+        self.close()
+        self._configs = {c.name: c for c in configs if c.enabled}
+        self._health = {
+            c.name: MCPServerHealth(name=c.name, transport=c.transport, connected=False)
+            for c in self._configs.values()
+        }
+        self._discovered_tools = []
+        if self._configs:
+            if registry is not None:
+                self.register_into_registry(registry)
+            else:
+                self.connect_all()
+        return self.list_servers_health()
+
     def close(self) -> None:
         if self._loop is None:
             return
@@ -281,4 +349,6 @@ __all__ = [
     "MCPServerConfig",
     "MCPServerHealth",
     "load_mcp_server_configs",
+    "remove_mcp_server_config",
+    "save_mcp_server_config",
 ]

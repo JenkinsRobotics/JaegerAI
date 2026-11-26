@@ -4,14 +4,14 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
-STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-gateway/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src:${REPO_ROOT}/packages/jaeger-cognition/src:${REPO_ROOT}/packages/jaeger-avatar/src:${REPO_ROOT}/packages/jaeger-business/src:${REPO_ROOT}/packages/jaeger-youtube/src:${REPO_ROOT}/packages/jaeger-channels/src:${REPO_ROOT}/packages/jaeger-embodiment-minecraft/src:${REPO_ROOT}/packages/jaeger-hardware/src:${REPO_ROOT}/packages/jaeger-realtime/src:${REPO_ROOT}/packages/jaeger-vision/src:${REPO_ROOT}/packages/jaeger-evals/src:${REPO_ROOT}/packages/jaeger-protocols/src"
+STANDALONE_SRC_PATHS="${REPO_ROOT}/packages/jaeger-contracts/src:${REPO_ROOT}/packages/jaeger-models/src:${REPO_ROOT}/packages/jaeger-tools/src:${REPO_ROOT}/packages/jaeger-loop/src:${REPO_ROOT}/packages/jaeger-memory/src:${REPO_ROOT}/packages/jaeger-authority/src:${REPO_ROOT}/packages/jaeger-orchestration/src:${REPO_ROOT}/packages/jaeger-reliability/src:${REPO_ROOT}/packages/jaeger-events/src:${REPO_ROOT}/packages/jaeger-gateway/src:${REPO_ROOT}/packages/jaeger-mcp/src:${REPO_ROOT}/packages/jaeger-macos/src:${REPO_ROOT}/packages/jaeger-lsp/src:${REPO_ROOT}/packages/jaeger-checkpoints/src:${REPO_ROOT}/packages/jaeger-skills/src:${REPO_ROOT}/packages/jaeger-cognition/src:${REPO_ROOT}/packages/jaeger-avatar/src:${REPO_ROOT}/packages/jaeger-business/src:${REPO_ROOT}/packages/jaeger-youtube/src:${REPO_ROOT}/packages/jaeger-channels/src:${REPO_ROOT}/packages/jaeger-embodiment-minecraft/src:${REPO_ROOT}/packages/jaeger-hardware/src:${REPO_ROOT}/packages/jaeger-droid/src:${REPO_ROOT}/packages/jaeger-realtime/src:${REPO_ROOT}/packages/jaeger-vision/src:${REPO_ROOT}/packages/jaeger-evals/src:${REPO_ROOT}/packages/jaeger-protocols/src"
 export PYTHONPATH="${STANDALONE_SRC_PATHS}:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 VENV_PY="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 TARGET="${1:-all}"
 
 run_backend() {
-  echo "=== [BACKEND] 26 Standalone Packages + E2E + Layering + Hygiene ==="
+  echo "=== [BACKEND] 27 Standalone Packages + E2E + Layering + Hygiene ==="
   "${VENV_PY}" -B -m pytest -q --no-header -p no:cacheprovider \
     packages/jaeger-contracts/tests \
     packages/jaeger-models/tests \
@@ -35,6 +35,7 @@ run_backend() {
     packages/jaeger-channels/tests \
     packages/jaeger-embodiment-minecraft/tests \
     packages/jaeger-hardware/tests \
+    packages/jaeger-droid/tests \
     packages/jaeger-realtime/tests \
     packages/jaeger-vision/tests \
     packages/jaeger-evals/tests \

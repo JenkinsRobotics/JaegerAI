@@ -35,6 +35,7 @@ OPTIONAL_MODULES = (
     "jaeger_youtube",
     "jaeger_channels",
     "jaeger_embodiment_minecraft",
+    "jaeger_droid",
     "jaeger_hardware",
     "jaeger_realtime",
     "jaeger_vision",
