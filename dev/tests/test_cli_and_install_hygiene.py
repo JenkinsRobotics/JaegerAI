@@ -39,3 +39,27 @@ def test_setup_dry_run_and_pyproject_workspace_sync() -> None:
     assert '"packages/jaeger-ui-avatar"' in pyproj
     assert "jaeger-droid = { workspace = true }" in pyproj
     assert "jaeger-cognition = { workspace = true }" in pyproj
+
+
+def test_runtime_registers_embodiment_and_studio_tools(tmp_path: Path) -> None:
+    from jaeger_gateway import ModularGatewayRuntime
+
+    rt = ModularGatewayRuntime(state_dir=tmp_path / "state", workspace=tmp_path)
+    try:
+        names = {t["name"] for t in rt.tools.list_tools(limit=200)}
+        for expected in (
+            "droid_devices",
+            "droid_act",
+            "droid_capture",
+            "avatar_express",
+            "minecraft_status",
+            "minecraft_act",
+            "jp01_act",
+            "youtube_studio",
+            "media_archive",
+            "business_team",
+            "persistent_goals",
+        ):
+            assert expected in names, f"missing platform tool: {expected}"
+    finally:
+        rt.close()

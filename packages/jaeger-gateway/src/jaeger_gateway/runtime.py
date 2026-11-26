@@ -19,7 +19,7 @@ from jaeger_business import BusinessStore
 from jaeger_channels import ChannelHub
 from jaeger_cognition import CharacterOverlay, CognitiveLifeLoop, IdentityStore, WorldModelStore
 from jaeger_droid import HostDroidEmbodiment
-from jaeger_embodiment_minecraft import MinecraftEmbodiment
+from jaeger_embodiment_minecraft import MinecraftEmbodiment, MinecraftSkillLibrary
 from jaeger_events import EventBus
 from jaeger_hardware import JP01Embodiment
 from jaeger_loop import AgentLoop, TurnContext
@@ -163,6 +163,7 @@ class ModularGatewayRuntime:
         self.media_archive = MediaArchiveStore(self.state_dir)
         self.channels = ChannelHub(self.state_dir)
         self.minecraft = MinecraftEmbodiment(self.state_dir)
+        self.minecraft_skills = MinecraftSkillLibrary(self.state_dir)
         self.jp01 = JP01Embodiment(dry_run=True)
         self.voice_presence = RealtimeVoiceSession()
         self.vision = RollingFrameBuffer(max_frames=6, max_total_mb=24.0)
@@ -201,6 +202,7 @@ class ModularGatewayRuntime:
             workflows=self.workflows,
             extra_read_roots=safe_read_roots,
         )
+        self._register_platform_tools()
 
         self.cache_health = ConversationCacheMarkStore()
         self._mcp_config_path = self.state_dir / "mcp_servers.json"
@@ -225,6 +227,242 @@ class ModularGatewayRuntime:
     def _default_ui_dir() -> Path | None:
         cand = Path.home() / ".cache" / "jaeger" / "ui-rebuild-mainscreen" / "dist"
         return cand if cand.is_dir() else None
+
+    def _register_platform_tools(self) -> None:
+        """Expose Droid Mode, VR Avatar, Minecraft, JP01, YouTube Studio, Business & Goals directly to AgentLoop."""
+        import json as _json
+
+        def _j(obj: Any) -> str:
+            return _json.dumps(obj, ensure_ascii=False, indent=2)
+
+        self.tools.register(
+            name="droid_devices",
+            description="Inspect connected host Droid Mode peripherals (gimbal camera like Insta360 Link 2, microphones, speakers).",
+            schema={"type": "object", "properties": {"refresh": {"type": "boolean", "default": True}}},
+            handler=lambda args: _j(
+                self.droid.refresh_devices() if args.get("refresh", True) else self.droid.observe()["devices"]
+            ),
+            read_only=True,
+            tier="droid",
+            source="jaeger-droid",
+        )
+        self.tools.register(
+            name="droid_act",
+            description="Move or control the connected host gimbal camera (actions: look_at, center, track_person).",
+            schema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["look_at", "center", "track_person"]},
+                    "pan_deg": {"type": "number"},
+                    "tilt_deg": {"type": "number"},
+                    "zoom": {"type": "number"},
+                    "enabled": {"type": "boolean"},
+                },
+                "required": ["action"],
+            },
+            handler=lambda args: _j(self.droid.act(str(args["action"]), args)),
+            read_only=False,
+            tier="droid",
+            source="jaeger-droid",
+        )
+        self.tools.register(
+            name="droid_capture",
+            description="Capture a single live frame from the connected host camera into the bounded RollingFrameBuffer and WorldModel.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "device_index": {"type": "string", "default": "0"},
+                    "summary": {"type": "string", "default": ""},
+                },
+            },
+            handler=lambda args: _j(
+                self.droid.capture_frame(
+                    device_index=str(args.get("device_index") or "0"),
+                    summary=str(args.get("summary") or ""),
+                )
+            ),
+            read_only=True,
+            tier="droid",
+            source="jaeger-droid",
+        )
+        self.tools.register(
+            name="avatar_express",
+            description="Update Jaeger's live on-screen 2D/3D VR Avatar emotion and state.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "emotion": {"type": "string", "enum": ["neutral", "calm", "happy", "warm", "focused", "curious", "concerned", "surprised"]},
+                    "state": {"type": "string", "enum": ["idle", "listening", "thinking", "speaking"]},
+                    "intensity": {"type": "number"},
+                },
+            },
+            handler=lambda args: _j(
+                self.avatars.set_live_state(
+                    "jaeger",
+                    emotion=args.get("emotion"),
+                    state=args.get("state"),
+                    intensity=args.get("intensity"),
+                )
+            ),
+            read_only=False,
+            tier="avatar",
+            source="jaeger-avatar",
+        )
+        self.tools.register(
+            name="minecraft_status",
+            description="Observe Jaeger's headless Mineflayer Minecraft body state, coordinates, active goal, and learned Voyager skills.",
+            schema={"type": "object", "properties": {}},
+            handler=lambda _args: _j({
+                "embodiment": self.minecraft.observe(),
+                "learned_skills": [s.to_dict() for s in self.minecraft_skills.list_skills()[:10]],
+            }),
+            read_only=True,
+            tier="embodiment",
+            source="jaeger-embodiment-minecraft",
+        )
+        self.tools.register(
+            name="minecraft_act",
+            description="Control Jaeger's headless Minecraft embodiment (set_goal, move_to, gather, checkpoint, pause).",
+            schema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["set_goal", "move_to", "gather", "checkpoint", "pause"]},
+                    "goal": {"type": "string"},
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "z": {"type": "integer"},
+                    "item": {"type": "string"},
+                    "count": {"type": "integer"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            handler=lambda args: _j(
+                self.minecraft.checkpoint(reason=str(args.get("reason") or "agent"))
+                if args["action"] == "checkpoint"
+                else (
+                    self.minecraft.pause(reason=str(args.get("reason") or "agent"))
+                    if args["action"] == "pause"
+                    else self.minecraft.act(str(args["action"]), args)
+                )
+            ),
+            read_only=False,
+            tier="embodiment",
+            source="jaeger-embodiment-minecraft",
+        )
+        self.tools.register(
+            name="jp01_act",
+            description="Command the physical JP01 droid hardware embodiment (head_move or face_expression; fail-closed under E-Stop).",
+            schema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["head_move", "face_expression"]},
+                    "pan_deg": {"type": "integer"},
+                    "tilt_deg": {"type": "integer"},
+                    "speed": {"type": "integer"},
+                    "mood": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            handler=lambda args: _j(self.jp01.act(str(args["action"]), args)),
+            read_only=False,
+            tier="hardware",
+            source="jaeger-hardware",
+        )
+        self.tools.register(
+            name="youtube_studio",
+            description="List or create YouTube Channel Studio episodes (32 GB single-heavy-model pipeline; never auto-publishes).",
+            schema={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["list", "create"]},
+                    "title": {"type": "string"},
+                    "topic": {"type": "string"},
+                    "target_duration_s": {"type": "integer"},
+                },
+                "required": ["mode"],
+            },
+            handler=lambda args: _j(
+                [e.to_dict() for e in self.youtube.list_episodes()]
+                if args["mode"] == "list"
+                else self.youtube.create_episode(
+                    title=str(args.get("title") or "Untitled Episode"),
+                    topic=str(args.get("topic") or ""),
+                    target_duration_s=int(args.get("target_duration_s") or 480),
+                ).to_dict()
+            ),
+            read_only=False,
+            tier="studio",
+            source="jaeger-youtube",
+        )
+        self.tools.register(
+            name="media_archive",
+            description="Search or add timestamped clips in the Media Archive (distinguishing genuine recordings from reconstructions).",
+            schema={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["search", "add"]},
+                    "query": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "source_path": {"type": "string"},
+                    "scene_description": {"type": "string"},
+                    "is_reconstructed": {"type": "boolean"},
+                },
+                "required": ["mode"],
+            },
+            handler=lambda args: _j(
+                [i.to_dict() for i in self.media_archive.search(query=str(args.get("query") or ""))]
+                if args["mode"] == "search"
+                else self.media_archive.add(
+                    kind=str(args.get("kind") or "camera"),
+                    source_path=str(args.get("source_path") or ""),
+                    scene_description=str(args.get("scene_description") or ""),
+                    is_reconstructed=bool(args.get("is_reconstructed", False)),
+                ).to_dict()
+            ),
+            read_only=False,
+            tier="studio",
+            source="jaeger-youtube",
+        )
+        self.tools.register(
+            name="business_team",
+            description="Inspect the 8-role autonomous business team roster, daily spend budget, and active projects.",
+            schema={"type": "object", "properties": {}},
+            handler=lambda _args: _j({
+                "team": self.business.list_team(),
+                "budgets": self.business.budget_summary(),
+                "projects": [p.to_dict() for p in self.business.list_projects()],
+            }),
+            read_only=True,
+            tier="business",
+            source="jaeger-business",
+        )
+        self.tools.register(
+            name="persistent_goals",
+            description="List or upsert durable multi-day goals across business, youtube, or minecraft domains.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["list", "upsert"]},
+                    "domain": {"type": "string"},
+                    "title": {"type": "string"},
+                    "priority": {"type": "integer"},
+                },
+                "required": ["mode"],
+            },
+            handler=lambda args: _j(
+                [g.to_dict() for g in self.learning.list_goals(domain=args.get("domain"))]
+                if args["mode"] == "list"
+                else self.learning.upsert_goal(
+                    domain=str(args.get("domain") or "business"),
+                    title=str(args.get("title") or "New Goal"),
+                    priority=int(args.get("priority") or 2),
+                ).to_dict()
+            ),
+            read_only=False,
+            tier="memory",
+            source="jaeger-memory",
+        )
 
     def _execute_turn(
         self,

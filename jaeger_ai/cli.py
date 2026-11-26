@@ -116,6 +116,8 @@ def _stream_turn(session_id: str, prompt: str) -> int:
                         if started_thinking:
                             sys.stdout.write(f"{_RESET}\n")
                             started_thinking = False
+                        elif saw_text:
+                            sys.stdout.write("\n")
                         print(f"{_YELLOW}⚙ tool:{payload.get('tool')}{_RESET} {_DIM}{json.dumps(payload.get('arguments') or {})[:120]}{_RESET}")
                     elif event_type == "tool.completed":
                         print(f"{_GREEN}✓ {payload.get('tool')}{_RESET} {_DIM}({payload.get('duration_ms', 0)}ms){_RESET}")
