@@ -59,12 +59,18 @@ class ControlPlaneInspector:
 
     name = "control_plane"
 
-    def __init__(self, *, global_stop_fn: Callable[[], bool] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        global_stop_fn: Callable[[], bool] | None = None,
+        embodiment_enabled: bool = False,
+    ) -> None:
         self._global_stop_fn = global_stop_fn
+        self._embodiment_enabled = bool(embodiment_enabled)
 
     def inspect(self, proposal: ActionProposal) -> PolicyVerdict | None:
         raw_name = str(proposal.tool_name or "").strip().lower()
-        if raw_name.startswith("mc_") or "minecraft" in raw_name:
+        if not self._embodiment_enabled and (raw_name.startswith("mc_") or "minecraft" in raw_name):
             return PolicyVerdict(
                 DecisionKind.DENY,
                 "Embodiment is disabled until the control-plane release gate passes.",

@@ -31,13 +31,17 @@ class PolicyEngine:
         name: str = "jaeger_authority",
         rules: PermissionRules | None = None,
         global_stop_fn: Callable[[], bool] | None = None,
+        embodiment_enabled: bool = False,
         extra_denied_paths: Sequence[Path] = (),
         read_allowed_roots: Sequence[Path] = (),
         pre_hook: HookFn | None = None,
         extra_inspectors: Sequence[ToolInspector] = (),
     ) -> None:
         self._name = name
-        self._control = ControlPlaneInspector(global_stop_fn=global_stop_fn)
+        self._control = ControlPlaneInspector(
+            global_stop_fn=global_stop_fn,
+            embodiment_enabled=embodiment_enabled,
+        )
         self._pre_hook = pre_hook
         self._safety_inspectors: tuple[ToolInspector, ...] = (
             ActorTrustInspector(),
