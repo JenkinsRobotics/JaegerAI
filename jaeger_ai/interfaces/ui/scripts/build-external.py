@@ -28,7 +28,7 @@ def main():
     snapshot = Path(tempfile.mkdtemp(prefix="build-", dir=cache))
     work = snapshot / "jaeger_ai" / "interfaces" / "ui"
 
-    for pkg_name in ("jaeger-ui-protocol", "jaeger-ui-sdk", "jaeger-ui-kit", "jaeger-ui-features"):
+    for pkg_name in ("jaeger-ui-protocol", "jaeger-ui-sdk", "jaeger-ui-kit", "jaeger-ui-avatar", "jaeger-ui-features"):
         pkg_src = repo / "packages" / pkg_name
         if pkg_src.is_dir():
             shutil.copytree(

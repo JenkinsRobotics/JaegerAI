@@ -14,6 +14,8 @@ from typing import Any, Mapping
 from aiohttp import web
 
 from jaeger_authority import MacOsSeatbeltSandbox, PolicyEngine, UnconfinedSandbox
+from jaeger_avatar import AvatarStore
+from jaeger_cognition import CognitiveLifeLoop, WorldModelStore
 from jaeger_events import EventBus
 from jaeger_loop import AgentLoop, TurnContext
 from jaeger_mcp import LiveMCPManager, load_mcp_server_configs
@@ -139,6 +141,18 @@ class ModularGatewayRuntime:
         self.workflows = WorkflowEngine(self.state_dir / "workflows.sqlite3")
         self.dry_run = DryRunSimulator()
         self.governor = ResourceGovernor(memory_cap_gb=24.0, idle_cooldown_s=60.0)
+        self.world = WorldModelStore(self.state_dir)
+        self.avatars = AvatarStore(self.state_dir)
+        self.cognition = CognitiveLifeLoop(
+            world=self.world,
+            governor=self.governor,
+            tick_interval_s=15.0,
+            on_state_change=lambda st: self.avatars.set_live_state(
+                "jaeger",
+                emotion=str(st.get("emotion") or "warm"),
+                state=str(st.get("mode") or "observing"),
+            ),
+        )
         self.store = GatewayStore(self.state_dir / "modular_gateway.sqlite3")
         self.hub = SessionEventHub()
         self.reliability = ReliabilityEngine(repeat_threshold=4)
@@ -274,6 +288,9 @@ class ModularGatewayRuntime:
             workflows_engine=self.workflows,
             dry_run_simulator=self.dry_run,
             governor=self.governor,
+            cognition_loop=self.cognition,
+            world_model=self.world,
+            avatar_store=self.avatars,
             memory_store=self.memory,
             learning_store=self.learning,
             skills_provider=self._discover_skills,

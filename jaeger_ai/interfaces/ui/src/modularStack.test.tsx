@@ -14,10 +14,15 @@ import {
 } from "@jaeger/ui-sdk";
 import {
   ApprovalCard,
+  CommandPalette,
+  ContextXrayBar,
   ScrollFollowMachine,
+  StreamingMarkdown,
+  StudioTimeline,
   ThinkingDisclosure,
   ToolCallCard,
 } from "@jaeger/ui-kit";
+import { AvatarStage } from "@jaeger/ui-avatar";
 import { JAEGER_DESTINATIONS, JaegerApp, getDestination } from "@jaeger/ui-features";
 
 describe("100% Modular @jaeger/ui-* Frontend Stack", () => {
@@ -103,5 +108,27 @@ describe("100% Modular @jaeger/ui-* Frontend Stack", () => {
     expect(screen.getByTestId("jaeger-modular-app")).toBeTruthy();
     expect(screen.getByText("Jaeger Modular")).toBeTruthy();
     vi.unstubAllGlobals();
+  });
+
+  it("@jaeger/ui-avatar & Studio kit: renders 2D AvatarStage, Patchmark Markdown, ContextXray, Cmd+K & Timeline", () => {
+    const onDryRun = vi.fn();
+    render(
+      <div>
+        <AvatarStage name="Jaeger" mode="2d_character" emotion="happy" cognitiveMode="idle_life" />
+        <StreamingMarkdown text="**Bold** and `code`" />
+        <ContextXrayBar usedTokens={4096} maxTokens={32768} hostTotalGb={32} hostAvailableGb={12.4} activeModel="gemma4:12b" />
+        <CommandPalette open={true} onClose={() => {}} items={[{ id: "1", label: "Open Studio", group: "Nav", onSelect: () => {} }]} />
+        <StudioTimeline
+          projectTitle="Episode 1"
+          clips={[{ id: "c1", track: "video", label: "Intro", startSec: 0, durationSec: 30, status: "ready" }]}
+          onDryRun={onDryRun}
+        />
+      </div>,
+    );
+    expect(screen.getByText("Playing Minecraft")).toBeTruthy();
+    expect(screen.getByText("12.4/32 GB free")).toBeTruthy();
+    expect(screen.getByText("Open Studio")).toBeTruthy();
+    fireEvent.click(screen.getByText("Safe Dry-Run"));
+    expect(onDryRun).toHaveBeenCalled();
   });
 });
