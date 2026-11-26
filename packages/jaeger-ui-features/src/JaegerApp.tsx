@@ -197,6 +197,16 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const [models, setModels] = useState<Array<{ id: string }>>([]);
   const [activeModel, setActiveModel] = useState("");
   const [avatarUploadMsg, setAvatarUploadMsg] = useState("");
+  const [identity, setIdentity] = useState<{ ai_name?: string; owner_name?: string; mission?: string; active_character_id?: string | null }>({});
+  const [idAiName, setIdAiName] = useState("");
+  const [idOwnerName, setIdOwnerName] = useState("");
+  const [idSavedMsg, setIdSavedMsg] = useState("");
+  const [droidDevices, setDroidDevices] = useState<{ gimbal_camera?: { name: string } | null; cameras?: Array<{ name: string }>; microphones?: Array<{ name: string }>; speakers?: Array<{ name: string }> }>({});
+  const [droidPose, setDroidPose] = useState<{ pan_deg?: number; tilt_deg?: number; zoom?: number }>({});
+  const [droidStatusMsg, setDroidStatusMsg] = useState("");
+  const [mcpNewName, setMcpNewName] = useState("");
+  const [mcpNewUrl, setMcpNewUrl] = useState("");
+  const [mediaArchive, setMediaArchive] = useState<Array<{ asset_id: string; kind: string; scene_description: string; source_path: string; is_reconstructed: boolean }>>([]);
 
   const transportRef = useRef<HttpSseTransport | null>(null);
   const storeRef = useRef<SessionStore | null>(null);
@@ -329,6 +339,7 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
     } else if (dest === "tasks") {
       void fetchJson(`${baseUrl}/v1/workflows`).then((d) => setWorkflows(d.workflows ?? []));
       void fetchJson(`${baseUrl}/v1/youtube/episodes`).then((d) => setEpisodes(d.episodes ?? []));
+      void fetchJson(`${baseUrl}/v1/media/archive`).then((d) => setMediaArchive(d.items ?? []));
     } else if (dest === "memory") {
       void fetchJson(`${baseUrl}/v1/memory/facts`).then((d) => setFacts(d.facts ?? []));
       void fetchJson(`${baseUrl}/v1/memory/learning`).then((d) => setLearning(d.entries ?? []));
@@ -337,6 +348,19 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
       void fetchJson(`${baseUrl}/v1/models`).then((d) => {
         setModels(d.models ?? []);
         setActiveModel(d.active ?? "");
+      });
+      void fetchJson(`${baseUrl}/v1/identity`).then((d) => {
+        if (d.identity) {
+          setIdentity(d.identity);
+          setIdAiName(d.identity.ai_name ?? "Jaeger");
+          setIdOwnerName(d.identity.owner_name ?? "Owner");
+        }
+      });
+      void fetchJson(`${baseUrl}/v1/droid/devices?refresh=1`).then((d) => {
+        if (d.devices) setDroidDevices(d.devices);
+      });
+      void fetchJson(`${baseUrl}/v1/embodiment/status`).then((d) => {
+        if (d.droid?.pose) setDroidPose(d.droid.pose);
       });
       void refreshSystem();
     }
@@ -809,27 +833,65 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                     <strong>{ep.title}</strong>
                     <div className="jg-muted">Stage: {ep.stage} · Lead: {ep.assigned_role} · Clips: {ep.timeline_clips.length}</div>
                   </div>
-                  {!ep.owner_approved ? (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     <button
                       type="button"
-                      className="jg-btn"
+                      className="jg-btn-ghost"
                       onClick={async () => {
-                        await fetch(`${baseUrl}/v1/youtube/episodes/${encodeURIComponent(ep.episode_id)}/advance`, {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ stage: "ready_to_publish", owner_approved: true, approval_note: "Approved in Studio UI" }),
-                        });
-                        const d = await fetchJson(`${baseUrl}/v1/youtube/episodes`);
-                        setEpisodes(d.episodes ?? []);
+                        const d = await fetchJson(`${baseUrl}/v1/youtube/episodes/${encodeURIComponent(ep.episode_id)}/otio?fps=24`);
+                        if (d.otio) {
+                          const blob = new Blob([JSON.stringify(d.otio, null, 2)], { type: "application/json" });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `${ep.episode_id}.otio`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }
                       }}
                     >
-                      Approve to Publish
+                      Export .otio
                     </button>
-                  ) : (
-                    <span className="jg-pill">Approved</span>
-                  )}
+                    {!ep.owner_approved ? (
+                      <button
+                        type="button"
+                        className="jg-btn"
+                        onClick={async () => {
+                          await fetch(`${baseUrl}/v1/youtube/episodes/${encodeURIComponent(ep.episode_id)}/advance`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ stage: "ready_to_publish", owner_approved: true, approval_note: "Approved in Studio UI" }),
+                          });
+                          const d = await fetchJson(`${baseUrl}/v1/youtube/episodes`);
+                          setEpisodes(d.episodes ?? []);
+                        }}
+                      >
+                        Approve to Publish
+                      </button>
+                    ) : (
+                      <span className="jg-pill">Approved</span>
+                    )}
+                  </div>
                 </div>
               ))}
+            </div>
+            <div className="jg-card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <strong>Timestamped Media Archive (Capture → Archive → Edit)</strong>
+                <span className="jg-pill">{mediaArchive.length} clips</span>
+              </div>
+              {mediaArchive.length === 0 ? (
+                <div className="jg-muted" style={{ marginTop: 6 }}>
+                  No archived clips yet. Camera, screen, and Minecraft captures indexed via <code>/v1/media/archive</code> appear here.
+                </div>
+              ) : (
+                mediaArchive.slice(0, 8).map((item) => (
+                  <div key={item.asset_id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderTop: "1px solid var(--jg-border-subtle)" }}>
+                    <span><strong>[{item.kind}]</strong> {item.scene_description || item.source_path}</span>
+                    <span className="jg-pill">{item.is_reconstructed ? "Reconstructed" : "Genuine"}</span>
+                  </div>
+                ))
+              )}
             </div>
             {dryRunResult && (
               <div className="jg-card">
@@ -921,7 +983,40 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                 )}
               </div>
               <div className="jg-card">
-                <h4 style={{ marginTop: 0 }}>Live MCP Servers</h4>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <h4 style={{ margin: 0 }}>Live MCP Servers (Aether / Resolve / Blender)</h4>
+                  <button
+                    type="button"
+                    className="jg-btn-ghost"
+                    onClick={async () => {
+                      const r = await fetch(`${baseUrl}/v1/mcp/reload`, { method: "POST" });
+                      if (r.ok) setMcpServers((await r.json()).servers ?? []);
+                    }}
+                  >
+                    Hot-Reload
+                  </button>
+                </div>
+                <form
+                  style={{ display: "flex", gap: 6, marginBottom: 8 }}
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!mcpNewName.trim() || !mcpNewUrl.trim()) return;
+                    const r = await fetch(`${baseUrl}/v1/mcp/servers`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: mcpNewName.trim(), transport: "streamable_http", url: mcpNewUrl.trim(), connect: true }),
+                    });
+                    if (r.ok) {
+                      setMcpNewName("");
+                      setMcpNewUrl("");
+                      setMcpServers((await r.json()).servers ?? []);
+                    }
+                  }}
+                >
+                  <input className="jg-input" placeholder="Name (e.g. aether_studio)" value={mcpNewName} onChange={(e) => setMcpNewName(e.target.value)} />
+                  <input className="jg-input" placeholder="HTTP MCP URL" value={mcpNewUrl} onChange={(e) => setMcpNewUrl(e.target.value)} />
+                  <button type="submit" className="jg-btn">+ Connect</button>
+                </form>
                 {mcpServers.length === 0 ? (
                   <div className="jg-muted">No external MCP servers configured in ~/.jaeger/mcp_servers.json yet.</div>
                 ) : (
@@ -1083,6 +1178,80 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                 >
                   {resources.estop_active ? "Release Emergency Stop" : "Trigger Emergency Stop"}
                 </button>
+              </div>
+            </div>
+
+            <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <h3 style={{ margin: 0 }}>Digital Counterpart Identity (User-Owned)</h3>
+              <form
+                style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const r = await fetch(`${baseUrl}/v1/identity`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ai_name: idAiName.trim() || "Jaeger", owner_name: idOwnerName.trim() || "Owner" }),
+                  });
+                  if (r.ok) {
+                    const d = await r.json();
+                    setIdentity(d.identity ?? {});
+                    setIdSavedMsg(`Saved (${d.identity?.ai_name} · ${d.identity?.owner_name})`);
+                  }
+                }}
+              >
+                <input className="jg-input" style={{ maxWidth: 200 }} placeholder="AI Name (e.g. ARES)" value={idAiName} onChange={(e) => setIdAiName(e.target.value)} />
+                <input className="jg-input" style={{ maxWidth: 200 }} placeholder="Owner Name" value={idOwnerName} onChange={(e) => setIdOwnerName(e.target.value)} />
+                <button type="submit" className="jg-btn jg-btn-primary">Save Identity</button>
+                {identity.active_character_id && <span className="jg-pill">Character: {identity.active_character_id}</span>}
+                {idSavedMsg && <span className="jg-muted">{idSavedMsg}</span>}
+              </form>
+            </div>
+
+            <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <h3 style={{ margin: 0 }}>Droid Mode — Connected Host Peripherals</h3>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span className="jg-pill">Gimbal: {droidDevices.gimbal_camera?.name ?? "None detected"}</span>
+                <span className="jg-pill">Cameras: {droidDevices.cameras?.length ?? 0}</span>
+                <span className="jg-pill">Mics: {droidDevices.microphones?.length ?? 0}</span>
+                <span className="jg-pill">Speakers: {droidDevices.speakers?.length ?? 0}</span>
+                <span className="jg-pill">Pose: pan {droidPose.pan_deg ?? 0}° · tilt {droidPose.tilt_deg ?? 0}°</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {[
+                  { label: "Look Left", action: "look_at", params: { pan_deg: -35, tilt_deg: 0 } },
+                  { label: "Center Gimbal", action: "center", params: {} },
+                  { label: "Look Right", action: "look_at", params: { pan_deg: 35, tilt_deg: 0 } },
+                ].map((cmd) => (
+                  <button
+                    key={cmd.label}
+                    type="button"
+                    className="jg-btn"
+                    onClick={async () => {
+                      const r = await fetch(`${baseUrl}/v1/embodiment/droid/act`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: cmd.action, params: cmd.params }),
+                      });
+                      const d = await r.json();
+                      if (d.pose) setDroidPose(d.pose);
+                      setDroidStatusMsg(d.ok ? `${cmd.label} OK` : d.error || "Refused");
+                    }}
+                  >
+                    {cmd.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="jg-btn"
+                  onClick={async () => {
+                    const r = await fetch(`${baseUrl}/v1/droid/capture`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device_index: "0" }) });
+                    const d = await r.json();
+                    setDroidStatusMsg(d.ok ? `Captured frame #${d.frame?.frame_id ?? 1}` : d.error || "Capture unavailable");
+                  }}
+                >
+                  Capture Camera Frame
+                </button>
+                {droidStatusMsg && <span className="jg-muted">{droidStatusMsg}</span>}
               </div>
             </div>
 
