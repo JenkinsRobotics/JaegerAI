@@ -49,6 +49,8 @@ from jaeger_loop import AgentLoop, LearningNudgeTracker, TurnContext
 from jaeger_mcp import (
     LiveMCPManager,
     MCPServerConfig,
+    build_preset_config,
+    list_mcp_presets,
     load_mcp_server_configs,
     remove_mcp_server_config,
     save_mcp_server_config,
@@ -368,7 +370,7 @@ class ModularGatewayRuntime:
         self.cache_health = ConversationCacheMarkStore()
         self._mcp_config_path = self.state_dir / "mcp_servers.json"
         mcp_configs = load_mcp_server_configs(self._mcp_config_path)
-        self.mcp = LiveMCPManager(mcp_configs)
+        self.mcp = LiveMCPManager(mcp_configs, image_dir=self.state_dir / "offload" / "mcp_images")
         if mcp_configs:
             try:
                 self.mcp.register_into_registry(self.tools)
@@ -1143,6 +1145,24 @@ class ModularGatewayRuntime:
             lambda args: self._droid_act(str(args["action"]), args),
             read_only=False,
             source="jaeger-droid",
+        )
+        _reg(
+            "inspect_image",
+            "Visually inspect a saved PNG/JPEG/WebP image file (e.g. an Aether-CAD viewport render saved by MCP) using Jaeger's local vision model.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "prompt": {"type": "string", "default": "Describe what you see accurately, including geometry, labels, and any visual defects."},
+                },
+                "required": ["path"],
+            },
+            lambda args: self._inspect_saved_image(
+                path=str(args["path"]),
+                prompt=str(args.get("prompt") or "Describe what you see accurately."),
+            ),
+            read_only=True,
+            source="jaeger-vision",
         )
         _reg(
             "droid_capture",
@@ -2427,25 +2447,85 @@ class ModularGatewayRuntime:
             })
         return found
 
+    def _inspect_saved_image(self, *, path: str, prompt: str) -> dict[str, Any]:
+        """Inspect a saved image under workspace or state_dir/offload with the local vision model."""
+        import base64
+        import json
+        from urllib.request import Request, urlopen
+
+        target = Path(path).expanduser().resolve()
+        allowed_roots = (self.workspace.resolve(), (self.state_dir / "offload").resolve())
+        if not any(target == r or r in target.parents for r in allowed_roots):
+            raise PermissionError("Image path must live inside workspace or ~/.jaeger/offload/")
+        if not target.is_file():
+            raise FileNotFoundError(f"Image file not found: {target}")
+        raw_bytes = target.read_bytes()
+        if len(raw_bytes) > 10 * 1024 * 1024:
+            raise ValueError("Image exceeds 10 MiB limit.")
+
+        model = self.routing.load().vision or "qwen3-vl:8b-instruct"
+        with self._video_model_lock:
+            acquired, reason = self.governor.acquire_heavy_model(
+                model, tier=PriorityTier.OWNER_WORK, owner_tag="image-inspect", estimated_gb=8.0,
+            )
+            if not acquired:
+                raise RuntimeError(f"Local vision model slot unavailable: {reason}.")
+            try:
+                payload = {
+                    "model": model,
+                    "prompt": prompt[:500],
+                    "stream": False,
+                    "images": [base64.b64encode(raw_bytes).decode("ascii")],
+                }
+                req = Request(
+                    "http://127.0.0.1:11434/api/generate",
+                    data=json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urlopen(req, timeout=60) as response:
+                    answer = str(json.load(response).get("response") or "").strip()
+                if not answer:
+                    raise RuntimeError("Local vision model returned no description.")
+                return {"ok": True, "path": str(target), "model": model, "observation": answer}
+            finally:
+                self.governor.release_heavy_model(model)
+
     def _upsert_mcp_server(self, spec: Mapping[str, Any], *, connect: bool = True) -> list[dict[str, Any]]:
-        name = str(spec.get("name") or "").strip()
-        if not name:
-            raise ValueError("MCP server name is required")
-        url = str(spec.get("url") or "").strip()
-        cmd = str(spec.get("command") or "").strip()
-        transport = str(spec.get("transport") or ("streamable_http" if url else "stdio")).strip().lower()
-        cfg = MCPServerConfig(
-            name=name,
-            transport=transport,
-            command=cmd,
-            args=tuple(str(a) for a in (spec.get("args") or ())),
-            env={str(k): str(v) for k, v in (spec.get("env") or {}).items()},
-            url=url,
-            headers={str(k): str(v) for k, v in (spec.get("headers") or {}).items()},
-            timeout_s=float(spec.get("timeout_s") or 30.0),
-            enabled=bool(spec.get("enabled", True)),
-            sandbox_workspace=str(spec.get("sandbox_workspace") or ""),
-        )
+        preset_id = str(spec.get("preset") or "").strip()
+        if preset_id:
+            cfg = build_preset_config(
+                preset_id,
+                url=str(spec["url"]).strip() if spec.get("url") else None,
+                bearer_token=str(spec.get("bearer_token") or "") or None,
+                command=str(spec["command"]).strip() if spec.get("command") else None,
+                args=list(spec["args"]) if isinstance(spec.get("args"), list) else None,
+                headers={str(k): str(v) for k, v in (spec.get("headers") or {}).items()} or None,
+                name=str(spec.get("name") or "").strip() or None,
+                timeout_s=float(spec.get("timeout_s") or 30.0),
+            )
+        else:
+            name = str(spec.get("name") or "").strip()
+            if not name:
+                raise ValueError("MCP server name is required")
+            url = str(spec.get("url") or "").strip()
+            cmd = str(spec.get("command") or "").strip()
+            transport = str(spec.get("transport") or ("streamable_http" if url else "stdio")).strip().lower()
+            headers = {str(k): str(v) for k, v in (spec.get("headers") or {}).items()}
+            tok = str(spec.get("bearer_token") or "").strip()
+            if tok and "Authorization" not in headers:
+                headers["Authorization"] = tok if tok.lower().startswith("bearer ") else f"Bearer {tok}"
+            cfg = MCPServerConfig(
+                name=name,
+                transport=transport,
+                command=cmd,
+                args=tuple(str(a) for a in (spec.get("args") or ())),
+                env={str(k): str(v) for k, v in (spec.get("env") or {}).items()},
+                url=url,
+                headers=headers,
+                timeout_s=float(spec.get("timeout_s") or 30.0),
+                enabled=bool(spec.get("enabled", True)),
+                sandbox_workspace=str(spec.get("sandbox_workspace") or ""),
+            )
         configs = save_mcp_server_config(self._mcp_config_path, cfg)
         if connect:
             return self.mcp.reload(configs, registry=self.tools)

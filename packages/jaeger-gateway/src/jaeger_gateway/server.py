@@ -15,6 +15,7 @@ from typing import Any, Callable
 from aiohttp import web
 from jaeger_avatar import AvatarError, build_viseme_timeline
 from jaeger_cognition import CharacterOverlay
+from jaeger_mcp import list_mcp_presets
 from jaeger_youtube import export_episode_to_otio, plan_phased_research, probe_youtube_toolchain
 
 from .auth import GatewayAuthPolicy, _is_valid_local_host, _is_valid_ts_net_host
@@ -658,7 +659,11 @@ def create_gateway_app(
 
     async def list_mcp_servers(_request: web.Request) -> web.Response:
         items = mcp_provider() if mcp_provider is not None else []
-        return web.json_response({"ok": True, "servers": items, "count": len(items)})
+        return web.json_response({"ok": True, "servers": items, "count": len(items), "presets": list_mcp_presets()})
+
+    async def get_mcp_presets(_request: web.Request) -> web.Response:
+        presets = list_mcp_presets()
+        return web.json_response({"ok": True, "presets": presets, "count": len(presets)})
 
     async def list_workflows(request: web.Request) -> web.Response:
         if workflows_engine is None:
@@ -1712,6 +1717,7 @@ def create_gateway_app(
     app.router.add_post("/v1/onboarding/complete", post_onboarding_complete)
     app.router.add_get("/v1/skills", list_skills)
     app.router.add_get("/v1/mcp/servers", list_mcp_servers)
+    app.router.add_get("/v1/mcp/presets", get_mcp_presets)
     app.router.add_post("/v1/mcp/servers", upsert_mcp_server)
     app.router.add_delete("/v1/mcp/servers/{name}", delete_mcp_server)
     app.router.add_post("/v1/mcp/reload", reload_mcp_servers)
