@@ -2167,7 +2167,16 @@ class ModularGatewayRuntime:
 
     def _runtime_info(self) -> dict[str, Any]:
         base = self._base_model()
-        ollama_probe = base.probe() if isinstance(base, OllamaModel) else {"ok": True}
+        now = time.monotonic()
+        cached_at, cached_probe = getattr(self, "_ollama_probe_cache", (0.0, None))
+        if isinstance(base, OllamaModel):
+            if cached_probe is not None and (now - cached_at) < 15.0:
+                ollama_probe = cached_probe
+            else:
+                ollama_probe = base.probe()
+                self._ollama_probe_cache = (now, ollama_probe)
+        else:
+            ollama_probe = {"ok": True}
         return {
             "model": getattr(base, "model_id", base.name),
             "routing": self.routing.load().to_dict(),

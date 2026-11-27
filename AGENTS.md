@@ -1,6 +1,6 @@
 # JaegerAI — Developer & Agent Operating Guide
 
-This repository is a **100% modular, local-first cognitive AI platform** built on **29 standalone Python packages** and **5 standalone React 19 UI packages** under `packages/`.
+This repository is a **100% modular, local-first cognitive AI platform** built on **30 standalone Python packages** and **6 standalone React 19 UI packages** under `packages/`.
 
 ## Golden Rules
 
