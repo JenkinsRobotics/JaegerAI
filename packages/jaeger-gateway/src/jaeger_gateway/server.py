@@ -173,6 +173,9 @@ def create_gateway_app(
     def _owner_local_only(request: web.Request) -> bool:
         return request[ACTOR_KEY] == "owner:loopback" and request.remote in ("127.0.0.1", "::1")
 
+    def _is_owner_actor(request: web.Request) -> bool:
+        return request[ACTOR_KEY].startswith("owner:")
+
     async def _strict_json_object(request: web.Request) -> dict[str, Any] | web.Response:
         if request.content_type != "application/json":
             return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
@@ -617,8 +620,8 @@ def create_gateway_app(
         return web.json_response({"ok": True, **routing_provider()})
 
     async def put_model_routing(request: web.Request) -> web.Response:
-        if not _owner_local_only(request):
-            return web.json_response({"ok": False, "error": "Model routing is owner-local only."}, status=403)
+        if not _is_owner_actor(request):
+            return web.json_response({"ok": False, "error": "Model routing requires owner access."}, status=403)
         if routing_updater is None:
             return web.json_response({"ok": False, "error": "model routing unavailable"}, status=501)
         body = await _strict_json_object(request)
@@ -632,8 +635,8 @@ def create_gateway_app(
         return web.json_response({"ok": True, **onboarding_provider()})
 
     async def post_onboarding_complete(request: web.Request) -> web.Response:
-        if not _owner_local_only(request):
-            return web.json_response({"ok": False, "error": "Onboarding is owner-local only."}, status=403)
+        if not _is_owner_actor(request):
+            return web.json_response({"ok": False, "error": "Onboarding requires owner access."}, status=403)
         if onboarding_completer is None:
             return web.json_response({"ok": False, "error": "onboarding unavailable"}, status=501)
         body = await _strict_json_object(request)
@@ -751,13 +754,15 @@ def create_gateway_app(
         })
 
     async def post_cognition_autonomy(request: web.Request) -> web.Response:
-        if not _owner_local_only(request):
-            return web.json_response({"ok": False, "error": "Autonomy control is owner-local only."}, status=403)
+        if not _is_owner_actor(request):
+            return web.json_response({"ok": False, "error": "Autonomy control requires owner access."}, status=403)
         if initiative_engine is None:
             return web.json_response({"ok": False, "error": "initiative engine unavailable"}, status=501)
         body = await _strict_json_object(request)
         if isinstance(body, web.Response):
             return body
+        if "elevated" in body and not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Elevated mode toggle is owner-local only."}, status=403)
         updated = False
         kwargs: dict[str, Any] = {}
         for k in ("enabled", "cooldown_s", "max_actions_per_hour", "active_start_hour", "active_end_hour"):
