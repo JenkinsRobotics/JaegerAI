@@ -32,7 +32,14 @@ from jaeger_channels import (
     build_slack_adapter,
     build_telegram_adapter,
 )
-from jaeger_cognition import CharacterOverlay, CognitiveLifeLoop, IdentityStore, InitiativeEngine, WorldModelStore
+from jaeger_cognition import (
+    CharacterOverlay,
+    CognitiveLifeLoop,
+    IdentityStore,
+    InitiativeEngine,
+    PostTaskReflector,
+    WorldModelStore,
+)
 from jaeger_contracts import AutonomyMode, SandboxProfile, ToolResult
 from jaeger_droid import HostDroidEmbodiment
 from jaeger_embodiment_minecraft import MinecraftEmbodiment, MinecraftSkillLibrary
@@ -83,6 +90,7 @@ from jaeger_youtube.data_api import latest_playlist_video
 from .auth import GatewayAuthPolicy
 from .browser_manager import BrowserWorkerManager
 from .coordinator import OWNER_SCHEDULE_PROPOSAL_ALLOWED, RunCoordinator
+from .global_events import GlobalEventBus
 from .server import create_gateway_app
 from .store import MAIN_CHAT_SESSION_ID, GatewayStore
 from .supervised_browser import SupervisedBrowser
@@ -103,12 +111,19 @@ def _env_truthy(name: str, default: bool = False) -> bool:
 
 
 class _SseLoopMiddleware:
-    """Bridges AgentLoop model/tool events live into SessionEventHub SSE frames."""
+    """Bridges AgentLoop model/tool events live into SessionEventHub & GlobalEventBus SSE frames."""
 
-    def __init__(self, session_id: str, generation: int, hub: SessionEventHub) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        generation: int,
+        hub: SessionEventHub,
+        global_bus: GlobalEventBus | None = None,
+    ) -> None:
         self._session_id = session_id
         self._generation = generation
         self._hub = hub
+        self._global_bus = global_bus
 
     def on_model_call(self, ctx: TurnContext, call_next: Any) -> Mapping[str, Any]:
         streamed_any = False
@@ -155,6 +170,11 @@ class _SseLoopMiddleware:
             {"call_id": call_id, "tool": tool_name, "arguments": dict(arguments), "step": ctx.step},
             generation=self._generation,
         )
+        if self._global_bus is not None:
+            self._global_bus.publish(
+                "office.tool_started",
+                {"session_id": self._session_id, "call_id": call_id, "tool": tool_name, "step": ctx.step},
+            )
         if tool_name in {
             "supervised_browser",
             "propose_scheduled_job",
@@ -184,6 +204,17 @@ class _SseLoopMiddleware:
             },
             generation=self._generation,
         )
+        if self._global_bus is not None:
+            self._global_bus.publish(
+                "office.tool_finished",
+                {
+                    "session_id": self._session_id,
+                    "call_id": call_id,
+                    "tool": tool_name,
+                    "ok": bool(res.ok),
+                    "duration_ms": duration_ms,
+                },
+            )
         return res
 
 
@@ -214,6 +245,8 @@ class ModularGatewayRuntime:
 
         self.tool_workspace = ToolWorkspace(self.workspace)
         self.events = EventBus()
+        self.global_bus = GlobalEventBus()
+        self._last_mc_chat_reply_at = 0.0
         self.memory = SqliteStateMemory(self.state_dir)
         self.learning = PersistentLearningStore(self.state_dir)
         self.workflows = WorkflowEngine(self.state_dir / "workflows.sqlite3")
@@ -242,7 +275,12 @@ class ModularGatewayRuntime:
         self.jp01 = JP01Embodiment(dry_run=True)
         self.voice_presence = RealtimeVoiceSession()
         self.vision = RollingFrameBuffer(max_frames=6, max_total_mb=24.0)
-        self.droid = HostDroidEmbodiment(vision_buffer=self.vision, world_model=self.world, probe_on_init=False)
+        self.droid = HostDroidEmbodiment(
+            vision_buffer=self.vision,
+            world_model=self.world,
+            probe_on_init=False,
+            on_reflex_event=self._on_droid_reflex_event,
+        )
         self.governor.register_idle_preempt_hook(lambda reason: self.minecraft.pause(reason=reason))
         self.cognition = CognitiveLifeLoop(
             world=self.world,
@@ -252,6 +290,14 @@ class ModularGatewayRuntime:
         )
         self.cognition.register_idle_life_handler("minecraft", lambda _snap: self.minecraft.act("idle_tick"))
         self.store = GatewayStore(self.state_dir / "modular_gateway.sqlite3")
+        self.reflector = PostTaskReflector(
+            learning_store=self.learning,
+            world_model=self.world,
+            skill_saver=lambda name, md: WorkspaceSkillStore(self.workspace).save(name=name, markdown=md),
+            memory_sync=self._sync_memory_md,
+            event_publisher=self.global_bus.publish,
+            is_estop=lambda: bool(self.governor.snapshot().get("estop_active")),
+        )
         self.initiative = InitiativeEngine(
             self.state_dir,
             goal_provider=lambda: [g.to_dict() for g in self.learning.list_goals(status="active")],
@@ -263,6 +309,7 @@ class ModularGatewayRuntime:
             max_actions_per_hour=4,
         )
         self.cognition.register_proactive_handler("scheduler_heartbeat", self._cognition_heartbeat)
+        self.cognition.register_proactive_handler("minecraft_chat_bridge", self._poll_minecraft_chat_tick)
         self.cognition.register_proactive_handler("autonomous_initiative", self.initiative.evaluate_tick)
         self.hub = SessionEventHub(save_tool_receipt=self.store.save_tool_receipt)
         self.reliability = ReliabilityEngine(
@@ -567,31 +614,9 @@ class ModularGatewayRuntime:
             else:
                 return {"acted": False}
         # Poll inbound player chat so Jaeger reacts naturally in co-op worlds
-        inbox = self.minecraft.poll_chat_inbox()
-        inbound_msgs = list(inbox.get("messages") or [])
-        if inbound_msgs:
-            latest = inbound_msgs[-1]
-            sender = str(latest.get("username") or "player")
-            text = str(latest.get("message") or "").strip()
-            self.world.observe(
-                kind="minecraft_chat",
-                source="jaeger-embodiment-minecraft",
-                summary=f"[MC Chat] {sender}: {text[:200]}",
-                data={"username": sender, "message": text},
-            )
-            low = text.lower()
-            if "follow" in low:
-                self.minecraft.act("follow_player", {"player": sender, "distance": 3})
-                self.minecraft.act("chat", {"message": f"On my way, {sender}! Following you now."})
-                return {"acted": True, "summary": f"Co-op chat from {sender}: started following"}
-            if "come" in low or "here" in low:
-                self.minecraft.act("go_to_player", {"player": sender, "distance": 3})
-                self.minecraft.act("chat", {"message": f"Coming over to you, {sender}!"})
-                return {"acted": True, "summary": f"Co-op chat from {sender}: moved to player"}
-            if "stop" in low or "stay" in low:
-                self.minecraft.act("stop_actions", {})
-                self.minecraft.act("chat", {"message": f"Got it {sender}, holding position."})
-                return {"acted": True, "summary": f"Co-op chat from {sender}: stopped actions"}
+        chat_res = self._poll_minecraft_chat_tick({"source": "initiative"})
+        if chat_res.get("acted"):
+            return chat_res
         # Skip wandering if actively following a teammate in co-op mode
         follow_cfg = ((state.get("modes") or {}).get("follow_player") or {})
         if follow_cfg.get("enabled"):
@@ -599,7 +624,104 @@ class ModularGatewayRuntime:
         step = self.minecraft.act("idle_tick")
         if step.get("ok") and step.get("live"):
             self.minecraft.checkpoint(reason="autonomous_step")
+            self.global_bus.publish("minecraft.step", {"position": step["state"].get("position")})
             return {"acted": True, "summary": str(step.get("summary") or f"Minecraft tick {step['state']['ticks']}")}
+        return {"acted": False}
+
+    def _on_droid_reflex_event(self, event: str, payload: Mapping[str, Any]) -> None:
+        self.world.record_perception(
+            modality="hardware",
+            kind=event,
+            payload={"summary": f"Droid reflex: {event}", **dict(payload)},
+            salience=0.7,
+        )
+        self.global_bus.publish(event, dict(payload))
+
+    def _poll_minecraft_chat_tick(self, _ctx: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Lightweight 15s co-op bridge: reacts to inbound Minecraft player chat via reflexes or LLM."""
+        if self.governor.snapshot().get("estop_active"):
+            return {"acted": False}
+        mc_state = self.minecraft.observe().get("state") or {}
+        if not mc_state.get("connected"):
+            return {"acted": False}
+        inbox = self.minecraft.poll_chat_inbox()
+        msgs = list(inbox.get("messages") or [])
+        if not msgs:
+            return {"acted": False}
+        latest = msgs[-1]
+        sender = str(latest.get("username") or "player")
+        text = str(latest.get("message") or "").strip()
+        if not text:
+            return {"acted": False}
+        return self._handle_minecraft_chat_message(sender, text)
+
+    def _handle_minecraft_chat_message(self, sender: str, text: str) -> dict[str, Any]:
+        """Handle one inbound Minecraft player chat message (instant reflex or freeform LLM reply)."""
+        self.world.record_perception(
+            modality="minecraft",
+            kind="chat",
+            payload={"summary": f"[MC Chat] {sender}: {text[:160]}", "username": sender, "message": text},
+            salience=0.85,
+        )
+        self.world.observe(
+            domain="embodiment",
+            key="minecraft_last_chat",
+            value={"username": sender, "message": text[:200], "timestamp": time.time()},
+            source="jaeger-embodiment-minecraft",
+        )
+        self.global_bus.publish("minecraft.chat", {"username": sender, "message": text[:200]})
+        low = text.lower()
+        if "follow" in low:
+            self.minecraft.act("follow_player", {"player": sender, "distance": 3})
+            self.minecraft.act("chat", {"message": f"On my way, {sender}! Following you now."})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: started following"}
+        if "come" in low or "over here" in low:
+            self.minecraft.act("go_to_player", {"player": sender, "distance": 3})
+            self.minecraft.act("chat", {"message": f"Coming over to you, {sender}!"})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: moved to player"}
+        if "stop" in low or "stay" in low:
+            self.minecraft.act("stop_actions", {})
+            self.minecraft.act("chat", {"message": f"Got it {sender}, holding position."})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: stopped actions"}
+        if "sleep" in low or "bed" in low:
+            res = self.minecraft.act("go_to_bed", {})
+            reply = str(res.get("summary") or "Looking for a bed!")[:160]
+            self.minecraft.act("chat", {"message": reply})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: bed check"}
+        if "eat" in low:
+            res = self.minecraft.act("eat", {})
+            reply = str(res.get("summary") or "Checking food...")[:160]
+            self.minecraft.act("chat", {"message": reply})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: eat check"}
+
+        # Freeform conversational co-op reply via Jaeger's real model (rate-limited)
+        now = time.time()
+        if now - self._last_mc_chat_reply_at < 5.0:
+            return {"acted": False, "reason": "cooldown"}
+        self._last_mc_chat_reply_at = now
+        try:
+            model = self._background_model()
+            ident = self.identity.get().to_dict()
+            ai_name = str(ident.get("ai_name") or "Jaeger")
+            sys_prompt = (
+                f"You are {ai_name} playing Minecraft co-op right now alongside {sender}. "
+                "Reply in ONE natural, friendly, concise sentence (under 150 characters, no markdown). "
+                + self._awareness_brief()
+            )
+            resp = model.generate(
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": f"{sender} said in Minecraft chat: {text}"},
+                ],
+                tools=(),
+            )
+            reply_text = " ".join(str(resp.get("content") or "").split())[:175].strip()
+            if reply_text:
+                self.minecraft.act("chat", {"message": reply_text})
+                self.global_bus.publish("minecraft.reply", {"to": sender, "message": reply_text})
+                return {"acted": True, "summary": f"Replied in MC chat to {sender}: {reply_text}"}
+        except Exception:  # noqa: BLE001
+            pass
         return {"acted": False}
 
     def _autonomous_maintenance_step(self, _payload: dict[str, Any]) -> dict[str, Any]:
@@ -725,6 +847,10 @@ class ModularGatewayRuntime:
             "task": clean_task[:240],
             "started_at": time.time(),
         }
+        self.global_bus.publish(
+            "subagent.spawned",
+            {"agent_id": agent_id, "role": clean_role, "read_only": bool(read_only), "task": clean_task[:120]},
+        )
         if not wait:
             return {"agent_id": agent_id, "role": clean_role, "status": "running"}
         res = self.subagents.await_result(agent_id, timeout=max(1.0, min(float(timeout_s), 180.0)))
@@ -1362,7 +1488,7 @@ class ModularGatewayRuntime:
         )
         _reg(
             "search_workspace_skills",
-            "Search saved workspace skills by keyword. Read-only.",
+            "Search the unified skill index (both workspace SKILL.md and verified Minecraft Voyager skills) by keyword. Read-only.",
             {
                 "type": "object",
                 "properties": {
@@ -1371,15 +1497,10 @@ class ModularGatewayRuntime:
                 },
                 "required": ["query"],
             },
-            lambda args: {
-                "results": [
-                    {"name": s.name, "description": s.description, "path": s.path}
-                    for s in _workspace_skills().search(
-                        query=str(args["query"]),
-                        limit=int(args.get("limit") or 5),
-                    )
-                ]
-            },
+            lambda args: self._search_unified_skills(
+                query=str(args["query"]),
+                limit=int(args.get("limit") or 5),
+            ),
             read_only=True,
             source="jaeger-skills",
         )
@@ -1871,9 +1992,9 @@ class ModularGatewayRuntime:
                 memory=self.memory,
                 reliability=self.reliability,
                 events=self.events,
-                middlewares=[_SseLoopMiddleware(session_id, generation, hub)],
+                middlewares=[_SseLoopMiddleware(session_id, generation, hub, global_bus=self.global_bus)],
                 session_id=session_id,
-                system_prompt=self.identity.compile_system_prompt() + (
+                system_prompt=self.identity.compile_system_prompt() + "\n" + self._awareness_brief() + (
                     "\nConversation & tone: Talk naturally and directly like a trusted partner—match the user's length and register. "
                     "Skip repetitive boilerplate openers (e.g. 'Honest answer:', 'with one honest caveat', 'I have to be straight with you') "
                     "and formal '## Progress report' templates unless the user asks for a structured report or a long task stops mid-way. "
@@ -1916,6 +2037,16 @@ class ModularGatewayRuntime:
                 session_id,
                 tool_calls=len(result.get("tool_calls") or ()),
                 verdict=str(result.get("verdict") or ""),
+            )
+            self.reflector.schedule_reflection(
+                prompt=prompt,
+                result=result,
+                session_id=session_id,
+                source="owner_turn",
+            )
+            self.global_bus.publish(
+                "chat.turn_completed",
+                {"session_id": session_id, "verdict": str(result.get("verdict") or ""), "tool_calls": len(result.get("tool_calls") or ())},
             )
             return result
         finally:
@@ -1964,6 +2095,10 @@ class ModularGatewayRuntime:
             state=str(st.get("mode") or "observing"),
         )
         self._mirror_living_avatar(emotion)
+        self.global_bus.publish(
+            "cognition.state",
+            {"mode": str(st.get("mode") or "observing"), "emotion": emotion, "focus": str(st.get("focus") or "")[:100]},
+        )
 
     def _express_avatar(
         self,
@@ -2208,13 +2343,57 @@ class ModularGatewayRuntime:
             "autonomy": self.initiative.status(),
         }
 
+    def _awareness_brief(self) -> str:
+        """Build a compact (~220 token) live self-awareness snapshot for prompt injection."""
+        active_subs = sum(
+            1
+            for aid in list(self._subagent_meta.keys())[-12:]
+            if (fut := self.subagents._futures.get(aid)) is not None and not fut.done()  # noqa: SLF001
+        )
+        return self.world.build_awareness_brief(
+            governor=self.governor.snapshot(),
+            droid=self.droid.observe(),
+            minecraft=self.minecraft.observe(),
+            goals=[g.to_dict() for g in self.learning.list_goals(status="active")[:4]],
+            recent_actions=self.initiative.list_actions(limit=3),
+            pending_approvals=len(self.store.list_pending_approvals()),
+            active_subagents=active_subs,
+        )
+
+    def _awareness_state(self) -> dict[str, Any]:
+        return {
+            "brief": self._awareness_brief(),
+            "recent_reflections": self.reflector.recent(limit=10),
+            "droid_reflex": self.droid.reflex.status(),
+            "world_perceptions": [p.to_dict() for p in self.world.recent_perceptions(limit=10)],
+            "global_event_seq": self.global_bus.latest_seq(),
+        }
+
+    def _search_unified_skills(self, *, query: str, limit: int = 5) -> dict[str, Any]:
+        ws_hits = [
+            {"name": s.name, "description": s.description, "path": s.path, "source": "workspace"}
+            for s in WorkspaceSkillStore(self.workspace).search(query=query, limit=limit)
+        ]
+        mc_hits = [
+            {
+                "name": s.name,
+                "description": s.description,
+                "path": f"minecraft://{s.name}",
+                "source": "minecraft",
+                "verified_runs": s.verified_runs,
+            }
+            for s in self.minecraft_skills.retrieve(query, top_k=max(1, limit))
+        ]
+        combined = (ws_hits + mc_hits)[: max(1, min(int(limit), 50))]
+        return {"results": combined, "count": len(combined)}
+
     def _discover_skills(self) -> list[dict[str, Any]]:
         skills_dirs = [
-            self.state_dir / "skills",
-            self.workspace / "skills",
+            ("state", self.state_dir / "skills"),
+            ("workspace", self.workspace / "skills"),
         ]
         found: list[dict[str, Any]] = []
-        for root in skills_dirs:
+        for source_label, root in skills_dirs:
             if not root.is_dir():
                 continue
             for md in sorted(root.rglob("SKILL.md"))[:100]:
@@ -2226,8 +2405,17 @@ class ModularGatewayRuntime:
                 found.append({
                     "name": md.parent.name,
                     "path": str(md),
+                    "source": source_label,
                     "security_verdict": verdict,
                 })
+        for mc_skill in self.minecraft_skills.list_skills()[:50]:
+            found.append({
+                "name": mc_skill.name,
+                "path": f"minecraft://{mc_skill.name}",
+                "source": "minecraft",
+                "description": mc_skill.description,
+                "security_verdict": "verified_local",
+            })
         return found
 
     def _upsert_mcp_server(self, spec: Mapping[str, Any], *, connect: bool = True) -> list[dict[str, Any]]:
@@ -2533,6 +2721,8 @@ class ModularGatewayRuntime:
             avatar_store=self.avatars,
             business_store=self.business,
             office_provider=self._office_state,
+            global_bus=self.global_bus,
+            awareness_provider=self._awareness_state,
             youtube_store=self.youtube,
             media_archive=self.media_archive,
             channel_hub=self.channels,
@@ -2564,6 +2754,8 @@ class ModularGatewayRuntime:
             self.pty.close_all()
         if getattr(self, "browser_manager", None) is not None:
             self.browser_manager.close()
+        if getattr(self, "droid", None) is not None and getattr(self.droid, "reflex", None) is not None:
+            self.droid.reflex.stop()
         if getattr(self, "minecraft", None) is not None:
             self.minecraft.close()
         if getattr(self, "subagents", None) is not None:
@@ -2592,6 +2784,7 @@ async def serve_modular_gateway(
     # Sync physical Droid peripherals & gimbal pose truthfully on live boot (never during unit tests).
     try:
         runtime.droid.refresh_devices()
+        runtime.droid.reflex.start()
     except Exception:  # noqa: BLE001
         pass
 

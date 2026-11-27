@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { AwakeningWizard, MindAutonomyPanel } from "@jaeger/ui-features";
+import { AwakeningWizard, MindAutonomyPanel, ReturnBriefingBanner } from "@jaeger/ui-features";
 
 describe("First-Run Awakening Wizard & Live Mind Autonomy Panel", () => {
   it("completes the 3-step Awakening Wizard and posts to /v1/onboarding/complete", async () => {
@@ -89,6 +89,31 @@ describe("First-Run Awakening Wizard & Live Mind Autonomy Panel", () => {
     });
     expect(screen.getByRole("button", { name: "Run Step Now" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    fetchSpy.mockRestore();
+  });
+
+  it("renders ReturnBriefingBanner when autonomous actions or approvals are waiting and lets user dismiss", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          summary: "Welcome back, Matthew.",
+          pending_approvals_count: 1,
+          recent_actions: [{ action_id: "act1", kind: "goal_step", summary: "Advanced Episode 02 script" }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const onOpenOffice = vi.fn();
+    render(<ReturnBriefingBanner baseUrl="" onOpenOffice={onOpenOffice} />);
+    await waitFor(() => {
+      expect(screen.getByText("While you were away")).toBeTruthy();
+      expect(screen.getByText(/Advanced Episode 02 script/)).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open Office" }));
+    expect(onOpenOffice).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText("While you were away")).toBeNull();
     fetchSpy.mockRestore();
   });
 });

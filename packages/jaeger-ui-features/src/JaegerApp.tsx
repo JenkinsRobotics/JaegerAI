@@ -22,6 +22,7 @@ import { AwakeningWizard } from "./AwakeningWizard";
 import { ConversationTimeline, type ConversationTopic } from "./ConversationTimeline";
 import { DroidVoice } from "./DroidVoice";
 import { MindAutonomyPanel } from "./MindAutonomyPanel";
+import { ReturnBriefingBanner } from "./ReturnBriefingBanner";
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import { ResearchPage } from "./ResearchPage";
 import { ToolsPage } from "./ToolsPage";
@@ -310,6 +311,7 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const [droidPose, setDroidPose] = useState<{ pan_deg?: number; tilt_deg?: number; zoom?: number; tracking?: boolean }>({});
   const [droidSleeping, setDroidSleeping] = useState(false);
   const [droidVoiceEnrolled, setDroidVoiceEnrolled] = useState<boolean | null>(null);
+  const [droidAutoPark, setDroidAutoPark] = useState<{ enabled: boolean; idle_park_s: number }>({ enabled: true, idle_park_s: 600 });
   const [droidCameraState, setDroidCameraState] = useState("ready");
   const [droidStatusMsg, setDroidStatusMsg] = useState("");
   const [droidBusy, setDroidBusy] = useState(false);
@@ -659,6 +661,12 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
     }
     if (typeof d.voice_enrolled === "boolean") {
       setDroidVoiceEnrolled(d.voice_enrolled);
+    }
+    if (d.reflex && typeof d.reflex === "object") {
+      setDroidAutoPark({
+        enabled: Boolean(d.reflex.auto_park_enabled),
+        idle_park_s: Number(d.reflex.idle_park_s || 600),
+      });
     }
     if (typeof d.estop_active === "boolean") {
       setResources((prev) => (prev.estop_active === d.estop_active ? prev : { ...prev, estop_active: d.estop_active }));
@@ -1463,6 +1471,34 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                 {droidVoiceEnrolled !== null && (
                   <span className="jg-pill">Voice ID: {droidVoiceEnrolled ? "Enrolled" : "Not enrolled"}</span>
                 )}
+                <button
+                  type="button"
+                  className="jg-pill"
+                  style={{ cursor: "pointer" }}
+                  title="Privacy reflex: automatically park camera when idle"
+                  onClick={async () => {
+                    const nextEnabled = !droidAutoPark.enabled;
+                    try {
+                      const r = await fetch(`${baseUrl}/v1/droid/reflex`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ auto_park_enabled: nextEnabled }),
+                      });
+                      const d = await r.json();
+                      if (d.ok && d.reflex) {
+                        setDroidAutoPark({
+                          enabled: Boolean(d.reflex.auto_park_enabled),
+                          idle_park_s: Number(d.reflex.idle_park_s || 600),
+                        });
+                        setDroidStatusMsg(nextEnabled ? `Privacy auto-park enabled (${Math.round((d.reflex.idle_park_s || 600) / 60)}m idle).` : "Privacy auto-park paused.");
+                      }
+                    } catch {
+                      setDroidStatusMsg("Could not update Droid auto-park reflex.");
+                    }
+                  }}
+                >
+                  Auto-Park: {droidAutoPark.enabled ? `${Math.round(droidAutoPark.idle_park_s / 60)}m` : "OFF"}
+                </button>
               </div>
               {droidVoiceEnrolled === false && (
                 <div className="jg-muted" role="status" style={{ fontSize: 12.5 }}>
@@ -1577,6 +1613,16 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                 visibleTopicId={visibleTopicId}
                 busy={loadingOlder} onJump={jumpToTopic} onResume={resumeTopic} onLatest={jumpToLatest} />
             <div className="jg-chat-column">
+              {dest === "chat" && (
+                <ReturnBriefingBanner
+                  baseUrl={baseUrl}
+                  onOpenOffice={() => setDest("office")}
+                  onOpenApprovals={() => {
+                    setRightSidebarTab("mind");
+                    setRightSidebarOpen(true);
+                  }}
+                />
+              )}
               <div
                 className="jg-content"
                 ref={viewportRef}

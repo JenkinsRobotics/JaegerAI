@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MinecraftRadarPeek } from "./MinecraftRadarPeek";
 import { OfficeEngine } from "./officeEngine";
 import type { OfficeAgentActivity, OfficeAgentRecord, OfficeSnapshot } from "./types";
 
@@ -54,6 +55,8 @@ export function OfficeWorkspace({
     window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
   const [actionNotice, setActionNotice] = useState("");
+  const [sseLive, setSseLive] = useState(false);
+  const [showMcPeek, setShowMcPeek] = useState(false);
   const dragRef = useRef<{ active: boolean; moved: boolean; startX: number; startY: number; panX: number; panY: number }>({
     active: false,
     moved: false,
@@ -91,9 +94,52 @@ export function OfficeWorkspace({
 
   useEffect(() => {
     void loadOfficeState();
-    const timer = window.setInterval(() => void loadOfficeState(), 3500);
-    return () => window.clearInterval(timer);
-  }, [loadOfficeState]);
+    let debounceTimer: number | undefined;
+    const scheduleRefresh = () => {
+      if (debounceTimer !== undefined) return;
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = undefined;
+        void loadOfficeState();
+      }, 220);
+    };
+
+    let es: EventSource | null = null;
+    if (!IS_TEST && typeof EventSource === "function") {
+      try {
+        es = new EventSource(`${baseUrl}/v1/events/global`);
+        es.onopen = () => setSseLive(true);
+        es.onerror = () => setSseLive(false);
+        const eventTypes = [
+          "global.connected",
+          "office.tool_started",
+          "office.tool_finished",
+          "subagent.spawned",
+          "droid.changed",
+          "droid.auto_parked",
+          "minecraft.changed",
+          "minecraft.chat",
+          "minecraft.reply",
+          "minecraft.step",
+          "cognition.state",
+          "cognition.reflection",
+          "chat.turn_completed",
+        ];
+        for (const evType of eventTypes) {
+          es.addEventListener(evType, scheduleRefresh);
+        }
+      } catch {
+        setSseLive(false);
+      }
+    }
+
+    const fallbackMs = es ? 15000 : 3500;
+    const timer = window.setInterval(() => void loadOfficeState(), fallbackMs);
+    return () => {
+      window.clearInterval(timer);
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
+      if (es) es.close();
+    };
+  }, [baseUrl, loadOfficeState]);
 
   useEffect(() => {
     if (engineRef.current) {
@@ -209,6 +255,7 @@ export function OfficeWorkspace({
           <strong style={{ fontSize: 15 }}>Jaeger Virtual Office</strong>
           <span className="jg-pill">{snapshot.agents.length} roster</span>
           <span className="jg-pill">{activeWorkersCount} active</span>
+          {sseLive && <span className="jg-pill">Realtime SSE</span>}
           {snapshot.activeSubagents > 0 && (
             <span className="jg-pill">{snapshot.activeSubagents} live subagent(s)</span>
           )}
@@ -249,6 +296,14 @@ export function OfficeWorkspace({
             onClick={() => setZoom((z) => Math.min(4.2, Number((z + 0.3).toFixed(2))))}
           >
             +
+          </button>
+          <button
+            type="button"
+            className={showMcPeek ? "jg-btn jg-btn-primary" : "jg-btn-ghost"}
+            aria-pressed={showMcPeek}
+            onClick={() => setShowMcPeek((v) => !v)}
+          >
+            {showMcPeek ? "Hide MC Peek" : "Minecraft Peek"}
           </button>
           <button
             type="button"
@@ -440,6 +495,10 @@ export function OfficeWorkspace({
           </div>
         </div>
       </div>
+
+      {showMcPeek && (
+        <MinecraftRadarPeek baseUrl={baseUrl} onClose={() => setShowMcPeek(false)} />
+      )}
     </div>
   );
 }
