@@ -486,6 +486,100 @@ app.get("/chat-inbox", (req, res) => {
     });
 });
 
+function classifySurfaceBlock(name) {
+    const n = String(name || "air").toLowerCase();
+    if (n.includes("water")) return "water";
+    if (n.includes("lava") || n.includes("fire")) return "lava";
+    if (n.includes("leaves") || n.includes("vine")) return "leaves";
+    if (n.includes("log") || n.includes("wood") || n.includes("plank")) return "wood";
+    if (n.includes("_bed")) return "bed";
+    if (n.includes("chest") || n.includes("barrel")) return "chest";
+    if (n.includes("crafting_table") || n.includes("furnace")) return "craft";
+    if (n.includes("ore") || n.includes("diamond") || n.includes("iron_block")) return "ore";
+    if (n.includes("sand") || n.includes("gravel")) return "sand";
+    if (n.includes("snow") || n.includes("ice")) return "snow";
+    if (n.includes("grass") || n.includes("moss")) return "grass";
+    if (n.includes("dirt") || n.includes("mud") || n.includes("clay")) return "dirt";
+    if (n.includes("stone") || n.includes("cobble") || n.includes("deepslate") || n.includes("andesite") || n.includes("granite")) return "stone";
+    if (n === "air" || n === "cave_air" || n === "void_air") return "air";
+    return "other";
+}
+
+app.get("/radar", (req, res) => {
+    if (!bot || !bot.entity) {
+        res.status(400).json({ ok: false, connected: false, error: "Bot not spawned" });
+        return;
+    }
+    const radius = Math.max(4, Math.min(Number(req.query.radius || 8), 10));
+    const bx = Math.floor(bot.entity.position.x);
+    const by = Math.floor(bot.entity.position.y);
+    const bz = Math.floor(bot.entity.position.z);
+    const grid = [];
+
+    for (let dz = -radius; dz <= radius; dz++) {
+        const row = [];
+        for (let dx = -radius; dx <= radius; dx++) {
+            let foundKind = "air";
+            let foundDy = 0;
+            for (let dy = 5; dy >= -5; dy--) {
+                const blk = bot.blockAt(bot.entity.position.floored().offset(dx, dy, dz));
+                if (!blk) continue;
+                const bname = blk.name || "air";
+                if (bname !== "air" && bname !== "cave_air" && bname !== "void_air" && bname !== "short_grass" && bname !== "tall_grass") {
+                    foundKind = classifySurfaceBlock(bname);
+                    foundDy = dy;
+                    break;
+                }
+            }
+            row.push([foundKind, foundDy]);
+        }
+        grid.push(row);
+    }
+
+    const entities = [];
+    for (const ent of Object.values(bot.entities || {})) {
+        if (!ent || !ent.position || ent === bot.entity) continue;
+        const dx = ent.position.x - bot.entity.position.x;
+        const dz = ent.position.z - bot.entity.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > radius + 2) continue;
+        entities.push({
+            name: String(ent.username || ent.name || ent.type || "entity"),
+            type: String(ent.type || "mob"),
+            dx: Number(dx.toFixed(1)),
+            dz: Number(dz.toFixed(1)),
+            distance: Number(dist.toFixed(1)),
+        });
+    }
+    entities.sort((a, b) => a.distance - b.distance);
+
+    const inv = {};
+    for (const item of bot.inventory ? bot.inventory.items() : []) {
+        inv[item.name] = (inv[item.name] || 0) + item.count;
+    }
+
+    res.json({
+        ok: true,
+        connected: true,
+        radius,
+        bot: {
+            username: bot.username,
+            x: bx,
+            y: by,
+            z: bz,
+            yaw: Number((bot.entity.yaw || 0).toFixed(2)),
+            health: Number((bot.health || 0).toFixed(1)),
+            food: Number((bot.food || 0).toFixed(1)),
+        },
+        grid,
+        entities: entities.slice(0, 24),
+        nearby_players: coopActions.listNearbyPlayers(bot),
+        inventory: inv,
+        modes: modeManager ? modeManager.getStatus().modes : {},
+        chat_inbox: chatInbox.slice(-10),
+    });
+});
+
 app.post("/coop", async (req, res) => {
     if (!bot || !bot.entity) {
         res.status(400).json({ ok: false, error: "Bot not spawned" });

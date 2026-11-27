@@ -343,6 +343,53 @@ class MinecraftEmbodiment:
                 "bridge": self.bridge_info(),
             }
 
+    def get_radar(self, *, radius: int = 8) -> dict[str, Any]:
+        """Fetch a lightweight 0-GPU live top-down terrain/entity/player radar slice."""
+        with self._lock:
+            live = bool(self._state.get("connected"))
+            snap = dict(self._state)
+        if not live:
+            return {
+                "ok": True,
+                "connected": False,
+                "radius": max(4, min(int(radius), 10)),
+                "bot": {
+                    "username": self._username,
+                    **(snap.get("position") or {"x": 0, "y": 64, "z": 0}),
+                    "health": snap.get("health", 20.0),
+                    "food": snap.get("food", 20.0),
+                    "biome": snap.get("biome", ""),
+                },
+                "grid": [],
+                "entities": [],
+                "nearby_players": list(snap.get("nearby_players") or []),
+                "inventory": dict(snap.get("inventory") or {}),
+                "modes": dict(snap.get("modes") or {}),
+                "chat_inbox": list(snap.get("chat_inbox") or [])[-10:],
+            }
+        try:
+            r = max(4, min(int(radius), 10))
+            data = self._bridge_get(f"/radar?radius={r}", timeout=6.0)
+            if isinstance(data, dict):
+                with self._lock:
+                    if isinstance(data.get("nearby_players"), list):
+                        self._state["nearby_players"] = data["nearby_players"]
+                    if isinstance(data.get("modes"), dict):
+                        self._state["modes"] = data["modes"]
+                    if isinstance(data.get("inventory"), dict):
+                        self._state["inventory"] = data["inventory"]
+                    if isinstance(data.get("bot"), dict):
+                        b = data["bot"]
+                        self._state["position"] = {"x": int(b.get("x", 0)), "y": int(b.get("y", 64)), "z": int(b.get("z", 0))}
+                        if "health" in b:
+                            self._state["health"] = float(b["health"])
+                        if "food" in b:
+                            self._state["food"] = float(b["food"])
+                return data
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            return {"ok": False, "connected": False, "error": str(exc)[:200]}
+        return {"ok": False, "connected": False, "error": "empty_radar"}
+
     def poll_chat_inbox(self, *, since_id: int | None = None) -> dict[str, Any]:
         """Poll inbound player chat messages & nearby players from the live Mineflayer bridge."""
         with self._lock:
