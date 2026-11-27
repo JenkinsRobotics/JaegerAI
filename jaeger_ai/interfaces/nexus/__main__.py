@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -53,7 +54,8 @@ def main(argv=None):
     actions = shell.Actions(gw, mon, bridge)
     port = a.port if a.port is not None else (8795 if a.browser else 0)
     screen = serve.Screen(bridge, actions, {'name': 'Jaeger', 'title': 'Jaeger AI', 'suggestions': SUGGEST,
-                                            'gateway': gw.url, 'webui': shell.WEBUI, 'face': json.loads(LOOK.read_text())}, port).start()
+                                            'gateway': gw.url, 'webui': shell.WEBUI, 'face': json.loads(LOOK.read_text()),
+                                            'company': os.environ.get('JAEGER_COMPANY', '')}, port).start()
     mon.start()
     if a.open:
         screen.open_link(a.open)

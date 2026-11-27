@@ -1,4 +1,4 @@
-// Jaeger AI's NexusUI screen, copied from Omni's: a header, the page rail (after Jaeger Avatar's) and the pages.
+// Jaeger AI's NexusUI screen, copied from Omni's, in the NexusUI app shell (app-shell/: Aether Studio's sidebar, no header).
 // Chat: the avatar (Jaeger Avatar's flat face in Jaeger's own frozen look, speaking with Jaeger Agent's Kokoro voice)
 // beside the chat, which runs on the Gateway. The other pages are the Swift app's native surfaces (INVENTORY.md).
 // `#pill` is Quick Ask.
@@ -15,11 +15,16 @@ import { Settings, Shell } from './Shell.tsx';
 import { Stage } from './Stage.tsx';
 import { moodFor } from './mood.ts';
 import { voice } from './voice.ts';
+import { AppShell, type ShellSection } from './app-shell/AppShell.tsx';
 
 const speaker = voice();   // her voice: each reply's sound, played here; the face's mouth follows its loudness
 type Seen = { at: string; kind: string; text: string };
 const PILL = location.hash === '#pill';
-const PAGES = [['chat', 'Chat'], ['status', 'Status & stack'], ['tasks', 'Tasks'], ['droid', 'Droid'], ['mac', 'Mac'], ['activity', 'Activity'], ['settings', 'Settings']];
+const SECTIONS: ShellSection[] = [
+  { id: 'workspace', title: 'Workspace', items: [{ id: 'chat', label: 'Chat', icon: 'comment' }, { id: 'activity', label: 'Activity', icon: 'history' }] },
+  { id: 'mac', title: 'Mac shell', items: [{ id: 'status', label: 'Status & stack', icon: 'dashboard' }, { id: 'tasks', label: 'Tasks', icon: 'tasks' },
+    { id: 'droid', label: 'Droid', icon: 'hardware' }, { id: 'mac', label: 'Mac', icon: 'display' }] },
+];
 
 function useAgent() {
   const [chat, setChat] = useState<ChatState>(empty);
@@ -98,20 +103,15 @@ function App() {
   const body = page === 'chat' ? <>{stage}<section className="pane">{chat}</section></>
     : <section className="pane page">{page === 'activity' ? agent : page === 'settings' ? <Settings /> : <Shell webui={cfg.webui} only={page} />}</section>;
 
+  const up = h?.ready ? 'connected' as const : 'offline' as const;
   return (
-    <div className="app">
-      <header className="bar">
-        <div className="brand"><i />{cfg.title}<span className="dim tag">NexusUI</span></div>
-        <div className="pill"><span className={`dot ${h?.ready ? 'ok' : ''}`} />{h?.brain ?? 'Connecting…'}</div>
-      </header>
-      <div className="frame">
-        <nav id="pages" aria-label="Pages">   {/* the page rail, after Jaeger Avatar's (app/web/index.html #pages) */}
-          {PAGES.map(([id, label]) => <button key={id} aria-selected={page === id} onClick={() => setPage(id)}>{label}</button>)}
-          <a className="site" href={cfg.webui} target="_blank" rel="noreferrer">Main screen (WebUI) ↗</a>
-        </nav>
-        <main className={`panes ${page === 'chat' ? 'avatar-chat' : 'one'}`}>{body}</main>
-      </div>
-    </div>
+    <AppShell id="jaeger-ai" brand={{ name: 'Jaeger', suffix: 'AI', mark: 'jaeger-mark.svg' }} sections={SECTIONS} current={page} onSelect={setPage}
+      tools={[{ id: 'webui', label: 'Main screen (WebUI)', icon: 'link', href: cfg.webui }]}
+      settings={{ id: 'settings', label: 'Settings', icon: 'settings' }}
+      profile={{ name: cfg.name, detail: h?.brain ?? 'Connecting…', avatar: 'jaeger-mark.svg', connection: up }}
+      status={{ name: cfg.title, connection: up, message: h?.voice ?? '', company: cfg.company }}>
+      <div className={`panes ${page === 'chat' ? 'avatar-chat' : 'one'}`}>{body}</div>
+    </AppShell>
   );
 }
 
