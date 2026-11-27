@@ -91,6 +91,10 @@ class RollingFrameBuffer:
             self._frames.popleft()
             self._pruned_count += 1
 
+    def latest_frame(self) -> CameraFrame | None:
+        with self._lock:
+            return self._frames[-1] if self._frames else None
+
     def recent_metadata(self) -> list[dict[str, Any]]:
         with self._lock:
             return [f.to_metadata() for f in self._frames]

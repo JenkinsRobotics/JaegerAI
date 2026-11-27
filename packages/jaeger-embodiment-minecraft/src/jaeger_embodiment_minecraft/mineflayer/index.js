@@ -22,21 +22,25 @@ const app = express();
 app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ limit: "50mb", extended: false }));
 
+app.get("/health", (_req, res) => {
+    res.json({ ok: true, connected: Boolean(bot && bot.entity), username: bot?.username || null });
+});
+
 app.post("/start", (req, res) => {
     if (bot) onDisconnect("Restarting bot");
     bot = null;
     console.log(req.body);
     bot = mineflayer.createBot({
-        host: "localhost", // minecraft server ip
-        port: req.body.port, // minecraft server port
-        username: "bot",
+        host: req.body.host || "127.0.0.1", // minecraft server ip
+        port: Number(req.body.port || 25565), // minecraft server port
+        username: req.body.username || "Jaeger",
         disableChatSigning: true,
         checkTimeoutInterval: 60 * 60 * 1000,
     });
     bot.once("error", onConnectionFailed);
 
     // Event subscriptions
-    bot.waitTicks = req.body.waitTicks;
+    bot.waitTicks = Number(req.body.waitTicks || 10);
     bot.globalTickCounter = 0;
     bot.stuckTickCounter = 0;
     bot.stuckPosList = [];
@@ -99,12 +103,15 @@ app.post("/start", (req, res) => {
         const tool = require("mineflayer-tool").plugin;
         const collectBlock = require("mineflayer-collectblock").plugin;
         const pvp = require("mineflayer-pvp").plugin;
-        const minecraftHawkEye = require("minecrafthawkeye");
+        const hawkeyeMod = require("minecrafthawkeye");
+        const minecraftHawkEye = typeof hawkeyeMod === "function" ? hawkeyeMod : (hawkeyeMod.default || hawkeyeMod.plugin);
         bot.loadPlugin(pathfinder);
         bot.loadPlugin(tool);
         bot.loadPlugin(collectBlock);
         bot.loadPlugin(pvp);
-        bot.loadPlugin(minecraftHawkEye);
+        if (typeof minecraftHawkEye === "function") {
+            bot.loadPlugin(minecraftHawkEye);
+        }
 
         // bot.collectBlock.movements.digCost = 0;
         // bot.collectBlock.movements.placeCost = 0;
@@ -399,7 +406,10 @@ app.post("/step", async (req, res) => {
 });
 
 app.post("/stop", (req, res) => {
-    bot.end();
+    if (bot) {
+        try { bot.end(); } catch {}
+        bot = null;
+    }
     res.json({
         message: "Bot stopped",
     });
