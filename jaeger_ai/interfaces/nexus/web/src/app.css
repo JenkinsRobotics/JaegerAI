@@ -6,13 +6,7 @@ body { background: var(--aether-color-bg-app); color: var(--aether-color-text); 
 button { font: inherit; color: inherit; cursor: pointer; }
 .loading { display: grid; place-items: center; height: 100%; color: var(--aether-color-text-dim); }
 
-.app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
-.bar { display: flex; align-items: center; gap: 14px; height: 52px; padding: 0 16px; background: var(--aether-color-bg-shell); border-bottom: 1px solid var(--aether-color-border-subtle); }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: var(--aether-font-weight-strong); font-size: 15px; }
-.brand i { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, var(--aether-color-accent), var(--aether-color-part)); }
-.pill { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: var(--aether-radius-pill); background: var(--aether-color-bg-control); color: var(--aether-color-text-soft); font-size: 12px; }
 .dot { display: inline-block; width: 8px; height: 8px; margin: 0 8px 0 10px; border-radius: 50%; background: var(--aether-color-text-faint); }
-.pill .dot { margin: 0; }
 .dot.ok { background: var(--aether-color-ok); }
 .dot.busy { background: var(--aether-color-accent); animation: pulse 1.2s infinite; }
 
@@ -118,7 +112,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .settings .add input:nth-of-type(2), .settings .add button { grid-column: span 2; }
 
 /* Jaeger AI's own additions: the Shell tab, the clipboard preview and the Quick Ask pill. */
-.tag { margin-left: 8px; font-size: 11px; font-weight: 400; padding: 1px 8px; border: 1px solid var(--aether-color-border-subtle); border-radius: var(--aether-radius-pill); }
 .reply-row { display: flex; gap: 14px; }
 .clip { max-width: var(--chat-width); margin: 0 auto 8px; background: var(--aether-color-bg-inset); border: 1px solid var(--aether-color-border-control); border-radius: 16px; padding: 10px 12px; }
 .clip-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
@@ -140,18 +133,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .chat.compact .composer-wrap { padding: 6px 10px 10px 0; }
 .chat.compact .msg { font-size: 13px; }
 
-/* The page rail, after Jaeger Avatar's #pages (app/web/index.html): a left column of pages, the open one marked
-   with an accent bar. */
-.frame { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 0; }
-#pages { display: flex; flex-direction: column; gap: 2px; margin: var(--pane-gap) 0 var(--pane-gap) var(--pane-gap); padding: 8px 6px; background: var(--aether-color-bg-panel); border: 1px solid var(--aether-color-border-subtle); border-radius: var(--aether-radius-panel); overflow-y: auto; }
-#pages button, #pages a { background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 8px; padding: 9px 11px; color: var(--aether-color-text-dim); font: inherit; text-align: left; text-decoration: none; cursor: pointer; white-space: nowrap; transition: color .15s, background .15s; }
-#pages button:hover, #pages a:hover { color: var(--aether-color-text); background: var(--aether-color-bg-hover); }
-#pages button[aria-selected=true] { color: var(--aether-color-accent-icon); background: var(--aether-color-bg-control); border-left-color: var(--aether-color-accent); font-weight: 600; }
-#pages .site { margin-top: auto; border-top: 1px solid var(--aether-color-border-subtle); border-radius: 0; padding-top: 12px; font-size: 12px; }
+/* In the app shell (app-shell/): the pages fill its main area. */
+.nx-main > .panes { height: 100%; box-sizing: border-box; }
 .panes.one { grid-template-columns: minmax(0, 1fr); }
 .pane.page { overflow-y: auto; }
 .pane.page > .settings, .pane.page > .agentic { max-width: 760px; padding: 20px 24px; }
-@media (max-width: 980px) { .frame { grid-template-columns: 1fr; } #pages { flex-direction: row; overflow-x: auto; margin: var(--pane-gap) var(--pane-gap) 0; } #pages .site { margin: 0 0 0 auto; border: 0; padding-top: 9px; } }
 
 /* The avatar beside the chat (Chat page). */
 .panes.avatar-chat { grid-template-columns: minmax(280px, .9fr) minmax(380px, 1.1fr); }

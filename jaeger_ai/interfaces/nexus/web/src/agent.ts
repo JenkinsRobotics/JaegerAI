@@ -1,7 +1,7 @@
 // The app's server (jaeger_ai/interfaces/nexus/serve.py): the Gateway as the agent, and the Mac shell's actions.
 import type { AgentEvent } from './chat.ts';
 
-export type Config = { name: string; title: string; suggestions: string[]; gateway: string; webui: string;
+export type Config = { name: string; title: string; suggestions: string[]; gateway: string; webui: string; company?: string;
   face: { name: string; style?: Record<string, unknown>; card?: string } };   // Jaeger's frozen look (look.json)
 export type Health = { ready?: boolean; brain?: string; voice?: string | null; hearing?: string; why?: string; session?: string };
 export type Task = { request_id: string; title?: string; step?: string; status?: string; elapsed_s?: number };

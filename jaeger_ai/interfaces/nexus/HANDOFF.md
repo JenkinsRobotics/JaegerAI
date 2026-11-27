@@ -9,7 +9,8 @@ Gateway (:33418).
 
 It follows the NexusUI desktop pattern used by Jaeger Avatar and Jaeger Omni: a Python server, a React + TypeScript +
 Vite screen, and a pywebview window (`--browser` serves the same screen). The look is copied, not imported: Aether
-tokens, Omni's screen, and Jaeger Avatar's page rail and flat face renderer.
+tokens, Omni's screen, Jaeger Avatar's flat face renderer, and the NexusUI app shell (`web/src/app-shell/`, from
+`VisualReactpy/framework/nexusui/app_shell`: Aether Studio's sidebar and status bar, no header).
 
 ## Run it (this Mac)
 
@@ -44,7 +45,7 @@ tokens, Omni's screen, and Jaeger Avatar's page rail and flat face renderer.
 | `native.py` | macOS menu-bar item (the same menus as the Swift `StatusItemController`) and the global hotkey (PyObjC) |
 | `window.py` | pywebview window plus a mic/camera grant for its own page (copied from Omni) |
 | `look.json` | Jaeger's frozen screen look. The character owns it; replace the file to change the look |
-| `web/` | The screen. `main.tsx` (page rail, avatar + chat), `Chat.tsx`, `Shell.tsx` (Status, Tasks, Droid, Mac, Settings), `Stage.tsx` + `face/` (Jaeger Avatar's flat face), `voice.ts` (plays her voice; the mouth follows its loudness), `mic.ts` (one clip per press) |
+| `web/` | The screen. `main.tsx` (the app shell's sidebar, avatar + chat), `Chat.tsx`, `Shell.tsx` (Status, Tasks, Droid, Mac, Settings), `Stage.tsx` + `face/` (Jaeger Avatar's flat face), `voice.ts` (plays her voice; the mouth follows its loudness), `mic.ts` (one clip per press) |
 | `INVENTORY.md` | Every Swift UI element and its counterpart here, with what was checked |
 
 Measured on this Mac:
