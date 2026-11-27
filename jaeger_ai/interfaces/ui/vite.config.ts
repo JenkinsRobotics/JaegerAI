@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     resolve: {
       alias: [
+        { find: "lucide-react", replacement: here("./node_modules/lucide-react/dist/esm/lucide-react.mjs") },
         { find: /^@jaeger\/ui-kit\/tokens\.css$/, replacement: here("../../../packages/jaeger-ui-kit/src/tokens.css") },
         { find: /^@jaeger\/ui-protocol$/, replacement: here("../../../packages/jaeger-ui-protocol/src/index.ts") },
         { find: /^@jaeger\/ui-sdk$/, replacement: here("../../../packages/jaeger-ui-sdk/src/index.ts") },

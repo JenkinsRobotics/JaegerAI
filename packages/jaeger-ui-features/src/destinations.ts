@@ -14,31 +14,31 @@ export interface DestinationDescriptor {
 export const JAEGER_DESTINATIONS: readonly DestinationDescriptor[] = Object.freeze([
   {
     id: "chat",
-    label: "Command",
+    label: "Chat",
     requiredCapabilities: ["chat.sessions", "chat.approvals"],
     authoritativeOwner: "gateway",
   },
   {
     id: "tasks",
-    label: "Work & Studio",
+    label: "Work",
     requiredCapabilities: ["tasks.board"],
     authoritativeOwner: "gateway",
   },
   {
     id: "tools",
-    label: "Team & Tools",
+    label: "Agents",
     requiredCapabilities: ["tools.inventory"],
     authoritativeOwner: "gateway",
   },
   {
     id: "memory",
-    label: "Memory & Life",
+    label: "Library",
     requiredCapabilities: ["memory.facts"],
     authoritativeOwner: "gateway",
   },
   {
     id: "settings",
-    label: "Control & Body",
+    label: "Settings",
     requiredCapabilities: ["settings.models"],
     authoritativeOwner: "gateway",
   },

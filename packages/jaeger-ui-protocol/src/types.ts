@@ -60,6 +60,7 @@ export interface ChatMessage {
   parts: MessagePart[];
   created_at: number;
   request_id?: string;
+  record_id?: number;
   optimistic?: boolean;
 }
 
