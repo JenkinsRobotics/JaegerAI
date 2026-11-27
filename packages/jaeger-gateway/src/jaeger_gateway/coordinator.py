@@ -10,6 +10,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
+from jaeger_authority import redact_text
+
 from .store import GatewayStore
 from .stream import SessionEventHub
 
@@ -52,6 +54,7 @@ class RunCoordinator:
         self._queues: dict[str, deque[_QueuedRun]] = {}
         self._active_sessions: set[str] = set()
         self._closed = False
+        self._store.recover_interrupted_runs()
         self._fiber = threading.Thread(target=self._loop, name="jaeger-run-coordinator", daemon=True)
         self._fiber.start()
 
@@ -89,8 +92,12 @@ class RunCoordinator:
             return rid, fut
 
         item = _QueuedRun(
-            session_id=session_id, request_id=rid, prompt=prompt, future=fut,
-            start_guard=start_guard, owner_schedule_proposal_allowed=owner_schedule_proposal_allowed,
+            session_id=session_id,
+            request_id=rid,
+            prompt=prompt,
+            future=fut,
+            start_guard=start_guard,
+            owner_schedule_proposal_allowed=owner_schedule_proposal_allowed,
         )
         with self._doorbell:
             self._queues.setdefault(session_id, deque()).append(item)
@@ -107,12 +114,16 @@ class RunCoordinator:
     def _run_item(self, item: _QueuedRun) -> None:
         gen = self._hub.open_generation(item.session_id, request_id=item.request_id)
         try:
+            self._store.settle_request(item.request_id, "running", {})
             self._store.set_session_status(item.session_id, "running")
-            self._store.append_message(item.session_id, "user", item.prompt, metadata={"request_id": item.request_id})
+            message_id = self._store.append_message(
+                item.session_id, "user", item.prompt, metadata={"request_id": item.request_id},
+            )
             self._hub.publish(
                 item.session_id,
                 "run.started",
-                {"request_id": item.request_id, "generation": gen},
+                {"request_id": item.request_id, "generation": gen, "prompt": item.prompt,
+                 "created_at": time.time(), "message_id": message_id},
                 generation=gen,
             )
             # Start guard is evaluated immediately before execution: if it
@@ -132,14 +143,18 @@ class RunCoordinator:
                 item.session_id,
                 "assistant",
                 content,
-                metadata={"request_id": item.request_id, "verdict": result.get("verdict")},
+                metadata={
+                    "request_id": item.request_id,
+                    "verdict": result.get("verdict"),
+                    "presentation": self._hub.transcript_parts(item.session_id, item.request_id, content),
+                },
             )
             self._store.settle_request(item.request_id, "completed", result)
             self._store.set_session_status(item.session_id, "idle")
             self._hub.publish(
                 item.session_id,
                 "run.completed",
-                {"request_id": item.request_id, "verdict": result.get("verdict", "complete")},
+                {"request_id": item.request_id, "verdict": result.get("verdict", "complete"), "content": content},
                 generation=gen,
             )
             with self._doorbell:
@@ -147,14 +162,24 @@ class RunCoordinator:
                 self._doorbell.notify_all()
             item.future.set_result(result)
         except Exception as exc:  # noqa: BLE001
-            err_payload = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            error = redact_text(f"{type(exc).__name__}: {exc}")[:1_000]
+            content = f"Run interrupted. {error}"
+            parts = self._hub.transcript_parts(item.session_id, item.request_id, content)
+            for part in parts:
+                if part["type"] == "tool" and part["status"] == "running":
+                    part.update(status="failed", error="Interrupted before a result was confirmed.")
+            self._store.append_message(
+                item.session_id, "assistant", content,
+                metadata={"request_id": item.request_id, "verdict": "failed", "presentation": parts},
+            )
+            err_payload = {"ok": False, "error": error, "presentation": parts}
             self._store.settle_request(item.request_id, "failed", err_payload)
             self._store.set_session_status(item.session_id, "idle")
             try:
                 self._hub.publish(
                     item.session_id,
                     "run.failed",
-                    {"request_id": item.request_id, "error": err_payload["error"]},
+                    {"request_id": item.request_id, "error": error, "content": content},
                     generation=gen,
                 )
             except Exception:  # noqa: BLE001
@@ -184,4 +209,4 @@ class RunCoordinator:
         self._fiber.join(timeout=2.0)
 
 
-__all__ = ["RunCoordinator", "RunExecutor"]
+__all__ = ["OWNER_SCHEDULE_PROPOSAL_ALLOWED", "RunCoordinator", "RunExecutor"]

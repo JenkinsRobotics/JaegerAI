@@ -45,8 +45,9 @@ __all__ = [
     "ACTIONS",
 ]
 
-#: The only actions this service will ever send to the worker.
-ACTIONS = frozenset({"open", "observe", "scroll"})
+#: Actions permitted on supervised tabs (click/type additionally require an interactive owner grant).
+ACTIONS = frozenset({"open", "observe", "scroll", "screenshot", "click", "type"})
+INTERACTIVE_ACTIONS = frozenset({"click", "type"})
 
 _MAX_URL_CHARS = 2048
 _MAX_SESSION_CHARS = 128
@@ -85,14 +86,15 @@ class _ActionClient(Protocol):
 
 
 class _Grant:
-    __slots__ = ("url", "origin", "page_id", "expires_at", "revoked")
+    __slots__ = ("url", "origin", "page_id", "expires_at", "revoked", "interactive")
 
-    def __init__(self, url: str, origin: str, page_id: str, expires_at: float) -> None:
+    def __init__(self, url: str, origin: str, page_id: str, expires_at: float, *, interactive: bool = False) -> None:
         self.url = url
         self.origin = origin
         self.page_id = page_id
         self.expires_at = expires_at
         self.revoked = False
+        self.interactive = bool(interactive)
 
     def live(self, now: float) -> bool:
         return not self.revoked and now < self.expires_at
@@ -220,11 +222,12 @@ class SupervisedBrowser:
 
     # -- owner-only grant --------------------------------------------------
 
-    def grant(self, session_id: str, url: str) -> dict[str, Any]:
+    def grant(self, session_id: str, url: str, *, interactive: bool = False) -> dict[str, Any]:
         """Owner HTTP layer only: grant one exact URL to one session.
 
         Creates a dedicated new tab and binds the grant to it. Never expose
         this as an agent tool; the agent cannot supply URLs.
+        Pass ``interactive=True`` to also permit origin-pinned ``click`` and ``type``.
         """
         exact_url, origin = _validate_grant_url(url)
         with self._lock:
@@ -253,7 +256,7 @@ class SupervisedBrowser:
             page_id = created.get("active") if isinstance(created, dict) else None
             if not isinstance(page_id, str) or not page_id:
                 raise SupervisedBrowserError("worker did not return a page id for the new tab")
-            grant = _Grant(exact_url, origin, page_id, now + self._grant_ttl_s)
+            grant = _Grant(exact_url, origin, page_id, now + self._grant_ttl_s, interactive=interactive)
             record["grants"].append(grant)
             record["total"] += 1
             return {
@@ -261,18 +264,26 @@ class SupervisedBrowser:
                 "url": exact_url,
                 "origin": origin,
                 "page_id": page_id,
+                "interactive": grant.interactive,
                 "expires_in_s": round(self._grant_ttl_s, 3),
             }
 
     # -- supervised actions -------------------------------------------------
 
-    def execute(self, session_id: str, action: str, direction: str = "down") -> dict[str, Any]:
+    def execute(
+        self,
+        session_id: str,
+        action: str,
+        direction: str = "down",
+        *,
+        selector: str = "",
+        element: int | None = None,
+        text: str = "",
+    ) -> dict[str, Any]:
         """Run one supervised action for a session with a live owner grant.
 
-        ``action`` is one of ``open`` (navigate to the approved URL only),
-        ``observe`` (read-only snapshot) or ``scroll`` (one step, with
-        ``direction`` 'up' or 'down'). Anything else is rejected before any
-        worker request is made.
+        Read-only actions: ``open``, ``observe``, ``scroll``, ``screenshot``.
+        Interactive actions (require ``interactive=True`` grant): ``click``, ``type``.
         """
         if action not in ACTIONS:
             raise SupervisedBrowserError(f"action must be one of {sorted(ACTIONS)}")
@@ -281,6 +292,8 @@ class SupervisedBrowser:
         with self._lock:
             record = self._session(session_id)
             grant = self._live_grant(record, self._clock())
+            if action in INTERACTIVE_ACTIONS and not grant.interactive:
+                raise GrantDenied(f"action {action!r} requires an interactive owner browser grant")
             self._check_estop()
             self._in_flight += 1
         try:
@@ -305,9 +318,31 @@ class SupervisedBrowser:
                         f"pinned page is not on the approved origin {grant.origin!r} (url={url!r})"
                     )
                 return {"ok": True, "action": "open", "url": grant.url, "origin": grant.origin}
-            if action == "scroll":
+            if action == "screenshot":
+                raw = self._client.action(self._scoped(grant, "screenshot"))
+                if not isinstance(raw, dict):
+                    raise SupervisedBrowserError("worker returned a malformed screenshot response")
+                self._assert_same_origin(grant, raw.get("url"))
+                return {
+                    "ok": True,
+                    "action": "screenshot",
+                    "url": raw.get("url"),
+                    "mime": str(raw.get("mime") or "image/png"),
+                    "png_base64": str(raw.get("png_base64") or ""),
+                    "bytes": int(raw.get("bytes") or 0),
+                    "untrusted": True,
+                }
+            if action == "click":
+                if not selector and element is None:
+                    raise SupervisedBrowserError("click requires selector or element index")
+                self._client.action(self._scoped(grant, "click", selector=selector, element=element))
+            elif action == "type":
+                if not selector and element is None:
+                    raise SupervisedBrowserError("type requires selector or element index")
+                self._client.action(self._scoped(grant, "type", selector=selector, element=element, text=text[:4000]))
+            elif action == "scroll":
                 self._client.action(self._scoped(grant, "scroll", direction=direction))
-            # observe (and the post-scroll read): snapshot scoped to our tab.
+            # observe (and post-scroll/click/type read): snapshot scoped to our tab.
             raw = self._client.action(self._scoped(grant, "snapshot"))
             if not isinstance(raw, dict):
                 raise SupervisedBrowserError("worker returned a malformed snapshot")

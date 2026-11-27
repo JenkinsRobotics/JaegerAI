@@ -17,16 +17,40 @@ from jaeger_avatar import AvatarError, build_viseme_timeline
 from jaeger_cognition import CharacterOverlay
 from jaeger_youtube import export_episode_to_otio, plan_phased_research, probe_youtube_toolchain
 
-from .auth import GatewayAuthPolicy
+from .auth import GatewayAuthPolicy, _is_valid_local_host, _is_valid_ts_net_host
 from .coordinator import RunCoordinator
+from .droid_voice import detect_voice_intent, transcribe_clip
 from .store import MAIN_CHAT_SESSION_ID, GatewayStore, RequestConflictError
 from .stream import SessionEventHub, format_sse
+from .tool_workspace import SourceConflict, ToolWorkspace
 
 ACTOR_KEY: web.RequestKey[str] = web.RequestKey("actor", str)
+SUPPORTED_EXTERNAL_CHANNELS = frozenset({"telegram", "discord", "slack", "imessage", "webhook"})
 
-# Inbound events are untrusted and are never dispatched as agent turns.
-SUPPORTED_EXTERNAL_CHANNELS = frozenset({"telegram", "imessage", "webhook"})
+_ALWAYS_ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "testserver"})
 
+
+def _is_allowed_host(
+    host_only: str,
+    *,
+    allow_private: bool,
+    extra_hosts: frozenset[str] = frozenset(),
+) -> bool:
+    """Validate HTTP Host header against DNS rebinding while permitting Tailscale & opt-in LAN."""
+    host = (host_only or "").strip().lower()
+    if not host:
+        return False
+    if host in _ALWAYS_ALLOWED_HOSTS or host in extra_hosts:
+        return True
+    if _is_valid_ts_net_host(host):
+        return True
+    if allow_private:
+        if _is_valid_local_host(host):
+            return True
+        ip_candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+        if GatewayAuthPolicy._is_private_or_tailscale(ip_candidate):
+            return True
+    return False
 
 
 def create_gateway_app(
@@ -37,12 +61,19 @@ def create_gateway_app(
     auth: GatewayAuthPolicy | None = None,
     runtime_info: Callable[[], dict[str, Any]] | None = None,
     tools_provider: Callable[[], list[dict[str, Any]]] | None = None,
+    tool_workspace: ToolWorkspace | None = None,
     models_provider: Callable[[], dict[str, Any]] | None = None,
     model_selector: Callable[[str], dict[str, Any]] | None = None,
+    routing_provider: Callable[[], dict[str, Any]] | None = None,
+    routing_updater: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    onboarding_provider: Callable[[], dict[str, Any]] | None = None,
+    onboarding_completer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    briefing_provider: Callable[[], dict[str, Any]] | None = None,
     workflows_engine: Any = None,
     dry_run_simulator: Any = None,
     governor: Any = None,
     cognition_loop: Any = None,
+    initiative_engine: Any = None,
     world_model: Any = None,
     identity_store: Any = None,
     avatar_store: Any = None,
@@ -50,6 +81,9 @@ def create_gateway_app(
     youtube_store: Any = None,
     media_archive: Any = None,
     channel_hub: Any = None,
+    channel_config: Any = None,
+    channel_ingress: Any = None,
+    remote_hosts: Any = None,
     minecraft_embodiment: Any = None,
     jp01_embodiment: Any = None,
     droid_embodiment: Any = None,
@@ -69,15 +103,49 @@ def create_gateway_app(
     """Create the standalone aiohttp Gateway + optional static WebUI application."""
     policy = auth or GatewayAuthPolicy(allow_loopback_unauthenticated=True)
     started_at = time.time()
-    allowed_hosts = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "testserver"})
+    extra_hosts = frozenset(
+        h.strip().lower()
+        for h in (os.environ.get("JAEGER_ALLOWED_HOSTS") or "").split(",")
+        if h.strip()
+    )
 
     @web.middleware
     async def auth_middleware(request: web.Request, handler: Any) -> web.StreamResponse:
         raw_host = (request.headers.get("Host") or "").strip().lower()
         if raw_host:
-            host_only = raw_host.split("]")[0] + "]" if raw_host.startswith("[") else raw_host.split(":")[0]
-            if host_only and host_only not in allowed_hosts and (request.remote or "") in ("127.0.0.1", "::1", ""):
-                return web.json_response({"ok": False, "error": "invalid Host header (DNS rebinding blocked)"}, status=403)
+            host_only = ""
+            if raw_host.startswith("["):
+                end_bracket = raw_host.find("]")
+                if end_bracket == -1:
+                    return web.json_response(
+                        {"ok": False, "error": "invalid Host header (DNS rebinding blocked)"},
+                        status=403,
+                    )
+                rest = raw_host[end_bracket + 1 :]
+                if rest and not (rest.startswith(":") and rest[1:].isdigit()):
+                    return web.json_response(
+                        {"ok": False, "error": "invalid Host header (DNS rebinding blocked)"},
+                        status=403,
+                    )
+                host_only = raw_host[: end_bracket + 1]
+            elif raw_host.count(":") == 1:
+                host_only, _, port_str = raw_host.partition(":")
+                if not port_str.isdigit():
+                    return web.json_response(
+                        {"ok": False, "error": "invalid Host header (DNS rebinding blocked)"},
+                        status=403,
+                    )
+            else:
+                host_only = raw_host
+            if not _is_allowed_host(
+                host_only,
+                allow_private=policy.allow_private_network_unauthenticated,
+                extra_hosts=extra_hosts,
+            ):
+                return web.json_response(
+                    {"ok": False, "error": "invalid Host header (DNS rebinding blocked)"},
+                    status=403,
+                )
         if request.path == "/health" or not request.path.startswith("/v1/"):
             return await handler(request)
         decision = policy.verify_http(request.headers, remote_addr=request.remote or "")
@@ -101,12 +169,38 @@ def create_gateway_app(
             **extra,
         })
 
+    def _owner_local_only(request: web.Request) -> bool:
+        return request[ACTOR_KEY] == "owner:loopback" and request.remote in ("127.0.0.1", "::1")
+
+    async def _strict_json_object(request: web.Request) -> dict[str, Any] | web.Response:
+        if request.content_type != "application/json":
+            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
+        return body
+
+    def _is_external_channel_session(sid: str) -> bool:
+        session = store.get_session(sid)
+        if session is None:
+            return False
+        metadata = session.get("metadata")
+        return isinstance(metadata, dict) and metadata.get("source") == "external_channel"
+
+    def _external_session_guard(request: web.Request, sid: str) -> web.Response | None:
+        if _owner_local_only(request):
+            return None
+        if _is_external_channel_session(sid):
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        return None
+
     async def list_sessions(request: web.Request) -> web.Response:
         limit = int(request.query.get("limit", "50"))
         sessions = store.list_sessions(limit=limit)
         if not _owner_local_only(request):
-            # External-channel transcript sessions are private: filter them out
-            # of non-owner-local listings so their existence is not disclosed.
             sessions = [
                 s for s in sessions
                 if not (isinstance(s.get("metadata"), dict)
@@ -140,6 +234,15 @@ def create_gateway_app(
             return web.json_response({"ok": False, "error": "Search must be 200 characters or fewer."}, status=400)
         return web.json_response({"ok": True, "topics": store.list_chat_topics(query, include_external=_owner_local_only(request))})
 
+    async def chat_search(request: web.Request) -> web.Response:
+        query = request.query.get("q", "").strip()
+        if not query or len(query) > 200:
+            return web.json_response({"ok": False, "error": "Query must be 1-200 characters."}, status=400)
+        sid = request.query.get("session_id") or None
+        limit = int(request.query.get("limit") or "15")
+        hits = store.search_messages(query, session_id=sid, limit=limit, include_external=_owner_local_only(request))
+        return web.json_response({"ok": True, "results": hits, "count": len(hits)})
+
     async def main_chat_session(_request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "session": store.main_chat_session()})
 
@@ -150,7 +253,22 @@ def create_gateway_app(
             return guard
         if store.get_session(sid) is None:
             return web.json_response({"ok": False, "error": "session not found"}, status=404)
-        return web.json_response({"ok": True, "messages": store.list_messages(sid)})
+        if request.query.get("page") != "latest":
+            return web.json_response({"ok": True, "messages": store.list_messages(sid)})
+        try:
+            before = int(request.query["before_id"]) if "before_id" in request.query else None
+            after = int(request.query["after_id"]) if "after_id" in request.query else None
+            if before is not None and after is not None:
+                raise ValueError("Choose one message cursor")
+        except ValueError:
+            return web.json_response({"ok": False, "error": "Invalid message cursor."}, status=400)
+        scope = None if sid == MAIN_CHAT_SESSION_ID else sid
+        if after is not None:
+            rows = store.list_messages(scope, limit=60, after_id=after, include_presentation=True)
+            return web.json_response({"ok": True, "messages": rows, "has_older": False, "after_seq": 0})
+        cursor = hub.history_cursor(sid)
+        rows = store.list_messages(scope, limit=61, latest=True, before_id=before, include_presentation=True)
+        return web.json_response({"ok": True, "messages": rows[-60:], "has_older": len(rows) > 60, "after_seq": cursor})
 
     async def submit_run(request: web.Request) -> web.Response:
         sid = request.match_info["session_id"]
@@ -177,29 +295,25 @@ def create_gateway_app(
             return web.json_response({"ok": True, "request_id": rid, "result": res})
         return web.json_response({"ok": True, "request_id": rid, "status": "queued"}, status=202)
 
-    async def create_scheduled_job(request: web.Request) -> web.Response:
-        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+    async def list_scheduled_jobs_route(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
         sid = request.match_info["session_id"]
         if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
             return web.json_response({"ok": False, "error": "session not found"}, status=404)
-        if request.content_type != "application/json":
-            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
-        if not isinstance(body, dict):
-            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
-        due_at_raw = body.get("due_at")
-        if not isinstance(due_at_raw, (int, float)) or isinstance(due_at_raw, bool):
-            return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
-        try:
-            due_at = float(due_at_raw)
-        except (ValueError, OverflowError):
-            return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
-        if not math.isfinite(due_at):
-            return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
+        status_filter = (request.query.get("status") or "").strip() or None
+        jobs = store.list_scheduled_jobs(sid, status=status_filter)
+        return web.json_response({"ok": True, "jobs": jobs, "count": len(jobs)})
+
+    async def create_scheduled_job(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
+        sid = request.match_info["session_id"]
+        if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
         prompt = body.get("prompt")
         if not isinstance(prompt, str):
             return web.json_response({"ok": False, "error": "prompt must be a string"}, status=400)
@@ -207,7 +321,14 @@ def create_gateway_app(
         if not prompt or len(prompt) > 16000:
             return web.json_response({"ok": False, "error": "prompt must be 1-16000 characters"}, status=400)
         recurrence = None
-        if "interval_s" in body:
+        if "interval_s" in body and "cron_expr" in body:
+            return web.json_response({"ok": False, "error": "cannot specify both interval_s and cron_expr"}, status=400)
+        if "cron_expr" in body:
+            cron_raw = body["cron_expr"]
+            if not isinstance(cron_raw, str) or not cron_raw.strip():
+                return web.json_response({"ok": False, "error": "cron_expr must be a nonempty 5-field cron string"}, status=400)
+            recurrence = {"cron_expr": cron_raw.strip(), "series_id": f"series_{uuid.uuid4().hex}"}
+        elif "interval_s" in body:
             interval_raw = body["interval_s"]
             if not isinstance(interval_raw, (int, float)) or isinstance(interval_raw, bool):
                 return web.json_response({"ok": False, "error": "interval_s must be a finite number of seconds"}, status=400)
@@ -218,6 +339,19 @@ def create_gateway_app(
             if not math.isfinite(interval_s) or not 1.0 <= interval_s <= 31536000.0:
                 return web.json_response({"ok": False, "error": "interval_s must be within 1 to 31536000 seconds"}, status=400)
             recurrence = {"interval_s": interval_s, "series_id": f"series_{uuid.uuid4().hex}"}
+        due_at: float | None = None
+        if "due_at" in body and body["due_at"] is not None:
+            due_at_raw = body["due_at"]
+            if not isinstance(due_at_raw, (int, float)) or isinstance(due_at_raw, bool):
+                return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
+            try:
+                due_at = float(due_at_raw)
+            except (ValueError, OverflowError):
+                return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
+            if not math.isfinite(due_at):
+                return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
+        elif recurrence is None or "cron_expr" not in recurrence:
+            return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
         depends_on = None
         if "depends_on" in body:
             depends_raw = body["depends_on"]
@@ -235,20 +369,20 @@ def create_gateway_app(
                 )
             if recurrence is not None:
                 return web.json_response(
-                    {"ok": False, "error": "depends_on cannot be combined with interval_s recurrence"},
+                    {"ok": False, "error": "depends_on cannot be combined with recurrence"},
                     status=400,
                 )
             depends_on = [pid.strip() for pid in depends_raw]
         try:
             job = store.create_scheduled_job(
-                session_id=sid, prompt=prompt, due_at=float(due_at), recurrence=recurrence, depends_on=depends_on
+                session_id=sid, prompt=prompt, due_at=due_at, recurrence=recurrence, depends_on=depends_on
             )
         except ValueError:
             return web.json_response({"ok": False, "error": "invalid scheduled job"}, status=400)
         return web.json_response({"ok": True, "job": job}, status=201)
 
     async def get_scheduled_job(request: web.Request) -> web.Response:
-        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+        if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
         sid = request.match_info["session_id"]
         if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
@@ -259,19 +393,14 @@ def create_gateway_app(
         return web.json_response({"ok": True, "job": job, "dependencies": store.get_job_dependencies(job["job_id"], sid)})
 
     async def cancel_scheduled_job(request: web.Request) -> web.Response:
-        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+        if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
         sid = request.match_info["session_id"]
         if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
             return web.json_response({"ok": False, "error": "session not found"}, status=404)
-        if request.content_type != "application/json":
-            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
-        if not isinstance(body, dict):
-            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
         outcome = store.cancel_pending_job(request.match_info["job_id"], sid)
         if outcome.get("error") == "not_found":
             return web.json_response({"ok": False, "error": "job not found"}, status=404)
@@ -280,7 +409,7 @@ def create_gateway_app(
         return web.json_response({"ok": True, "job": outcome})
 
     async def get_job_series(request: web.Request) -> web.Response:
-        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+        if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
         sid = request.match_info["session_id"]
         if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
@@ -293,20 +422,15 @@ def create_gateway_app(
         return web.json_response({"ok": True, "series_id": series_id, "control": control, "jobs": fires})
 
     async def update_job_series(request: web.Request) -> web.Response:
-        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+        if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
         sid = request.match_info["session_id"]
         if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
             return web.json_response({"ok": False, "error": "session not found"}, status=404)
         series_id = request.match_info["series_id"]
-        if request.content_type != "application/json":
-            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
-        if not isinstance(body, dict):
-            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
         status = body.get("status")
         if status not in ("active", "paused", "cancelled"):
             return web.json_response({"ok": False, "error": "status must be active, paused, or cancelled"}, status=400)
@@ -322,20 +446,6 @@ def create_gateway_app(
             return web.json_response({"ok": False, "error": str(exc)}, status=404)
         return web.json_response({"ok": True, "series_id": series_id, "control": control})
 
-    def _owner_local_only(request: web.Request) -> bool:
-        return request[ACTOR_KEY] == "owner:loopback" and request.remote in ("127.0.0.1", "::1")
-
-    async def _strict_json_object(request: web.Request) -> dict[str, Any] | web.Response:
-        if request.content_type != "application/json":
-            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
-        try:
-            body = await request.json()
-        except json.JSONDecodeError:
-            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
-        if not isinstance(body, dict):
-            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
-        return body
-
     async def grant_supervised_browser(request: web.Request) -> web.Response:
         if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Browser grants are owner-local only."}, status=403)
@@ -350,8 +460,12 @@ def create_gateway_app(
         url = body.get("url")
         if not isinstance(url, str) or not url.strip():
             return web.json_response({"ok": False, "error": "url is required and must be a string"}, status=400)
+        interactive = bool(body.get("interactive", False))
         try:
-            result = await asyncio.to_thread(browser_grant, sid, url.strip())
+            if interactive:
+                result = await asyncio.to_thread(browser_grant, sid, url.strip(), True)
+            else:
+                result = await asyncio.to_thread(browser_grant, sid, url.strip())
         except Exception:  # noqa: BLE001
             return web.json_response({"ok": False, "error": "browser grant failed"}, status=400)
         return web.json_response({"ok": True, "grant": result})
@@ -452,6 +566,37 @@ def create_gateway_app(
         items = tools_provider() if tools_provider is not None else []
         return web.json_response({"ok": True, "tools": items, "count": len(items)})
 
+    async def tool_catalog(_request: web.Request) -> web.Response:
+        return web.json_response(tool_workspace.catalog() if tool_workspace else {"sources": [], "slash_commands": []})
+
+    async def tool_source(request: web.Request) -> web.Response:
+        if tool_workspace is None:
+            return web.json_response({"error": "Tool source editor unavailable."}, status=501)
+        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+            return web.json_response({"error": "Tool source editing is available in the owner’s local WebUI."}, status=403)
+        if request.headers.get("Sec-Fetch-Site") != "same-origin":
+            return web.json_response({"error": "Open the tool editor from the local WebUI."}, status=403)
+        try:
+            if request.method == "GET":
+                return web.json_response(tool_workspace.read(request.query.get("path", "")))
+            if request.headers.get("Origin") != f"{request.scheme}://{request.host}" or request.content_type != "application/json":
+                return web.json_response({"error": "Source saves require a same-origin JSON request."}, status=403)
+            body = await request.json()
+            if not isinstance(body, dict) or not isinstance(body.get("path"), str) or not isinstance(body.get("source"), str):
+                raise ValueError("A source path and Python source are required.")
+            revision = body.get("revision")
+            if revision is not None and not isinstance(revision, str):
+                raise ValueError("Invalid source revision.")
+            return web.json_response(tool_workspace.save(body["path"], body["source"], revision))
+        except SourceConflict as error:
+            return web.json_response({"error": str(error)}, status=409)
+        except ValueError as error:
+            return web.json_response({"error": str(error)}, status=400)
+        except FileNotFoundError:
+            return web.json_response({"error": "Source file not found."}, status=404)
+        except OSError:
+            return web.json_response({"error": "The repository source could not be accessed."}, status=500)
+
     async def list_models(_request: web.Request) -> web.Response:
         info = models_provider() if models_provider is not None else {"active": "", "models": []}
         return web.json_response({"ok": True, **info})
@@ -464,6 +609,41 @@ def create_gateway_app(
         if not model_id:
             return web.json_response({"ok": False, "error": "model is required"}, status=400)
         return web.json_response({"ok": True, **model_selector(model_id)})
+
+    async def get_model_routing(_request: web.Request) -> web.Response:
+        if routing_provider is None:
+            return web.json_response({"ok": True, "active": "", "routing": {}})
+        return web.json_response({"ok": True, **routing_provider()})
+
+    async def put_model_routing(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Model routing is owner-local only."}, status=403)
+        if routing_updater is None:
+            return web.json_response({"ok": False, "error": "model routing unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        return web.json_response({"ok": True, **routing_updater(body)})
+
+    async def get_onboarding_status(_request: web.Request) -> web.Response:
+        if onboarding_provider is None:
+            return web.json_response({"ok": True, "completed": True})
+        return web.json_response({"ok": True, **onboarding_provider()})
+
+    async def post_onboarding_complete(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Onboarding is owner-local only."}, status=403)
+        if onboarding_completer is None:
+            return web.json_response({"ok": False, "error": "onboarding unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        return web.json_response({"ok": True, **onboarding_completer(body)})
+
+    async def get_cognition_briefing(_request: web.Request) -> web.Response:
+        if briefing_provider is None:
+            return web.json_response({"ok": True, "summary": "", "recent_actions": [], "active_goals": []})
+        return web.json_response({"ok": True, **briefing_provider()})
 
     async def list_skills(_request: web.Request) -> web.Response:
         items = skills_provider() if skills_provider is not None else []
@@ -554,8 +734,51 @@ def create_gateway_app(
         return web.json_response({
             "ok": True,
             "cognition": cognition_loop.state.to_dict(),
+            "autonomy": initiative_engine.status() if initiative_engine is not None else {},
             "world": world_model.snapshot() if world_model is not None else {},
             "perceptions": [p.to_dict() for p in (world_model.recent_perceptions(limit=12) if world_model else [])],
+        })
+
+    async def get_cognition_actions(request: web.Request) -> web.Response:
+        if initiative_engine is None:
+            return web.json_response({"ok": True, "actions": [], "status": {}})
+        limit = int(request.query.get("limit", "30"))
+        return web.json_response({
+            "ok": True,
+            "status": initiative_engine.status(),
+            "actions": initiative_engine.list_actions(limit=limit),
+        })
+
+    async def post_cognition_autonomy(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Autonomy control is owner-local only."}, status=403)
+        if initiative_engine is None:
+            return web.json_response({"ok": False, "error": "initiative engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        updated = False
+        kwargs: dict[str, Any] = {}
+        for k in ("enabled", "cooldown_s", "max_actions_per_hour", "active_start_hour", "active_end_hour"):
+            if k in body:
+                kwargs[k] = body[k]
+                updated = True
+        if updated:
+            initiative_engine.update_config(**kwargs)
+        triggered: dict[str, Any] | None = None
+        if body.get("trigger_now"):
+            if _governor_estop_active():
+                return web.json_response({"ok": False, "error": "estop_active"}, status=409)
+            ctx = {
+                "world": world_model.snapshot() if world_model is not None else {},
+                "resources": governor.snapshot() if governor is not None else {},
+                "trigger": "owner_manual_step",
+            }
+            triggered = await initiative_engine.evaluate_tick(ctx, force=True)
+        return web.json_response({
+            "ok": True,
+            "status": initiative_engine.status(),
+            **({"triggered": triggered} if triggered is not None else {}),
         })
 
     async def post_perception(request: web.Request) -> web.Response:
@@ -743,11 +966,33 @@ def create_gateway_app(
             return web.json_response({"ok": False, "error": "Channel outbox is owner-local only."}, status=403)
         if channel_hub is None:
             return web.json_response({"ok": True, "channels": {}, "outbox": []})
+        await asyncio.to_thread(store.stage_notification_emails, channel_hub)
         return web.json_response({
             "ok": True,
+            "email_preferences": store.email_preferences(),
             "channels": channel_hub.status(),
+            "config": channel_config.public_summary() if channel_config is not None else {},
+            "ingress": channel_ingress.status() if channel_ingress is not None else {"pollers": {}},
             "outbox": [m.to_dict() for m in channel_hub.list_outbox(limit=25)],
         })
+
+    async def email_preferences(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"error": "owner-local settings only"}, status=403)
+        data = await _strict_json_object(request)
+        if isinstance(data, web.Response):
+            return data
+        if not isinstance(data.get("responses"), bool) or not isinstance(data.get("tasks"), bool):
+            return web.json_response({"error": "expected boolean preferences"}, status=400)
+        from jaeger_channels.email_transport import mailbox
+        try:
+            address = mailbox(data["recipient"]) if data.get("recipient") else ""
+            if not address and (data["responses"] or data["tasks"]):
+                raise ValueError("recipient required")
+        except (ValueError, TypeError, AttributeError):
+            return web.json_response({"error": "invalid recipient"}, status=400)
+        store.save_email_preferences(address, data["responses"], data["tasks"])
+        return web.json_response({"ok": True})
 
     async def channels_send(request: web.Request) -> web.Response:
         if not _owner_local_only(request):
@@ -758,8 +1003,6 @@ def create_gateway_app(
         if isinstance(body, web.Response):
             return body
         channel = str(body.get("channel") or "local_log")
-        # External channels always enqueue unapproved: a request body claiming
-        # approved=True must never bypass owner approval.
         approved = bool(body.get("approved", False)) and channel == "local_log"
         msg = channel_hub.enqueue(
             channel=channel,
@@ -786,13 +1029,6 @@ def create_gateway_app(
         return web.json_response({"ok": True, "message": msg.to_dict()})
 
     async def channels_inbound(request: web.Request) -> web.Response:
-        """Attribute one inbound external-channel message to a dedicated session.
-
-        Owner-local only. Accepts exactly {channel, external_thread_id,
-        external_message_id, sender, body} — any extra field (including a
-        caller-provided session_id) is rejected. Pure store-layer attribution:
-        no network, provider, tool call, model, or coordinator submission.
-        """
         if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Inbound channel messages are owner-local only."}, status=403)
         body = await _strict_json_object(request)
@@ -808,7 +1044,7 @@ def create_gateway_app(
         channel = body["channel"]
         if not isinstance(channel, str) or channel not in SUPPORTED_EXTERNAL_CHANNELS:
             return web.json_response(
-                {"ok": False, "error": "channel must be one of telegram, imessage, webhook"}, status=400
+                {"ok": False, "error": f"channel must be one of {sorted(SUPPORTED_EXTERNAL_CHANNELS)}"}, status=400
             )
         for field in ("external_thread_id", "external_message_id", "sender", "body"):
             if not isinstance(body[field], str):
@@ -852,25 +1088,49 @@ def create_gateway_app(
         message = await asyncio.to_thread(channel_hub.enqueue, channel=channel, recipient=recipient, body=content)
         return web.json_response({"ok": True, "message": message.to_dict()}, status=201)
 
-    def _is_external_channel_session(sid: str) -> bool:
-        """True when the session was allocated for an external channel thread."""
-        session = store.get_session(sid)
-        if session is None:
-            return False
-        metadata = session.get("metadata")
-        return isinstance(metadata, dict) and metadata.get("source") == "external_channel"
+    async def list_remote_hosts(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Remote hosts are owner-local only."}, status=403)
+        if remote_hosts is None:
+            return web.json_response({"ok": True, "hosts": []})
+        return web.json_response({"ok": True, "hosts": remote_hosts.list_public()})
 
-    def _external_session_guard(request: web.Request, sid: str) -> web.Response | None:
-        """404 for non-owner-local access to an external-channel session.
+    async def upsert_remote_host(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Remote hosts are owner-local only."}, status=403)
+        if remote_hosts is None:
+            return web.json_response({"ok": False, "error": "remote hosts unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        from jaeger_tools import RemoteExecError, RemoteHostConfig
+        alias = request.match_info["alias"]
+        try:
+            cfg = RemoteHostConfig(
+                alias=alias,
+                hostname=str(body.get("hostname") or "").strip(),
+                user=str(body.get("user") or "").strip(),
+                port=int(body.get("port") or 22),
+                identity_file=str(body.get("identity_file") or "").strip(),
+                strict_host_key=str(body.get("strict_host_key") or "accept-new").strip(),
+                allowed_prefixes=tuple(str(p).strip() for p in (body.get("allowed_prefixes") or ()) if str(p).strip()),
+                enabled=bool(body.get("enabled", True)),
+                notes=str(body.get("notes") or "")[:240],
+            )
+            saved = remote_hosts.upsert(cfg)
+        except (RemoteExecError, ValueError, TypeError) as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        return web.json_response({"ok": True, "host": saved.to_public_dict()})
 
-        Returning 404 (not 403) keeps the existence and identity of external
-        transcript sessions undisclosed to non-owner-local callers.
-        """
-        if _owner_local_only(request):
-            return None
-        if _is_external_channel_session(sid):
-            return web.json_response({"ok": False, "error": "session not found"}, status=404)
-        return None
+    async def delete_remote_host(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Remote hosts are owner-local only."}, status=403)
+        if remote_hosts is None:
+            return web.json_response({"ok": False, "error": "remote hosts unavailable"}, status=501)
+        alias = request.match_info["alias"]
+        if not remote_hosts.remove(alias):
+            return web.json_response({"ok": False, "error": "host not found"}, status=404)
+        return web.json_response({"ok": True, "deleted": alias})
 
     async def embodiment_status(_request: web.Request) -> web.Response:
         return web.json_response({
@@ -881,6 +1141,29 @@ def create_gateway_app(
             "voice": voice_presence.snapshot() if voice_presence is not None else None,
             "vision": vision_buffer.stats() if vision_buffer is not None else None,
         })
+
+    def _governor_estop_active() -> bool:
+        if governor is None:
+            return False
+        if hasattr(governor, "estop_active"):
+            return bool(governor.estop_active)
+        if hasattr(governor, "_estop_active"):
+            return bool(governor._estop_active)
+        if hasattr(governor, "snapshot"):
+            return bool(governor.snapshot().get("estop_active"))
+        return False
+
+    async def _optional_json_body(request: web.Request) -> dict[str, Any]:
+        if not request.can_read_body:
+            return {}
+        try:
+            raw = await request.read()
+            if not raw or not raw.strip():
+                return {}
+            parsed = json.loads(raw.decode("utf-8"))
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:  # noqa: BLE001
+            return {}
 
     async def embodiment_act(request: web.Request) -> web.Response:
         target = request.match_info["body"]
@@ -894,7 +1177,21 @@ def create_gateway_app(
         )
         if emb is None:
             return web.json_response({"ok": False, "error": f"unknown embodiment:{target}"}, status=404)
-        res = emb.act(action, params)
+        if target == "droid":
+            if action == "wake" and _governor_estop_active():
+                obs = emb.observe()
+                return web.json_response(
+                    {
+                        "ok": False,
+                        "error": "estop_active",
+                        "awake": False,
+                        "sleeping": bool(obs.get("sleeping", False)),
+                    },
+                    status=409,
+                )
+            res = await asyncio.to_thread(emb.act, action, params)
+        else:
+            res = emb.act(action, params)
         return web.json_response(dict(res), status=200 if res.get("ok") else 409)
 
     async def get_identity(_request: web.Request) -> web.Response:
@@ -959,6 +1256,43 @@ def create_gateway_app(
         servers = mcp_reload()
         return web.json_response({"ok": True, "servers": servers})
 
+    async def droid_status(_request: web.Request) -> web.Response:
+        if droid_embodiment is None:
+            return web.json_response({"ok": False, "error": "droid embodiment unavailable"}, status=501)
+        obs = dict(droid_embodiment.observe())
+        estop_active = _governor_estop_active() if governor is not None else bool(obs.get("estop_latched"))
+        return web.json_response({"ok": True, **obs, "estop_active": estop_active})
+
+    async def droid_sleep(request: web.Request) -> web.Response:
+        """Fail-safe privacy sleep/park route: NEVER blocked by E-Stop."""
+        if droid_embodiment is None:
+            return web.json_response({"ok": False, "error": "droid embodiment unavailable"}, status=501)
+        body = await _optional_json_body(request)
+        reason = str(body.get("reason") or "operator")
+        res = await asyncio.to_thread(droid_embodiment.sleep, reason=reason)
+        return web.json_response(dict(res), status=200)
+
+    async def droid_wake(request: web.Request) -> web.Response:
+        """Wake Droid and center gimbal; blocked fail-closed under E-Stop."""
+        if droid_embodiment is None:
+            return web.json_response({"ok": False, "error": "droid embodiment unavailable"}, status=501)
+        obs = droid_embodiment.observe()
+        estop_latched = bool(getattr(droid_embodiment, "_estop_latched", False) or obs.get("estop_latched"))
+        if _governor_estop_active() or estop_latched:
+            return web.json_response(
+                {
+                    "ok": False,
+                    "error": "estop_active",
+                    "awake": False,
+                    "sleeping": bool(obs.get("sleeping", False)),
+                },
+                status=409,
+            )
+        body = await _optional_json_body(request)
+        reason = str(body.get("reason") or "operator")
+        res = await asyncio.to_thread(droid_embodiment.wake, reason=reason)
+        return web.json_response(dict(res), status=200 if res.get("ok") else 409)
+
     async def droid_devices(request: web.Request) -> web.Response:
         if droid_embodiment is None:
             return web.json_response({"ok": False, "error": "droid embodiment unavailable"}, status=501)
@@ -970,11 +1304,66 @@ def create_gateway_app(
         if droid_embodiment is None:
             return web.json_response({"ok": False, "error": "droid embodiment unavailable"}, status=501)
         body = await request.json() if request.can_read_body else {}
-        res = droid_embodiment.capture_frame(
+        res = await asyncio.to_thread(
+            droid_embodiment.capture_frame,
             device_index=str(body.get("device_index") or "0"),
             summary=str(body.get("summary") or ""),
+            include_preview=body.get("include_preview") is True,
         )
         return web.json_response(res, status=200 if res.get("ok") else 409)
+
+    voice_lock = asyncio.Lock()
+
+    async def droid_transcribe(request: web.Request) -> web.Response:
+        if voice_lock.locked():
+            return web.json_response({"error": "A voice clip is already being transcribed."}, status=409)
+        async with voice_lock:
+            audio = bytearray()
+            async for chunk in request.content.iter_chunked(64 * 1024):
+                audio.extend(chunk)
+                if len(audio) > 2 * 1024 * 1024:
+                    return web.json_response({"error": "Voice clip is too large."}, status=413)
+            if not audio:
+                return web.json_response({"error": "No voice audio received."}, status=400)
+            try:
+                result = await asyncio.to_thread(transcribe_clip, bytes(audio), enroll=request.query.get("enroll") == "1")
+            except RuntimeError as exc:
+                return web.json_response({"error": str(exc)}, status=422)
+            if isinstance(result, dict) and "intent" not in result:
+                intent = detect_voice_intent(str(result.get("transcript") or ""))
+                if intent:
+                    result = {**result, "intent": intent}
+            return web.json_response(result)
+
+    camera_preview_lock = asyncio.Lock()
+
+    async def droid_camera_stream(request: web.Request) -> web.StreamResponse:
+        if droid_embodiment is None:
+            return web.Response(status=501)
+        if camera_preview_lock.locked():
+            return web.Response(status=409, text="Camera preview already open")
+        async with camera_preview_lock:
+            frames = droid_embodiment.stream_camera()
+            response = web.StreamResponse(headers={
+                "Content-Type": "multipart/x-mixed-replace; boundary=frame",
+                "Cache-Control": "no-store",
+            })
+            try:
+                async for frame in frames:
+                    if request.transport is None or request.transport.is_closing():
+                        break
+                    if not response.prepared:
+                        await response.prepare(request)
+                    header = f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(frame)}\r\n\r\n"
+                    await response.write(header.encode("ascii") + frame + b"\r\n")
+            except (ConnectionError, asyncio.TimeoutError, RuntimeError):
+                if not response.prepared:
+                    return web.Response(status=503, text="Camera preview unavailable")
+            finally:
+                await frames.aclose()
+            if not response.prepared:
+                return web.Response(status=503, text="Camera preview unavailable")
+            return response
 
     async def youtube_export_otio(request: web.Request) -> web.Response:
         if youtube_store is None:
@@ -1144,7 +1533,9 @@ def create_gateway_app(
 
     app.router.add_get("/health", health)
     app.router.add_get("/v1/chat/session", main_chat_session)
+    app.router.add_post("/v1/chat/session", main_chat_session)
     app.router.add_get("/v1/chat/topics", chat_topics)
+    app.router.add_get("/v1/chat/search", chat_search)
     app.router.add_get("/v1/sessions", list_sessions)
     app.router.add_post("/v1/sessions", create_session)
     app.router.add_delete("/v1/sessions/{session_id}", delete_session)
@@ -1152,6 +1543,7 @@ def create_gateway_app(
     app.router.add_post("/v1/sessions/{session_id}/runs", submit_run)
     app.router.add_post("/v1/sessions/{session_id}/browser/grant", grant_supervised_browser)
     app.router.add_post("/v1/sessions/{session_id}/browser/stop", stop_supervised_browser)
+    app.router.add_get("/v1/sessions/{session_id}/jobs", list_scheduled_jobs_route)
     app.router.add_post("/v1/sessions/{session_id}/jobs", create_scheduled_job)
     app.router.add_get("/v1/sessions/{session_id}/jobs/{job_id}", get_scheduled_job)
     app.router.add_post("/v1/sessions/{session_id}/jobs/{job_id}/cancel", cancel_scheduled_job)
@@ -1161,8 +1553,15 @@ def create_gateway_app(
     app.router.add_get("/v1/approvals", list_approvals)
     app.router.add_post("/v1/approvals/{approval_id}/resolve", resolve_approval)
     app.router.add_get("/v1/tools", list_tools)
+    app.router.add_get("/v1/tools/catalog", tool_catalog)
+    app.router.add_get("/v1/tools/source", tool_source)
+    app.router.add_put("/v1/tools/source", tool_source)
     app.router.add_get("/v1/models", list_models)
     app.router.add_post("/v1/models/select", select_model)
+    app.router.add_get("/v1/models/routing", get_model_routing)
+    app.router.add_put("/v1/models/routing", put_model_routing)
+    app.router.add_get("/v1/onboarding/status", get_onboarding_status)
+    app.router.add_post("/v1/onboarding/complete", post_onboarding_complete)
     app.router.add_get("/v1/skills", list_skills)
     app.router.add_get("/v1/mcp/servers", list_mcp_servers)
     app.router.add_post("/v1/mcp/servers", upsert_mcp_server)
@@ -1179,6 +1578,9 @@ def create_gateway_app(
     app.router.add_post("/v1/system/idle-life", set_idle_life)
     app.router.add_post("/v1/system/estop", set_estop)
     app.router.add_get("/v1/cognition/state", get_cognition_state)
+    app.router.add_get("/v1/cognition/actions", get_cognition_actions)
+    app.router.add_get("/v1/cognition/briefing", get_cognition_briefing)
+    app.router.add_post("/v1/cognition/autonomy", post_cognition_autonomy)
     app.router.add_post("/v1/cognition/perceive", post_perception)
     app.router.add_get("/v1/avatars/assets", list_avatar_assets)
     app.router.add_post("/v1/avatars/assets", upload_avatar_asset)
@@ -1199,14 +1601,23 @@ def create_gateway_app(
     app.router.add_get("/v1/media/archive", list_media_archive)
     app.router.add_post("/v1/media/archive", add_media_archive)
     app.router.add_get("/v1/channels/status", channels_status)
+    app.router.add_put("/v1/channels/email/preferences", email_preferences)
     app.router.add_post("/v1/channels/send", channels_send)
     app.router.add_post("/v1/channels/messages/{message_id}/approve", channels_approve)
     app.router.add_post("/v1/channels/inbound", channels_inbound)
     app.router.add_post("/v1/sessions/{session_id}/channel-reply", channels_reply)
+    app.router.add_get("/v1/remote/hosts", list_remote_hosts)
+    app.router.add_put("/v1/remote/hosts/{alias}", upsert_remote_host)
+    app.router.add_delete("/v1/remote/hosts/{alias}", delete_remote_host)
     app.router.add_get("/v1/embodiment/status", embodiment_status)
     app.router.add_post("/v1/embodiment/{body}/act", embodiment_act)
+    app.router.add_get("/v1/droid/status", droid_status)
+    app.router.add_post("/v1/droid/sleep", droid_sleep)
+    app.router.add_post("/v1/droid/wake", droid_wake)
     app.router.add_get("/v1/droid/devices", droid_devices)
     app.router.add_post("/v1/droid/capture", droid_capture)
+    app.router.add_post("/v1/droid/transcribe", droid_transcribe)
+    app.router.add_get("/v1/droid/camera-stream", droid_camera_stream, allow_head=False)
     app.router.add_post("/v1/embodiment/minecraft/checkpoint", minecraft_checkpoint)
     app.router.add_post("/v1/presence/voice/hear", presence_voice_hear)
 
@@ -1219,6 +1630,15 @@ def create_gateway_app(
 
         app.on_startup.append(_start_cognition)
         app.on_cleanup.append(_stop_cognition)
+    if channel_ingress is not None:
+        async def _start_ingress(_app: web.Application) -> None:
+            channel_ingress.start()
+
+        async def _stop_ingress(_app: web.Application) -> None:
+            await channel_ingress.stop()
+
+        app.on_startup.append(_start_ingress)
+        app.on_cleanup.append(_stop_ingress)
     app.router.add_get("/v1/memory/facts", list_facts)
     app.router.add_post("/v1/memory/facts", put_fact)
     app.router.add_delete("/v1/memory/facts/{key}", delete_fact)

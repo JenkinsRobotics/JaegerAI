@@ -1,11 +1,12 @@
-"""Standalone WAL SQLite Gateway store for sessions, transcripts, idempotent requests, approvals
-& scheduled jobs (one-shot plus durable fixed-delay recurrence)."""
+"""Standalone WAL SQLite Gateway store for sessions, transcripts, FTS5 search,
+idempotent requests, approvals & scheduled jobs (one-shot, dependencies, and fixed-delay recurrence)."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -14,38 +15,30 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Mapping
 
-
 from jaeger_authority import redact_object, redact_text
+from jaeger_orchestration import next_cron_time, validate_cron
+
+from .stream import restore_saved_presentation
 
 MAIN_CHAT_SESSION_ID = "sess_jaeger_chat"
 
-# Bounds for inbound external-channel identifiers and payloads. Anything
-# outside these bounds is rejected before any write is attempted.
+# Bounds for inbound external-channel identifiers and payloads.
 _CHANNEL_ID_MAX = 128
 _EXTERNAL_ID_MAX = 256
 _SENDER_MAX = 256
 _CHANNEL_BODY_MAX = 20_000
+_FTS_TOKEN_RE = re.compile(r"[A-Za-z0-9_]{2,}")
 
 
 def _is_complete_result(result: Mapping[str, Any] | None) -> bool:
-    """True only for an unambiguous ``complete`` verdict.
-
-    Failed, interrupted, E-Stop and uncertain (missing/other verdict) runs are
-    never treated as complete, so they never spawn a recurrence successor.
-    """
+    """True only for an unambiguous ``complete`` verdict."""
     if not result or result.get("verdict") != "complete":
         return False
     return not any(bool(result.get(flag)) for flag in ("estop", "estop_active", "interrupted", "uncertain"))
 
 
 def _result_json_is_complete(result_json: Any) -> bool:
-    """Canonical completion predicate over a persisted ``result_json`` payload.
-
-    Parses the stored JSON and delegates to :func:`_is_complete_result` only
-    when the payload is a JSON object; malformed or non-object payloads are
-    never complete. Registered as a deterministic SQLite function so SQL
-    claim queries and Python readiness checks cannot disagree.
-    """
+    """Canonical completion predicate over a persisted ``result_json`` payload."""
     try:
         parsed = json.loads(result_json) if isinstance(result_json, str) else None
     except (TypeError, ValueError):
@@ -62,10 +55,13 @@ class RequestConflictError(ValueError):
 class GatewayStore:
     """Durable WAL SQLite catalog for standalone Jaeger Gateway instances."""
 
+    _SERIES_STATUSES = ("active", "paused", "cancelled")
+
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._fts_ready = False
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -136,12 +132,32 @@ class GatewayStore:
                     completed_at REAL,
                     series_id TEXT,
                     interval_s REAL,
+                    cron_expr TEXT,
                     predecessor_job_id TEXT,
                     fire_seq INTEGER NOT NULL DEFAULT 0,
                     FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due
                     ON scheduled_jobs(status, due_at);
+                CREATE TABLE IF NOT EXISTS email_preferences (
+                    id INTEGER PRIMARY KEY CHECK(id=1), recipient TEXT NOT NULL,
+                    responses INTEGER NOT NULL, tasks INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS notification_events (
+                    event TEXT PRIMARY KEY, recipient TEXT NOT NULL, label TEXT NOT NULL
+                );
+                CREATE TRIGGER IF NOT EXISTS email_response_complete AFTER UPDATE OF status ON requests
+                WHEN NEW.status='completed' AND OLD.status != NEW.status
+                BEGIN
+                    INSERT OR IGNORE INTO notification_events SELECT 'run:'||NEW.request_id, recipient,
+                        'Jaeger finished a response.' FROM email_preferences WHERE responses=1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS email_task_complete AFTER UPDATE OF status ON scheduled_jobs
+                WHEN NEW.status IN ('done','failed') AND OLD.status != NEW.status
+                BEGIN
+                    INSERT OR IGNORE INTO notification_events SELECT 'job:'||NEW.job_id, recipient,
+                        'Jaeger scheduled task status: '||NEW.status FROM email_preferences WHERE tasks=1;
+                END;
                 CREATE TABLE IF NOT EXISTS series_controls (
                     series_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
@@ -185,23 +201,16 @@ class GatewayStore:
                     ON external_channel_messages(session_id, message_row_id);
                 """
             )
-            # Backward-compatible migration: databases created before recurrence
-            # support get the new columns added in place; fresh databases already
-            # have them from the CREATE TABLE above. Existing rows keep working
-            # as one-shot jobs (series_id NULL).
             existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(scheduled_jobs)")}
             for col_name, col_decl in (
                 ("series_id", "TEXT"),
                 ("interval_s", "REAL"),
+                ("cron_expr", "TEXT"),
                 ("predecessor_job_id", "TEXT"),
                 ("fire_seq", "INTEGER NOT NULL DEFAULT 0"),
             ):
                 if col_name not in existing_cols:
                     conn.execute(f"ALTER TABLE scheduled_jobs ADD COLUMN {col_name} {col_decl}")
-            # Created after all ALTER TABLE additions: on pre-existing databases
-            # the columns do not exist until the migration above runs, so a
-            # CREATE INDEX inside the executescript would fail with
-            # "no such column: series_id" before any ALTER TABLE executes.
             conn.execute(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_jobs_series_predecessor
@@ -209,60 +218,243 @@ class GatewayStore:
                     WHERE series_id IS NOT NULL AND predecessor_job_id IS NOT NULL
                 """
             )
+            # SQLite FTS5 cross-session transcript search index (Hermes session_search parity).
+            try:
+                fts_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+                ).fetchone()
+                conn.executescript(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                        content,
+                        content='messages',
+                        content_rowid='id'
+                    );
+                    CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+                        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+                        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content ON messages BEGIN
+                        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+                        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+                    END;
+                    """
+                )
+                if fts_exists is None:
+                    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+                self._fts_ready = True
+            except sqlite3.OperationalError:
+                self._fts_ready = False
+            # Workspace file index (FTS5) for retrieval over indexed directory roots.
+            try:
+                fts_files_exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='files_fts'"
+                ).fetchone()
+                conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS indexed_files(
+                        path TEXT PRIMARY KEY,
+                        root TEXT NOT NULL,
+                        size INTEGER NOT NULL,
+                        mtime REAL NOT NULL,
+                        indexed_at REAL NOT NULL,
+                        content TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_indexed_files_root ON indexed_files(root);
+                    CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
+                        content,
+                        content='indexed_files',
+                        content_rowid='rowid'
+                    );
+                    CREATE TRIGGER IF NOT EXISTS files_fts_ai AFTER INSERT ON indexed_files BEGIN
+                        INSERT INTO files_fts(rowid, content) VALUES (new.rowid, new.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS files_fts_ad AFTER DELETE ON indexed_files BEGIN
+                        INSERT INTO files_fts(files_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+                    END;
+                    """
+                )
+                if fts_files_exists is None:
+                    conn.execute("INSERT INTO files_fts(files_fts) VALUES ('rebuild')")
+                self._files_fts_ready = True
+            except sqlite3.OperationalError:
+                self._files_fts_ready = False
+
+    _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".idea", ".vscode", "dist", "build"}
+
+    def index_directory(
+        self,
+        root: str,
+        *,
+        max_files: int = 2000,
+        max_file_bytes: int = 262144,
+    ) -> dict[str, Any]:
+        """Index a bounded directory tree into the FTS5 workspace index.
+
+        Walks ``root`` (skipping VCS/build dirs), reads text files up to
+        ``max_file_bytes``, upserts them into ``indexed_files``, and removes
+        stale rows for files that no longer exist. Returns counts.
+        """
+        import os
+        import time
+
+        root_abs = os.path.abspath(root)
+        if not os.path.isdir(root_abs):
+            raise FileNotFoundError(f"not a directory: {root_abs}")
+        cap_files = max(1, min(int(max_files), 20000))
+        cap_bytes = max(1024, int(max_file_bytes))
+        now = time.time()
+        indexed = 0
+        skipped = 0
+        seen: set[str] = set()
+        with self._lock, self._connect() as conn:
+            for dirpath, dirnames, filenames in os.walk(root_abs):
+                dirnames[:] = [d for d in dirnames if d not in self._SKIP_DIRS]
+                for name in filenames:
+                    if indexed >= cap_files:
+                        break
+                    path = os.path.join(dirpath, name)
+                    try:
+                        st = os.stat(path)
+                    except OSError:
+                        skipped += 1
+                        continue
+                    if not os.path.isfile(path) or st.st_size > cap_bytes:
+                        skipped += 1
+                        continue
+                    try:
+                        with open(path, "rb") as fh:
+                            raw = fh.read(cap_bytes + 1)
+                        content = raw.decode("utf-8", errors="replace")
+                    except OSError:
+                        skipped += 1
+                        continue
+                    seen.add(path)
+                    conn.execute(
+                        """INSERT OR REPLACE INTO indexed_files
+                           (path, root, size, mtime, indexed_at, content)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        (path, root_abs, st.st_size, st.st_mtime, now, content),
+                    )
+                    indexed += 1
+            # Drop stale rows for this root.
+            stale = conn.execute(
+                "SELECT path FROM indexed_files WHERE root = ?", (root_abs,)
+            ).fetchall()
+            for row in stale:
+                if row[0] not in seen:
+                    conn.execute("DELETE FROM indexed_files WHERE path = ?", (row[0],))
+        return {"root": root_abs, "indexed": indexed, "skipped": skipped}
+
+    def search_indexed_files(
+        self,
+        query: str,
+        *,
+        root: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Full-text search (SQLite FTS5) across indexed workspace files."""
+        import os
+
+        cleaned = (query or "").strip()
+        if not cleaned:
+            return []
+        cap = max(1, min(int(limit), 50))
+        tokens = _FTS_TOKEN_RE.findall(cleaned)
+        with self._lock, self._connect() as conn:
+            rows: list[sqlite3.Row] = []
+            if getattr(self, "_files_fts_ready", False) and tokens:
+                fts_query = " AND ".join(f'"{tok}"' for tok in tokens[:8])
+                params: list[Any] = [fts_query]
+                filters = ["1=1"]
+                if root:
+                    filters.append("f.root = ?")
+                    params.append(os.path.abspath(root))
+                where = " AND ".join(filters)
+                try:
+                    rows = conn.execute(
+                        f"""SELECT f.path, f.root, f.size, f.mtime,
+                                   snippet(files_fts, 0, '[', ']', '...', 24) AS excerpt
+                            FROM files_fts
+                            JOIN indexed_files f ON f.rowid = files_fts.rowid
+                            WHERE files_fts MATCH ? AND {where}
+                            ORDER BY bm25(files_fts), f.path
+                            LIMIT ?""",
+                        (*params, cap),
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    rows = []
+        return [
+            {
+                "path": r["path"],
+                "root": r["root"],
+                "size": r["size"],
+                "mtime": r["mtime"],
+                "excerpt": r["excerpt"],
+            }
+            for r in rows
+        ]
 
     def create_scheduled_job(
         self,
         *,
         session_id: str,
         prompt: str,
-        due_at: float,
+        due_at: float | None = None,
         job_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
         recurrence: Mapping[str, Any] | None = None,
         depends_on: Sequence[str] | None = None,
     ) -> dict[str, Any]:
-        """Durably register an owner-created scheduled agent job.
-
-        Without ``recurrence`` this is a plain one-shot job (unchanged behavior).
-        With ``recurrence={"interval_s": <positive finite seconds>, "series_id":
-        <optional stable id>}`` the job becomes the first fire of a durable
-        fixed-delay series: each fire that completes with verdict ``complete``
-        schedules exactly one pending successor at completion + interval_s under
-        the same stable series ID.
-
-        ``depends_on`` optionally lists parent job IDs for a NEW one-shot job.
-        Every parent must already exist, be a one-shot job (no series) in the
-        same session, and differ from the new child ID; the child row and its
-        dependency links are inserted in one transaction. Because edges can
-        only reference pre-existing jobs, cycles are impossible by
-        construction. The child is not claimable until every parent is done
-        with a persisted ``complete`` verdict.
-        """
+        """Durably register an owner-created scheduled agent job (one-shot, fixed-delay, cron, or dependent)."""
         jid = job_id or f"job_{uuid.uuid4().hex[:12]}"
         now = time.time()
         series_id: str | None = None
         interval_s: float | None = None
+        cron_expr: str | None = None
         meta = dict(metadata or {})
         if recurrence is not None:
             try:
                 rec = dict(recurrence)
             except (TypeError, ValueError):
-                raise ValueError("recurrence must be a mapping with a positive finite interval_s") from None
+                raise ValueError("recurrence must be a mapping with interval_s or cron_expr") from None
             raw_interval = rec.get("interval_s")
-            if isinstance(raw_interval, bool) or not isinstance(raw_interval, (int, float)):
-                raise ValueError("recurrence.interval_s must be a positive finite number of seconds")
-            interval = float(raw_interval)
-            if not math.isfinite(interval) or interval <= 0:
-                raise ValueError("recurrence.interval_s must be a positive finite number of seconds")
-            series_id = str(rec.get("series_id") or f"series_{uuid.uuid4().hex[:12]}")
-            interval_s = interval
-            meta = {
-                **meta,
-                "series_id": series_id,
-                "interval_s": interval_s,
-                "fire_seq": 0,
-                "recurrence": {"kind": "fixed_delay", "interval_s": interval_s},
-            }
+            raw_cron = rec.get("cron_expr")
+            if raw_interval is not None and raw_cron is not None:
+                raise ValueError("recurrence cannot specify both interval_s and cron_expr")
+            if raw_cron is not None:
+                cron_expr = validate_cron(str(raw_cron))
+                series_id = str(rec.get("series_id") or f"series_{uuid.uuid4().hex[:12]}")
+                meta = {
+                    **meta,
+                    "series_id": series_id,
+                    "cron_expr": cron_expr,
+                    "fire_seq": 0,
+                    "recurrence": {"kind": "cron", "cron_expr": cron_expr},
+                }
+            else:
+                if isinstance(raw_interval, bool) or not isinstance(raw_interval, (int, float)):
+                    raise ValueError("recurrence.interval_s must be a positive finite number of seconds")
+                interval = float(raw_interval)
+                if not math.isfinite(interval) or interval <= 0:
+                    raise ValueError("recurrence.interval_s must be a positive finite number of seconds")
+                series_id = str(rec.get("series_id") or f"series_{uuid.uuid4().hex[:12]}")
+                interval_s = interval
+                meta = {
+                    **meta,
+                    "series_id": series_id,
+                    "interval_s": interval_s,
+                    "fire_seq": 0,
+                    "recurrence": {"kind": "fixed_delay", "interval_s": interval_s},
+                }
+        if due_at is None:
+            if cron_expr is None:
+                raise ValueError("due_at is required unless cron_expr is provided")
+            due_val = next_cron_time(cron_expr, after=now)
+        else:
+            due_val = float(due_at)
         parent_ids: list[str] = []
         if depends_on is not None:
             if series_id is not None:
@@ -280,7 +472,7 @@ class GatewayStore:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 self._insert_pending_job(
-                    conn, jid, session_id, prompt, float(due_at), meta, now, series_id, interval_s,
+                    conn, jid, session_id, prompt, due_val, meta, now, series_id, interval_s, cron_expr,
                 )
                 for pid in parent_ids:
                     parent = conn.execute(
@@ -317,20 +509,8 @@ class GatewayStore:
             row = conn.execute("SELECT * FROM scheduled_jobs WHERE job_id = ?", (job_id,)).fetchone()
         return dict(row) if row is not None else None
 
-    def cancel_pending_job(self, job_id: str, session_id: str) -> dict[str, Any] | None:
-        """Atomically cancel a PENDING one-shot job owned by ``session_id``.
-
-        Uses BEGIN IMMEDIATE so the cancel races safely against claim_due_job:
-        exactly one of the two transactions wins the row. The UPDATE only fires
-        when the session matches, the job is one-shot (series_id IS NULL) and
-        the status is still 'pending' — claimed/running and terminal jobs are
-        never altered. Returns the cancelled row on success, or a distinct
-        outcome dict: {"error": "not_found"} when no such job exists in this
-        session, {"error": "cannot_cancel"} when the job exists but is not a
-        pending one-shot. No rows are ever deleted. Cancelling uses the existing
-        'cancelled' status, so dependent children become blocked and can never
-        dispatch.
-        """
+    def cancel_pending_job(self, job_id: str, session_id: str) -> dict[str, Any]:
+        """Atomically cancel a PENDING one-shot job owned by ``session_id``."""
         now = time.time()
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -390,20 +570,8 @@ class GatewayStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    _SERIES_STATUSES = ("active", "paused", "cancelled")
-
     def set_series_status(self, series_id: str, session_id: str, status: str) -> dict[str, Any]:
-        """Persist a series control state (active/paused/cancelled), serialized
-        with claims and settlements via BEGIN IMMEDIATE.
-
-        Rejects unknown statuses and unknown series (no fires for that
-        series+session). A cancelled series can never be reactivated or paused
-        again. Cancelling also marks all existing pending fires of the series
-        cancelled in the same transaction; in-flight (claimed) fires are left
-        untouched so their recorded result stays truthful — cancel only governs
-        future scheduling (no successor will be spawned). Pause/resume leave the
-        pending successor and its fixed due time untouched.
-        """
+        """Persist a series control state (active/paused/cancelled) atomically."""
         if status not in self._SERIES_STATUSES:
             raise ValueError(f"invalid series status: {status!r}")
         now = time.time()
@@ -444,11 +612,7 @@ class GatewayStore:
         return self.get_series_status(series_id, session_id) or {}
 
     def get_series_status(self, series_id: str, session_id: str) -> dict[str, Any] | None:
-        """Read the effective control state of a series for a session.
-
-        Series created before the controls table existed (or with no explicit
-        row) default to 'active'. Returns None for unknown series.
-        """
+        """Read the effective control state of a series for a session."""
         with self._lock, self._connect() as conn:
             exists = conn.execute(
                 "SELECT 1 FROM scheduled_jobs WHERE series_id = ? AND session_id = ? LIMIT 1",
@@ -470,18 +634,7 @@ class GatewayStore:
         }
 
     def claim_due_job(self, *, now: float | None = None) -> dict[str, Any] | None:
-        """Atomically claim the oldest due pending job.
-
-        Uses BEGIN IMMEDIATE so two competing claimers cannot both win:
-        exactly one UPDATE ... WHERE status='pending' succeeds. Pending fires of
-        paused or cancelled series are skipped (one-shot jobs have no series and
-        are never skipped). A pending job with unmet dependencies is skipped too:
-        it becomes claimable only once every parent job is done with a persisted
-        ``complete`` verdict (no estop/interrupted/uncertain flags), so a
-        failed, cancelled or interrupted parent blocks the child durably across
-        restarts. Returns the claimed row (with a fresh run_id), or None if
-        nothing is due and ready.
-        """
+        """Atomically claim the oldest due pending ready job."""
         now = time.time() if now is None else float(now)
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         with self._lock, self._connect() as conn:
@@ -528,16 +681,7 @@ class GatewayStore:
         return dict(claimed) if claimed is not None else None
 
     def get_job_dependencies(self, job_id: str, session_id: str) -> dict[str, Any] | None:
-        """Return the parent links of a job plus its dependency readiness.
-
-        ``parents`` lists each parent's job_id, session_id, status and verdict
-        (None when no verdict is persisted). ``readiness`` is ``ready`` when
-        every parent is done with an unambiguous ``complete`` verdict, ``blocked``
-        when at least one parent reached a terminal non-complete state (failed,
-        cancelled, interrupted, or done without a complete verdict), and
-        ``waiting`` while parents are still pending/claimed. Returns None for an
-        unknown job or a job belonging to another session.
-        """
+        """Return parent links of a job plus its dependency readiness."""
         with self._lock, self._connect() as conn:
             job = conn.execute(
                 "SELECT job_id, session_id FROM scheduled_jobs WHERE job_id = ?",
@@ -567,10 +711,7 @@ class GatewayStore:
             complete = row["status"] == "done" and _is_complete_result(result)
             if complete:
                 pass
-            elif row["status"] in ("failed", "cancelled", "interrupted"):
-                saw_blocking_terminal = True
-            elif row["status"] == "done":
-                # done without an unambiguous complete verdict: terminal block
+            elif row["status"] in ("failed", "cancelled", "interrupted", "done"):
                 saw_blocking_terminal = True
             else:
                 saw_unfinished = True
@@ -602,29 +743,28 @@ class GatewayStore:
         *,
         completed_at: float,
     ) -> dict[str, Any] | None:
-        """Insert exactly one pending successor fire for a completed recurring fire.
-
-        Must be called inside the caller's open write transaction so the settle
-        and the successor insert commit or roll back together. Idempotent: a
-        successor for this predecessor is never inserted twice (guarded by a
-        SELECT plus the partial unique index on (series_id, predecessor_job_id)).
-        Returns the successor row, or None for one-shot fires, unusable
-        intervals, or when a successor already exists.
-        """
+        """Insert exactly one pending successor fire for a completed recurring (interval or cron) fire."""
         series_id = job_row["series_id"]
         interval_raw = job_row["interval_s"]
-        if not series_id or interval_raw is None:
+        cron_expr = job_row["cron_expr"] if "cron_expr" in job_row.keys() else None
+        if not series_id or (interval_raw is None and not cron_expr):
             return None
-        try:
-            interval_s = float(interval_raw)
-        except (TypeError, ValueError, OverflowError):
-            return None
-        if not math.isfinite(interval_s) or interval_s <= 0:
-            return None
-        # A cancelled series never spawns successors, including from a fire that
-        # was already in flight when the cancel landed. A paused series still
-        # spawns: the successor simply stays pending (fixed due time preserved)
-        # until the series is resumed.
+        interval_s: float | None = None
+        next_due: float
+        if cron_expr:
+            try:
+                cron_expr = validate_cron(str(cron_expr))
+                next_due = next_cron_time(cron_expr, after=float(completed_at))
+            except ValueError:
+                return None
+        else:
+            try:
+                interval_s = float(interval_raw)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if not math.isfinite(interval_s) or interval_s <= 0:
+                return None
+            next_due = float(completed_at) + interval_s
         control = conn.execute(
             """SELECT status FROM series_controls
                WHERE series_id = ? AND session_id = ?""",
@@ -643,28 +783,35 @@ class GatewayStore:
         fire_seq = int(job_row["fire_seq"] or 0) + 1
         successor_id = f"job_{uuid.uuid4().hex[:12]}"
         metadata = json.loads(job_row["metadata_json"] or "{}")
+        recurrence_meta = (
+            {"kind": "cron", "cron_expr": cron_expr}
+            if cron_expr
+            else {"kind": "fixed_delay", "interval_s": interval_s}
+        )
         metadata = {
             **metadata,
             "series_id": series_id,
             "interval_s": interval_s,
+            "cron_expr": cron_expr,
             "predecessor_job_id": predecessor_job_id,
             "fire_seq": fire_seq,
-            "recurrence": {"kind": "fixed_delay", "interval_s": interval_s},
+            "recurrence": recurrence_meta,
         }
         conn.execute(
             """INSERT INTO scheduled_jobs(job_id, session_id, prompt, due_at, status,
                                            result_json, metadata_json, created_at,
-                                           series_id, interval_s, predecessor_job_id, fire_seq)
-               VALUES (?, ?, ?, ?, 'pending', '{}', ?, ?, ?, ?, ?, ?)""",
+                                           series_id, interval_s, cron_expr, predecessor_job_id, fire_seq)
+               VALUES (?, ?, ?, ?, 'pending', '{}', ?, ?, ?, ?, ?, ?, ?)""",
             (
                 successor_id,
                 job_row["session_id"],
                 job_row["prompt"],
-                float(completed_at) + interval_s,
+                next_due,
                 json.dumps(metadata, default=str),
                 float(completed_at),
                 series_id,
                 interval_s,
+                cron_expr,
                 predecessor_job_id,
                 fire_seq,
             ),
@@ -681,14 +828,7 @@ class GatewayStore:
         status: str,
         result: Mapping[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Record the final result of a claimed job (done/failed/cancelled).
-
-        Settling a known claimed recurring fire as ``done`` with an unambiguous
-        ``complete`` verdict inserts exactly one pending successor fire at
-        completion + interval in the same SQLite transaction. Failed, cancelled,
-        interrupted, E-Stop or uncertain outcomes never spawn a successor, and a
-        completed fire record is never modified again (stable job/run IDs).
-        """
+        """Record the final result of a claimed job (done/failed/cancelled)."""
         if status not in ("done", "failed", "cancelled"):
             raise ValueError(f"invalid scheduled job status: {status!r}")
         now = time.time()
@@ -700,7 +840,7 @@ class GatewayStore:
                     """UPDATE scheduled_jobs
                        SET status = ?, result_json = ?, completed_at = ?
                        WHERE job_id = ? AND status = 'claimed'""",
-                    (status, json.dumps(result_payload), now, job_id),
+                    (status, json.dumps(result_payload, default=str), now, job_id),
                 )
                 if cur.rowcount == 1 and status == "done" and _is_complete_result(result_payload):
                     row = conn.execute(
@@ -728,14 +868,7 @@ class GatewayStore:
         }
 
     def reconcile_claimed_jobs(self) -> list[str]:
-        """Boot-time reconciliation of jobs stuck in 'claimed' after a crash.
-
-        Known terminal request outcomes are copied onto the job; unresolved or
-        missing outcomes become 'interrupted' for owner review. No tools are
-        replayed. A recovered known-complete recurring fire spawns exactly one
-        pending successor in the same transaction; repeating recovery never
-        duplicates a fire. Returns the job IDs that were reconciled.
-        """
+        """Boot-time reconciliation of jobs stuck in 'claimed' after a crash."""
         now = time.time()
         reconciled: list[str] = []
         with self._lock, self._connect() as conn:
@@ -758,8 +891,6 @@ class GatewayStore:
                                 "updated_at": req_row["updated_at"],
                             }
                     if req is not None and req["status"] in ("completed", "failed"):
-                        # 'done' requires BOTH a completed storage status AND a complete
-                        # verdict; a completed-but-budget_exhausted request is failed.
                         done = req["status"] == "completed" and req.get("result", {}).get("verdict") == "complete"
                         status = "done" if done else "failed"
                         conn.execute(
@@ -768,10 +899,6 @@ class GatewayStore:
                             (status, json.dumps(req["result"], default=str), now, job_id),
                         )
                         if done and _is_complete_result(req.get("result")):
-                            # Fixed-delay recurrence anchors on when the run actually
-                            # completed (persisted requests.updated_at), not on the
-                            # restart time, so the successor is due at
-                            # completion + interval rather than restart + interval.
                             completed_at = req.get("updated_at")
                             if not isinstance(completed_at, (int, float)) or isinstance(completed_at, bool):
                                 completed_at = now
@@ -895,7 +1022,6 @@ class GatewayStore:
 
     @staticmethod
     def _bounded_channel_string(value: Any, field: str, max_len: int) -> str:
-        """Validate one bounded, non-empty external-channel string field."""
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field} must be a non-empty string")
         if len(value) > max_len:
@@ -918,22 +1044,7 @@ class GatewayStore:
         sender: str,
         body: str,
     ) -> dict[str, Any]:
-        """Attribute one inbound external-channel message to a dedicated Gateway session.
-
-        Fully atomic (BEGIN IMMEDIATE): validates bounded strings, claims the
-        (channel, external_thread_id, external_message_id) dedup key, allocates
-        exactly one Gateway session per (channel, external_thread_id), and
-        appends a single role='external' transcript row marked untrusted with
-        provenance. The caller never supplies a Gateway session_id; it is
-        always allocated here. Bodies and provenance are scrubbed with
-        jaeger_authority redaction before persistence; only a one-way content
-        digest of the raw payload is stored alongside the redacted content.
-
-        A retry with an identical payload returns the same row with
-        ``replayed=True`` and writes nothing; a conflicting replay of the same
-        key raises RequestConflictError without any writes. No model, tools,
-        outbound effects, network, or automatic activation occur here.
-        """
+        """Attribute one inbound external-channel message to a dedicated Gateway session."""
         channel = self._bounded_channel_string(channel, "channel", _CHANNEL_ID_MAX)
         external_thread_id = self._bounded_channel_string(
             external_thread_id, "external_thread_id", _EXTERNAL_ID_MAX
@@ -947,8 +1058,6 @@ class GatewayStore:
         if len(body) > _CHANNEL_BODY_MAX:
             raise ValueError(f"body exceeds maximum length of {_CHANNEL_BODY_MAX} characters")
 
-        # Stable, one-way digest over the canonical raw payload; safe to persist
-        # because it reveals nothing about the content itself.
         digest = hashlib.sha256(
             json.dumps(
                 {
@@ -998,10 +1107,6 @@ class GatewayStore:
                 if thread is not None:
                     session_id = thread["session_id"]
                 else:
-                    # Allocated here only — never accepted from the caller — and
-                    # inserted under the same write lock as the message claim, so
-                    # concurrent connections cannot allocate two sessions for one
-                    # (channel, external_thread_id) pair.
                     session_id = f"sess_{uuid.uuid4().hex[:12]}"
                     conn.execute(
                         """INSERT INTO sessions(session_id, title, workspace, status, metadata_json, created_at, updated_at)
@@ -1079,7 +1184,9 @@ class GatewayStore:
             "replayed": False,
         }
 
-    def list_chat_topics(self, query: str = "", *, limit: int = 100, include_external: bool = True) -> list[dict[str, Any]]:
+    def list_chat_topics(
+        self, query: str = "", *, limit: int = 100, include_external: bool = True,
+    ) -> list[dict[str, Any]]:
         """Index user turns by their transcript position, without generating topics."""
         with self._lock, self._connect() as conn:
             rows = conn.execute(
@@ -1092,23 +1199,129 @@ class GatewayStore:
             ).fetchall()
         return [dict(row) for row in reversed(rows)]
 
-    def list_messages(self, session_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    def search_messages(
+        self,
+        query: str,
+        *,
+        session_id: str | None = None,
+        limit: int = 15,
+        include_external: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Full-text search (SQLite FTS5) across past session transcripts."""
+        cleaned = (query or "").strip()
+        if not cleaned:
+            return []
+        cap = max(1, min(int(limit), 50))
+        tokens = _FTS_TOKEN_RE.findall(cleaned)
         with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM messages WHERE session_id = ? ORDER BY id ASC LIMIT ?",
-                (session_id, max(1, int(limit))),
-            ).fetchall()
+            rows: list[sqlite3.Row] = []
+            if self._fts_ready and tokens:
+                fts_query = " AND ".join(f'"{tok}"' for tok in tokens[:8])
+                params: list[Any] = [fts_query]
+                filters = ["m.role IN ('user', 'assistant')"]
+                if session_id:
+                    filters.append("m.session_id = ?")
+                    params.append(session_id)
+                if not include_external:
+                    filters.append("json_extract(s.metadata_json, '$.source') IS NOT 'external_channel'")
+                where = " AND ".join(filters)
+                try:
+                    rows = conn.execute(
+                        f"""SELECT m.id, m.session_id, s.title AS session_title, m.role,
+                                   snippet(messages_fts, 0, '[', ']', '...', 24) AS excerpt,
+                                   substr(m.content, 1, 500) AS content,
+                                   m.created_at
+                            FROM messages_fts
+                            JOIN messages m ON m.id = messages_fts.rowid
+                            JOIN sessions s ON s.session_id = m.session_id
+                            WHERE messages_fts MATCH ? AND {where}
+                            ORDER BY bm25(messages_fts), m.id DESC
+                            LIMIT ?""",
+                        (*params, cap),
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    rows = []
+            if not rows:
+                params2: list[Any] = [cleaned]
+                filters2 = ["m.role IN ('user', 'assistant')", "instr(lower(m.content), lower(?)) > 0"]
+                if session_id:
+                    filters2.append("m.session_id = ?")
+                    params2.append(session_id)
+                if not include_external:
+                    filters2.append("json_extract(s.metadata_json, '$.source') IS NOT 'external_channel'")
+                rows = conn.execute(
+                    f"""SELECT m.id, m.session_id, s.title AS session_title, m.role,
+                               substr(m.content, 1, 300) AS excerpt,
+                               substr(m.content, 1, 500) AS content,
+                               m.created_at
+                        FROM messages m
+                        JOIN sessions s ON s.session_id = m.session_id
+                        WHERE {' AND '.join(filters2)}
+                        ORDER BY m.id DESC LIMIT ?""",
+                    (*params2, cap),
+                ).fetchall()
         return [
             {
-                "id": r["id"],
+                "id": int(r["id"]),
                 "session_id": r["session_id"],
+                "session_title": r["session_title"],
                 "role": r["role"],
+                "excerpt": r["excerpt"],
                 "content": r["content"],
-                "metadata": json.loads(r["metadata_json"] or "{}"),
                 "created_at": r["created_at"],
             }
             for r in rows
         ]
+
+    def list_messages(
+        self, session_id: str | None, *, limit: int = 200, latest: bool = False,
+        before_id: int | None = None, after_id: int | None = None, include_presentation: bool = False,
+    ) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            params: list[int | str] = []
+            conditions = []
+            if session_id is not None:
+                conditions.append("m.session_id = ?")
+                params.append(session_id)
+            if before_id is not None:
+                conditions.append("m.id < ?")
+                params.append(before_id)
+            if after_id is not None:
+                conditions.append("m.id > ?")
+                params.append(after_id)
+            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+            reverse = after_id is None and (latest or before_id is not None)
+            order = "DESC" if reverse else "ASC"
+            rows = conn.execute(
+                f"SELECT m.* FROM messages m{where} ORDER BY m.id {order} LIMIT ?",
+                (*params, max(1, int(limit))),
+            ).fetchall()
+            if reverse:
+                rows.reverse()
+            items = [
+                {
+                    "id": row["id"], "session_id": row["session_id"],
+                    "role": row["role"], "content": row["content"],
+                    "metadata": json.loads(row["metadata_json"] or "{}"),
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
+            if include_presentation:
+                for item in items:
+                    metadata = item["metadata"]
+                    request_id = metadata.get("request_id")
+                    if item["role"] != "assistant" or metadata.get("presentation") is not None or not request_id:
+                        continue
+                    receipt = conn.execute(
+                        "SELECT result_json FROM requests WHERE request_id = ? AND session_id = ? AND status = 'completed'",
+                        (request_id, item["session_id"]),
+                    ).fetchone()
+                    if receipt:
+                        parts = restore_saved_presentation(json.loads(receipt["result_json"]), item["content"])
+                        if parts:
+                            metadata["presentation"] = parts
+            return items
 
     def admit_request(
         self,
@@ -1140,6 +1353,69 @@ class GatewayStore:
             )
         return {"request_id": rid, "session_id": session_id, "status": "queued", "result": {}}, False
 
+    def recover_interrupted_runs(self) -> None:
+        """Save a restart handoff for each abandoned run without reissuing tools."""
+        now = time.time()
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT request_id, session_id, result_json FROM requests WHERE status = 'running'"
+            ).fetchall()
+            for row in rows:
+                receipts = json.loads(row["result_json"]).get("tool_receipts", [])
+                names = ", ".join(f"{item.get('tool', 'tool')} ({item['status']})" for item in receipts[-8:])
+                content = "The Gateway restarted during this run. Check the workspace before continuing any interrupted action."
+                if names:
+                    content += f" Last saved tool results: {names}."
+                parts = [
+                    {"type": "tool", "callId": item.get("call_id", str(index)),
+                     "toolName": item.get("tool", "tool"), "status": item["status"],
+                     **{key: item[key] for key in ("output", "error") if key in item}}
+                    for index, item in enumerate(receipts)
+                ]
+                parts.append({"type": "text", "text": content})
+                metadata = {"request_id": row["request_id"], "verdict": "interrupted", "presentation": parts}
+                conn.execute(
+                    "INSERT INTO messages(session_id, role, content, metadata_json, created_at) VALUES (?, 'assistant', ?, ?, ?)",
+                    (row["session_id"], content, json.dumps(metadata), now),
+                )
+                conn.execute(
+                    "UPDATE requests SET status = 'failed', result_json = ?, updated_at = ? WHERE request_id = ?",
+                    (json.dumps({"ok": False, "error": content, "tool_receipts": receipts}), now, row["request_id"]),
+                )
+                conn.execute("UPDATE sessions SET status = 'idle' WHERE session_id = ?", (row["session_id"],))
+
+    def save_tool_receipt(self, request_id: str, receipt: Mapping[str, Any]) -> None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT result_json FROM requests WHERE request_id = ? AND status = 'running'",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                return
+            result = json.loads(row["result_json"])
+            result["tool_receipts"] = [*result.get("tool_receipts", []), dict(receipt)][-50:]
+            conn.execute(
+                "UPDATE requests SET result_json = ?, updated_at = ? WHERE request_id = ?",
+                (json.dumps(result, default=str), time.time(), request_id),
+            )
+
+    def email_preferences(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT recipient, responses, tasks FROM email_preferences WHERE id=1").fetchone()
+        return {"recipient": row[0], "responses": bool(row[1]), "tasks": bool(row[2])} if row else {"recipient": "", "responses": False, "tasks": False}
+
+    def save_email_preferences(self, recipient: str, responses: bool, tasks: bool) -> None:
+        with self._connect() as conn:
+            conn.execute("INSERT OR REPLACE INTO email_preferences VALUES(1, ?, ?, ?)", (recipient, responses, tasks))
+
+    def stage_notification_emails(self, hub) -> None:
+        # Gateway commits the event with the job/run. A deterministic outbox ID
+        # makes retry after a crash between these two SQLite commits harmless.
+        with self._connect() as conn:
+            for event, recipient, label in conn.execute("SELECT event, recipient, label FROM notification_events ORDER BY rowid LIMIT 100").fetchall():
+                hub.stage_notification(event, recipient, label)
+                conn.execute("DELETE FROM notification_events WHERE event=?", (event,))
+
     def settle_request(self, request_id: str, status: str, result: Mapping[str, Any]) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -1169,19 +1445,17 @@ class GatewayStore:
     def _insert_pending_job(
         conn: sqlite3.Connection, jid: str, session_id: str, prompt: str, due_at: float,
         meta: dict[str, Any], now: float, series_id: str | None, interval_s: float | None,
+        cron_expr: str | None = None,
     ) -> None:
         conn.execute(
             """INSERT INTO scheduled_jobs(job_id, session_id, prompt, due_at, status,
                                            result_json, metadata_json, created_at,
-                                           series_id, interval_s, predecessor_job_id, fire_seq)
-               VALUES (?, ?, ?, ?, 'pending', '{}', ?, ?, ?, ?, NULL, 0)""",
+                                           series_id, interval_s, cron_expr, predecessor_job_id, fire_seq)
+               VALUES (?, ?, ?, ?, 'pending', '{}', ?, ?, ?, ?, ?, NULL, 0)""",
             (jid, session_id, prompt, float(due_at), json.dumps(meta, default=str), now,
-             series_id, interval_s),
+             series_id, interval_s, cron_expr),
         )
         if series_id is not None:
-            # Effective default state for a new (and any pre-existing) series
-            # row is 'active'; recorded explicitly so get_series_status and
-            # the claim/spawn guards see it.
             conn.execute(
                 """INSERT OR IGNORE INTO series_controls(series_id, session_id, status, updated_at)
                    VALUES (?, ?, 'active', ?)""",
@@ -1189,30 +1463,48 @@ class GatewayStore:
             )
 
     def propose_scheduled_job(
-        self, session_id: str, *, prompt: str, due_at: Any, interval_s: float | None = None,
+        self,
+        session_id: str,
+        *,
+        prompt: str,
+        due_at: Any = None,
+        interval_s: float | None = None,
+        cron_expr: str | None = None,
     ) -> dict[str, Any]:
         """Persist an immutable scheduled job proposal for explicit owner approval."""
         if not isinstance(prompt, str) or not 1 <= len(prompt.strip()) <= 16000:
             raise ValueError("prompt must be 1-16000 characters")
-        if isinstance(due_at, bool) or not isinstance(due_at, (int, float)):
-            raise ValueError("finite numeric due_at is required")
-        try:
-            due = float(due_at)
-        except OverflowError:
-            raise ValueError("finite numeric due_at is required") from None
-        if not math.isfinite(due):
-            raise ValueError("finite numeric due_at is required")
+        if interval_s is not None and cron_expr is not None:
+            raise ValueError("specify either interval_s or cron_expr, not both")
+        clean_cron: str | None = None
+        if cron_expr is not None:
+            clean_cron = validate_cron(str(cron_expr))
+        if due_at is None:
+            if clean_cron is None:
+                raise ValueError("finite numeric due_at is required unless cron_expr is given")
+            due = next_cron_time(clean_cron, after=time.time())
+        else:
+            if isinstance(due_at, bool) or not isinstance(due_at, (int, float)):
+                raise ValueError("finite numeric due_at is required")
+            try:
+                due = float(due_at)
+            except OverflowError:
+                raise ValueError("finite numeric due_at is required") from None
+            if not math.isfinite(due):
+                raise ValueError("finite numeric due_at is required")
         if interval_s is not None and (
             isinstance(interval_s, bool) or not isinstance(interval_s, (int, float))
             or not 1 <= interval_s <= 31536000
         ):
             raise ValueError("interval_s must be within 1 to 31536000 seconds")
-        payload = {"prompt": prompt.strip(), "due_at": due, "interval_s": interval_s}
+        payload: dict[str, Any] = {"prompt": prompt.strip(), "due_at": due, "interval_s": interval_s}
+        if clean_cron is not None:
+            payload["cron_expr"] = clean_cron
         return self.create_approval(session_id, "schedule-proposal", json.dumps(payload))
 
     def get_approval(self, approval_id: str) -> dict[str, Any] | None:
         """Get an approval by ID for owner authorization checking."""
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             row = conn.execute("SELECT * FROM approvals WHERE approval_id = ?", (approval_id,)).fetchone()
         return dict(row) if row is not None else None
 
@@ -1234,16 +1526,25 @@ class GatewayStore:
                     return None
                 if status == "approved":
                     payload = json.loads(row["prompt"])
-                    interval = payload["interval_s"]
+                    interval = payload.get("interval_s")
+                    cron_expr = payload.get("cron_expr")
                     job_id = f"job_{approval_id}"
-                    series_id = f"series_{approval_id}" if interval is not None else None
-                    meta = {} if interval is None else {
-                        "series_id": series_id, "interval_s": interval, "fire_seq": 0,
-                        "recurrence": {"kind": "fixed_delay", "interval_s": interval},
-                    }
+                    series_id = f"series_{approval_id}" if (interval is not None or cron_expr) else None
+                    if cron_expr:
+                        meta: dict[str, Any] = {
+                            "series_id": series_id, "cron_expr": cron_expr, "fire_seq": 0,
+                            "recurrence": {"kind": "cron", "cron_expr": cron_expr},
+                        }
+                    elif interval is not None:
+                        meta = {
+                            "series_id": series_id, "interval_s": interval, "fire_seq": 0,
+                            "recurrence": {"kind": "fixed_delay", "interval_s": interval},
+                        }
+                    else:
+                        meta = {}
                     self._insert_pending_job(
                         conn, job_id, row["session_id"], payload["prompt"], payload["due_at"],
-                        meta, now, series_id, interval,
+                        meta, now, series_id, interval, cron_expr,
                     )
             conn.execute(
                 "UPDATE approvals SET status = ?, decision = ?, note = ?, resolved_at = ? WHERE approval_id = ?",
@@ -1266,4 +1567,4 @@ class GatewayStore:
         return [dict(r) for r in rows]
 
 
-__all__ = ["GatewayStore", "RequestConflictError"]
+__all__ = ["MAIN_CHAT_SESSION_ID", "GatewayStore", "RequestConflictError"]
