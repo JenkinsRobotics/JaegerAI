@@ -287,3 +287,26 @@ def test_egress_inspector_banned_standing_grants_and_guardrails(tmp_path: Path) 
         assert guardrails.run("input", "normal prompt") is None
     finally:
         unreg()
+
+
+def test_multiline_quoted_python_and_git_ignore_set_not_false_positive(tmp_path: Path) -> None:
+    engine = PolicyEngine()
+    # Multiline safe python3 -c "..." must NOT fail as unparseable shell syntax
+    safe_ml = 'python3 -c "\nimport sys\nprint(sys.version_info.major)\n"'
+    v_safe = engine.evaluate(ActionProposal("shell", {"command": safe_ml}, workspace=tmp_path))
+    assert v_safe.decision == DecisionKind.ALLOW, f"False positive on multiline python -c: {v_safe}"
+
+    # Multiline destructive python3 -c "..." MUST still be caught
+    bad_ml = 'python3 -c "\nimport os\nos.remove(\'foo.txt\')\n"'
+    v_bad = engine.evaluate(ActionProposal("shell", {"command": bad_ml}, workspace=tmp_path))
+    assert v_bad.decision == DecisionKind.REQUIRE_APPROVAL
+
+    # Bare ".git" in an ignore set alongside write_text on a regular file is safe
+    ignore_set = 'python3 -c "from pathlib import Path; SKIP = {\'.git\', \'node_modules\'}; Path(\'out.txt\').write_text(\'ok\')"'
+    v_ign = engine.evaluate(ActionProposal("shell", {"command": ignore_set}, workspace=tmp_path))
+    assert v_ign.decision == DecisionKind.ALLOW, f"False positive on .git ignore set: {v_ign}"
+
+    # Actual .git/ mutation MUST still be DENIED
+    real_git = 'python3 -c "from pathlib import Path; (Path(\'.git\') / \'config\').write_text(\'pwn\')"'
+    v_git = engine.evaluate(ActionProposal("shell", {"command": real_git}, workspace=tmp_path))
+    assert v_git.decision == DecisionKind.DENY
