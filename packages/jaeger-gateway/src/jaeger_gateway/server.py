@@ -74,6 +74,7 @@ def create_gateway_app(
     governor: Any = None,
     cognition_loop: Any = None,
     initiative_engine: Any = None,
+    elevated_toggler: Callable[[bool], dict[str, Any]] | None = None,
     world_model: Any = None,
     identity_store: Any = None,
     avatar_store: Any = None,
@@ -765,6 +766,9 @@ def create_gateway_app(
                 updated = True
         if updated:
             initiative_engine.update_config(**kwargs)
+        elevated_res: dict[str, Any] | None = None
+        if "elevated" in body and elevated_toggler is not None:
+            elevated_res = elevated_toggler(bool(body["elevated"]))
         triggered: dict[str, Any] | None = None
         if body.get("trigger_now"):
             if _governor_estop_active():
@@ -778,6 +782,7 @@ def create_gateway_app(
         return web.json_response({
             "ok": True,
             "status": initiative_engine.status(),
+            **({"execution_mode": elevated_res} if elevated_res is not None else {}),
             **({"triggered": triggered} if triggered is not None else {}),
         })
 

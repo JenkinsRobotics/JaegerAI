@@ -168,5 +168,19 @@ async def test_gateway_hybrid_routing_onboarding_and_briefing(tmp_path: Path) ->
             assert "Welcome back, Alex" in br_data["summary"]
             assert "Prepare Q4 engineering roadmap" in br_data["summary"]
             assert len(br_data["active_goals"]) == 1
+
+            # 5. Owner-controlled Elevated Autonomous Mode toggle (non-overridable safety stays intact)
+            assert rt._elevated_mode is False  # noqa: SLF001
+            el_on = await client.post("/v1/cognition/autonomy", json={"elevated": True})
+            assert el_on.status == 200
+            el_data = await el_on.json()
+            assert el_data["execution_mode"]["elevated"] is True
+            assert el_data["execution_mode"]["autonomy_mode"] == "full_access"
+            assert el_data["execution_mode"]["sandbox"] == "unconfined"
+            # Destructive safety still blocks rm -rf even in elevated mode
+            blocked = rt.tools.execute("shell", {"command": "rm -rf /tmp/definitely_not_real"})
+            assert not blocked.ok
+            el_off = await client.post("/v1/cognition/autonomy", json={"elevated": False})
+            assert (await el_off.json())["execution_mode"]["elevated"] is False
     finally:
         rt.close()

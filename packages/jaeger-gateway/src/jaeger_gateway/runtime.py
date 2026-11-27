@@ -33,7 +33,7 @@ from jaeger_channels import (
     build_telegram_adapter,
 )
 from jaeger_cognition import CharacterOverlay, CognitiveLifeLoop, IdentityStore, InitiativeEngine, WorldModelStore
-from jaeger_contracts import SandboxProfile, ToolResult
+from jaeger_contracts import AutonomyMode, SandboxProfile, ToolResult
 from jaeger_droid import HostDroidEmbodiment
 from jaeger_embodiment_minecraft import MinecraftEmbodiment, MinecraftSkillLibrary
 from jaeger_events import EventBus
@@ -294,12 +294,18 @@ class ModularGatewayRuntime:
             global_stop_fn=lambda: bool(self.governor.snapshot().get("estop_active")),
             embodiment_enabled=True,
         )
-        self.sandbox = MacOsSeatbeltSandbox() if sys.platform == "darwin" else UnconfinedSandbox()
+        self._elevated_mode = self._load_elevated_mode()
+        self.sandbox = (
+            UnconfinedSandbox()
+            if (self._elevated_mode or sys.platform != "darwin")
+            else MacOsSeatbeltSandbox()
+        )
         self.pty = PtySessionManager(self.workspace, sandbox=self.sandbox)
         self.tools = ToolRegistry(
             workspace=self.workspace,
             policy=self.policy,
             sandbox=self.sandbox,
+            autonomy_mode=AutonomyMode.FULL_ACCESS if self._elevated_mode else AutonomyMode.WORKSPACE_SANDBOX,
         )
         register_builtin_tools(
             self.tools,
@@ -307,6 +313,8 @@ class ModularGatewayRuntime:
             memory=self.memory,
             workflows=self.workflows,
             extra_read_roots=safe_read_roots,
+            allow_network=self._elevated_mode,
+            shell_timeout_s=120.0 if self._elevated_mode else 45.0,
         )
         self._register_platform_tools()
 
@@ -626,6 +634,7 @@ class ModularGatewayRuntime:
             workspace=effective_profile.workspace if effective_profile is not None else self.workspace,
             policy=self.policy,
             sandbox=self.sandbox,
+            autonomy_mode=AutonomyMode.FULL_ACCESS if self._elevated_mode else AutonomyMode.WORKSPACE_SANDBOX,
         )
         read_only_child = bool(effective_profile and effective_profile.read_only_default)
         for name, spec in self.tools._tools.items():  # noqa: SLF001
@@ -1850,10 +1859,11 @@ class ModularGatewayRuntime:
                     if len(page) < 64:
                         return
 
+            max_steps = max(8, min(int(os.environ.get("JAEGER_MAX_STEPS") or "32"), 64))
             result = loop.run_turn(
                 prompt,
-                max_steps=20,
-                extra_slices=1,
+                max_steps=max_steps,
+                extra_slices=2,
                 pre_slice_guard=lambda: bool(self.governor.snapshot().get("estop_active")),
                 history=loop.select_history(prompt, previous_messages()),
             )
@@ -1927,12 +1937,62 @@ class ModularGatewayRuntime:
             self._mirror_living_avatar(str(emotion))
         return live
 
+    def _load_elevated_mode(self) -> bool:
+        import json as _json
+
+        if _env_truthy("JAEGER_ELEVATED", False) or (os.environ.get("JAEGER_AUTONOMY_MODE") or "").strip().lower() == "full_access":
+            return True
+        cfg_file = self.state_dir / "execution_mode.json"
+        if cfg_file.is_file():
+            try:
+                data = _json.loads(cfg_file.read_text(encoding="utf-8"))
+                return bool(isinstance(data, Mapping) and data.get("elevated"))
+            except (OSError, ValueError):
+                return False
+        return False
+
+    def _set_elevated_mode(self, enabled: bool) -> dict[str, Any]:
+        """Toggle owner-controlled Full Autonomous Elevated Mode (like IDE coding agents).
+
+        Non-overridable safety invariants (E-Stop, destructive-action gate, secret-store
+        protection) ALWAYS remain active even when elevated mode is enabled.
+        """
+        import json as _json
+
+        self._elevated_mode = bool(enabled)
+        cfg_file = self.state_dir / "execution_mode.json"
+        cfg_file.write_text(
+            _json.dumps({"elevated": self._elevated_mode, "updated_at": time.time()}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self.sandbox = (
+            UnconfinedSandbox()
+            if (self._elevated_mode or sys.platform != "darwin")
+            else MacOsSeatbeltSandbox()
+        )
+        self.tools._sandbox = self.sandbox  # noqa: SLF001
+        self.tools._autonomy_mode = (  # noqa: SLF001
+            AutonomyMode.FULL_ACCESS if self._elevated_mode else AutonomyMode.WORKSPACE_SANDBOX
+        )
+        self.tools.register_shell_tool(
+            allow_network=self._elevated_mode,
+            timeout_s=120.0 if self._elevated_mode else 45.0,
+        )
+        self.pty._sandbox = self.sandbox  # noqa: SLF001
+        return {
+            "elevated": self._elevated_mode,
+            "autonomy_mode": self.tools._autonomy_mode.value,  # noqa: SLF001
+            "sandbox": self.sandbox.name,
+        }
+
     def _runtime_info(self) -> dict[str, Any]:
         base = self._base_model()
         ollama_probe = base.probe() if isinstance(base, OllamaModel) else {"ok": True}
         return {
             "model": getattr(base, "model_id", base.name),
             "routing": self.routing.load().to_dict(),
+            "elevated": self._elevated_mode,
+            "sandbox": self.sandbox.name,
             "workspace": str(self.workspace),
             "state_dir": str(self.state_dir),
             "tools_count": len(self.tools.list_tools(limit=200)),
@@ -2184,6 +2244,7 @@ class ModularGatewayRuntime:
             governor=self.governor,
             cognition_loop=self.cognition,
             initiative_engine=self.initiative,
+            elevated_toggler=self._set_elevated_mode,
             world_model=self.world,
             identity_store=self.identity,
             avatar_store=self.avatars,

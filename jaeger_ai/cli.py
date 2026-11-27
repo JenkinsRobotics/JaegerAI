@@ -546,7 +546,16 @@ def _cmd_autonomy(args: list[str]) -> int:
         for act in actions:
             print(f"  [{act['status']}] {act['kind']} — {act['summary']}")
         return 0
-    print("Usage: ./jaeger autonomy [status | on | off | step | log]")
+    if sub == "elevated":
+        mode = args[1] if len(args) >= 2 else "status"
+        if mode in ("on", "off"):
+            res = _api_json("POST", "/v1/cognition/autonomy", {"elevated": mode == "on"})
+            print(f"{_GREEN}Elevated mode:{_RESET} {json.dumps(res.get('execution_mode'))}")
+            return 0
+        health = _api_json("GET", "/health")
+        print(json.dumps({"elevated": health.get("elevated", False), "sandbox": health.get("sandbox")}, indent=2))
+        return 0
+    print("Usage: ./jaeger autonomy [status | on | off | step | log | elevated [on|off|status]]")
     return 2
 
 

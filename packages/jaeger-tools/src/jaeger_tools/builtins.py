@@ -48,6 +48,8 @@ def register_builtin_tools(
     workflows: Any = None,
     extra_read_roots: tuple[Path, ...] = (),
     include_macos: bool = True,
+    allow_network: bool = False,
+    shell_timeout_s: float = 45.0,
 ) -> list[str]:
     """Register the complete built-in modular engineering & personal assistant toolset."""
     ws = workspace.expanduser().resolve()
@@ -57,8 +59,8 @@ def register_builtin_tools(
         registry.register(spec)
         registered.append(spec.name)
 
-    # 1. Shell (Policy + Seatbelt sandbox gated)
-    registry.register_shell_tool(allow_network=False, timeout_s=45.0)
+    # 1. Shell (Policy + Seatbelt/Elevated sandbox gated)
+    registry.register_shell_tool(allow_network=allow_network, timeout_s=shell_timeout_s)
     registered.append("shell")
 
     # 2. read_file (paged line reader)
