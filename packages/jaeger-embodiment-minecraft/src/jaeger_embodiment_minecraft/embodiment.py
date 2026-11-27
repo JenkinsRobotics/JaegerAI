@@ -2,27 +2,44 @@
 
 Includes the MIT-licensed headless Node.js Mineflayer bridge adapted from
 MetaGPT (`geekan/MetaGPT`, Voyager bridge) under ``./mineflayer/`` (~150 MB RAM,
-0 GPU). Implements ``jaeger_contracts.EmbodimentPort`` so Jaeger learns multi-day
-goal persistence, checkpointing, and graceful preemption using the exact same
-body interface as the physical JP01 droid.
+0 GPU). Runtime npm dependencies are installed outside the repository at
+``<state_dir>/runtimes/mineflayer`` (zero in-repo runtime junk!).
+
+Implements ``jaeger_contracts.EmbodimentPort`` with:
+- Real Node.js Mineflayer bridge lifecycle (`ensure_bridge`, `connect`, `run_step`, `disconnect`)
+- Real live position, health, food, inventory & biome sync when connected to a Minecraft server
+- Graceful SQLite WAL checkpoint persistence and offline fallback when no server is running
+- Immediate preemption & E-Stop teardown
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import socket
 import sqlite3
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Mapping
 
 MINEFLAYER_DIR = Path(__file__).resolve().parent / "mineflayer"
 
 
+def _tcp_open(host: str, port: int, timeout: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 class MinecraftEmbodiment:
-    """Headless Minecraft body backed by SQLite WAL multi-day goal & checkpoint state."""
+    """Headless Minecraft body backed by SQLite WAL multi-day goal state & live Mineflayer bridge."""
 
     name = "minecraft_headless"
 
@@ -32,17 +49,19 @@ class MinecraftEmbodiment:
         *,
         bridge_host: str = "127.0.0.1",
         bridge_port: int = 3000,
-        mc_host: str = "127.0.0.1",
-        mc_port: int = 25565,
+        mc_host: str | None = None,
+        mc_port: int | None = None,
+        username: str = "Jaeger",
     ) -> None:
-        self._dir = Path(state_dir)
+        self._dir = Path(state_dir).expanduser().resolve()
         self._dir.mkdir(parents=True, exist_ok=True)
         self._db = self._dir / "minecraft_embodiment.sqlite3"
         self._lock = threading.RLock()
         self._bridge_host = bridge_host
-        self._bridge_port = int(bridge_port)
-        self._mc_host = mc_host
-        self._mc_port = int(mc_port)
+        self._bridge_port = int(os.environ.get("JAEGER_MC_BRIDGE_PORT") or bridge_port)
+        self._mc_host = (mc_host or os.environ.get("JAEGER_MC_HOST") or "127.0.0.1").strip()
+        self._mc_port = int(mc_port or os.environ.get("JAEGER_MC_PORT") or 25565)
+        self._username = (username or os.environ.get("JAEGER_MC_USERNAME") or "Jaeger").strip()
         self._proc: subprocess.Popen[str] | None = None
         self._paused = True
         self._estop_latched = False
@@ -54,13 +73,17 @@ class MinecraftEmbodiment:
             "health": 20.0,
             "food": 20.0,
             "inventory": {},
+            "biome": "",
             "active_goal": "Explore world, gather wood, and build a shelter",
             "day_count": 1,
             "last_action": "idle",
+            "last_error": "",
             "ticks": 0,
         }
         self._init_db()
         self._restore_latest_checkpoint()
+        # Never claim connected across a process restart until re-verified.
+        self._state["connected"] = False
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db), timeout=10.0)
@@ -94,18 +117,199 @@ class MinecraftEmbodiment:
             except ValueError:
                 pass
 
+    def _resolve_runtime_dir(self) -> Path | None:
+        """Prefer external runtime dir `<state_dir>/runtimes/mineflayer`, falling back to package dir."""
+        ext = self._dir / "runtimes" / "mineflayer"
+        if (ext / "index.js").is_file() and (ext / "node_modules").is_dir():
+            return ext
+        if (MINEFLAYER_DIR / "index.js").is_file() and (MINEFLAYER_DIR / "node_modules").is_dir():
+            return MINEFLAYER_DIR
+        return None
+
     def bridge_info(self) -> dict[str, Any]:
-        entry = MINEFLAYER_DIR / "index.js"
+        runtime_dir = self._resolve_runtime_dir()
+        entry = (runtime_dir / "index.js") if runtime_dir else (MINEFLAYER_DIR / "index.js")
+        node_bin = shutil.which("node") or ("/opt/homebrew/bin/node" if Path("/opt/homebrew/bin/node").is_file() else "")
         return {
-            "mineflayer_dir": str(MINEFLAYER_DIR),
+            "mineflayer_dir": str(runtime_dir or MINEFLAYER_DIR),
             "bridge_present": entry.is_file(),
-            "node_available": bool(shutil.which("node")),
-            "npm_installed": (MINEFLAYER_DIR / "node_modules").is_dir(),
+            "node_available": bool(node_bin),
+            "npm_installed": runtime_dir is not None,
+            "bridge_running": _tcp_open(self._bridge_host, self._bridge_port, timeout=0.15),
+            "server_reachable": _tcp_open(self._mc_host, self._mc_port, timeout=0.15),
             "bridge_url": f"http://{self._bridge_host}:{self._bridge_port}",
             "mc_target": f"{self._mc_host}:{self._mc_port}",
             "estimated_ram_mb": 150,
             "gpu_mb": 0,
         }
+
+    def _bridge_post(self, path: str, payload: Mapping[str, Any], *, timeout: float = 30.0) -> Any:
+        url = f"http://{self._bridge_host}:{self._bridge_port}{path}"
+        data = json.dumps(dict(payload)).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw.strip() else {}
+
+    def ensure_bridge(self, *, startup_timeout_s: float = 10.0) -> bool:
+        """Start the headless Node.js Mineflayer HTTP bridge if not already listening."""
+        if _tcp_open(self._bridge_host, self._bridge_port, timeout=0.2):
+            return True
+        runtime_dir = self._resolve_runtime_dir()
+        node_bin = shutil.which("node") or ("/opt/homebrew/bin/node" if Path("/opt/homebrew/bin/node").is_file() else "")
+        if runtime_dir is None or not node_bin:
+            return False
+        with self._lock:
+            if self._proc is None or self._proc.poll() is not None:
+                log_path = self._dir / "logs" / "mineflayer.log"
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                log_fh = log_path.open("a", encoding="utf-8")
+                self._proc = subprocess.Popen(
+                    [node_bin, "index.js", str(self._bridge_port)],
+                    cwd=str(runtime_dir),
+                    stdout=log_fh,
+                    stderr=log_fh,
+                    text=True,
+                )
+        deadline = time.monotonic() + max(2.0, float(startup_timeout_s))
+        while time.monotonic() < deadline:
+            if _tcp_open(self._bridge_host, self._bridge_port, timeout=0.25):
+                return True
+            if self._proc is not None and self._proc.poll() is not None:
+                return False
+            time.sleep(0.2)
+        return False
+
+    def _ingest_observation(self, obs_events: Any) -> None:
+        """Sync live Mineflayer observation array (handling Voyager's JSON-stringified res.json) into self._state."""
+        if isinstance(obs_events, str):
+            try:
+                obs_events = json.loads(obs_events)
+            except ValueError:
+                return
+        if not isinstance(obs_events, list):
+            return
+        for item in obs_events:
+            if not (isinstance(item, list) and len(item) == 2):
+                continue
+            kind, data = item[0], item[1]
+            if not isinstance(data, dict):
+                continue
+            status_obj = data.get("status") if kind == "observe" and isinstance(data.get("status"), dict) else (data if kind == "status" else None)
+            if isinstance(status_obj, dict):
+                pos = status_obj.get("position")
+                if isinstance(pos, dict):
+                    self._state["position"] = {
+                        "x": int(round(float(pos.get("x", 0)))),
+                        "y": int(round(float(pos.get("y", 64)))),
+                        "z": int(round(float(pos.get("z", 0)))),
+                    }
+                if "health" in status_obj:
+                    self._state["health"] = float(status_obj["health"])
+                if "food" in status_obj:
+                    self._state["food"] = float(status_obj["food"])
+                if "biome" in status_obj:
+                    self._state["biome"] = str(status_obj["biome"])
+            inv_obj = data.get("inventory") if kind == "observe" and isinstance(data.get("inventory"), dict) else (data if kind == "inventory" else None)
+            if isinstance(inv_obj, dict):
+                self._state["inventory"] = {str(k): int(v) for k, v in inv_obj.items() if isinstance(v, (int, float))}
+
+    def connect(
+        self,
+        *,
+        mc_host: str | None = None,
+        mc_port: int | None = None,
+        username: str | None = None,
+    ) -> dict[str, Any]:
+        """Connect Mineflayer bot to the configured Minecraft Java server."""
+        with self._lock:
+            if self._estop_latched:
+                return {"ok": False, "error": f"estop_latched:{self._estop_reason}"}
+            if mc_host:
+                self._mc_host = str(mc_host).strip()
+            if mc_port:
+                self._mc_port = int(mc_port)
+            if username:
+                self._username = str(username).strip()
+        if not self.ensure_bridge():
+            return {
+                "ok": False,
+                "error": "mineflayer_bridge_unavailable (install runtime deps under ~/.jaeger/runtimes/mineflayer)",
+                "bridge": self.bridge_info(),
+            }
+        if not _tcp_open(self._mc_host, self._mc_port, timeout=1.0):
+            return {
+                "ok": False,
+                "error": f"minecraft_server_unreachable at {self._mc_host}:{self._mc_port}",
+                "bridge": self.bridge_info(),
+            }
+        try:
+            obs = self._bridge_post(
+                "/start",
+                {
+                    "host": self._mc_host,
+                    "port": self._mc_port,
+                    "username": self._username,
+                    "waitTicks": 10,
+                },
+                timeout=35.0,
+            )
+            with self._lock:
+                self._state["connected"] = True
+                self._state["paused"] = False
+                self._paused = False
+                self._state["last_action"] = "connected"
+                self._state["last_error"] = ""
+                self._ingest_observation(obs)
+            self.checkpoint(reason="connected")
+            return {"ok": True, "connected": True, "state": dict(self._state)}
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            with self._lock:
+                self._state["connected"] = False
+                self._state["last_error"] = str(exc)[:240]
+            return {"ok": False, "connected": False, "error": str(exc)[:240]}
+
+    def disconnect(self) -> dict[str, Any]:
+        """Gracefully disconnect bot from Minecraft server."""
+        try:
+            if _tcp_open(self._bridge_host, self._bridge_port, timeout=0.25):
+                self._bridge_post("/stop", {}, timeout=5.0)
+        except Exception:  # noqa: BLE001
+            pass
+        with self._lock:
+            self._state["connected"] = False
+            self._paused = True
+            self._state["paused"] = True
+            self._state["last_action"] = "disconnected"
+        self.checkpoint(reason="disconnect")
+        return {"ok": True, "connected": False}
+
+    def run_step(self, code: str, *, programs: str = "") -> dict[str, Any]:
+        """Execute a Mineflayer JS step on the live connected bot and sync observations."""
+        with self._lock:
+            if self._estop_latched:
+                return {"ok": False, "error": f"estop_latched:{self._estop_reason}"}
+            if not self._state.get("connected"):
+                return {"ok": False, "error": "not_connected"}
+        try:
+            obs = self._bridge_post("/step", {"code": code, "programs": programs}, timeout=45.0)
+            with self._lock:
+                self._state["ticks"] = int(self._state.get("ticks") or 0) + 1
+                self._state["day_count"] = max(1, 1 + (self._state["ticks"] // 240))
+                self._state["last_action"] = "step"
+                self._state["last_error"] = ""
+                self._ingest_observation(obs)
+            return {"ok": True, "live": True, "state": dict(self._state)}
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            with self._lock:
+                self._state["connected"] = False
+                self._state["last_error"] = str(exc)[:240]
+            return {"ok": False, "live": False, "error": str(exc)[:240]}
 
     def observe(self) -> Mapping[str, Any]:
         with self._lock:
@@ -119,14 +323,57 @@ class MinecraftEmbodiment:
             }
 
     def act(self, action: str, params: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+        p = dict(params or {})
+        if action == "connect":
+            return self.connect(
+                mc_host=p.get("host"),
+                mc_port=int(p["port"]) if p.get("port") else None,
+                username=p.get("username"),
+            )
+        if action == "disconnect":
+            return self.disconnect()
+        if action == "step":
+            return self.run_step(str(p.get("code") or ""), programs=str(p.get("programs") or ""))
+
         with self._lock:
             if self._estop_latched:
                 return {"ok": False, "error": f"estop_latched:{self._estop_reason}"}
-            p = dict(params or {})
+            live = bool(self._state.get("connected"))
             self._paused = False
             self._state["paused"] = False
             self._state["ticks"] = int(self._state.get("ticks") or 0) + 1
             self._state["last_action"] = action
+
+        if live:
+            if action == "move_to":
+                pos = dict(self._state.get("position") or {"x": 0, "y": 64, "z": 0})
+                x = int(p.get("x", pos["x"]))
+                y = int(p.get("y", pos["y"]))
+                z = int(p.get("z", pos["z"]))
+                js = f"await bot.pathfinder.goto(new GoalNear({x}, {y}, {z}, 1));"
+                return self.run_step(js)
+            if action == "chat" and p.get("message"):
+                msg = json.dumps(str(p["message"])[:200])
+                return self.run_step(f"bot.chat({msg});")
+            if action == "gather" and p.get("item"):
+                item = json.dumps(str(p["item"]))
+                cnt = max(1, min(int(p.get("count", 1)), 16))
+                js = (
+                    f"const blk = bot.findBlock({{matching: b => b && b.name && b.name.includes({item}), maxDistance: 32}});"
+                    f"if (blk) {{ await bot.collectBlock.collect(blk, {{count: {cnt}}}); }}"
+                )
+                return self.run_step(js)
+            if action == "idle_tick":
+                # Gentle autonomous exploration step around current coordinates
+                pos = self._state.get("position") or {"x": 0, "y": 64, "z": 0}
+                dx = 4 if (int(self._state["ticks"]) % 2 == 0) else -4
+                js = f"await bot.pathfinder.goto(new GoalNearXZ({int(pos['x']) + dx}, {int(pos['z']) + 2}, 2));"
+                res = self.run_step(js)
+                if res.get("ok"):
+                    return {**res, "acted": True, "summary": f"Explored to {res['state']['position']}"}
+                return {**res, "acted": False}
+
+        with self._lock:
             if action == "set_goal" and p.get("goal"):
                 self._state["active_goal"] = str(p["goal"])
             elif action == "move_to":
@@ -142,7 +389,7 @@ class MinecraftEmbodiment:
                 self._state["inventory"] = inv
             elif action == "idle_tick":
                 self._state["day_count"] = max(1, 1 + (self._state["ticks"] // 240))
-            return {"ok": True, "action": action, "state": dict(self._state)}
+            return {"ok": True, "live": False, "acted": False, "action": action, "state": dict(self._state)}
 
     def checkpoint(self, reason: str = "periodic") -> Mapping[str, Any]:
         now = time.time()
@@ -170,10 +417,25 @@ class MinecraftEmbodiment:
             self._estop_reason = reason
             self._paused = True
             self._state["paused"] = True
-            if self._proc is not None and self._proc.poll() is None:
-                self._proc.terminate()
-                self._proc = None
+            self._state["connected"] = False
+            self._terminate_bridge_locked()
         return self.checkpoint(reason=f"estop:{reason}")
+
+    def _terminate_bridge_locked(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=2.0)
+            except Exception:  # noqa: BLE001
+                try:
+                    self._proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+        self._proc = None
+
+    def close(self) -> None:
+        with self._lock:
+            self._terminate_bridge_locked()
 
     def release_estop(self) -> None:
         with self._lock:

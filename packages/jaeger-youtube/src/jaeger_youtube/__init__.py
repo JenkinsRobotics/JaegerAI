@@ -1,5 +1,7 @@
 """jaeger-youtube: flagship YouTube Channel Studio & 32 GB phased research pack."""
 
+from .browse import YouTubeBrowserSession
+from .data_api import search_public_videos
 from .production import ArchivedMediaItem, MediaArchiveStore, export_episode_to_otio
 from .studio import (
     AREAS,
@@ -30,4 +32,5 @@ __all__ = [
     "export_episode_to_otio",
     "plan_phased_research",
     "probe_youtube_toolchain",
+    "search_public_videos",
 ]

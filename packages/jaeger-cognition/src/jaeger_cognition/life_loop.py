@@ -24,6 +24,11 @@ from typing import Any, Awaitable, Callable, Mapping
 
 from .world_model import PerceptionEvent, WorldModelStore
 
+try:  # optional: tick-driven cron (hermes-agent pattern) for scheduled proactive work
+    from jaeger_orchestration import CronScheduler
+except Exception:  # noqa: BLE001 - orchestration package not installed
+    CronScheduler = None  # type: ignore[assignment]
+
 ProactiveHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None] | dict[str, Any] | None]
 
 
@@ -77,6 +82,9 @@ class CognitiveLifeLoop:
         self._state = CognitiveState()
         self._proactive_handlers: dict[str, ProactiveHandler] = {}
         self._idle_handlers: dict[str, ProactiveHandler] = {}
+        self._cron: Any = None
+        if CronScheduler is not None:
+            self._cron = CronScheduler()
         self._perception_queue: asyncio.Queue[PerceptionEvent] | None = None
         self._task: asyncio.Task[None] | None = None
         self._running = False
@@ -90,6 +98,16 @@ class CognitiveLifeLoop:
 
     def register_idle_life_handler(self, name: str, fn: ProactiveHandler) -> None:
         self._idle_handlers[name] = fn
+
+    def schedule(self, job_id: str, interval_s: float, fn: Callable[[], Any]) -> None:
+        """Register a recurring scheduled job (hermes-agent cron pattern).
+
+        The job fires on cognitive ticks while the loop is running and is skipped
+        under E-Stop or while owner work is active, exactly like proactive handlers.
+        """
+        if self._cron is None:
+            raise RuntimeError("CronScheduler unavailable: jaeger-orchestration not installed")
+        self._cron.register(job_id, interval_s, fn)
 
     def ingest_perception(
         self,
@@ -148,10 +166,16 @@ class CognitiveLifeLoop:
             self._state.emotion = "concerned"
             self._state.focus = "Emergency Stop latched"
         elif int(gov_snap.get("active_owner_runs") or 0) > 0:
+            # Owner-first: scheduled jobs never preempt owner work.
             self._state.mode = "serving_owner"
             self._state.emotion = "focused"
             self._state.focus = "Working on owner request"
         else:
+            # 2b. Fire due scheduled (cron) jobs before proactive/idle handlers.
+            if self._cron is not None:
+                for job_id in self._cron.tick():
+                    self._state.last_action = f"cron:{job_id}"
+                    self._world.observe(domain="system", key=f"cron_run:{job_id}", value={"tick": self._state.tick_count}, source="cron")
             # 3. Try proactive goal-directed business/scheduled work first
             ran_proactive = False
             ctx = {

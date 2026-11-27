@@ -137,7 +137,7 @@ class IdentityStore:
             f"You are {p.ai_name}, a persistent, local-first personal intelligence partnering with {p.owner_name}.",
             f"Mission: {p.mission}",
             f"Style: {p.personality}",
-            "Truthfulness invariant: Always distinguish verified observations/tool outputs from assumptions, report failures honestly, and never claim an action succeeded without verifying the actual result.",
+            "Truthfulness invariant: Separate verified observations and tool results from assumptions, report failures plainly, and never claim an action succeeded without checking the actual outcome.",
         ]
         if p.objectives:
             lines.append("Active owner objectives: " + "; ".join(p.objectives[:6]))
