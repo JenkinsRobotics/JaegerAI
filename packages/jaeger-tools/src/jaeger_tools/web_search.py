@@ -4,7 +4,8 @@ Provider resolution order:
 1. Tavily (`TAVILY_API_KEY`) — structured web results
 2. Brave Search (`BRAVE_API_KEY`) — structured web results
 3. Self-hosted SearXNG (`SEARXNG_URL`) — private local/LAN metasearch
-4. DuckDuckGo HTML fallback (`https://html.duckduckgo.com/html/`) — zero-config default
+4. Bing RSS (`https://www.bing.com/search?format=rss`) — reliable zero-config default
+5. DuckDuckGo HTML fallback (`https://html.duckduckgo.com/html/`)
 
 All network calls use bounded timeouts, refuse ambient secret leaks, and never retry
 deterministic 401/403/429 responses.
@@ -19,9 +20,10 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from typing import Any
 
-__all__ = ["web_search"]
+__all__ = ["_parse_bing_rss", "_parse_ddg_html", "web_search"]
 
 _DDG_LINK_RE = re.compile(
     r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="(?P<href>[^"]+)"[^>]*>(?P<title>.*?)</a>',
@@ -131,6 +133,39 @@ def _parse_ddg_html(body: str, limit: int) -> list[dict[str, str]]:
     return results
 
 
+def _parse_bing_rss(body: str, limit: int) -> list[dict[str, str]]:
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return []
+    results: list[dict[str, str]] = []
+    for item in root.findall("./channel/item")[:limit]:
+        title = _clean_html(item.findtext("title") or "")[:200]
+        url = (item.findtext("link") or "").strip()[:500]
+        snippet = _clean_html(item.findtext("description") or "")[:400]
+        if url and title:
+            results.append({"title": title, "url": url, "snippet": snippet})
+    return results
+
+
+def _search_bing_rss(query: str, limit: int, timeout_s: float) -> dict[str, Any]:
+    qs = urllib.parse.urlencode({"format": "rss", "q": query})
+    req = urllib.request.Request(
+        f"https://www.bing.com/search?{qs}",
+        headers={
+            "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        raw = resp.read(300_000).decode("utf-8", errors="replace")
+    return {"provider": "bing_rss", "query": query, "results": _parse_bing_rss(raw, limit)}
+
+
 def _search_duckduckgo(query: str, limit: int, timeout_s: float) -> dict[str, Any]:
     data = urllib.parse.urlencode({"q": query}).encode("utf-8")
     req = urllib.request.Request(
@@ -154,7 +189,7 @@ def web_search(
     provider: str = "auto",
     timeout_s: float = 12.0,
 ) -> dict[str, Any]:
-    """Run a bounded web search using configured API provider or zero-config DuckDuckGo."""
+    """Run a bounded web search using configured API provider or zero-config Bing RSS / DuckDuckGo."""
     cleaned = (query or "").strip()
     if not cleaned or len(cleaned) > 400:
         raise ValueError("query must be 1-400 characters")
@@ -179,6 +214,17 @@ def web_search(
             if not searx_url:
                 raise ValueError("SEARXNG_URL is not configured")
             return _search_searxng(cleaned, cap, searx_url, timeout)
+        if pref == "duckduckgo":
+            return _search_duckduckgo(cleaned, cap, timeout)
+        if pref in ("bing", "bing_rss"):
+            return _search_bing_rss(cleaned, cap, timeout)
+        # Auto zero-config: prefer Bing RSS (reliable structured XML), fall back to DuckDuckGo HTML.
+        try:
+            bing_res = _search_bing_rss(cleaned, cap, timeout)
+            if bing_res.get("results"):
+                return bing_res
+        except Exception:  # noqa: BLE001
+            pass
         return _search_duckduckgo(cleaned, cap, timeout)
     except urllib.error.HTTPError as exc:
         hint = " Do not retry immediately." if exc.code in (401, 403, 429) else ""
