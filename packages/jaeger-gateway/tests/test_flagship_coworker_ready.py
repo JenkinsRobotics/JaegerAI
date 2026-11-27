@@ -182,5 +182,17 @@ async def test_gateway_hybrid_routing_onboarding_and_briefing(tmp_path: Path) ->
             assert not blocked.ok
             el_off = await client.post("/v1/cognition/autonomy", json={"elevated": False})
             assert (await el_off.json())["execution_mode"]["elevated"] is False
+
+            # 6. Live Virtual Office endpoint returns primary mind, 8 team roles & embodiment ops
+            off = await client.get("/v1/office/state")
+            assert off.status == 200
+            off_data = await off.json()
+            assert off_data["ok"] is True
+            agent_ids = {a["id"] for a in off_data["agents"]}
+            assert "jaeger" in agent_ids
+            assert "embodiment_ops" in agent_ids
+            assert "role_producer" in agent_ids and "role_engineer" in agent_ids
+            assert len(off_data["agents"]) >= 10
+            assert "budgets" in off_data and isinstance(off_data["activityFeed"], list)
     finally:
         rt.close()

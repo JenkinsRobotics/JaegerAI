@@ -566,6 +566,36 @@ class ModularGatewayRuntime:
                     return {"acted": False}
             else:
                 return {"acted": False}
+        # Poll inbound player chat so Jaeger reacts naturally in co-op worlds
+        inbox = self.minecraft.poll_chat_inbox()
+        inbound_msgs = list(inbox.get("messages") or [])
+        if inbound_msgs:
+            latest = inbound_msgs[-1]
+            sender = str(latest.get("username") or "player")
+            text = str(latest.get("message") or "").strip()
+            self.world.observe(
+                kind="minecraft_chat",
+                source="jaeger-embodiment-minecraft",
+                summary=f"[MC Chat] {sender}: {text[:200]}",
+                data={"username": sender, "message": text},
+            )
+            low = text.lower()
+            if "follow" in low:
+                self.minecraft.act("follow_player", {"player": sender, "distance": 3})
+                self.minecraft.act("chat", {"message": f"On my way, {sender}! Following you now."})
+                return {"acted": True, "summary": f"Co-op chat from {sender}: started following"}
+            if "come" in low or "here" in low:
+                self.minecraft.act("go_to_player", {"player": sender, "distance": 3})
+                self.minecraft.act("chat", {"message": f"Coming over to you, {sender}!"})
+                return {"acted": True, "summary": f"Co-op chat from {sender}: moved to player"}
+            if "stop" in low or "stay" in low:
+                self.minecraft.act("stop_actions", {})
+                self.minecraft.act("chat", {"message": f"Got it {sender}, holding position."})
+                return {"acted": True, "summary": f"Co-op chat from {sender}: stopped actions"}
+        # Skip wandering if actively following a teammate in co-op mode
+        follow_cfg = ((state.get("modes") or {}).get("follow_player") or {})
+        if follow_cfg.get("enabled"):
+            return {"acted": False}
         step = self.minecraft.act("idle_tick")
         if step.get("ok") and step.get("live"):
             self.minecraft.checkpoint(reason="autonomous_step")
@@ -1037,15 +1067,29 @@ class ModularGatewayRuntime:
         )
         _reg(
             "minecraft_act",
-            "Control Jaeger's headless Minecraft embodiment (connect, disconnect, set_goal, move_to, gather, chat, step, checkpoint, pause).",
+            "Control Jaeger's headless Minecraft embodiment including Mindcraft co-op companion actions "
+            "(connect, disconnect, set_goal, move_to, gather, chat, read_chat, nearby_players, "
+            "follow_player, go_to_player, give_to_player, eat, go_to_bed, set_mode, stop_actions, step, checkpoint, pause).",
             {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["connect", "disconnect", "set_goal", "move_to", "gather", "chat", "step", "checkpoint", "pause"]},
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "connect", "disconnect", "set_goal", "move_to", "gather", "chat",
+                            "read_chat", "nearby_players", "follow_player", "go_to_player",
+                            "give_to_player", "eat", "go_to_bed", "set_mode", "stop_actions",
+                            "step", "checkpoint", "pause",
+                        ],
+                    },
                     "goal": {"type": "string"},
                     "host": {"type": "string"},
                     "port": {"type": "integer"},
                     "username": {"type": "string"},
+                    "player": {"type": "string"},
+                    "distance": {"type": "integer"},
+                    "mode": {"type": "string", "enum": ["self_preservation", "auto_eat", "self_defense", "unstuck", "follow_player"]},
+                    "enabled": {"type": "boolean"},
                     "message": {"type": "string"},
                     "code": {"type": "string"},
                     "x": {"type": "integer"},
@@ -1053,6 +1097,7 @@ class ModularGatewayRuntime:
                     "z": {"type": "integer"},
                     "item": {"type": "string"},
                     "count": {"type": "integer"},
+                    "since_id": {"type": "integer"},
                     "reason": {"type": "string"},
                 },
                 "required": ["action"],
@@ -2218,6 +2263,244 @@ class ModularGatewayRuntime:
         configs = load_mcp_server_configs(self._mcp_config_path)
         return self.mcp.reload(configs, registry=self.tools)
 
+    def _office_state(self) -> dict[str, Any]:
+        """Assemble live Virtual Office snapshot from real Gateway, Subagent, Business, and Embodiment state."""
+        now = time.time()
+        ident = self.identity.get().to_dict()
+        ai_name = str(ident.get("ai_name") or "Jaeger")
+        base = self._base_model()
+        active_model = str(getattr(base, "model_id", base.name))
+        gov = self.governor.snapshot()
+        estop_active = bool(gov.get("estop_active"))
+        active_owner_runs = int(gov.get("active_owner_runs") or 0)
+        cog = self.cognition.state.to_dict() if hasattr(self.cognition, "state") else {}
+        init_status = self.initiative.status() if hasattr(self.initiative, "status") else {}
+        autonomy_enabled = bool((init_status.get("config") or {}).get("enabled", True))
+        pending_approvals = self.store.list_pending_approvals()
+        pending_count = len(pending_approvals)
+
+        # Inspect recent main-session hub events for live tool activity & feed
+        recent_events = self.hub.replay_after(MAIN_CHAT_SESSION_ID)[-25:]
+        active_tool = ""
+        open_tools: dict[str, str] = {}
+        feed: list[dict[str, Any]] = []
+        for ev in recent_events:
+            etype = str(ev.get("event") or "")
+            payload = ev.get("payload") or {}
+            tname = str(payload.get("tool") or "")
+            cid = str(payload.get("call_id") or ev.get("seq") or "")
+            if etype == "tool.started" and tname:
+                open_tools[cid] = tname
+            elif etype in ("tool.completed", "tool.failed"):
+                open_tools.pop(cid, None)
+                feed.append({
+                    "id": f"ev-{ev.get('seq')}",
+                    "timestamp": now,
+                    "agentName": ai_name,
+                    "kind": "tool",
+                    "summary": f"{'Finished' if etype == 'tool.completed' else 'Failed'} `{tname or 'tool'}`",
+                })
+        if open_tools:
+            active_tool = list(open_tools.values())[-1]
+
+        read_tools = {
+            "read_file", "list_files", "grep_files", "web_search", "web_fetch",
+            "search_workspace", "memory_recall", "minecraft_status", "droid_capture",
+            "business_team", "search_workspace_skills", "load_workspace_skill",
+        }
+        primary_activity = "idle"
+        primary_status = f"Standing by ({cog.get('mode') or 'ready'})"
+        primary_task = str(cog.get("focus") or active_model)
+        if estop_active:
+            primary_activity = "estop"
+            primary_status = "E-Stop latched"
+        elif pending_count > 0:
+            primary_activity = "waiting_approval"
+            primary_status = f"Waiting on {pending_count} approval(s)"
+        elif active_owner_runs > 0:
+            if active_tool:
+                primary_activity = "reading" if active_tool in read_tools else "typing"
+                primary_status = f"Running {active_tool}"
+            else:
+                primary_activity = "thinking"
+                primary_status = "Thinking through owner request"
+        elif str(cog.get("mode") or "") in ("acting", "exploring", "thinking"):
+            primary_activity = "thinking"
+            primary_status = f"Autonomous: {cog.get('mode')}"
+
+        agents: list[dict[str, Any]] = [{
+            "id": "jaeger",
+            "name": ai_name,
+            "role": "Primary Autonomous Mind",
+            "kind": "primary",
+            "zone": "command",
+            "activity": primary_activity,
+            "statusLabel": primary_status,
+            "currentTool": active_tool or None,
+            "currentTask": primary_task[:120] if primary_task else None,
+            "model": active_model,
+            "accentColor": "#22d3ee",
+            "paletteIndex": 0,
+            "seatId": "seat-command",
+            "updatedAt": now,
+        }]
+
+        # Live spawned subagents (Engineering / Subagent Pod)
+        subagent_seats = ["seat-eng-3", "seat-eng-4", "seat-eng-2"]
+        active_subagents = 0
+        for aid, meta in list(self._subagent_meta.items())[-12:]:
+            fut = self.subagents._futures.get(aid)  # noqa: SLF001
+            running = bool(fut is not None and not fut.done())
+            if not running:
+                continue
+            seat = subagent_seats[active_subagents % len(subagent_seats)]
+            active_subagents += 1
+            read_only = bool(meta.get("read_only"))
+            role = str(meta.get("role") or "subagent")
+            task = str(meta.get("task") or "")
+            agents.append({
+                "id": f"sub_{aid}",
+                "name": f"{role.title()} #{active_subagents}",
+                "role": f"Subagent ({'Read-Only' if read_only else 'Worker'})",
+                "kind": "subagent",
+                "zone": "engineering",
+                "activity": "estop" if estop_active else ("reading" if read_only else "typing"),
+                "statusLabel": "Researching" if read_only else "Executing delegated task",
+                "currentTask": task[:120],
+                "model": active_model,
+                "accentColor": "#4ade80",
+                "paletteIndex": 4,
+                "seatId": seat,
+                "updatedAt": float(meta.get("started_at") or now),
+            })
+
+        # 8-role autonomous studio & business team
+        role_layout: dict[str, tuple[str, str, str, int]] = {
+            "producer": ("studio", "seat-studio-1", "#f59e0b", 1),
+            "editor": ("studio", "seat-studio-2", "#fb7185", 2),
+            "scriptwriter": ("studio", "seat-studio-3", "#a78bfa", 3),
+            "designer": ("studio", "seat-studio-4", "#f472b6", 5),
+            "engineer": ("engineering", "seat-eng-1", "#38bdf8", 0),
+            "researcher": ("research", "seat-res-1", "#60a5fa", 6),
+            "ops": ("research", "seat-res-2", "#34d399", 4),
+            "publisher": ("research", "seat-res-3", "#fbbf24", 7),
+        }
+        episodes = [e.to_dict() for e in self.youtube.list_episodes()]
+        projects = [p.to_dict() for p in self.business.list_projects()]
+        active_workflows = [
+            w for w in (r.to_dict() for r in self.workflows.list_runs(limit=20))
+            if str(w.get("status") or "") in ("running", "awaiting_approval", "pending")
+        ]
+        role_tasks: dict[str, tuple[str, str]] = {}
+        for ep in episodes:
+            assigned = str(ep.get("assigned_role") or "")
+            stage = str(ep.get("stage") or "")
+            if assigned and stage != "published":
+                role_tasks[assigned] = (f"Episode: {ep.get('title')} ({stage})", "typing" if stage in ("editing", "scripting") else "reading")
+        for proj in projects:
+            owner_role = str(proj.get("owner_role") or "")
+            if owner_role and owner_role not in role_tasks:
+                role_tasks[owner_role] = (f"Project: {proj.get('name')} ({proj.get('stage')})", "reading")
+        if active_workflows and "ops" not in role_tasks:
+            wf = active_workflows[0]
+            role_tasks["ops"] = (
+                f"Workflow: {wf.get('name') or wf.get('run_id')}",
+                "waiting_approval" if wf.get("status") == "awaiting_approval" else "typing",
+            )
+
+        for role in self.business.list_team():
+            rid = str(role.get("role_id") or "")
+            zone, seat_id, color, pal = role_layout.get(rid, ("research", "seat-res-1", "#94a3b8", 6))
+            task_info = role_tasks.get(rid)
+            if estop_active:
+                act, label, task = "estop", "E-Stop paused", None
+            elif task_info:
+                task, act = task_info
+                label = "Active on studio work" if act != "waiting_approval" else "Awaiting owner approval"
+            else:
+                act = "coffee" if rid in ("publisher", "designer") else "idle"
+                label = "Break lounge" if act == "coffee" else "Ready for assignment"
+                task = str(role.get("mission") or "")[:110]
+            agents.append({
+                "id": f"role_{rid}",
+                "name": str(role.get("title") or rid.title()),
+                "role": rid.replace("_", " ").title(),
+                "kind": "team",
+                "zone": zone,
+                "activity": act,
+                "statusLabel": label,
+                "currentTask": task,
+                "model": str(role.get("default_model") or active_model),
+                "accentColor": color,
+                "paletteIndex": pal,
+                "seatId": seat_id,
+                "updatedAt": now,
+            })
+
+        # Embodiment Ops (Minecraft + Droid)
+        mc_obs = self.minecraft.observe()
+        mc_state = mc_obs.get("state") or {}
+        mc_connected = bool(mc_state.get("connected"))
+        mc_pos = mc_state.get("position") or {"x": 0, "y": 64, "z": 0}
+        mc_biome = str(mc_state.get("biome") or "").strip()
+        mc_summary = (
+            f"Connected @ ({mc_pos.get('x', 0)}, {mc_pos.get('y', 64)}, {mc_pos.get('z', 0)})"
+            + (f" • {mc_biome}" if mc_biome else "")
+            if mc_connected
+            else "Standby"
+        )
+        droid_obs = self.droid.observe()
+        droid_awake = bool(droid_obs.get("awake"))
+        emb_activity = "estop" if estop_active else ("typing" if mc_connected else ("reading" if droid_awake else "coffee"))
+        emb_status = (
+            "E-Stop halted"
+            if estop_active
+            else (
+                f"Minecraft live: {mc_summary}"
+                if mc_connected
+                else ("Droid awake & observing" if droid_awake else "Droid parked • MC standby")
+            )
+        )
+        agents.append({
+            "id": "embodiment_ops",
+            "name": "Embodiment Ops",
+            "role": "Minecraft & Droid",
+            "kind": "embodiment",
+            "zone": "research",
+            "activity": emb_activity,
+            "statusLabel": emb_status,
+            "currentTask": str(mc_state.get("active_goal") or "Ready for co-op & physical presence")[:120],
+            "accentColor": "#34d399",
+            "paletteIndex": 2,
+            "seatId": "seat-res-4",
+            "updatedAt": now,
+        })
+
+        # Combine recent autonomous initiative actions into the live feed
+        for act_item in self.initiative.list_actions(limit=8):
+            feed.append({
+                "id": f"init-{act_item.get('action_id') or act_item.get('created_at')}",
+                "timestamp": float(act_item.get("created_at") or now),
+                "agentName": ai_name,
+                "kind": "autonomy",
+                "summary": f"[{act_item.get('kind', 'auto')}] {str(act_item.get('summary') or '')[:140]}",
+            })
+        feed.sort(key=lambda item: float(item.get("timestamp") or 0), reverse=True)
+
+        return {
+            "agents": agents,
+            "activityFeed": feed[:12],
+            "budgets": self.business.budget_summary(),
+            "pendingApprovals": pending_count,
+            "activeSubagents": active_subagents,
+            "estopActive": estop_active,
+            "autonomyEnabled": autonomy_enabled,
+            "minecraftConnected": mc_connected,
+            "minecraftSummary": mc_summary,
+            "droidAwake": droid_awake,
+            "updatedAt": now,
+        }
+
     def build_app(
         self,
         *,
@@ -2249,6 +2532,7 @@ class ModularGatewayRuntime:
             identity_store=self.identity,
             avatar_store=self.avatars,
             business_store=self.business,
+            office_provider=self._office_state,
             youtube_store=self.youtube,
             media_archive=self.media_archive,
             channel_hub=self.channels,

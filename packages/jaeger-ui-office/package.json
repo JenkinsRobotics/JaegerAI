@@ -1,0 +1,10 @@
+{
+  "name": "@jaeger/ui-office",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "license": "MIT",
+  "description": "Standalone React 19 + HTML5 Canvas pixel-art virtual office for JaegerAI multi-agent teams, adapted from pixel-agents-hq/pixel-agents (MIT)."
+}

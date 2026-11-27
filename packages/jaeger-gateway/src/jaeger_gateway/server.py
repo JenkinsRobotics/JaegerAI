@@ -79,6 +79,7 @@ def create_gateway_app(
     identity_store: Any = None,
     avatar_store: Any = None,
     business_store: Any = None,
+    office_provider: Callable[[], dict[str, Any]] | None = None,
     youtube_store: Any = None,
     media_archive: Any = None,
     channel_hub: Any = None,
@@ -881,6 +882,24 @@ def create_gateway_app(
         path, mime = hit
         return web.FileResponse(path, headers={"Content-Type": mime})
 
+    async def get_office_state(_request: web.Request) -> web.Response:
+        if office_provider is not None:
+            return web.json_response({"ok": True, **office_provider()})
+        now = time.time()
+        return web.json_response({
+            "ok": True,
+            "agents": [],
+            "activityFeed": [],
+            "budgets": business_store.budget_summary() if business_store is not None else {},
+            "pendingApprovals": len(store.list_pending_approvals()),
+            "activeSubagents": 0,
+            "estopActive": bool(governor.snapshot().get("estop_active")) if governor is not None else False,
+            "autonomyEnabled": bool(initiative_engine.status().get("config", {}).get("enabled", True)) if initiative_engine is not None else False,
+            "minecraftConnected": False,
+            "droidAwake": False,
+            "updatedAt": now,
+        })
+
     async def get_business_team(_request: web.Request) -> web.Response:
         if business_store is None:
             return web.json_response({"ok": True, "team": [], "budgets": {}})
@@ -1599,6 +1618,7 @@ def create_gateway_app(
     app.router.add_put("/v1/avatars/{agent_id}", put_avatar)
     app.router.add_put("/v1/avatars/{agent_id}/live", put_avatar_live)
     app.router.add_get("/v1/avatars/{agent_id}/visemes", get_avatar_visemes)
+    app.router.add_get("/v1/office/state", get_office_state)
     app.router.add_get("/v1/business/team", get_business_team)
     app.router.add_post("/v1/business/projects", create_business_project)
     app.router.add_post("/v1/business/spend", record_business_spend)
