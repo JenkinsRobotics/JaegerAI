@@ -11,7 +11,7 @@ VENV_PY="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 TARGET="${1:-all}"
 
 run_backend() {
-  echo "=== [BACKEND] 27 Standalone Packages + E2E + Layering + Hygiene ==="
+  echo "=== [BACKEND] 30 Standalone Python Packages + E2E + Layering + Hygiene ==="
   "${VENV_PY}" -B -m pytest -q --no-header -p no:cacheprovider \
     packages/jaeger-contracts/tests \
     packages/jaeger-models/tests \
@@ -44,7 +44,7 @@ run_backend() {
 }
 
 run_frontend() {
-  echo "=== [FRONTEND] 5 Standalone @jaeger/ui-* Packages + External Build ==="
+  echo "=== [FRONTEND] 6 Standalone @jaeger/ui-* Packages + External Build ==="
   (cd "${REPO_ROOT}/jaeger_ai/interfaces/ui" && npm run test)
   JAEGER_UI_DEPENDENCIES="${REPO_ROOT}/jaeger_ai/interfaces/ui" \
     python3 "${REPO_ROOT}/jaeger_ai/interfaces/ui/scripts/build-external.py"

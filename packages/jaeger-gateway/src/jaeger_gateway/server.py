@@ -161,7 +161,7 @@ def create_gateway_app(
     app = web.Application(middlewares=[auth_middleware])
 
     async def health(_request: web.Request) -> web.Response:
-        extra = runtime_info() if runtime_info is not None else {}
+        extra = await asyncio.to_thread(runtime_info) if runtime_info is not None else {}
         return web.json_response({
             "ok": True,
             "status": "ok",
