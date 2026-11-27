@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+import math
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -16,10 +19,14 @@ from jaeger_youtube import export_episode_to_otio, plan_phased_research, probe_y
 
 from .auth import GatewayAuthPolicy
 from .coordinator import RunCoordinator
-from .store import GatewayStore, RequestConflictError
+from .store import MAIN_CHAT_SESSION_ID, GatewayStore, RequestConflictError
 from .stream import SessionEventHub, format_sse
 
 ACTOR_KEY: web.RequestKey[str] = web.RequestKey("actor", str)
+
+# Inbound events are untrusted and are never dispatched as agent turns.
+SUPPORTED_EXTERNAL_CHANNELS = frozenset({"telegram", "imessage", "webhook"})
+
 
 
 def create_gateway_app(
@@ -56,6 +63,8 @@ def create_gateway_app(
     mcp_delete: Callable[[str], list[dict[str, Any]]] | None = None,
     mcp_reload: Callable[[], list[dict[str, Any]]] | None = None,
     static_ui_dir: Path | None = None,
+    browser_grant: Callable[[str, str], dict[str, Any]] | None = None,
+    browser_stop: Callable[[str], dict[str, Any]] | None = None,
 ) -> web.Application:
     """Create the standalone aiohttp Gateway + optional static WebUI application."""
     policy = auth or GatewayAuthPolicy(allow_loopback_unauthenticated=True)
@@ -94,7 +103,16 @@ def create_gateway_app(
 
     async def list_sessions(request: web.Request) -> web.Response:
         limit = int(request.query.get("limit", "50"))
-        return web.json_response({"ok": True, "sessions": store.list_sessions(limit=limit)})
+        sessions = store.list_sessions(limit=limit)
+        if not _owner_local_only(request):
+            # External-channel transcript sessions are private: filter them out
+            # of non-owner-local listings so their existence is not disclosed.
+            sessions = [
+                s for s in sessions
+                if not (isinstance(s.get("metadata"), dict)
+                        and s["metadata"].get("source") == "external_channel")
+            ]
+        return web.json_response({"ok": True, "sessions": sessions})
 
     async def create_session(request: web.Request) -> web.Response:
         body = await request.json() if request.can_read_body else {}
@@ -107,20 +125,38 @@ def create_gateway_app(
 
     async def delete_session(request: web.Request) -> web.Response:
         sid = request.match_info["session_id"]
+        guard = _external_session_guard(request, sid)
+        if guard is not None:
+            return guard
         with store._lock, store._connect() as conn:  # noqa: SLF001
             cur = conn.execute("DELETE FROM sessions WHERE session_id = ?", (sid,))
         if cur.rowcount == 0:
             return web.json_response({"ok": False, "error": "session not found"}, status=404)
         return web.json_response({"ok": True, "deleted": sid})
 
+    async def chat_topics(request: web.Request) -> web.Response:
+        query = request.query.get("q", "").strip()
+        if len(query) > 200:
+            return web.json_response({"ok": False, "error": "Search must be 200 characters or fewer."}, status=400)
+        return web.json_response({"ok": True, "topics": store.list_chat_topics(query, include_external=_owner_local_only(request))})
+
+    async def main_chat_session(_request: web.Request) -> web.Response:
+        return web.json_response({"ok": True, "session": store.main_chat_session()})
+
     async def list_messages(request: web.Request) -> web.Response:
         sid = request.match_info["session_id"]
+        guard = _external_session_guard(request, sid)
+        if guard is not None:
+            return guard
         if store.get_session(sid) is None:
             return web.json_response({"ok": False, "error": "session not found"}, status=404)
         return web.json_response({"ok": True, "messages": store.list_messages(sid)})
 
     async def submit_run(request: web.Request) -> web.Response:
         sid = request.match_info["session_id"]
+        guard = _external_session_guard(request, sid)
+        if guard is not None:
+            return guard
         if store.get_session(sid) is None:
             return web.json_response({"ok": False, "error": "session not found"}, status=404)
         body = await request.json()
@@ -130,7 +166,10 @@ def create_gateway_app(
         req_id = body.get("request_id")
         strategy = str(body.get("multitask_strategy") or "enqueue")
         try:
-            rid, fut = coordinator.submit(sid, prompt, request_id=req_id, multitask_strategy=strategy)
+            rid, fut = coordinator.submit(
+                sid, prompt, request_id=req_id, multitask_strategy=strategy,
+                owner_schedule_proposal_allowed=_owner_local_only(request),
+            )
         except (RequestConflictError, RuntimeError) as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=409)
         if body.get("wait"):
@@ -138,8 +177,207 @@ def create_gateway_app(
             return web.json_response({"ok": True, "request_id": rid, "result": res})
         return web.json_response({"ok": True, "request_id": rid, "status": "queued"}, status=202)
 
+    async def create_scheduled_job(request: web.Request) -> web.Response:
+        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+            return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
+        sid = request.match_info["session_id"]
+        if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        if request.content_type != "application/json":
+            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
+        due_at_raw = body.get("due_at")
+        if not isinstance(due_at_raw, (int, float)) or isinstance(due_at_raw, bool):
+            return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
+        try:
+            due_at = float(due_at_raw)
+        except (ValueError, OverflowError):
+            return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
+        if not math.isfinite(due_at):
+            return web.json_response({"ok": False, "error": "finite numeric due_at is required"}, status=400)
+        prompt = body.get("prompt")
+        if not isinstance(prompt, str):
+            return web.json_response({"ok": False, "error": "prompt must be a string"}, status=400)
+        prompt = prompt.strip()
+        if not prompt or len(prompt) > 16000:
+            return web.json_response({"ok": False, "error": "prompt must be 1-16000 characters"}, status=400)
+        recurrence = None
+        if "interval_s" in body:
+            interval_raw = body["interval_s"]
+            if not isinstance(interval_raw, (int, float)) or isinstance(interval_raw, bool):
+                return web.json_response({"ok": False, "error": "interval_s must be a finite number of seconds"}, status=400)
+            try:
+                interval_s = float(interval_raw)
+            except (ValueError, OverflowError):
+                return web.json_response({"ok": False, "error": "interval_s must be a finite number of seconds"}, status=400)
+            if not math.isfinite(interval_s) or not 1.0 <= interval_s <= 31536000.0:
+                return web.json_response({"ok": False, "error": "interval_s must be within 1 to 31536000 seconds"}, status=400)
+            recurrence = {"interval_s": interval_s, "series_id": f"series_{uuid.uuid4().hex}"}
+        depends_on = None
+        if "depends_on" in body:
+            depends_raw = body["depends_on"]
+            if (
+                not isinstance(depends_raw, list)
+                or not 1 <= len(depends_raw) <= 16
+                or any(
+                    not isinstance(pid, str) or not pid.strip() or len(pid) > 128
+                    for pid in depends_raw
+                )
+            ):
+                return web.json_response(
+                    {"ok": False, "error": "depends_on must be a list of 1-16 nonempty strings of at most 128 characters"},
+                    status=400,
+                )
+            if recurrence is not None:
+                return web.json_response(
+                    {"ok": False, "error": "depends_on cannot be combined with interval_s recurrence"},
+                    status=400,
+                )
+            depends_on = [pid.strip() for pid in depends_raw]
+        try:
+            job = store.create_scheduled_job(
+                session_id=sid, prompt=prompt, due_at=float(due_at), recurrence=recurrence, depends_on=depends_on
+            )
+        except ValueError:
+            return web.json_response({"ok": False, "error": "invalid scheduled job"}, status=400)
+        return web.json_response({"ok": True, "job": job}, status=201)
+
+    async def get_scheduled_job(request: web.Request) -> web.Response:
+        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+            return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
+        sid = request.match_info["session_id"]
+        if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        job = store.get_scheduled_job(request.match_info["job_id"])
+        if job is None or job.get("session_id") != sid:
+            return web.json_response({"ok": False, "error": "job not found"}, status=404)
+        return web.json_response({"ok": True, "job": job, "dependencies": store.get_job_dependencies(job["job_id"], sid)})
+
+    async def cancel_scheduled_job(request: web.Request) -> web.Response:
+        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+            return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
+        sid = request.match_info["session_id"]
+        if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        if request.content_type != "application/json":
+            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
+        outcome = store.cancel_pending_job(request.match_info["job_id"], sid)
+        if outcome.get("error") == "not_found":
+            return web.json_response({"ok": False, "error": "job not found"}, status=404)
+        if outcome.get("error") == "cannot_cancel":
+            return web.json_response({"ok": False, "error": "job cannot be cancelled"}, status=409)
+        return web.json_response({"ok": True, "job": outcome})
+
+    async def get_job_series(request: web.Request) -> web.Response:
+        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+            return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
+        sid = request.match_info["session_id"]
+        if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        series_id = request.match_info["series_id"]
+        fires = store.list_series_jobs(series_id)
+        if not fires or any(f.get("session_id") != sid for f in fires):
+            return web.json_response({"ok": False, "error": "series not found"}, status=404)
+        control = store.get_series_status(series_id, sid)
+        return web.json_response({"ok": True, "series_id": series_id, "control": control, "jobs": fires})
+
+    async def update_job_series(request: web.Request) -> web.Response:
+        if request[ACTOR_KEY] != "owner:loopback" or request.remote not in ("127.0.0.1", "::1"):
+            return web.json_response({"ok": False, "error": "Scheduled jobs are owner-local only."}, status=403)
+        sid = request.match_info["session_id"]
+        if sid != MAIN_CHAT_SESSION_ID or store.get_session(sid) is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        series_id = request.match_info["series_id"]
+        if request.content_type != "application/json":
+            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
+        status = body.get("status")
+        if status not in ("active", "paused", "cancelled"):
+            return web.json_response({"ok": False, "error": "status must be active, paused, or cancelled"}, status=400)
+        fires = store.list_series_jobs(series_id)
+        if not fires or any(f.get("session_id") != sid for f in fires):
+            return web.json_response({"ok": False, "error": "series not found"}, status=404)
+        current = store.get_series_status(series_id, sid)
+        if current is not None and current.get("status") == "cancelled":
+            return web.json_response({"ok": False, "error": "cancelled series cannot be reactivated"}, status=409)
+        try:
+            control = store.set_series_status(series_id, sid, status)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=404)
+        return web.json_response({"ok": True, "series_id": series_id, "control": control})
+
+    def _owner_local_only(request: web.Request) -> bool:
+        return request[ACTOR_KEY] == "owner:loopback" and request.remote in ("127.0.0.1", "::1")
+
+    async def _strict_json_object(request: web.Request) -> dict[str, Any] | web.Response:
+        if request.content_type != "application/json":
+            return web.json_response({"ok": False, "error": "application/json body required"}, status=400)
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"ok": False, "error": "JSON object required"}, status=400)
+        return body
+
+    async def grant_supervised_browser(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Browser grants are owner-local only."}, status=403)
+        sid = request.match_info["session_id"]
+        if store.get_session(sid) is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        if browser_grant is None:
+            return web.json_response({"ok": False, "error": "browser consent unavailable"}, status=503)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        url = body.get("url")
+        if not isinstance(url, str) or not url.strip():
+            return web.json_response({"ok": False, "error": "url is required and must be a string"}, status=400)
+        try:
+            result = await asyncio.to_thread(browser_grant, sid, url.strip())
+        except Exception:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": "browser grant failed"}, status=400)
+        return web.json_response({"ok": True, "grant": result})
+
+    async def stop_supervised_browser(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Browser stop is owner-local only."}, status=403)
+        sid = request.match_info["session_id"]
+        if store.get_session(sid) is None:
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        if browser_stop is None:
+            return web.json_response({"ok": False, "error": "browser consent unavailable"}, status=503)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        try:
+            result = await asyncio.to_thread(browser_stop, sid)
+        except Exception:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": "browser stop failed"}, status=400)
+        return web.json_response({"ok": True, "stopped": result})
+
     async def stream_events(request: web.Request) -> web.StreamResponse:
         sid = request.match_info["session_id"]
+        guard = _external_session_guard(request, sid)
+        if guard is not None:
+            return guard
         if store.get_session(sid) is None:
             return web.json_response({"ok": False, "error": "session not found"}, status=404)
         last_id_raw = request.headers.get("Last-Event-ID") or request.query.get("after_seq") or "0"
@@ -183,14 +421,29 @@ def create_gateway_app(
 
     async def list_approvals(request: web.Request) -> web.Response:
         sid = request.query.get("session_id")
-        return web.json_response({"ok": True, "approvals": store.list_pending_approvals(session_id=sid)})
+        approvals = store.list_pending_approvals(session_id=sid)
+        if not _owner_local_only(request):
+            approvals = [row for row in approvals if row["tool_name"] != "schedule-proposal"]
+        return web.json_response({"ok": True, "approvals": approvals})
 
     async def resolve_approval(request: web.Request) -> web.Response:
         aid = request.match_info["approval_id"]
-        body = await request.json()
+        existing = store.get_approval(aid)
+        schedule_proposal = existing is not None and existing["tool_name"] == "schedule-proposal"
+        owner_local = _owner_local_only(request)
+        if schedule_proposal:
+            if not owner_local:
+                return web.json_response({"ok": False, "error": "approval not found or already resolved"}, status=404)
+            body = await _strict_json_object(request)
+            if isinstance(body, web.Response):
+                return body
+            if body.get("decision") not in ("approve", "deny") or not set(body) <= {"decision", "note"}:
+                return web.json_response({"ok": False, "error": "decision must be approve or deny"}, status=400)
+        else:
+            body = await request.json()
         decision = str(body.get("decision") or "deny")
         note = str(body.get("note") or "")
-        row = store.resolve_approval(aid, decision=decision, note=note)
+        row = store.resolve_approval(aid, decision=decision, note=note, allow_schedule_approval=owner_local)
         if row is None:
             return web.json_response({"ok": False, "error": "approval not found or already resolved"}, status=404)
         return web.json_response({"ok": True, "approval": row})
@@ -485,7 +738,9 @@ def create_gateway_app(
         )
         return web.json_response({"ok": True, "plan": plan})
 
-    async def channels_status(_request: web.Request) -> web.Response:
+    async def channels_status(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Channel outbox is owner-local only."}, status=403)
         if channel_hub is None:
             return web.json_response({"ok": True, "channels": {}, "outbox": []})
         return web.json_response({
@@ -495,17 +750,127 @@ def create_gateway_app(
         })
 
     async def channels_send(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Channel send is owner-local only."}, status=403)
         if channel_hub is None:
             return web.json_response({"ok": False, "error": "channel hub unavailable"}, status=501)
-        body = await request.json()
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        channel = str(body.get("channel") or "local_log")
+        # External channels always enqueue unapproved: a request body claiming
+        # approved=True must never bypass owner approval.
+        approved = bool(body.get("approved", False)) and channel == "local_log"
         msg = channel_hub.enqueue(
-            channel=str(body.get("channel") or "local_log"),
+            channel=channel,
             recipient=str(body.get("recipient") or "owner"),
             body=str(body.get("body") or ""),
-            approved=bool(body.get("approved", False)),
+            approved=approved,
             dry_run=bool(body.get("dry_run", False)),
         )
         return web.json_response({"ok": True, "message": msg.to_dict()}, status=201)
+
+    async def channels_approve(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Message approval is owner-local only."}, status=403)
+        if channel_hub is None:
+            return web.json_response({"ok": False, "error": "channel hub unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        message_id = request.match_info["message_id"]
+        try:
+            msg = await asyncio.to_thread(channel_hub.approve_delivery, message_id)
+        except KeyError:
+            return web.json_response({"ok": False, "error": "message not found"}, status=404)
+        return web.json_response({"ok": True, "message": msg.to_dict()})
+
+    async def channels_inbound(request: web.Request) -> web.Response:
+        """Attribute one inbound external-channel message to a dedicated session.
+
+        Owner-local only. Accepts exactly {channel, external_thread_id,
+        external_message_id, sender, body} — any extra field (including a
+        caller-provided session_id) is rejected. Pure store-layer attribution:
+        no network, provider, tool call, model, or coordinator submission.
+        """
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Inbound channel messages are owner-local only."}, status=403)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        expected = {"channel", "external_thread_id", "external_message_id", "sender", "body"}
+        if set(body.keys()) != expected:
+            return web.json_response(
+                {"ok": False, "error": "body must contain exactly channel, external_thread_id, "
+                 "external_message_id, sender, body"},
+                status=400,
+            )
+        channel = body["channel"]
+        if not isinstance(channel, str) or channel not in SUPPORTED_EXTERNAL_CHANNELS:
+            return web.json_response(
+                {"ok": False, "error": "channel must be one of telegram, imessage, webhook"}, status=400
+            )
+        for field in ("external_thread_id", "external_message_id", "sender", "body"):
+            if not isinstance(body[field], str):
+                return web.json_response({"ok": False, "error": f"{field} must be a string"}, status=400)
+        try:
+            result = await asyncio.to_thread(
+                store.ingest_channel_message,
+                channel,
+                body["external_thread_id"],
+                body["external_message_id"],
+                body["sender"],
+                body["body"],
+            )
+        except RequestConflictError:
+            return web.json_response(
+                {"ok": False, "error": "conflicting replay of an already-ingested external message"}, status=409
+            )
+        except ValueError:
+            return web.json_response({"ok": False, "error": "invalid inbound channel message"}, status=400)
+        return web.json_response(
+            {"ok": True, "message": result}, status=200 if result.get("replayed") else 201
+        )
+
+    async def channels_reply(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Channel replies are owner-local only."}, status=403)
+        if channel_hub is None:
+            return web.json_response({"ok": False, "error": "channel hub unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        content = body.get("body")
+        if set(body) != {"body"} or not isinstance(content, str) or not content.strip() or len(content) > 20_000:
+            return web.json_response({"ok": False, "error": "A nonempty body of up to 20000 characters is required."}, status=400)
+        destination = await asyncio.to_thread(store.external_channel_destination, request.match_info["session_id"])
+        if destination is None:
+            return web.json_response({"ok": False, "error": "External conversation not found."}, status=404)
+        channel, recipient = destination
+        if channel not in SUPPORTED_EXTERNAL_CHANNELS or channel not in channel_hub.status()["configured_adapters"]:
+            return web.json_response({"ok": False, "error": "External channel adapter unavailable."}, status=503)
+        message = await asyncio.to_thread(channel_hub.enqueue, channel=channel, recipient=recipient, body=content)
+        return web.json_response({"ok": True, "message": message.to_dict()}, status=201)
+
+    def _is_external_channel_session(sid: str) -> bool:
+        """True when the session was allocated for an external channel thread."""
+        session = store.get_session(sid)
+        if session is None:
+            return False
+        metadata = session.get("metadata")
+        return isinstance(metadata, dict) and metadata.get("source") == "external_channel"
+
+    def _external_session_guard(request: web.Request, sid: str) -> web.Response | None:
+        """404 for non-owner-local access to an external-channel session.
+
+        Returning 404 (not 403) keeps the existence and identity of external
+        transcript sessions undisclosed to non-owner-local callers.
+        """
+        if _owner_local_only(request):
+            return None
+        if _is_external_channel_session(sid):
+            return web.json_response({"ok": False, "error": "session not found"}, status=404)
+        return None
 
     async def embodiment_status(_request: web.Request) -> web.Response:
         return web.json_response({
@@ -778,11 +1143,20 @@ def create_gateway_app(
         })
 
     app.router.add_get("/health", health)
+    app.router.add_get("/v1/chat/session", main_chat_session)
+    app.router.add_get("/v1/chat/topics", chat_topics)
     app.router.add_get("/v1/sessions", list_sessions)
     app.router.add_post("/v1/sessions", create_session)
     app.router.add_delete("/v1/sessions/{session_id}", delete_session)
     app.router.add_get("/v1/sessions/{session_id}/messages", list_messages)
     app.router.add_post("/v1/sessions/{session_id}/runs", submit_run)
+    app.router.add_post("/v1/sessions/{session_id}/browser/grant", grant_supervised_browser)
+    app.router.add_post("/v1/sessions/{session_id}/browser/stop", stop_supervised_browser)
+    app.router.add_post("/v1/sessions/{session_id}/jobs", create_scheduled_job)
+    app.router.add_get("/v1/sessions/{session_id}/jobs/{job_id}", get_scheduled_job)
+    app.router.add_post("/v1/sessions/{session_id}/jobs/{job_id}/cancel", cancel_scheduled_job)
+    app.router.add_get("/v1/sessions/{session_id}/job-series/{series_id}", get_job_series)
+    app.router.add_patch("/v1/sessions/{session_id}/job-series/{series_id}", update_job_series)
     app.router.add_get("/v1/sessions/{session_id}/events", stream_events)
     app.router.add_get("/v1/approvals", list_approvals)
     app.router.add_post("/v1/approvals/{approval_id}/resolve", resolve_approval)
@@ -826,6 +1200,9 @@ def create_gateway_app(
     app.router.add_post("/v1/media/archive", add_media_archive)
     app.router.add_get("/v1/channels/status", channels_status)
     app.router.add_post("/v1/channels/send", channels_send)
+    app.router.add_post("/v1/channels/messages/{message_id}/approve", channels_approve)
+    app.router.add_post("/v1/channels/inbound", channels_inbound)
+    app.router.add_post("/v1/sessions/{session_id}/channel-reply", channels_reply)
     app.router.add_get("/v1/embodiment/status", embodiment_status)
     app.router.add_post("/v1/embodiment/{body}/act", embodiment_act)
     app.router.add_get("/v1/droid/devices", droid_devices)
