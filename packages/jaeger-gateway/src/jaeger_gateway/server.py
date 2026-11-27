@@ -96,6 +96,7 @@ def create_gateway_app(
     vision_buffer: Any = None,
     memory_store: Any = None,
     learning_store: Any = None,
+    wiki_store: Any = None,
     skills_provider: Callable[[], list[dict[str, Any]]] | None = None,
     mcp_provider: Callable[[], list[dict[str, Any]]] | None = None,
     mcp_upsert: Callable[..., list[dict[str, Any]]] | None = None,
@@ -1609,6 +1610,38 @@ def create_gateway_app(
         removed = learning_store.forget(eid, cascade=cascade)
         return web.json_response({"ok": True, "removed": removed, "count": len(removed)})
 
+    async def list_wiki_pages(request: web.Request) -> web.Response:
+        if wiki_store is None:
+            return web.json_response({"ok": True, "pages": []})
+        path = (request.query.get("path") or "").strip()
+        if path:
+            try:
+                page = wiki_store.read_page(path)
+                return web.json_response({"ok": True, "page": page})
+            except Exception as exc:  # noqa: BLE001
+                return web.json_response({"ok": False, "error": str(exc)}, status=404)
+        q = (request.query.get("q") or "").strip()
+        if q:
+            hits = wiki_store.search(q, limit=int(request.query.get("limit", "15")))
+            return web.json_response({"ok": True, "results": hits, "count": len(hits)})
+        section = (request.query.get("section") or "").strip() or None
+        pages = wiki_store.browse(section=section)
+        return web.json_response({"ok": True, "pages": pages, "count": len(pages)})
+
+    async def write_wiki_page(request: web.Request) -> web.Response:
+        if wiki_store is None:
+            return web.json_response({"ok": False, "error": "wiki store unavailable"}, status=501)
+        body = await request.json()
+        try:
+            saved = wiki_store.write_page(
+                section=str(body.get("section") or "notes"),
+                name=str(body.get("name") or ""),
+                content=str(body.get("content") or ""),
+            )
+            return web.json_response({"ok": True, "page": saved}, status=201)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
     async def list_goals(request: web.Request) -> web.Response:
         if learning_store is None:
             return web.json_response({"ok": True, "goals": []})
@@ -1808,6 +1841,8 @@ def create_gateway_app(
     app.router.add_delete("/v1/memory/learning/{entry_id}", forget_learning)
     app.router.add_get("/v1/memory/goals", list_goals)
     app.router.add_post("/v1/memory/goals", upsert_goal)
+    app.router.add_get("/v1/memory/wiki", list_wiki_pages)
+    app.router.add_post("/v1/memory/wiki", write_wiki_page)
     app.router.add_get("/v1/diagnostics", diagnostics)
 
     # Optional static WebUI bundle serving (SPA fallback to index.html)

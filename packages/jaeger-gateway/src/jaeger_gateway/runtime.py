@@ -17,7 +17,13 @@ from typing import Any, Mapping
 
 from aiohttp import web
 
-from jaeger_authority import MacOsSeatbeltSandbox, PolicyEngine, UnconfinedSandbox, redact_text
+from jaeger_authority import (
+    MacOsSeatbeltSandbox,
+    PolicyEngine,
+    UnconfinedSandbox,
+    evaluate_cloud_egress,
+    redact_text,
+)
 from jaeger_avatar import AvatarLink, AvatarStore
 from jaeger_business import BusinessStore
 from jaeger_channels import (
@@ -55,7 +61,13 @@ from jaeger_mcp import (
     remove_mcp_server_config,
     save_mcp_server_config,
 )
-from jaeger_memory import PersistentLearningStore, SqliteStateMemory, export_memory_markdown, sync_memory_markdown
+from jaeger_memory import (
+    LocalWikiStore,
+    PersistentLearningStore,
+    SqliteStateMemory,
+    export_memory_markdown,
+    sync_memory_markdown,
+)
 from jaeger_models import (
     ConversationCacheMarkStore,
     HybridRoutingStore,
@@ -251,6 +263,7 @@ class ModularGatewayRuntime:
         self._last_mc_chat_reply_at = 0.0
         self.memory = SqliteStateMemory(self.state_dir)
         self.learning = PersistentLearningStore(self.state_dir)
+        self.wiki = LocalWikiStore(self.state_dir / "wiki")
         self.workflows = WorkflowEngine(self.state_dir / "workflows.sqlite3")
         self.dry_run = DryRunSimulator()
         self.governor = ResourceGovernor(memory_cap_gb=24.0, idle_cooldown_s=60.0)
@@ -685,6 +698,10 @@ class ModularGatewayRuntime:
             self.minecraft.act("stop_actions", {})
             self.minecraft.act("chat", {"message": f"Got it {sender}, holding position."})
             return {"acted": True, "summary": f"Co-op chat from {sender}: stopped actions"}
+        if "guard" in low:
+            self.minecraft.act("guard_area", {"radius": 10})
+            self.minecraft.act("chat", {"message": f"Copy that {sender}, guarding this area!"})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: guarding area"}
         if "sleep" in low or "bed" in low:
             res = self.minecraft.act("go_to_bed", {})
             reply = str(res.get("summary") or "Looking for a bed!")[:160]
@@ -1213,9 +1230,10 @@ class ModularGatewayRuntime:
         )
         _reg(
             "minecraft_act",
-            "Control Jaeger's headless Minecraft embodiment including Mindcraft co-op companion actions "
+            "Control Jaeger's headless Minecraft embodiment including Mindcraft & ARES co-op actions "
             "(connect, disconnect, set_goal, move_to, gather, chat, read_chat, nearby_players, "
-            "follow_player, go_to_player, give_to_player, eat, go_to_bed, set_mode, stop_actions, step, checkpoint, pause).",
+            "follow_player, go_to_player, give_to_player, eat, go_to_bed, guard_area, build_blueprint, "
+            "save_location, list_locations, goto_location, join_guide, lan_broadcast, set_mode, stop_actions, step, checkpoint, pause).",
             {
                 "type": "object",
                 "properties": {
@@ -1224,17 +1242,23 @@ class ModularGatewayRuntime:
                         "enum": [
                             "connect", "disconnect", "set_goal", "move_to", "gather", "chat",
                             "read_chat", "nearby_players", "follow_player", "go_to_player",
-                            "give_to_player", "eat", "go_to_bed", "set_mode", "stop_actions",
-                            "step", "checkpoint", "pause",
+                            "give_to_player", "eat", "go_to_bed", "guard_area", "build_blueprint",
+                            "save_location", "list_locations", "goto_location", "join_guide",
+                            "lan_broadcast", "set_mode", "stop_actions", "step", "checkpoint", "pause",
                         ],
                     },
                     "goal": {"type": "string"},
                     "host": {"type": "string"},
                     "port": {"type": "integer"},
+                    "bedrock_port": {"type": "integer"},
                     "username": {"type": "string"},
                     "player": {"type": "string"},
+                    "name": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "blueprint": {"type": "string", "enum": ["shelter", "monument", "farm", "town_hall"]},
+                    "radius": {"type": "integer"},
                     "distance": {"type": "integer"},
-                    "mode": {"type": "string", "enum": ["self_preservation", "auto_eat", "self_defense", "unstuck", "follow_player"]},
+                    "mode": {"type": "string", "enum": ["self_preservation", "auto_eat", "self_defense", "unstuck", "follow_player", "guard_area"]},
                     "enabled": {"type": "boolean"},
                     "message": {"type": "string"},
                     "code": {"type": "string"},
@@ -1259,6 +1283,60 @@ class ModularGatewayRuntime:
             ),
             read_only=False,
             source="jaeger-embodiment-minecraft",
+        )
+        _reg(
+            "wiki_knowledge",
+            "Browse, search, read, or write pages in Jaeger's private-safe local Markdown Knowledge Wiki (entities, concepts, comparisons, queries, notes).",
+            {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["browse", "search", "read", "write"]},
+                    "section": {"type": "string", "enum": ["entities", "concepts", "comparisons", "queries", "notes"]},
+                    "path": {"type": "string"},
+                    "name": {"type": "string"},
+                    "content": {"type": "string"},
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "default": 10},
+                },
+                "required": ["mode"],
+            },
+            lambda args: (
+                {"pages": self.wiki.browse(section=args.get("section"))}
+                if args["mode"] == "browse"
+                else (
+                    {"results": self.wiki.search(str(args.get("query") or ""), limit=int(args.get("limit") or 10))}
+                    if args["mode"] == "search"
+                    else (
+                        self.wiki.read_page(str(args.get("path") or ""))
+                        if args["mode"] == "read"
+                        else self.wiki.write_page(
+                            section=str(args.get("section") or "notes"),
+                            name=str(args.get("name") or "note"),
+                            content=str(args.get("content") or ""),
+                        )
+                    )
+                )
+            ),
+            read_only=False,
+            source="jaeger-memory",
+        )
+        _reg(
+            "privacy_classify",
+            "Deterministically classify content sensitivity (public/personal/private/sensitive/secret) and whether cloud egress is allowed.",
+            {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string"},
+                    "local_only_mode": {"type": "boolean", "default": False},
+                },
+                "required": ["content"],
+            },
+            lambda args: evaluate_cloud_egress(
+                str(args["content"]),
+                local_only_mode=bool(args.get("local_only_mode", False)),
+            ).to_dict(),
+            read_only=True,
+            source="jaeger-authority",
         )
         _reg(
             "jp01_act",
@@ -2825,6 +2903,7 @@ class ModularGatewayRuntime:
             vision_buffer=self.vision,
             memory_store=self.memory,
             learning_store=self.learning,
+            wiki_store=self.wiki,
             skills_provider=self._discover_skills,
             mcp_provider=self.mcp.list_servers_health,
             mcp_upsert=self._upsert_mcp_server,

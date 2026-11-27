@@ -81,3 +81,24 @@ def test_mindcraft_coop_modes_actions_and_chat_inbox(tmp_path: Path) -> None:
 
     inbox = mc.act("read_chat")
     assert inbox["ok"] is True and isinstance(inbox["messages"], list) and isinstance(inbox["nearby_players"], list)
+
+    # ARES-Minecraft harvested features: named waypoints, guard_area, blueprints & join guide
+    assert (MINEFLAYER_DIR / "lib" / "blueprints.js").is_file()
+    assert (MINEFLAYER_DIR / "lib" / "lanBroadcaster.js").is_file()
+
+    mc.act("move_to", {"x": 42, "y": 65, "z": -18})
+    wp = mc.act("save_location", {"name": "Home Base", "notes": "Oak shelter"})
+    assert wp["ok"] is True and wp["waypoint"]["x"] == 42 and wp["waypoint"]["z"] == -18
+    places = mc.act("list_locations")
+    assert places["count"] == 1 and places["locations"][0]["name"] == "home base"
+
+    mc.act("move_to", {"x": 0, "y": 64, "z": 0})
+    ret = mc.act("goto_location", {"name": "Home Base"})
+    assert ret["ok"] is True and ret["state"]["position"]["x"] == 42
+
+    guard = mc.act("guard_area", {"radius": 12})
+    assert guard["ok"] is True and guard["state"]["modes"]["guard_area"]["enabled"] is True
+    assert guard["state"]["modes"]["guard_area"]["radius"] == 12
+
+    guide = mc.act("join_guide")
+    assert guide["ok"] is True and "shelter" in guide["available_blueprints"]

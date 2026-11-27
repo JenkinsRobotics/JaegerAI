@@ -257,5 +257,19 @@ async def test_gateway_hybrid_routing_onboarding_and_briefing(tmp_path: Path) ->
             )
             assert add_aether.status == 201
             assert any(t["name"] == "inspect_image" for t in rt.tools.list_tools(limit=200))
+
+            # 9. ARES-harvested Local Knowledge Wiki HTTP + privacy_classify tool
+            w_post = await client.post(
+                "/v1/memory/wiki",
+                json={"section": "concepts", "name": "Hybrid Routing", "content": "Local fallback keeps offline chat alive."},
+            )
+            assert w_post.status == 201
+            w_search = await client.get("/v1/memory/wiki?q=offline+fallback")
+            assert w_search.status == 200
+            w_data = await w_search.json()
+            assert w_data["count"] == 1 and w_data["results"][0]["name"] == "hybrid-routing"
+
+            priv = rt.tools.execute("privacy_classify", {"content": "my bank account number is 999"})
+            assert priv.ok and "sensitive" in priv.output and "false" in priv.output.lower()
     finally:
         rt.close()
