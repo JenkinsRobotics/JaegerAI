@@ -13,17 +13,22 @@ All tools respect PolicyPort + SandboxPort gating and zero upward dependencies:
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
+import subprocess
+import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Mapping
 
-from jaeger_contracts import ToolResult
+from jaeger_contracts import SandboxProfile, ToolResult
 
 from .editors import ApplyPatchEditor, SearchReplaceEditor, lint_guarded_edit
 from .registry import ToolRegistry, ToolSpec
 from .repomap import build_repo_map
+from .web_search import web_search as run_web_search
 
 
 def _safe_resolve(workspace: Path, raw_path: str, *, extra_read_roots: tuple[Path, ...] = ()) -> Path:
@@ -261,8 +266,14 @@ def register_builtin_tools(
         if not url.startswith(("http://", "https://")):
             return ToolResult("web_fetch", False, error="url must start with http:// or https://")
         req = urllib.request.Request(url, headers={"User-Agent": "JaegerAI/1.0"})
-        with urllib.request.urlopen(req, timeout=15.0) as resp:
-            raw = resp.read(200_000).decode("utf-8", errors="replace")
+        try:
+            with urllib.request.urlopen(req, timeout=12.0) as resp:
+                raw = resp.read(200_000).decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            hint = " Do not retry this URL." if exc.code in (401, 403, 404, 410, 429) else ""
+            return ToolResult("web_fetch", False, error=f"HTTP {exc.code}: {exc.reason}.{hint}")
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            return ToolResult("web_fetch", False, error=f"Fetch failed for {url}: {exc}")
         text = re.sub(r"<script[^>]*>.*?</script>|<style[^>]*>.*?</style>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r"<[^>]+>", " ", text)
         text = " ".join(text.split())[:8000]
@@ -276,6 +287,88 @@ def register_builtin_tools(
         tier="read_only",
         read_only=True,
         tags=("web", "http", "fetch"),
+    ))
+
+    # 7b. web_search (Tavily / Brave / SearXNG / DuckDuckGo zero-config fallback)
+    def _web_search(args: Mapping[str, Any]) -> ToolResult:
+        try:
+            res = run_web_search(
+                str(args.get("query") or ""),
+                limit=int(args.get("limit") or 5),
+                provider=str(args.get("provider") or "auto"),
+            )
+            return ToolResult("web_search", True, output=json.dumps(res, ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult("web_search", False, error=str(exc))
+
+    _add(ToolSpec(
+        name="web_search",
+        description="Search the web (Tavily/Brave/SearXNG or DuckDuckGo fallback). Read-only.",
+        schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 10},
+            },
+            "required": ["query"],
+        },
+        handler=_web_search,
+        tier="read_only",
+        read_only=True,
+        tags=("web", "search", "internet"),
+    ))
+
+    # 7c. execute_code (sandboxed Python batch runner, Hermes code_execution parity)
+    def _execute_code(args: Mapping[str, Any]) -> ToolResult:
+        code = str(args.get("code") or "")
+        if not code.strip():
+            return ToolResult("execute_code", False, error="code is required")
+        timeout_s = max(1.0, min(float(args.get("timeout_s") or 30.0), 60.0))
+        py_bin = "/usr/bin/python3" if Path("/usr/bin/python3").is_file() else sys.executable
+        argv = [py_bin, "-B", "-c", code]
+        sb = getattr(registry, "_sandbox", None)
+        if sb is not None:
+            profile = SandboxProfile(workspace=ws, allow_network=False)
+            argv = list(sb.prepare(argv, profile).argv)
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        ws.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            argv,
+            cwd=str(ws),
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=env,
+        )
+        stderr_lines = [
+            ln for ln in (proc.stderr or "").splitlines()
+            if "DARWIN_USER_TEMP_DIR" not in ln
+        ]
+        stderr_clean = "\n".join(stderr_lines).strip()
+        out = ((proc.stdout or "").rstrip() + (("\n" + stderr_clean) if stderr_clean else "")).strip()[:16_000]
+        return ToolResult(
+            "execute_code",
+            proc.returncode == 0,
+            output=out,
+            error=None if proc.returncode == 0 else f"exit code {proc.returncode}",
+            metadata={"returncode": proc.returncode},
+        )
+
+    _add(ToolSpec(
+        name="execute_code",
+        description="Run a Python script snippet inside the workspace sandbox for computation or data transforms.",
+        schema={
+            "type": "object",
+            "properties": {
+                "code": {"type": "string"},
+                "timeout_s": {"type": "number", "default": 30.0},
+            },
+            "required": ["code"],
+        },
+        handler=_execute_code,
+        tier="write_local",
+        read_only=False,
+        tags=("python", "code", "compute"),
     ))
 
     # 8. Memory + offload tools (when SqliteStateMemory attached)
@@ -425,8 +518,14 @@ def register_builtin_tools(
                     return out
                 end tell
                 '''
-                res = run_applescript(script, timeout=20.0, lock_key="mail")
-                return ToolResult("list_mailboxes", res.ok, output=res.stdout, error=None if res.ok else res.stderr)
+                res = run_applescript(script, timeout_seconds=20.0, target="mail")
+                ok = bool(res.get("ok"))
+                return ToolResult(
+                    "list_mailboxes",
+                    ok,
+                    output=str(res.get("raw_output") or ""),
+                    error=None if ok else str(res.get("error") or "AppleScript failed"),
+                )
 
             _add(ToolSpec(
                 name="list_mailboxes",
@@ -466,8 +565,15 @@ def register_builtin_tools(
                     return movedCount as string
                 end tell
                 '''
-                res = run_applescript(script, timeout=40.0, lock_key="mail")
-                return ToolResult("batch_move_mail", res.ok, output=f"Moved {res.stdout.strip()} message(s)", error=None if res.ok else res.stderr)
+                res = run_applescript(script, timeout_seconds=40.0, target="mail")
+                ok = bool(res.get("ok"))
+                raw_out = str(res.get("raw_output") or "").strip()
+                return ToolResult(
+                    "batch_move_mail",
+                    ok,
+                    output=f"Moved {raw_out} message(s)" if ok else "",
+                    error=None if ok else str(res.get("error") or "AppleScript failed"),
+                )
 
             _add(ToolSpec(
                 name="batch_move_mail",

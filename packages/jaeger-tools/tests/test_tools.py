@@ -168,3 +168,39 @@ def test_unicode_seek_sequence_lint_rollback_and_pagerank_repomap(tmp_path: Path
     rmap = build_repo_map(tmp_path, max_chars=2000)
     assert rmap.index("core_hub.py:") < rmap.index("leaf_0.py:")
 
+
+def test_builtin_web_fetch_429_and_macos_mail_contract(tmp_path: Path, monkeypatch) -> None:
+    import platform
+    import urllib.error
+    import urllib.request
+    from jaeger_tools import register_builtin_tools
+
+    reg = ToolRegistry(workspace=tmp_path, policy=PolicyEngine(), sandbox=UnconfinedSandbox())
+    register_builtin_tools(reg, workspace=tmp_path, include_macos=(platform.system() == "Darwin"))
+
+    def fake_urlopen(req, timeout=12.0):
+        raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    res = reg.execute("web_fetch", {"url": "https://example.test/rate-limited"})
+    assert not res.ok
+    assert "429" in (res.error or "")
+    assert "Do not retry" in (res.error or "")
+
+    if platform.system() == "Darwin":
+        import jaeger_macos
+        captured: dict[str, object] = {}
+
+        def fake_run_applescript(script, *, timeout_seconds=25.0, target="global", **kwargs):
+            captured["timeout_seconds"] = timeout_seconds
+            captured["target"] = target
+            return {"ok": True, "raw_output": "Work: INBOX, Archive"}
+
+        monkeypatch.setattr(jaeger_macos, "run_applescript", fake_run_applescript)
+        reg2 = ToolRegistry(workspace=tmp_path, policy=PolicyEngine(), sandbox=UnconfinedSandbox())
+        register_builtin_tools(reg2, workspace=tmp_path, include_macos=True)
+        mail_res = reg2.execute("list_mailboxes", {})
+        assert mail_res.ok
+        assert "Work: INBOX" in mail_res.output
+        assert captured == {"timeout_seconds": 20.0, "target": "mail"}
+

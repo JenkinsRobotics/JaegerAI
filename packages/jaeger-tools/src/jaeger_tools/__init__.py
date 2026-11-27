@@ -1,9 +1,19 @@
 """jaeger-tools: ToolDef, ToolRegistry, ToolRouter, RwLock dispatcher, progressive discovery, EditEngines, RepoMap."""
 
-from . import aider_search_replace, arg_coercion, builtins, router, search, tool_registry, tool_schema
+from . import aider_search_replace, arg_coercion, builtins, pty_manager, remote_exec, router, search, tool_registry, tool_schema, web_search
+from .web_search import web_search as run_web_search
 from .aider_search_replace import RelativeIndenter, search_and_replace
 from .arg_coercion import COMMON_PARAM_ALIASES, coerce_args
 from .builtins import register_builtin_tools
+from .pty_manager import PtySessionError, PtySessionManager
+from .remote_exec import (
+    ExecutionBackend,
+    LocalSubprocessBackend,
+    RemoteExecError,
+    RemoteHostConfig,
+    RemoteHostRegistry,
+    SSHBackend,
+)
 from .diagnostics import Diagnostic, DiagnosticReport, diagnose_file
 from .editors import (
     ApplyPatchEditor,
@@ -46,8 +56,16 @@ __all__ = [
     "DiagnosticReport",
     "EditEngine",
     "EditOutcome",
+    "ExecutionBackend",
+    "LocalSubprocessBackend",
+    "PtySessionError",
+    "PtySessionManager",
     "ReadWriteToolDispatcher",
+    "RemoteExecError",
+    "RemoteHostConfig",
+    "RemoteHostRegistry",
     "RoutedTool",
+    "SSHBackend",
     "SearchReplaceEditor",
     "ToolConflict",
     "ToolDef",
