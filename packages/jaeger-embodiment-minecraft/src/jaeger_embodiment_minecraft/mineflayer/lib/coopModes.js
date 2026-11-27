@@ -157,6 +157,12 @@ class CoopModeManager {
                 distance: 3,
                 description: "Continuously follow a teammate player in co-op mode.",
             },
+            guard_area: {
+                enabled: false,
+                anchor: null,
+                radius: 10,
+                description: "Hold and defend a designated anchor coordinate against hostiles.",
+            },
         };
 
         if (bot && typeof bot.on === "function") {
@@ -199,6 +205,24 @@ class CoopModeManager {
                 try {
                     this.bot.pathfinder.setGoal(null);
                 } catch {}
+            }
+        }
+        if (key === "guard_area") {
+            if (opts.anchor && typeof opts.anchor === "object") {
+                this.modes[key].anchor = {
+                    x: Math.round(Number(opts.anchor.x || 0)),
+                    y: Math.round(Number(opts.anchor.y || 64)),
+                    z: Math.round(Number(opts.anchor.z || 0)),
+                };
+            } else if (this.modes[key].enabled && !this.modes[key].anchor && this.bot && this.bot.entity) {
+                const p = this.bot.entity.position;
+                this.modes[key].anchor = { x: Math.round(p.x), y: Math.round(p.y), z: Math.round(p.z) };
+            }
+            if (opts.radius !== undefined) {
+                this.modes[key].radius = Math.max(4, Math.min(Number(opts.radius) || 10, 32));
+            }
+            if (this.modes[key].enabled) {
+                this.modes.follow_player.enabled = false;
             }
         }
         this._log(`mode:${key}=${this.modes[key].enabled}`);
@@ -333,6 +357,29 @@ class CoopModeManager {
                         this._ensureMovements();
                         bot.pathfinder.setGoal(new GoalFollow(targetEnt, desired), true);
                     }
+                }
+            }
+
+            // 4b. Guard area mode (defend hostiles in radius & return to anchor post)
+            if (this.modes.guard_area.enabled && this.modes.guard_area.anchor && bot.pathfinder) {
+                const anchor = this.modes.guard_area.anchor;
+                const radius = this.modes.guard_area.radius || 10;
+                const intruder = findNearestHostile(bot, radius);
+                if (intruder && bot.pvp) {
+                    await equipBestWeapon(bot);
+                    if (bot.pvp.target !== intruder) {
+                        this._log(`Guarding post: engaging ${intruder.name}`);
+                        bot.pvp.attack(intruder);
+                    }
+                    return;
+                }
+                const distFromAnchor = Math.hypot(
+                    bot.entity.position.x - anchor.x,
+                    bot.entity.position.z - anchor.z
+                );
+                if (distFromAnchor > Math.max(4, radius * 0.6)) {
+                    this._ensureMovements();
+                    bot.pathfinder.setGoal(new GoalNear(anchor.x, anchor.y, anchor.z, 2), true);
                 }
             }
 

@@ -16,9 +16,12 @@ const Chests = require("./lib/observation/chests");
 const { plugin: tool } = require("mineflayer-tool");
 const { CoopModeManager } = require("./lib/coopModes");
 const coopActions = require("./lib/coopActions");
+const blueprints = require("./lib/blueprints");
+const { BedrockLanBroadcaster, buildJoinGuide } = require("./lib/lanBroadcaster");
 
 let bot = null;
 let modeManager = null;
+let lanBroadcaster = new BedrockLanBroadcaster();
 let chatInbox = [];
 let chatSeq = 0;
 
@@ -605,7 +608,22 @@ app.post("/coop", async (req, res) => {
             result = await coopActions.goToBed(bot);
         } else if (action === "collect_blocks") {
             result = await coopActions.collectBlocks(bot, body.item || body.block || "", body.count || 4);
+        } else if (action === "build_blueprint") {
+            const origin = body.x !== undefined ? { x: body.x, y: body.y, z: body.z } : null;
+            result = await blueprints.buildBlueprint(bot, body.blueprint || "shelter", origin);
+        } else if (action === "guard_area") {
+            const anchor = body.x !== undefined
+                ? { x: Number(body.x), y: Number(body.y ?? bot.entity.position.y), z: Number(body.z) }
+                : { x: Math.round(bot.entity.position.x), y: Math.round(bot.entity.position.y), z: Math.round(bot.entity.position.z) };
+            const radius = Number(body.radius || 10);
+            if (modeManager) {
+                modeManager.setMode("guard_area", true, { anchor, radius });
+            }
+            result = { ok: true, summary: `Now guarding area around (${anchor.x}, ${anchor.y}, ${anchor.z}) within ${radius} blocks.`, anchor, radius };
         } else if (action === "stop_actions") {
+            if (modeManager) {
+                try { modeManager.setMode("guard_area", false); } catch {}
+            }
             result = coopActions.stopActions(bot, modeManager);
         } else {
             res.status(400).json({ ok: false, error: `Unsupported co-op action: ${action}` });
@@ -621,6 +639,32 @@ app.post("/coop", async (req, res) => {
         res.status(500).json({ ok: false, error: err.message || String(err) });
     } finally {
         if (modeManager) modeManager.setExternalBusy(false);
+    }
+});
+
+app.get("/join-guide", (req, res) => {
+    const javaPort = Number(req.query.java_port || 25565);
+    const bedrockPort = Number(req.query.bedrock_port || 19132);
+    res.json({
+        ok: true,
+        guide: buildJoinGuide({ javaPort, bedrockPort }),
+        lan_broadcast: lanBroadcaster.status(),
+        available_blueprints: blueprints.AVAILABLE_BLUEPRINTS,
+    });
+});
+
+app.post("/lan-broadcast", (req, res) => {
+    const body = req.body || {};
+    const enabled = Boolean(body.enabled);
+    if (enabled) {
+        if (body.server_name) lanBroadcaster.serverName = String(body.server_name);
+        if (body.world_name) lanBroadcaster.worldName = String(body.world_name);
+        if (body.bedrock_port) lanBroadcaster.port = Number(body.bedrock_port);
+        const st = lanBroadcaster.start(() => (bot && bot.players ? Object.keys(bot.players).length : 1));
+        res.json({ ok: true, lan_broadcast: st });
+    } else {
+        const st = lanBroadcaster.stop();
+        res.json({ ok: true, lan_broadcast: st });
     }
 });
 
