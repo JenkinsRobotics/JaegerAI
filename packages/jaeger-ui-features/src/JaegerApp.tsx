@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, GatewayEventEnvelope, SessionSummary } from "@jaeger/ui-protocol";
+import type { ApprovalPart, ChatMessage, SessionSummary } from "@jaeger/ui-protocol";
 import { HttpSseTransport, SessionStore } from "@jaeger/ui-sdk";
 import {
   ApprovalCard,
@@ -167,6 +167,10 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [prompt, setPrompt] = useState("");
   const [runStatus, setRunStatus] = useState<string>("idle");
+  const [scheduleApprovals, setScheduleApprovals] = useState<{ sessionId: string; items: ApprovalPart[] }>();
+  const [approvalRefresh, setApprovalRefresh] = useState(0);
+  const [approvalError, setApprovalError] = useState("");
+  const [decidingApproval, setDecidingApproval] = useState<string>();
 
   const [health, setHealth] = useState<GatewayRuntimeSnapshot>({});
   const [resources, setResources] = useState<ResourceSnapshot>({});
@@ -257,14 +261,19 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   };
 
   const refreshSessions = async () => {
+    const primaryResponse = !activeSessionId
+      ? await fetch(`${baseUrl}/v1/chat/session`).catch(() => null)
+      : null;
+    const primary = primaryResponse?.ok
+      ? (await primaryResponse.json() as { session?: SessionSummary }).session
+      : undefined;
+    if (primary) setActiveSessionId((current) => current || primary.session_id);
     const res = await fetch(`${baseUrl}/v1/sessions`).catch(() => null);
     if (!res?.ok) return;
     const data = (await res.json()) as { sessions?: SessionSummary[] };
     const rows = data.sessions ?? [];
     setSessions(rows);
-    if (!activeSessionId && rows.length > 0) {
-      setActiveSessionId(rows[0].session_id);
-    }
+    if (!primary && rows.length > 0) setActiveSessionId((current) => current || rows[0].session_id);
   };
 
   const createNewSession = async () => {
@@ -326,6 +335,46 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
       store.dispose();
     };
   }, [activeSessionId, baseUrl]);
+
+  useEffect(() => {
+    if (!activeSessionId || dest !== "chat") return;
+    const controller = new AbortController();
+    const sessionId = activeSessionId;
+    const url = `${baseUrl}/v1/approvals?session_id=${encodeURIComponent(sessionId)}`;
+    async function loadScheduleApprovals() {
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) {
+          if (!controller.signal.aborted) setScheduleApprovals({ sessionId, items: [] });
+          return;
+        }
+        const data: { approvals?: Array<{ approval_id: string; session_id: string; tool_name: string; prompt: string }> } = await response.json();
+        if (controller.signal.aborted) return;
+        const items: ApprovalPart[] = [];
+        for (const row of Array.isArray(data.approvals) ? data.approvals : []) {
+          if (!row || row.tool_name !== "schedule-proposal" || row.session_id !== sessionId || typeof row.approval_id !== "string") continue;
+          try {
+            const payload = JSON.parse(row.prompt);
+            if (typeof payload?.prompt !== "string" || typeof payload.due_at !== "number" || !Number.isFinite(payload.due_at)) continue;
+            const date = new Date(payload.due_at * 1000);
+            const start = Number.isNaN(date.getTime()) ? String(payload.due_at) : date.toLocaleString();
+            const interval = typeof payload.interval_s === "number" ? ` · Repeats every ${payload.interval_s} seconds` : "";
+            items.push({
+              type: "approval", approvalId: row.approval_id, toolName: "Scheduled job",
+              prompt: `${payload.prompt} · Starts ${start}${interval}`, status: "pending",
+            });
+          } catch {
+            // Ignore malformed proposals; do not offer an approval for them.
+          }
+        }
+        setScheduleApprovals({ sessionId, items });
+      } catch {
+        if (!controller.signal.aborted) setScheduleApprovals({ sessionId, items: [] });
+      }
+    }
+    void loadScheduleApprovals();
+    return () => controller.abort();
+  }, [activeSessionId, approvalRefresh, baseUrl, dest, runStatus]);
 
   useEffect(() => {
     if (dest === "tools") {
@@ -396,18 +445,22 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   };
 
   const handleApproval = async (approvalId: string, decision: "approve" | "deny") => {
-    await fetch(`${baseUrl}/v1/approvals/${encodeURIComponent(approvalId)}/resolve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decision }),
-    });
-    const ev: GatewayEventEnvelope = {
-      seq: Date.now(),
-      event: "approval.resolved",
-      payload: { approval_id: approvalId, decision },
-    };
-    void ev;
-  };
+    setApprovalError("");
+    setDecidingApproval(approvalId);
+    try {
+      const response = await fetch(`${baseUrl}/v1/approvals/${encodeURIComponent(approvalId)}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      if (!response.ok) throw new Error("Could not record the approval decision.");
+      setApprovalRefresh((current) => current + 1);
+    } catch {
+      setApprovalError("Could not record the approval decision.");
+    } finally {
+      setDecidingApproval(undefined);
+    }
+ };
 
   const runSafeDryRun = async () => {
     setDryRunBusy(true);
@@ -637,6 +690,10 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                   setShowJump(!nearBottom);
                 }}
               >
+                {approvalError && <p role="alert">{approvalError}</p>}
+                {scheduleApprovals?.sessionId === activeSessionId && scheduleApprovals.items.map((approval) => (
+                  <ApprovalCard key={approval.approvalId} approval={approval} onDecision={handleApproval} disabled={decidingApproval !== undefined} />
+                ))}
                 {messages.length === 0 ? (
                   <div className="jg-card" style={{ maxWidth: 680, margin: "28px auto" }}>
                     <h3 style={{ marginTop: 0 }}>Jaeger Command Center</h3>

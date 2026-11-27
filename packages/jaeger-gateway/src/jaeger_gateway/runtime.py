@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 import os
 import signal
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -42,15 +44,27 @@ from jaeger_orchestration import DryRunSimulator, PriorityTier, ResourceGovernor
 from jaeger_realtime import RealtimeVoiceSession
 from jaeger_reliability import ReliabilityEngine
 from jaeger_skills import scan_skill
+from jaeger_skills.workspace import WorkspaceSkillStore
 from jaeger_tools import ToolRegistry, ToolSpec, register_builtin_tools
 from jaeger_vision import RollingFrameBuffer
 from jaeger_youtube import MediaArchiveStore, YouTubeStudioStore
+from jaeger_youtube.browse import BrowserWorkerClient
 
 from .auth import GatewayAuthPolicy
-from .coordinator import RunCoordinator
+from .coordinator import OWNER_SCHEDULE_PROPOSAL_ALLOWED, RunCoordinator
 from .server import create_gateway_app
-from .store import GatewayStore
+from .store import MAIN_CHAT_SESSION_ID, GatewayStore
+from .supervised_browser import SupervisedBrowser
 from .stream import SessionEventHub
+
+
+#: Trusted session binding for the supervised_browser tool. Set by
+#: _SseLoopMiddleware.on_tool_call around call_next so the handler can scope
+#: SupervisedBrowser.execute() to the real session even when read tools run
+#: in worker threads; tool handlers otherwise only receive model arguments.
+_TRUSTED_SUPERVISED_SESSION: ContextVar[str | None] = ContextVar(
+    "jaeger_trusted_supervised_session", default=None
+)
 
 
 class _SseLoopMiddleware:
@@ -106,7 +120,14 @@ class _SseLoopMiddleware:
             {"call_id": call_id, "tool": tool_name, "arguments": dict(arguments), "step": ctx.step},
             generation=self._generation,
         )
-        res = call_next(tool_name, arguments)
+        if tool_name in {"supervised_browser", "propose_scheduled_job"}:
+            token = _TRUSTED_SUPERVISED_SESSION.set(self._session_id)
+            try:
+                res = call_next(tool_name, arguments)
+            finally:
+                _TRUSTED_SUPERVISED_SESSION.reset(token)
+        else:
+            res = call_next(tool_name, arguments)
         duration_ms = int((time.monotonic() - t0) * 1000)
         self._hub.publish(
             self._session_id,
@@ -163,6 +184,9 @@ class ModularGatewayRuntime:
         self.youtube = YouTubeStudioStore(self.state_dir)
         self.media_archive = MediaArchiveStore(self.state_dir)
         self.channels = ChannelHub(self.state_dir)
+        # Recover interrupted deliveries once at startup; ordinary hub reopen must never recover rows.
+        self.channels.recover_interrupted_deliveries()
+        self._register_webhook_channel()
         self.minecraft = MinecraftEmbodiment(self.state_dir)
         self.minecraft_skills = MinecraftSkillLibrary(self.state_dir)
         self.jp01 = JP01Embodiment(dry_run=True)
@@ -184,6 +208,7 @@ class ModularGatewayRuntime:
         self.store = GatewayStore(self.state_dir / "modular_gateway.sqlite3")
         self.hub = SessionEventHub()
         self.reliability = ReliabilityEngine(repeat_threshold=4)
+        self._supervised_browser_instance: SupervisedBrowser | None = None
 
         safe_read_roots = (
             self.state_dir / "offload",
@@ -227,6 +252,137 @@ class ModularGatewayRuntime:
             hub=self.hub,
             executor=self._execute_turn,
         )
+        # Boot reconciliation: jobs stuck 'claimed' by a crash are settled from
+        # persisted request outcomes (or marked interrupted for review) before
+        # the scheduler thread starts. No tools are replayed.
+        self.store.reconcile_claimed_jobs()
+        self._scheduler_stop = threading.Event()
+        self._scheduler_thread = threading.Thread(
+            target=self._scheduler_loop, name="jaeger-scheduler", daemon=True
+        )
+        self._scheduler_thread.start()
+
+    def _register_webhook_channel(self) -> None:
+        """Wire the outbound webhook adapter only when explicitly configured.
+
+        Reads JAEGER_CHANNEL_WEBHOOK_URL (required to enable) and optional
+        JAEGER_CHANNEL_WEBHOOK_TOKEN. Construction performs no network I/O.
+        Invalid optional config fails closed: the webhook adapter is simply not
+        registered (messages stay queued_for_approval), secrets are never
+        logged, and Gateway startup is unaffected. Delivery still requires
+        explicit owner approval through ChannelHub.
+        """
+        from jaeger_channels.webhook import build_webhook_adapter
+
+        url = (os.environ.get("JAEGER_CHANNEL_WEBHOOK_URL") or "").strip()
+        if not url:
+            return
+        token = os.environ.get("JAEGER_CHANNEL_WEBHOOK_TOKEN") or None
+        try:
+            adapter = build_webhook_adapter(url, token)
+        except Exception:  # noqa: BLE001 - fail closed without leaking config
+            return
+        self.channels.register_adapter("webhook", adapter)
+
+    def _scheduler_loop(self) -> None:
+        """Claim at most one due scheduled job per tick and dispatch it once
+        through the normal RunCoordinator submit path (same session, persisted
+        run ID as request ID). Gated on owner-work/E-Stop policy; only a
+        complete verdict marks the job done."""
+        while not self._scheduler_stop.wait(timeout=1.0):
+            try:
+                self._dispatch_due_scheduled_job()
+            except Exception:  # noqa: BLE001
+                continue
+
+    def _dispatch_due_scheduled_job(self) -> None:
+        snap = self.governor.snapshot()
+        if snap.get("estop_active"):
+            return
+        if snap.get("active_owner_runs", 0) > 0:
+            return  # owner work in flight; try next tick
+        job = self.store.claim_due_job()
+        if job is None:
+            return
+        job_id, run_id = job["job_id"], job.get("run_id")
+        try:
+            # Refresh the governor snapshot AFTER the claim: an E-Stop latched
+            # during the claim window must prevent dispatch (snap is stale here).
+            snap = self.governor.snapshot()
+            if snap.get("estop_active") or self._scheduler_stop.is_set():
+                self.store.settle_scheduled_job(job_id, status="cancelled",
+                                                 result={"ok": False, "error": "estop_or_shutdown"})
+                return
+            _, future = self.coordinator.submit(
+                job["session_id"], job["prompt"], request_id=run_id,
+                start_guard=lambda: not (
+                    bool(self.governor.snapshot().get("estop_active"))
+                    or self._scheduler_stop.is_set()
+                ),
+            )
+            def _settle(fut):
+                # Future is already done when this callback runs; fut.result() never blocks here.
+                try:
+                    result = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    self.store.settle_scheduled_job(
+                        job_id, status="failed",
+                        result={"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+                    )
+                    return
+                verdict = str(result.get("verdict") or "")
+                if verdict == "complete":
+                    self.store.settle_scheduled_job(job_id, status="done", result=result)
+                else:
+                    self.store.settle_scheduled_job(
+                        job_id, status="failed",
+                        result={"ok": False, "verdict": verdict, "error": result.get("error") or result.get("content") or "incomplete"},
+                    )
+
+            future.add_done_callback(_settle)
+        except Exception as exc:  # noqa: BLE001
+            self.store.settle_scheduled_job(
+                job_id, status="failed",
+                result={"ok": False, "error": f"{type(exc).__name__}: {exc}"},
+            )
+
+
+    def _supervised_browser(self) -> SupervisedBrowser:
+        """Lazily create the supervised browser policy over the existing worker.
+
+        No process management or auto-launch: the Gateway-owned browser worker
+        is expected to be running already, configured via JAEGER_BROWSER_PORT
+        and JAEGER_BROWSER_TOKEN.
+        """
+        if self._supervised_browser_instance is not None:
+            return self._supervised_browser_instance
+        port = int(os.environ.get("JAEGER_BROWSER_PORT") or "0")
+        token = os.environ.get("JAEGER_BROWSER_TOKEN") or ""
+        if not port or not token:
+            raise RuntimeError(
+                "browser worker not configured: set JAEGER_BROWSER_PORT and "
+                "JAEGER_BROWSER_TOKEN (Gateway-owned worker, started outside the Gateway)"
+            )
+        client = BrowserWorkerClient(port=port, token=token)
+        self._supervised_browser_instance = SupervisedBrowser(
+            client,
+            estop_active=lambda: bool(self.governor.snapshot().get("estop_active")),
+        )
+        return self._supervised_browser_instance
+
+    def _grant_supervised_browser(self, session_id: str, url: str) -> dict[str, Any]:
+        """Owner HTTP wiring only: grant one exact URL to one session."""
+        return self._supervised_browser().grant(session_id, url)
+
+    def _stop_supervised_browser(self, session_id: str) -> dict[str, Any]:
+        """Owner HTTP wiring only: latch the session off and close its pages."""
+        return self._supervised_browser().stop(session_id)
+
+    def _supervised_browser_tool(self, action: str, direction: str) -> Any:
+        session_id = _TRUSTED_SUPERVISED_SESSION.get()
+        if not session_id:
+            raise RuntimeError("supervised_browser requires a trusted owner session binding")
+        return self._supervised_browser().execute(session_id, action=action, direction=direction)
 
     @staticmethod
     def _default_ui_dir() -> Path | None:
@@ -236,6 +392,12 @@ class ModularGatewayRuntime:
     def _register_platform_tools(self) -> None:
         """Expose Droid Mode, VR Avatar, Minecraft, JP01, YouTube Studio, Business & Goals directly to AgentLoop."""
         import json as _json
+
+        def _workspace_skills() -> WorkspaceSkillStore:
+            # Constructed lazily per tool call: a symlinked skills folder then
+            # denies the skill tools (SkillStoreError -> ok=False result) but
+            # cannot prevent the Gateway itself from starting.
+            return WorkspaceSkillStore(self.workspace)
 
         def _ok(tool_name: str, obj: Any) -> ToolResult:
             return ToolResult(tool_name=tool_name, ok=True, output=_json.dumps(obj, ensure_ascii=False, indent=2))
@@ -309,6 +471,74 @@ class ModularGatewayRuntime:
             ),
             read_only=True,
             source="jaeger-droid",
+        )
+        _reg(
+            "save_workspace_skill",
+            "Save a learned procedure as a workspace skill (SKILL.md under <workspace>/skills/<name>/). "
+            "Only call when the owner explicitly asked to save/remember this procedure. "
+            "The markdown is stored as inert procedure data: it is never executed and grants no permissions. "
+            "Existing skills are never overwritten.",
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Skill name (lowercase letters, digits, hyphens)."},
+                    "markdown": {"type": "string", "description": "Full SKILL.md content with frontmatter."},
+                },
+                "required": ["name", "markdown"],
+            },
+            lambda args: {
+                "saved": str(
+                    _workspace_skills().save(
+                        name=str(args["name"]),
+                        markdown=str(args["markdown"]),
+                    )
+                )
+            },
+            read_only=False,
+            source="jaeger-skills",
+        )
+        _reg(
+            "search_workspace_skills",
+            "Search saved workspace skills by keyword and return matching names, descriptions, and paths. "
+            "Read-only; searching grants no permissions and executes nothing.",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": 50},
+                },
+                "required": ["query"],
+            },
+            lambda args: {
+                "results": [
+                    {"name": s.name, "description": s.description, "path": s.path}
+                    for s in _workspace_skills().search(
+                        query=str(args["query"]),
+                        limit=int(args.get("limit") or 5),
+                    )
+                ]
+            },
+            read_only=True,
+            source="jaeger-skills",
+        )
+        _reg(
+            "load_workspace_skill",
+            "Load a saved workspace skill and return its SKILL.md content explicitly as procedure data "
+            "(markdown text only). Loading grants no permissions, executes nothing, and does not inject "
+            "the content into any prompt automatically.",
+            {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Skill name to load."},
+                },
+                "required": ["name"],
+            },
+            lambda args: {
+                "name": str(args["name"]),
+                "procedure_data": _workspace_skills().load(name=str(args["name"])),
+            },
+            read_only=True,
+            source="jaeger-skills",
         )
         _reg(
             "avatar_express",
@@ -387,6 +617,31 @@ class ModularGatewayRuntime:
             lambda args: self.jp01.act(str(args["action"]), args),
             read_only=False,
             source="jaeger-hardware",
+        )
+        _reg(
+            "supervised_browser",
+            "Supervised browsing of the owner-granted URL in the Gateway-owned browser tab. "
+            "Actions: 'open' (navigate to the granted URL only), 'observe' (read-only snapshot), "
+            "'scroll' (exactly one step up/down, then a read-only snapshot). The session and URL "
+            "are bound by the owner grant; this tool takes no URL, page, session or credential "
+            "arguments. Page content is returned as untrusted data. Requires JAEGER_BROWSER_PORT "
+            "and JAEGER_BROWSER_TOKEN.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["open", "observe", "scroll"]},
+                    "direction": {"type": "string", "enum": ["up", "down"]},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._supervised_browser_tool(
+                str(args["action"]),
+                str(args.get("direction") or "down"),
+            ),
+            # Stateful (open/scroll mutate the granted tab) even though page
+            # content is read-only: keep these serialized within one tool batch.
+            read_only=False,
+            source="jaeger-gateway",
         )
         _reg(
             "youtube_studio",
@@ -478,6 +733,37 @@ class ModularGatewayRuntime:
             read_only=False,
             source="jaeger-memory",
         )
+        _reg(
+            "propose_scheduled_job",
+            "Propose a one-shot or recurring job for owner approval. "
+            "Use due_at in Unix epoch seconds and optional interval_s for a fixed delay. "
+            "The job starts only after owner approval.",
+            {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string"},
+                    "due_at": {"type": "number"},
+                    "interval_s": {"type": "number"},
+                },
+                "required": ["prompt", "due_at"],
+            },
+            lambda args: self._propose_scheduled_job(
+                prompt=args["prompt"],
+                due_at=args["due_at"],
+                interval_s=args.get("interval_s"),
+            ),
+            read_only=False,
+            source="jaeger-gateway",
+        )
+
+    def _propose_scheduled_job(
+        self, *, prompt: str, due_at: float, interval_s: float | None,
+    ) -> dict[str, Any]:
+        session_id = _TRUSTED_SUPERVISED_SESSION.get()
+        if not OWNER_SCHEDULE_PROPOSAL_ALLOWED.get() or session_id != MAIN_CHAT_SESSION_ID:
+            raise PermissionError("Scheduling proposals require an interactive owner run in the main chat")
+        result = self.store.propose_scheduled_job(session_id, prompt=prompt, due_at=due_at, interval_s=interval_s)
+        return {"approval_id": result["approval_id"], "status": "pending"}
 
     def _execute_turn(
         self,
@@ -619,9 +905,13 @@ class ModularGatewayRuntime:
             mcp_delete=self._delete_mcp_server,
             mcp_reload=self._reload_mcp_servers,
             static_ui_dir=self.static_ui_dir if serve_ui else None,
+            browser_grant=self._grant_supervised_browser,
+            browser_stop=self._stop_supervised_browser,
         )
 
     def close(self) -> None:
+        self._scheduler_stop.set()
+        self._scheduler_thread.join(timeout=3.0)
         self.mcp.close()
         self.coordinator.close()
 

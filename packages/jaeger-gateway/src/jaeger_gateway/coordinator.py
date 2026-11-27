@@ -6,6 +6,7 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import Future
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -13,6 +14,7 @@ from .store import GatewayStore
 from .stream import SessionEventHub
 
 RunExecutor = Callable[[str, str, int, SessionEventHub], Mapping[str, Any]]
+OWNER_SCHEDULE_PROPOSAL_ALLOWED: ContextVar[bool] = ContextVar("owner_schedule_proposal_allowed", default=False)
 
 
 @dataclass
@@ -22,6 +24,8 @@ class _QueuedRun:
     prompt: str
     future: Future[Mapping[str, Any]]
     enqueued_at: float = field(default_factory=time.time)
+    start_guard: Callable[[], bool] | None = None
+    owner_schedule_proposal_allowed: bool = False
 
 
 class RunCoordinator:
@@ -58,6 +62,8 @@ class RunCoordinator:
         *,
         request_id: str | None = None,
         multitask_strategy: str = "enqueue",
+        start_guard: Callable[[], bool] | None = None,
+        owner_schedule_proposal_allowed: bool = False,
     ) -> tuple[str, Future[Mapping[str, Any]]]:
         """Admit a request idempotently with LangGraph-style multitask strategy (enqueue|reject|interrupt)."""
         strat = (multitask_strategy or "enqueue").strip().lower()
@@ -82,7 +88,10 @@ class RunCoordinator:
             fut.set_result(req["result"])
             return rid, fut
 
-        item = _QueuedRun(session_id=session_id, request_id=rid, prompt=prompt, future=fut)
+        item = _QueuedRun(
+            session_id=session_id, request_id=rid, prompt=prompt, future=fut,
+            start_guard=start_guard, owner_schedule_proposal_allowed=owner_schedule_proposal_allowed,
+        )
         with self._doorbell:
             self._queues.setdefault(session_id, deque()).append(item)
             self._doorbell.notify_all()
@@ -96,7 +105,7 @@ class RunCoordinator:
         return None
 
     def _run_item(self, item: _QueuedRun) -> None:
-        gen = self._hub.open_generation(item.session_id)
+        gen = self._hub.open_generation(item.session_id, request_id=item.request_id)
         try:
             self._store.set_session_status(item.session_id, "running")
             self._store.append_message(item.session_id, "user", item.prompt, metadata={"request_id": item.request_id})
@@ -106,7 +115,18 @@ class RunCoordinator:
                 {"request_id": item.request_id, "generation": gen},
                 generation=gen,
             )
-            result = dict(self._executor(item.session_id, item.prompt, gen, self._hub))
+            # Start guard is evaluated immediately before execution: if it
+            # returns False the run settles as a normal non-complete result
+            # without invoking the model or any tools.
+            if item.start_guard is not None and not item.start_guard():
+                result = {"ok": False, "verdict": "loop_halted",
+                          "content": "Halted by start guard before execution."}
+            else:
+                token = OWNER_SCHEDULE_PROPOSAL_ALLOWED.set(item.owner_schedule_proposal_allowed)
+                try:
+                    result = dict(self._executor(item.session_id, item.prompt, gen, self._hub))
+                finally:
+                    OWNER_SCHEDULE_PROPOSAL_ALLOWED.reset(token)
             content = str(result.get("content") or "")
             self._store.append_message(
                 item.session_id,

@@ -34,6 +34,7 @@ class SessionEventHub:
         self._lock = threading.RLock()
         self._stream = FencedEventStream()
         self._doorbells: dict[str, threading.Condition] = {}
+        self._requests: dict[str, str] = {}
 
     def _cond(self, session_id: str) -> threading.Condition:
         with self._lock:
@@ -43,11 +44,15 @@ class SessionEventHub:
                 self._doorbells[session_id] = cond
             return cond
 
-    def open_generation(self, session_id: str, *, floor_seq: int = 0) -> int:
+    def open_generation(self, session_id: str, *, floor_seq: int = 0, request_id: str = "") -> int:
         """Mint a new monotonic writer generation, fencing out any prior zombie worker."""
         cond = self._cond(session_id)
         with cond:
             gen = self._stream.open_attempt(session_id, floor_seq=floor_seq)
+            if request_id:
+                self._requests[session_id] = request_id
+            else:
+                self._requests.pop(session_id, None)
             cond.notify_all()
             return gen
 
@@ -62,6 +67,9 @@ class SessionEventHub:
         """Append a fenced event and ring the session doorbell. Raises StaleWriterError on zombie writes."""
         cond = self._cond(session_id)
         with cond:
+            request_id = self._requests.get(session_id)
+            if request_id and "request_id" not in payload:
+                payload = {**payload, "request_id": request_id}
             env = self._stream.append(
                 session_id,
                 generation,

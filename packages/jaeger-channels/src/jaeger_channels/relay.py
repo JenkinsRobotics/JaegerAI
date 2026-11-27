@@ -21,13 +21,20 @@ from pathlib import Path
 from typing import Any, Callable
 
 try:
-    from jaeger_authority.redact import redact_text
+    from jaeger_authority.redact import redact_object, redact_text
 except ImportError:  # pragma: no cover - standalone fallback
     def redact_text(text: str) -> str:
         return text
 
+    def redact_object(value: Any, *, _depth: int = 0) -> Any:
+        return value
+
 
 SUPPORTED_CHANNELS = ("local_log", "imessage", "telegram", "webhook")
+
+_OUTBOX_COLS = (
+    "message_id, channel, recipient, body, status, dry_run, approved, receipt_json, created_at"
+)
 
 
 @dataclass(slots=True)
@@ -36,7 +43,7 @@ class OutboxMessage:
     channel: str
     recipient: str
     body: str
-    status: str  # queued_for_approval | sent | dry_run | failed
+    status: str  # queued_for_approval | sending | sent | delivery_unknown | dry_run
     dry_run: bool
     approved: bool
     receipt: dict[str, Any]
@@ -86,6 +93,153 @@ class ChannelHub:
     def register_adapter(self, channel: str, fn: Callable[[str, str], dict[str, Any]]) -> None:
         self._adapters[channel] = fn
 
+    @staticmethod
+    def _row_to_message(r: tuple) -> OutboxMessage:
+        return OutboxMessage(
+            message_id=r[0],
+            channel=r[1],
+            recipient=r[2],
+            body=r[3],
+            status=r[4],
+            dry_run=bool(r[5]),
+            approved=bool(r[6]),
+            receipt=json.loads(r[7] or "{}"),
+            created_at=float(r[8]),
+        )
+
+    def get_message(self, message_id: str) -> OutboxMessage | None:
+        """Return the persisted outbox row for ``message_id`` (or None)."""
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                f"SELECT {_OUTBOX_COLS} FROM outbox WHERE message_id = ?", (message_id,)
+            ).fetchone()
+        return self._row_to_message(row) if row else None
+
+    def _persist(self, conn: sqlite3.Connection, msg: OutboxMessage) -> None:
+        conn.execute(
+            """
+            UPDATE outbox SET status = ?, approved = ?, receipt_json = ?
+            WHERE message_id = ?
+            """,
+            (msg.status, 1 if msg.approved else 0, json.dumps(msg.receipt), msg.message_id),
+        )
+
+    @staticmethod
+    def _confirmed_delivery(receipt: Any) -> bool:
+        """True only for an explicit boolean delivered/ok confirmation.
+
+        ``sent`` requires a dict receipt with ``delivered: true`` or legacy
+        ``ok: true``; an explicit ``false`` on either key, a missing key, or
+        any non-dict outcome is ambiguous and must never be treated as sent.
+        """
+        if not isinstance(receipt, dict):
+            return False
+        delivered = receipt.get("delivered")
+        ok = receipt.get("ok")
+        if delivered is False or ok is False:
+            return False
+        return delivered is True or ok is True
+
+    def _deliver(self, msg: OutboxMessage) -> OutboxMessage:
+        """Persist-before-delivery for an approved, adapter-backed message.
+
+        Claims the row exactly once (sending/approved) under BEGIN IMMEDIATE,
+        invokes the adapter outside the lock, then persists the terminal
+        status: ``sent`` + scrubbed receipt only on an explicit confirmed
+        delivery, ``delivery_unknown`` on exception or any ambiguous outcome
+        (never auto-retried).
+        """
+        adapter = self._adapters.get(msg.channel)
+        if adapter is None:
+            # No adapter: leave queued_for_approval with no side effect.
+            return msg
+        with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                f"SELECT {_OUTBOX_COLS} FROM outbox WHERE message_id = ?", (msg.message_id,)
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                raise KeyError(f"unknown message_id: {msg.message_id}")
+            current = self._row_to_message(row)
+            if current.status != "queued_for_approval":
+                # Already claimed/finished (repeated or concurrent approval,
+                # including reopening while in flight): no second adapter call.
+                conn.rollback()
+                return current
+            claimed = OutboxMessage(
+                message_id=current.message_id,
+                channel=current.channel,
+                recipient=current.recipient,
+                body=current.body,
+                status="sending",
+                dry_run=current.dry_run,
+                approved=True,
+                receipt=current.receipt,
+                created_at=current.created_at,
+            )
+            self._persist(conn, claimed)
+            conn.commit()
+        try:
+            receipt = adapter(msg.recipient, msg.body)
+            if self._confirmed_delivery(receipt):
+                final = OutboxMessage(
+                    message_id=msg.message_id,
+                    channel=msg.channel,
+                    recipient=msg.recipient,
+                    body=msg.body,
+                    status="sent",
+                    dry_run=msg.dry_run,
+                    approved=True,
+                    receipt=redact_object(receipt),
+                    created_at=msg.created_at,
+                )
+            else:
+                # Ambiguous outcome (non-dict, missing key, or explicit false):
+                # fail closed, never auto-retry this message_id.
+                final = OutboxMessage(
+                    message_id=msg.message_id,
+                    channel=msg.channel,
+                    recipient=msg.recipient,
+                    body=msg.body,
+                    status="delivery_unknown",
+                    dry_run=msg.dry_run,
+                    approved=True,
+                    receipt={"error": "ambiguous adapter outcome"},
+                    created_at=msg.created_at,
+                )
+        except Exception:  # noqa: BLE001 - ambiguous outcomes fail closed
+            # Never persist raw exception strings: they may embed secrets.
+            final = OutboxMessage(
+                message_id=msg.message_id,
+                channel=msg.channel,
+                recipient=msg.recipient,
+                body=msg.body,
+                status="delivery_unknown",
+                dry_run=msg.dry_run,
+                approved=True,
+                receipt={"error": "adapter raised an exception"},
+                created_at=msg.created_at,
+            )
+        with self._lock, self._connect() as conn:
+            self._persist(conn, final)
+        return final
+
+    def approve_delivery(self, message_id: str) -> OutboxMessage:
+        """Trusted Gateway owner callback: deliver a queued_for_approval row.
+
+        Atomically claims the row exactly once; repeated or concurrent calls
+        return the existing record without a second adapter invocation.
+        """
+        msg = self.get_message(message_id)
+        if msg is None:
+            raise KeyError(f"unknown message_id: {message_id}")
+        if msg.status != "queued_for_approval":
+            return msg
+        if msg.dry_run:
+            return msg
+        return self._deliver(msg)
+
     def status(self) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
             pending = int(
@@ -98,6 +252,16 @@ class ChannelHub:
             "pending_approval": pending,
             "sent_count": sent,
         }
+
+    def recover_interrupted_deliveries(self) -> int:
+        """Settle every interrupted send at Gateway startup without replay."""
+        receipt = json.dumps({"reason": "interrupted_at_startup"})
+        with self._lock, self._connect() as conn:
+            result = conn.execute(
+                "UPDATE outbox SET status = 'delivery_unknown', receipt_json = ? WHERE status = 'sending'",
+                (receipt,),
+            )
+            return result.rowcount
 
     def enqueue(
         self,
@@ -121,17 +285,8 @@ class ChannelHub:
             status = "queued_for_approval"
             receipt = {"reason": "external_channel_requires_owner_approval"}
         else:
-            adapter = self._adapters.get(ch)
-            if adapter is None:
-                status = "queued_for_approval"
-                receipt = {"reason": f"adapter_not_configured:{ch}"}
-            else:
-                try:
-                    receipt = adapter(recipient, safe_body)
-                    status = "sent"
-                except Exception as exc:  # noqa: BLE001
-                    status = "failed"
-                    receipt = {"error": str(exc)}
+            status = "queued_for_approval"
+            receipt = {"reason": f"adapter_not_configured:{ch}"}
 
         msg = OutboxMessage(
             message_id=mid,
@@ -163,6 +318,10 @@ class ChannelHub:
                     msg.created_at,
                 ),
             )
+        if not dry_run and status == "queued_for_approval" and (ch == "local_log" or approved):
+            # Approved direct enqueue and local_log go through the same
+            # persist-before-delivery path (claim -> adapter -> terminal status).
+            msg = self._deliver(msg)
         return msg
 
     def list_outbox(self, *, limit: int = 50) -> list[OutboxMessage]:
@@ -174,20 +333,7 @@ class ChannelHub:
                 """,
                 (limit,),
             ).fetchall()
-        return [
-            OutboxMessage(
-                message_id=r[0],
-                channel=r[1],
-                recipient=r[2],
-                body=r[3],
-                status=r[4],
-                dry_run=bool(r[5]),
-                approved=bool(r[6]),
-                receipt=json.loads(r[7] or "{}"),
-                created_at=float(r[8]),
-            )
-            for r in rows
-        ]
+        return [self._row_to_message(r) for r in rows]
 
 
 __all__ = ["ChannelHub", "OutboxMessage", "SUPPORTED_CHANNELS"]
