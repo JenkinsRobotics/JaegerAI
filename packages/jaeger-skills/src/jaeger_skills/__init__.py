@@ -20,17 +20,24 @@ from .store import (
     rank_skills,
     validate_skill_markdown,
 )
+from .starter_pack import STARTER_SKILLS, ensure_starter_skills
+from .workspace import SkillExistsError, SkillStoreError, WorkspaceSkillStore
 
 __all__ = [
     "LintFinding",
     "MAX_SKILL_BYTES",
     "MergedText",
     "SCANNER_VERSION",
+    "STARTER_SKILLS",
     "ScanResult",
+    "SkillExistsError",
+    "SkillStoreError",
     "SkillSummary",
     "SkillValidationError",
+    "WorkspaceSkillStore",
     "ast_scan_path",
     "clean_skill_name",
+    "ensure_starter_skills",
     "format_ast_report",
     "format_scan_report",
     "lint_skill",

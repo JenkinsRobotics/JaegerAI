@@ -1,5 +1,12 @@
 """jaeger-orchestration: Pregel DAG, durable WorkflowEngine, subagents, mailboxes, auth, scoped vars & cron."""
 
+from .cron_expr import (
+    CronExpressionError,
+    CronSchedule,
+    next_cron_time,
+    parse_cron,
+    validate_cron,
+)
 from .dry_run import DryRunReport, DryRunSimulator, SimulatedStep
 from .governor import HeavyModelLease, PriorityTier, ResourceGovernor
 from .orchestrator import (
@@ -40,7 +47,9 @@ from .workflow import (
 __all__ = [
     "AttemptFencedQueue",
     "Command",
+    "CronExpressionError",
     "CronJob",
+    "CronSchedule",
     "CronScheduler",
     "DurableMailbox",
     "FencedJob",
@@ -63,4 +72,7 @@ __all__ = [
     "current_authorization",
     "interrupt",
     "intersect_sandbox_profiles",
+    "next_cron_time",
+    "parse_cron",
+    "validate_cron",
 ]

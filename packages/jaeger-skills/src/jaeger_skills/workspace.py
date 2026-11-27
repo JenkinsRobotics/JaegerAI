@@ -294,6 +294,56 @@ class WorkspaceSkillStore:
             )
         return rank_skills(query, candidates, limit=cap)
 
+    def update(self, name: str, markdown: str) -> Path:
+        """Validate, lint, scan, then atomically replace an existing SKILL.md.
+
+        Allows Jaeger to evolve a previously learned procedure while keeping
+        ``save()`` strictly non-overwriting and preserving every safety gate
+        (scope, O_NOFOLLOW symlink checks, hard validator, linter, skills-guard).
+        """
+        clean = clean_skill_name(name)
+        text = validate_skill_markdown(clean, markdown)
+        skill_dir = self._skill_dir(clean)
+        skill_file = skill_dir / SKILL_FILE
+        if skill_file.is_symlink() or not skill_file.is_file():
+            raise SkillStoreError(f"skill {clean!r} not found; use save() to create a new skill")
+
+        staging, staged_md = self._stage_snapshot(clean, text)
+        try:
+            self._lint_ok(staged_md)
+            self._scan_safe(staged_md)
+            self._check_skills_root()
+            root_fd = os.open(self.skills_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                try:
+                    dest_fd = os.open(
+                        clean, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd
+                    )
+                except OSError as exc:
+                    if exc.errno == errno.ELOOP:
+                        raise SkillStoreError(f"skill path contains a symlink: {clean!r}") from exc
+                    raise
+                try:
+                    staged_fd = os.open(
+                        staged_md.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                    )
+                    try:
+                        os.replace(
+                            SKILL_FILE,
+                            SKILL_FILE,
+                            src_dir_fd=staged_fd,
+                            dst_dir_fd=dest_fd,
+                        )
+                    finally:
+                        os.close(staged_fd)
+                finally:
+                    os.close(dest_fd)
+            finally:
+                os.close(root_fd)
+            return skill_file
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
     def load(self, name: str) -> str:
         """Return the stored SKILL.md body after rechecking scope, validator, scanner."""
         _, text, _ = self._load_verified(name)
