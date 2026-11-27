@@ -416,7 +416,8 @@ class AgentLoop:
         schemas = json.dumps(llm_tools, ensure_ascii=False, separators=(",", ":"), default=str)
         used = estimate_compactor_tokens([{"content": prompt}, {"content": schemas}],
                                          system_prompt=self._system_prompt)
-        remaining = int(self._window * 0.75) - used
+        min_history_floor = min(int(self._window * 0.20), 2048)
+        remaining = max(int(self._window * 0.75) - used, min_history_floor)
         history = []
         for message in newest_first:
             cost = 4 + estimate_compactor_tokens([message])
