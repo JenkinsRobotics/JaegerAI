@@ -1,0 +1,114 @@
+/* Copied from Aether UI 0.2.0-alpha.296 (Aether-UI commit 8553289, tokens/tokens.css, the default dark :root block),
+   November 24, 2026. Copied, not imported: Jaeger apps match Aether's look with no dependency on @aether/ui. */
+:root {
+  color-scheme: dark;
+  --aether-color-bg-app: #111722;
+  --aether-color-bg-shell: #171f2b;
+  --aether-color-bg-bar: #1b2532;
+  --aether-color-bg-panel: #1b2532;
+  --aether-color-bg-rail: #17202c;
+  --aether-color-bg-inset: #243142;
+  --aether-color-bg-control: #202c3b;
+  --aether-color-bg-control-hover: #34475c;
+  --aether-color-bg-hover: #2a3a4d;
+  --aether-color-bg-row-hover: #29394b;
+  --aether-color-bg-selected: #1d4ed8;
+  --aether-color-text-on-selected: #ffffff;
+  --aether-color-border: #344253;
+  --aether-color-border-control: #46596f;
+  --aether-color-border-control-hover: #63809c;
+  --aether-color-border-focus: #3b82f6;
+  --aether-color-text: #f1f5fa;
+  --aether-color-text-soft: #d3dfeb;
+  --aether-color-text-dim: #a0b1c2;
+  --aether-color-text-faint: #8193a7;
+  --aether-color-accent: #3b82f6;
+  --aether-color-part: #36d6c3;
+  --aether-color-joint: #8b87ff;
+  --aether-color-hardware: #ff8a3d;
+  --aether-color-accent-strong: #1d4ed8;
+  --aether-color-accent-icon: #60a5fa;
+  --aether-color-selection-edge: #60a5fa;
+  /* Focus halo — disabled suite-wide (Jonathan, 2026-09-10): fields glowed,
+     buttons never did. Every application point references this token;
+     `grep aether-focus-halo` lists them. Re-enable per subtree by overriding. */
+  --aether-focus-halo: none;
+  /* Elevation shadows are always shadow-dark; never derive them from bg-app
+     or they invert into light-mode halos over dark surfaces. */
+  --aether-color-shadow: #090f17;
+  --aether-color-ok: #32cf84;
+  --aether-color-warn: #e7a843;
+  --aether-color-error: #ff5a62;
+  --aether-color-scrim: rgba(6, 8, 11, 0.62);
+  --aether-color-border-subtle: #2a3646;
+  /* The viewport look. A viewport theme (core/assets/themes/viewports) overrides
+     only these, so the stage can change without touching the interface. */
+  --aether-viewport-bg-top: #1e232b;
+  --aether-viewport-bg-bottom: #0b0d11;
+  --aether-viewport-grid: rgba(255, 255, 255, 0.04);
+  --aether-viewport-grid-axis: rgba(255, 255, 255, 0.12);
+  --aether-viewport-selection: #60a5fa;
+  --aether-viewport-hover: #93c5fd;
+  --aether-viewport-part: #474e59;
+  --aether-viewport-part-shade: #262b32;
+  --aether-viewport-part-edge: rgba(255, 255, 255, 0.16);
+  --aether-viewport-cavity: #14171c;
+  --aether-viewport-sketch: #4c9dff;
+  --aether-viewport-sketch-constrained: #f1f5fa;
+  --aether-viewport-construction: #e7a843;
+  --aether-color-bg-segment-selected: var(--aether-color-bg-selected);
+  --aether-color-text-segment-selected: var(--aether-color-text);
+
+  --aether-radius-control: 7px;
+  --aether-radius-button: 8px;
+  --aether-radius-field: 6px;
+  --aether-radius-row: 6px;
+  --aether-space-1: 3px;
+  --aether-space-2: 5px;
+  --aether-space-3: 7px;
+  --aether-space-4: 9px;
+  --aether-space-5: 13px;
+  /* Jonathan 2026-09-10: home-style bar is the standard */
+  --aether-size-topbar: 56px;
+  --aether-size-ribbon: 72px;
+  --aether-size-statusbar: 27px;
+  --aether-size-rail: 42px;
+  --aether-size-sidebar: 250px;
+  /* Constant-geometry contract: rows are size-row tall with a fixed
+     size-icon-slot leading column on a size-grid rhythm — sidebars, toolbars,
+     and tables build from these same blocks. */
+  --aether-size-row: 36px;
+  --aether-size-icon-slot: 36px;
+  --aether-size-grid: 4px;
+  --aether-radius-panel: 10px;
+  --aether-radius-pill: 999px;
+  --aether-size-control: 28px;
+  --aether-control-padding-x: 11px;
+  --aether-control-padding-y: 8px;
+  --aether-control-border-width: 1px;
+  --aether-selection-cell-inset: 0px;
+  --aether-selection-cell-gap: 0px;
+  --aether-selection-cell-radius: 0px;
+
+  --aether-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, ui-sans-serif, sans-serif;
+  --aether-font-size-body: 12px;
+  --aether-font-size-label: 10px;
+  --aether-font-size-caption: 9px;
+  --aether-font-size-micro: 8px;
+  --aether-font-weight-strong: 650;
+  --aether-font-letter-caps: 0.09em;
+  --aether-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --aether-shadow-1: 0 1px 2px color-mix(in srgb, var(--aether-color-shadow) 35%, transparent);
+  --aether-shadow-2: 0 8px 22px color-mix(in srgb, var(--aether-color-shadow) 30%, transparent);
+  --aether-shadow-3: 0 24px 70px color-mix(in srgb, var(--aether-color-shadow) 55%, transparent);
+  --aether-material: color-mix(in srgb, var(--aether-color-bg-panel) 75%, transparent);
+  --aether-motion-fast: 120ms;
+  --aether-motion-base: 180ms;
+  --aether-control-shadow: none;
+  --aether-control-hover-shadow: none;
+  --aether-motion-slow: 260ms;
+  --aether-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+  --aether-motion-ease-out: cubic-bezier(0, 0, 0, 1);
+  --aether-motion-ease-spring: cubic-bezier(0.2, 1.25, 0.35, 1);
+}
