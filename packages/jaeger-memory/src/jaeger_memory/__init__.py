@@ -1,6 +1,11 @@
 """jaeger-memory: SQLite WAL checkpoints+writes, history invariants, context guard, compaction, offloading."""
 
-from . import compactor, context_guard, history, history_processors, learning, statusbar
+from . import compactor, context_guard, history, history_processors, learning, markdown_sync, statusbar
+from .markdown_sync import (
+    export_memory_markdown,
+    import_memory_markdown,
+    sync_memory_markdown,
+)
 from .history_processors import (
     CacheControlHistoryProcessor,
     DefaultHistoryProcessor,
@@ -73,9 +78,13 @@ __all__ = [
     "context_guard",
     "deterministic_resource_id",
     "estimate_tokens",
+    "export_memory_markdown",
     "history",
+    "import_memory_markdown",
+    "markdown_sync",
     "oldest_group_size",
     "replayable_span",
     "should_compact",
     "snap",
+    "sync_memory_markdown",
 ]
