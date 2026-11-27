@@ -1,0 +1,160 @@
+/* The shared screen's layout, on Aether's copied tokens (aether-tokens.css). */
+:root { --pane-gap: 10px; --chat-width: 720px; }
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--aether-color-bg-app); color: var(--aether-color-text); font: 14px/1.5 var(--aether-font-family); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.loading { display: grid; place-items: center; height: 100%; color: var(--aether-color-text-dim); }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+.bar { display: flex; align-items: center; gap: 14px; height: 52px; padding: 0 16px; background: var(--aether-color-bg-shell); border-bottom: 1px solid var(--aether-color-border-subtle); }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: var(--aether-font-weight-strong); font-size: 15px; }
+.brand i { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, var(--aether-color-accent), var(--aether-color-part)); }
+.pill { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: var(--aether-radius-pill); background: var(--aether-color-bg-control); color: var(--aether-color-text-soft); font-size: 12px; }
+.dot { display: inline-block; width: 8px; height: 8px; margin: 0 8px 0 10px; border-radius: 50%; background: var(--aether-color-text-faint); }
+.pill .dot { margin: 0; }
+.dot.ok { background: var(--aether-color-ok); }
+.dot.busy { background: var(--aether-color-accent); animation: pulse 1.2s infinite; }
+
+.panes { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--pane-gap); padding: var(--pane-gap); min-height: 0; }
+.panes.with-stage { grid-template-columns: minmax(300px, 1fr) minmax(380px, 1.15fr) 340px; }
+.pane { min-height: 0; overflow: hidden; background: var(--aether-color-bg-panel); border: 1px solid var(--aether-color-border-subtle); border-radius: var(--aether-radius-panel); }
+.stage iframe, .tab-page { display: block; width: 100%; height: 100%; border: 0; background: var(--aether-viewport-bg-bottom); }
+
+/* The chat */
+.chat { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+.chat-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--aether-color-border-subtle); color: var(--aether-color-text-dim); font-size: 12px; }
+.chat-head b { color: var(--aether-color-text); font-size: 15px; }
+.ghost { background: transparent; border: 1px solid var(--aether-color-border-control); border-radius: var(--aether-radius-button); padding: 5px 12px; }
+.ghost:hover { background: var(--aether-color-bg-hover); }
+.messages { overflow-y: auto; padding: 24px 18px 8px; }
+.column { max-width: var(--chat-width); margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+.msg { font-size: 15px; line-height: 1.65; }
+.msg .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; max-width: 82%; }
+.msg.user .text { background: var(--aether-color-bg-inset); padding: 10px 16px; border-radius: 18px; }
+.msg.agent { position: relative; color: var(--aether-color-text); }
+.msg.note { align-self: center; font-size: 12px; color: var(--aether-color-error); }
+.caret { display: inline-block; width: 7px; height: 1.1em; margin-left: 2px; vertical-align: text-bottom; background: var(--aether-color-text-dim); animation: pulse 1s infinite; }
+.copy { opacity: 0; margin-top: 6px; background: transparent; border: 0; padding: 2px 0; color: var(--aether-color-text-faint); font-size: 12px; transition: opacity var(--aether-motion-fast); }
+.msg.agent:hover .copy { opacity: 1; }
+.tools { margin-bottom: 8px; font-size: 12px; color: var(--aether-color-text-dim); }
+.tools summary { cursor: pointer; display: inline-block; padding: 3px 10px; border: 1px solid var(--aether-color-border-subtle); border-radius: var(--aether-radius-pill); list-style: none; }
+.tools summary::-webkit-details-marker { display: none; }
+.tools ul { margin: 8px 0 0; padding: 10px 12px; list-style: none; background: var(--aether-color-bg-rail); border-radius: 8px; display: grid; gap: 4px; }
+.tools code { margin-left: 8px; font: 11px var(--aether-font-mono); color: var(--aether-color-text-faint); }
+.thinking { display: flex; align-items: center; gap: 4px; color: var(--aether-color-text-dim); font-size: 13px; }
+.thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--aether-color-text-dim); animation: pulse 1.2s infinite; }
+.thinking span:nth-child(2) { animation-delay: .2s; } .thinking span:nth-child(3) { animation-delay: .4s; margin-right: 6px; }
+.hello { margin: 12vh auto 0; text-align: center; }
+.hello h2 { margin: 0 0 6px; font-size: 22px; font-weight: 600; }
+.hello p { margin: 0 0 20px; color: var(--aether-color-text-dim); }
+.chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.chips button { background: var(--aether-color-bg-control); border: 1px solid var(--aether-color-border-subtle); border-radius: var(--aether-radius-pill); padding: 7px 14px; }
+.chips button:hover { background: var(--aether-color-bg-hover); }
+.composer-wrap { padding: 8px 18px 18px; }
+.composer { max-width: var(--chat-width); margin: 0 auto; background: var(--aether-color-bg-inset); border: 1px solid var(--aether-color-border-control); border-radius: 20px; padding: 12px 12px 10px 16px; }
+.composer:focus-within { border-color: var(--aether-color-border-control-hover); }
+.composer textarea { width: 100%; resize: none; border: 0; outline: 0; background: transparent; color: inherit; font: 15px/1.5 var(--aether-font-family); }
+.composer-row { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.mic.on { background: var(--aether-color-accent); border-color: var(--aether-color-accent); color: #fff; }
+.send { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--aether-color-accent); color: #fff; font-size: 17px; }
+.send:disabled { background: var(--aether-color-bg-control); color: var(--aether-color-text-faint); cursor: default; }
+.send.stop { font-size: 12px; }
+
+/* The side panel */
+.side { display: grid; grid-template-rows: auto 1fr; }
+.tabs { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--aether-color-border-subtle); }
+.tabs button { flex: 1; background: transparent; border: 0; border-radius: var(--aether-radius-button); padding: 7px; color: var(--aether-color-text-dim); }
+.tabs button.on { background: var(--aether-color-bg-control); color: var(--aether-color-text); }
+.agentic { overflow-y: auto; padding: 14px 16px; }
+.agentic h3 { margin: 6px 0 10px; font-size: var(--aether-font-size-label); letter-spacing: var(--aether-font-letter-caps); text-transform: uppercase; color: var(--aether-color-text-dim); }
+.agentic dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0 0 20px; font-size: 13px; }
+.agentic dt { color: var(--aether-color-text-dim); }
+.agentic dd { margin: 0; overflow-wrap: anywhere; }
+.activity { margin: 0; padding: 0; list-style: none; font-size: 12px; display: grid; gap: 5px; }
+.activity time { color: var(--aether-color-text-faint); margin-right: 8px; font-family: var(--aether-font-mono); }
+.activity b { color: var(--aether-color-accent-icon); font-weight: 600; }
+.dim { color: var(--aether-color-text-faint); }
+
+@keyframes pulse { 50% { opacity: .35; } }
+@media (max-width: 980px) { .panes, .panes.with-stage { grid-template-columns: 1fr; grid-auto-rows: minmax(320px, auto); overflow-y: auto; } }
+.face { position: relative; width: 100%; height: 100%; background: #000; display: grid; place-items: center; }
+.face canvas { display: block; width: 100%; max-height: 100%; aspect-ratio: 1; }   /* square: the face fits any column */
+.face-name { position: absolute; left: 12px; bottom: 10px; font-size: 12px; color: var(--aether-color-text-muted, #8b949e); }
+.tools-row { display: flex; gap: 6px; align-items: center; }
+.composer.drop { border-color: var(--aether-color-accent, #3b82f6); }
+.tray { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.att { position: relative; width: 56px; height: 56px; border-radius: 10px; overflow: hidden; background: var(--aether-color-bg-control); display: grid; place-items: center; }
+.att img { width: 100%; height: 100%; object-fit: cover; }
+.att button { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 0; background: rgba(0,0,0,.65); color: #fff; font-size: 12px; line-height: 18px; }
+.pics { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-bottom: 6px; }
+.pics img { max-width: 180px; max-height: 140px; border-radius: 12px; object-fit: cover; }
+.camera { max-width: var(--chat-width); margin: 0 auto 8px; background: var(--aether-color-bg-inset); border: 1px solid var(--aether-color-border-control); border-radius: 16px; padding: 8px; }
+.camera video { display: block; width: 100%; max-height: 240px; border-radius: 10px; background: #000; object-fit: contain; }
+.camera-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+.face .card { max-width: 80%; max-height: 80%; object-fit: contain; }
+.settings { padding: 14px 16px 24px; overflow-y: auto; height: 100%; font-size: 13px; }
+.settings section { margin-bottom: 18px; }
+.settings h3 { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--aether-color-text-muted); margin: 0 0 8px; }
+.settings label { display: block; margin-bottom: 10px; color: var(--aether-color-text-muted); }
+.settings label.row { display: flex; gap: 8px; align-items: flex-start; color: inherit; }
+.settings select, .settings input:not([type=checkbox]):not([type=radio]), .settings textarea {
+  display: block; width: 100%; margin-top: 4px; padding: 7px 9px; border-radius: 8px; color: inherit; font: inherit;
+  background: var(--aether-color-bg-inset); border: 1px solid var(--aether-color-border-control); }
+.settings label.row input { margin-top: 2px; }
+.settings .save { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; padding: 8px 0; background: var(--aether-color-bg-surface, #0f1520); }
+.settings .primary { background: var(--aether-color-accent, #3b82f6); color: #fff; border: 0; border-radius: 8px; padding: 7px 16px; }
+.settings .list { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 6px; }
+.settings .list li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.settings .list code { font-size: 11px; color: var(--aether-color-text-muted); flex: 1; overflow-wrap: anywhere; }
+.settings .keys input { flex: 1; margin: 0 !important; }
+.settings .keys b { flex: 0 0 170px; font-weight: 500; font-size: 12px; }
+.settings .ok { color: var(--aether-color-success, #34d399); flex: 1; }
+.settings .skills { max-height: 320px; overflow-y: auto; margin-top: 8px; }
+.settings .skills li { display: block; }
+.settings .skills li span { display: block; font-size: 12px; }
+.settings .add { display: grid; grid-template-columns: 1fr 80px; gap: 6px; }
+.settings .add input:nth-of-type(2), .settings .add button { grid-column: span 2; }
+
+/* Jaeger AI's own additions: the Shell tab, the clipboard preview and the Quick Ask pill. */
+.tag { margin-left: 8px; font-size: 11px; font-weight: 400; padding: 1px 8px; border: 1px solid var(--aether-color-border-subtle); border-radius: var(--aether-radius-pill); }
+.reply-row { display: flex; gap: 14px; }
+.clip { max-width: var(--chat-width); margin: 0 auto 8px; background: var(--aether-color-bg-inset); border: 1px solid var(--aether-color-border-control); border-radius: 16px; padding: 10px 12px; }
+.clip-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.clip pre { max-height: 160px; overflow: auto; margin: 8px 0 0; padding: 8px; border-radius: 8px; background: var(--aether-color-bg-rail); font: 12px/1.45 var(--aether-font-mono); white-space: pre-wrap; }
+.shell .lines { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 3px; color: var(--aether-color-text-soft); }
+.acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.acts .ghost, .confirm .ghost { font-size: 12px; }
+.ghost:disabled { opacity: .45; cursor: default; }
+.link { color: inherit; text-decoration: none; font-size: 12px; }
+.confirm { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0 0; }
+.kv dt { color: var(--aether-color-text-dim); } .kv dd { margin: 0; }
+.hint { font-size: 12px; }
+.pill-app { display: grid; grid-template-columns: 40px 1fr; height: 100%; background: var(--aether-color-bg-shell); border: 1px solid var(--aether-color-border-control); border-radius: 16px; overflow: hidden; }
+.pill-orb { display: grid; place-items: start center; padding-top: 22px; }
+.pill-orb .dot { width: 14px; height: 14px; margin: 0; }
+.chat.compact { grid-template-rows: 1fr auto; }
+.chat.compact .messages { padding: 10px 10px 0 0; }
+.chat.compact .composer-wrap { padding: 6px 10px 10px 0; }
+.chat.compact .msg { font-size: 13px; }
+
+/* The page rail, after Jaeger Avatar's #pages (app/web/index.html): a left column of pages, the open one marked
+   with an accent bar. */
+.frame { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 0; }
+#pages { display: flex; flex-direction: column; gap: 2px; margin: var(--pane-gap) 0 var(--pane-gap) var(--pane-gap); padding: 8px 6px; background: var(--aether-color-bg-panel); border: 1px solid var(--aether-color-border-subtle); border-radius: var(--aether-radius-panel); overflow-y: auto; }
+#pages button, #pages a { background: transparent; border: 0; border-left: 3px solid transparent; border-radius: 8px; padding: 9px 11px; color: var(--aether-color-text-dim); font: inherit; text-align: left; text-decoration: none; cursor: pointer; white-space: nowrap; transition: color .15s, background .15s; }
+#pages button:hover, #pages a:hover { color: var(--aether-color-text); background: var(--aether-color-bg-hover); }
+#pages button[aria-selected=true] { color: var(--aether-color-accent-icon); background: var(--aether-color-bg-control); border-left-color: var(--aether-color-accent); font-weight: 600; }
+#pages .site { margin-top: auto; border-top: 1px solid var(--aether-color-border-subtle); border-radius: 0; padding-top: 12px; font-size: 12px; }
+.panes.one { grid-template-columns: minmax(0, 1fr); }
+.pane.page { overflow-y: auto; }
+.pane.page > .settings, .pane.page > .agentic { max-width: 760px; padding: 20px 24px; }
+@media (max-width: 980px) { .frame { grid-template-columns: 1fr; } #pages { flex-direction: row; overflow-x: auto; margin: var(--pane-gap) var(--pane-gap) 0; } #pages .site { margin: 0 0 0 auto; border: 0; padding-top: 9px; } }
+
+/* The avatar beside the chat (Chat page). */
+.panes.avatar-chat { grid-template-columns: minmax(280px, .9fr) minmax(380px, 1.1fr); }
+.stage.avatar { display: grid; grid-template-rows: 1fr auto; background: #000; }
+.voice-line { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 11.5px; color: var(--aether-color-text-dim); background: var(--aether-color-bg-rail); border-top: 1px solid var(--aether-color-border-subtle); }
+.voice-line .dot { margin: 0; }
