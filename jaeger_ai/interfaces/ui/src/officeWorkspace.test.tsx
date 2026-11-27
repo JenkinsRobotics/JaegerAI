@@ -70,6 +70,29 @@ describe("@jaeger/ui-office Virtual Office", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Researcher-1" }));
     expect(screen.getByText("Compare MIT pixel office donors")).toBeTruthy();
+
+    // Opening Minecraft Peek renders the 0-GPU radar & co-op HUD cleanly
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          connected: true,
+          radius: 8,
+          bot: { username: "Jaeger", x: -334, y: 30, z: -2, health: 20, food: 18 },
+          grid: [[["grass", 0]]],
+          entities: [],
+          nearby_players: [{ username: "Matthew", visible: true, distance: 4.2 }],
+          modes: { self_preservation: { enabled: true }, auto_eat: { enabled: true }, self_defense: { enabled: true }, unstuck: { enabled: true } },
+          chat_inbox: [{ id: 1, username: "Matthew", message: "Let's build!", timestamp: 1700000000 }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Minecraft Peek" }));
+    await waitFor(() => {
+      expect(screen.getByText("Live Minecraft World Peek")).toBeTruthy();
+      expect(screen.getByText("Let's build!")).toBeTruthy();
+    });
     fetchSpy.mockRestore();
   });
 });

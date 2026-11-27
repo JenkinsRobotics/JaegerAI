@@ -194,5 +194,54 @@ async def test_gateway_hybrid_routing_onboarding_and_briefing(tmp_path: Path) ->
             assert "role_producer" in agent_ids and "role_engineer" in agent_ids
             assert len(off_data["agents"]) >= 10
             assert "budgets" in off_data and isinstance(off_data["activityFeed"], list)
+
+            # 7. Live Self-Awareness, Global Event Spine, Droid Reflex, Unified Skills & MC Radar
+            aw = await client.get("/v1/cognition/awareness")
+            assert aw.status == 200
+            aw_data = await aw.json()
+            assert aw_data["ok"] is True
+            assert "[Live Self-Awareness Snapshot]" in aw_data["brief"]
+            assert aw_data["droid_reflex"]["auto_park_enabled"] is True
+
+            rx_post = await client.post("/v1/droid/reflex", json={"auto_park_enabled": False, "idle_park_s": 180})
+            assert rx_post.status == 200
+            rx_data = await rx_post.json()
+            assert rx_data["reflex"]["auto_park_enabled"] is False
+            assert rx_data["reflex"]["idle_park_s"] == 180
+
+            ev_resp = await client.get("/v1/events/recent")
+            assert ev_resp.status == 200
+            ev_data = await ev_resp.json()
+            assert ev_data["ok"] is True
+            assert any(e["event"] == "droid.reflex_updated" for e in ev_data["events"])
+
+            # Unified skill search returns both SKILL.md and verified Minecraft skills
+            rt.minecraft_skills.upsert_skill(
+                name="buildOakShelter",
+                description="Gather oak logs and build a cozy survival shelter",
+                code="async function buildOakShelter(bot) {}",
+                tags=["minecraft", "shelter"],
+            )
+            unified = rt._search_unified_skills(query="shelter", limit=10)  # noqa: SLF001
+            assert any(r["name"] == "buildOakShelter" and r["source"] == "minecraft" for r in unified["results"])
+
+            # Minecraft radar endpoint returns clean standby payload when not connected
+            rad = await client.get("/v1/embodiment/minecraft/radar")
+            assert rad.status == 200
+            rad_data = await rad.json()
+            assert rad_data["ok"] is True and "bot" in rad_data and "modes" in rad_data
+
+            # Freeform Minecraft chat bridges cleanly into Jaeger's model & world model
+            class _EchoModel:
+                name = "test-mc-chat"
+
+                def generate(self, messages, tools=()):
+                    return {"content": "I am right behind you, let's gather oak wood!"}
+
+            rt.model = _EchoModel()
+            chat_out = rt._handle_minecraft_chat_message("Matthew", "What should we build first?")  # noqa: SLF001
+            assert chat_out["acted"] is True
+            assert "oak wood" in chat_out["summary"]
+            assert any(p.modality == "minecraft" and p.kind == "chat" for p in rt.world.recent_perceptions(limit=5))
     finally:
         rt.close()

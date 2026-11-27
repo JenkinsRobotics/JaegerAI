@@ -80,6 +80,8 @@ def create_gateway_app(
     avatar_store: Any = None,
     business_store: Any = None,
     office_provider: Callable[[], dict[str, Any]] | None = None,
+    global_bus: Any = None,
+    awareness_provider: Callable[[], dict[str, Any]] | None = None,
     youtube_store: Any = None,
     media_archive: Any = None,
     channel_hub: Any = None,
@@ -882,6 +884,84 @@ def create_gateway_app(
         path, mime = hit
         return web.FileResponse(path, headers={"Content-Type": mime})
 
+    def _emit_global(event: str, payload: Mapping[str, Any] | None = None) -> None:
+        if global_bus is not None:
+            try:
+                global_bus.publish(event, dict(payload or {}))
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def stream_global_events(request: web.Request) -> web.StreamResponse:
+        if global_bus is None:
+            return web.json_response({"ok": False, "error": "global event bus unavailable"}, status=501)
+        raw_after = request.headers.get("Last-Event-ID") or request.query.get("after_seq") or "0"
+        try:
+            after_seq = max(0, int(raw_after))
+        except ValueError:
+            after_seq = 0
+
+        resp = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await resp.prepare(request)
+        queue, _ = global_bus.subscribe()
+        try:
+            if after_seq > 0:
+                for ev in global_bus.recent(after_seq=after_seq, limit=40):
+                    frame = format_sse(event=str(ev["event"]), data=ev["payload"], seq=int(ev["seq"]))
+                    await resp.write(frame.encode("utf-8"))
+            else:
+                hello = format_sse(
+                    event="global.connected",
+                    data={"seq": global_bus.latest_seq(), "timestamp": time.time()},
+                    seq=global_bus.latest_seq(),
+                )
+                await resp.write(hello.encode("utf-8"))
+            while True:
+                try:
+                    ev = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    frame = format_sse(event=str(ev["event"]), data=ev["payload"], seq=int(ev["seq"]))
+                    await resp.write(frame.encode("utf-8"))
+                except asyncio.TimeoutError:
+                    await resp.write(b": keepalive\n\n")
+        except (ConnectionResetError, asyncio.CancelledError, OSError):
+            pass
+        finally:
+            global_bus.unsubscribe(queue)
+        return resp
+
+    async def list_recent_global_events(request: web.Request) -> web.Response:
+        if global_bus is None:
+            return web.json_response({"ok": True, "events": [], "latest_seq": 0})
+        try:
+            after_seq = max(0, int(request.query.get("after_seq") or "0"))
+            limit = max(1, min(int(request.query.get("limit") or "40"), 120))
+        except ValueError:
+            after_seq, limit = 0, 40
+        return web.json_response({
+            "ok": True,
+            "latest_seq": global_bus.latest_seq(),
+            "events": global_bus.recent(after_seq=after_seq, limit=limit),
+        })
+
+    async def get_cognition_awareness(_request: web.Request) -> web.Response:
+        if awareness_provider is not None:
+            return web.json_response({"ok": True, **awareness_provider()})
+        return web.json_response({
+            "ok": True,
+            "brief": "",
+            "recent_reflections": [],
+            "droid_reflex": droid_embodiment.reflex.status() if droid_embodiment is not None and hasattr(droid_embodiment, "reflex") else None,
+            "world_perceptions": [],
+            "global_event_seq": global_bus.latest_seq() if global_bus is not None else 0,
+        })
+
     async def get_office_state(_request: web.Request) -> web.Response:
         if office_provider is not None:
             return web.json_response({"ok": True, **office_provider()})
@@ -1219,9 +1299,42 @@ def create_gateway_app(
                     status=409,
                 )
             res = await asyncio.to_thread(emb.act, action, params)
+            _emit_global("droid.changed", {"action": action, "ok": bool(res.get("ok"))})
         else:
             res = emb.act(action, params)
+            if target == "minecraft":
+                _emit_global("minecraft.changed", {"action": action, "ok": bool(res.get("ok"))})
         return web.json_response(dict(res), status=200 if res.get("ok") else 409)
+
+    async def minecraft_radar(request: web.Request) -> web.Response:
+        if minecraft_embodiment is None:
+            return web.json_response({"ok": False, "error": "minecraft embodiment unavailable"}, status=501)
+        try:
+            radius = max(4, min(int(request.query.get("radius") or "8"), 10))
+        except ValueError:
+            radius = 8
+        data = await asyncio.to_thread(minecraft_embodiment.get_radar, radius=radius)
+        return web.json_response(data)
+
+    async def get_droid_reflex(_request: web.Request) -> web.Response:
+        if droid_embodiment is None or not hasattr(droid_embodiment, "reflex"):
+            return web.json_response({"ok": False, "error": "droid reflex unavailable"}, status=501)
+        return web.json_response({"ok": True, "reflex": droid_embodiment.reflex.status()})
+
+    async def post_droid_reflex(request: web.Request) -> web.Response:
+        if not _is_owner_actor(request):
+            return web.json_response({"ok": False, "error": "Droid reflex settings require owner access."}, status=403)
+        if droid_embodiment is None or not hasattr(droid_embodiment, "reflex"):
+            return web.json_response({"ok": False, "error": "droid reflex unavailable"}, status=501)
+        body = await _optional_json_body(request)
+        if body.get("touch"):
+            droid_embodiment.reflex.touch(str(body.get("reason") or "owner_ping"))
+        updated = droid_embodiment.reflex.update_config(
+            auto_park_enabled=bool(body["auto_park_enabled"]) if "auto_park_enabled" in body else None,
+            idle_park_s=float(body["idle_park_s"]) if "idle_park_s" in body else None,
+        )
+        _emit_global("droid.reflex_updated", updated)
+        return web.json_response({"ok": True, "reflex": updated})
 
     async def get_identity(_request: web.Request) -> web.Response:
         if identity_store is None:
@@ -1299,6 +1412,7 @@ def create_gateway_app(
         body = await _optional_json_body(request)
         reason = str(body.get("reason") or "operator")
         res = await asyncio.to_thread(droid_embodiment.sleep, reason=reason)
+        _emit_global("droid.changed", {"action": "sleep", "awake": False, "reason": reason})
         return web.json_response(dict(res), status=200)
 
     async def droid_wake(request: web.Request) -> web.Response:
@@ -1320,6 +1434,7 @@ def create_gateway_app(
         body = await _optional_json_body(request)
         reason = str(body.get("reason") or "operator")
         res = await asyncio.to_thread(droid_embodiment.wake, reason=reason)
+        _emit_global("droid.changed", {"action": "wake", "awake": bool(res.get("awake"))})
         return web.json_response(dict(res), status=200 if res.get("ok") else 409)
 
     async def droid_devices(request: web.Request) -> web.Response:
@@ -1362,6 +1477,10 @@ def create_gateway_app(
                 intent = detect_voice_intent(str(result.get("transcript") or ""))
                 if intent:
                     result = {**result, "intent": intent}
+            if droid_embodiment is not None and hasattr(droid_embodiment, "reflex"):
+                droid_embodiment.reflex.touch("voice_clip")
+            if isinstance(result, dict) and result.get("transcript"):
+                _emit_global("droid.voice_heard", {"transcript": str(result.get("transcript") or "")[:120]})
             return web.json_response(result)
 
     camera_preview_lock = asyncio.Lock()
@@ -1618,6 +1737,9 @@ def create_gateway_app(
     app.router.add_put("/v1/avatars/{agent_id}", put_avatar)
     app.router.add_put("/v1/avatars/{agent_id}/live", put_avatar_live)
     app.router.add_get("/v1/avatars/{agent_id}/visemes", get_avatar_visemes)
+    app.router.add_get("/v1/events/global", stream_global_events)
+    app.router.add_get("/v1/events/recent", list_recent_global_events)
+    app.router.add_get("/v1/cognition/awareness", get_cognition_awareness)
     app.router.add_get("/v1/office/state", get_office_state)
     app.router.add_get("/v1/business/team", get_business_team)
     app.router.add_post("/v1/business/projects", create_business_project)
@@ -1642,12 +1764,15 @@ def create_gateway_app(
     app.router.add_get("/v1/embodiment/status", embodiment_status)
     app.router.add_post("/v1/embodiment/{body}/act", embodiment_act)
     app.router.add_get("/v1/droid/status", droid_status)
+    app.router.add_get("/v1/droid/reflex", get_droid_reflex)
+    app.router.add_post("/v1/droid/reflex", post_droid_reflex)
     app.router.add_post("/v1/droid/sleep", droid_sleep)
     app.router.add_post("/v1/droid/wake", droid_wake)
     app.router.add_get("/v1/droid/devices", droid_devices)
     app.router.add_post("/v1/droid/capture", droid_capture)
     app.router.add_post("/v1/droid/transcribe", droid_transcribe)
     app.router.add_get("/v1/droid/camera-stream", droid_camera_stream, allow_head=False)
+    app.router.add_get("/v1/embodiment/minecraft/radar", minecraft_radar)
     app.router.add_post("/v1/embodiment/minecraft/checkpoint", minecraft_checkpoint)
     app.router.add_post("/v1/presence/voice/hear", presence_voice_hear)
 
