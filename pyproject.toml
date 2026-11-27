@@ -73,3 +73,8 @@ version = { attr = "jaeger_ai.__version__" }
 include = ["jaeger_ai*"]
 exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__"]
 namespaces = true
+
+[tool.pytest.ini_options]
+# Golden Rule #1: zero in-repo runtime junk — never create .pytest_cache in the repo root
+# (dev/tests/test_ci_hygiene.py forbids it).
+addopts = "-p no:cacheprovider"
