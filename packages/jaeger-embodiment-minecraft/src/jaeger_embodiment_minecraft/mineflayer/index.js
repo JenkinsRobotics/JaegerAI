@@ -14,8 +14,29 @@ const Inventory = require("./lib/observation/inventory");
 const OnSave = require("./lib/observation/onSave");
 const Chests = require("./lib/observation/chests");
 const { plugin: tool } = require("mineflayer-tool");
+const { CoopModeManager } = require("./lib/coopModes");
+const coopActions = require("./lib/coopActions");
 
 let bot = null;
+let modeManager = null;
+let chatInbox = [];
+let chatSeq = 0;
+
+function recordInboundChat(username, message) {
+    if (!bot || username === bot.username) return;
+    const text = String(message || "").trim();
+    if (!text) return;
+    chatSeq += 1;
+    chatInbox.push({
+        id: chatSeq,
+        username: String(username || "player"),
+        message: text,
+        timestamp: Date.now() / 1000,
+    });
+    if (chatInbox.length > 50) {
+        chatInbox.shift();
+    }
+}
 
 const app = express();
 
@@ -23,7 +44,13 @@ app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ limit: "50mb", extended: false }));
 
 app.get("/health", (_req, res) => {
-    res.json({ ok: true, connected: Boolean(bot && bot.entity), username: bot?.username || null });
+    res.json({
+        ok: true,
+        connected: Boolean(bot && bot.entity),
+        username: bot?.username || null,
+        modes: modeManager ? modeManager.getStatus() : null,
+        nearby_players: bot && bot.entity ? coopActions.listNearbyPlayers(bot) : [],
+    });
 });
 
 app.post("/start", (req, res) => {
@@ -134,23 +161,44 @@ app.post("/start", (req, res) => {
         }
 
         await bot.waitForTicks(bot.waitTicks * itemTicks);
+
+        // Start Mindcraft-inspired survival & co-op reflex modes + inbound chat capture
+        if (modeManager) {
+            modeManager.stop();
+        }
+        modeManager = new CoopModeManager(bot);
+        modeManager.start();
+        bot.on("chat", recordInboundChat);
+
         res.json(bot.observe());
 
         initCounter(bot);
-        bot.chat("/gamerule keepInventory true");
-        bot.chat("/gamerule doDaylightCycle false");
+        if (req.body.reset === "hard") {
+            bot.chat("/gamerule keepInventory true");
+            bot.chat("/gamerule doDaylightCycle false");
+        }
     });
 
     function onConnectionFailed(e) {
         console.log(e);
+        if (modeManager) {
+            modeManager.stop();
+            modeManager = null;
+        }
         bot = null;
         res.status(400).json({ error: e });
     }
     function onDisconnect(message) {
-        if (bot.viewer) {
+        if (modeManager) {
+            modeManager.stop();
+            modeManager = null;
+        }
+        if (bot && bot.viewer) {
             bot.viewer.close();
         }
-        bot.end();
+        if (bot) {
+            bot.end();
+        }
         console.log(message);
         bot = null;
     }
@@ -405,7 +453,88 @@ app.post("/step", async (req, res) => {
     }
 });
 
+app.get("/modes", (_req, res) => {
+    if (!bot || !bot.entity || !modeManager) {
+        res.status(400).json({ ok: false, error: "Bot not spawned" });
+        return;
+    }
+    res.json({ ok: true, ...modeManager.getStatus() });
+});
+
+app.post("/modes", (req, res) => {
+    if (!bot || !bot.entity || !modeManager) {
+        res.status(400).json({ ok: false, error: "Bot not spawned" });
+        return;
+    }
+    try {
+        const { mode, enabled, target, distance } = req.body || {};
+        const status = modeManager.setMode(mode, enabled, { target, distance });
+        res.json({ ok: true, ...status });
+    } catch (err) {
+        res.status(400).json({ ok: false, error: err.message || String(err) });
+    }
+});
+
+app.get("/chat-inbox", (req, res) => {
+    const sinceId = Number(req.query.since_id || 0);
+    const messages = chatInbox.filter((m) => m.id > sinceId);
+    res.json({
+        ok: true,
+        last_id: chatSeq,
+        messages,
+        nearby_players: bot && bot.entity ? coopActions.listNearbyPlayers(bot) : [],
+    });
+});
+
+app.post("/coop", async (req, res) => {
+    if (!bot || !bot.entity) {
+        res.status(400).json({ ok: false, error: "Bot not spawned" });
+        return;
+    }
+    const body = req.body || {};
+    const action = String(body.action || "").trim();
+    if (modeManager) modeManager.setExternalBusy(true);
+    try {
+        let result;
+        if (action === "nearby_players") {
+            const players = coopActions.listNearbyPlayers(bot, Number(body.max_distance || 64));
+            result = { ok: true, nearby_players: players, summary: `Found ${players.length} player(s).` };
+        } else if (action === "go_to_player") {
+            result = await coopActions.goToPlayer(bot, body.player || body.username || "", body.distance || 3);
+        } else if (action === "follow_player") {
+            result = await coopActions.followPlayer(bot, body.player || body.username || "", body.distance || 3, modeManager);
+        } else if (action === "give_to_player") {
+            result = await coopActions.giveToPlayer(bot, body.player || body.username || "", body.item || "", body.count || 1);
+        } else if (action === "eat") {
+            result = await coopActions.eatFood(bot, body.item || "");
+        } else if (action === "go_to_bed") {
+            result = await coopActions.goToBed(bot);
+        } else if (action === "collect_blocks") {
+            result = await coopActions.collectBlocks(bot, body.item || body.block || "", body.count || 4);
+        } else if (action === "stop_actions") {
+            result = coopActions.stopActions(bot, modeManager);
+        } else {
+            res.status(400).json({ ok: false, error: `Unsupported co-op action: ${action}` });
+            return;
+        }
+        res.json({
+            ...result,
+            modes: modeManager ? modeManager.getStatus() : null,
+            nearby_players: coopActions.listNearbyPlayers(bot),
+            observation: bot.observe(),
+        });
+    } catch (err) {
+        res.status(500).json({ ok: false, error: err.message || String(err) });
+    } finally {
+        if (modeManager) modeManager.setExternalBusy(false);
+    }
+});
+
 app.post("/stop", (req, res) => {
+    if (modeManager) {
+        modeManager.stop();
+        modeManager = null;
+    }
     if (bot) {
         try { bot.end(); } catch {}
         bot = null;

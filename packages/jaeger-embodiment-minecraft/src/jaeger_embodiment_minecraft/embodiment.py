@@ -79,7 +79,17 @@ class MinecraftEmbodiment:
             "last_action": "idle",
             "last_error": "",
             "ticks": 0,
+            "modes": {
+                "self_preservation": {"enabled": True},
+                "auto_eat": {"enabled": True},
+                "self_defense": {"enabled": True},
+                "unstuck": {"enabled": True},
+                "follow_player": {"enabled": False, "target": None, "distance": 3},
+            },
+            "nearby_players": [],
+            "chat_inbox": [],
         }
+        self._last_chat_id = 0
         self._init_db()
         self._restore_latest_checkpoint()
         # Never claim connected across a process restart until re-verified.
@@ -142,6 +152,17 @@ class MinecraftEmbodiment:
             "estimated_ram_mb": 150,
             "gpu_mb": 0,
         }
+
+    def _bridge_get(self, path: str, *, timeout: float = 10.0) -> Any:
+        url = f"http://{self._bridge_host}:{self._bridge_port}{path}"
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw.strip() else {}
 
     def _bridge_post(self, path: str, payload: Mapping[str, Any], *, timeout: float = 30.0) -> Any:
         url = f"http://{self._bridge_host}:{self._bridge_port}{path}"
@@ -322,6 +343,65 @@ class MinecraftEmbodiment:
                 "bridge": self.bridge_info(),
             }
 
+    def poll_chat_inbox(self, *, since_id: int | None = None) -> dict[str, Any]:
+        """Poll inbound player chat messages & nearby players from the live Mineflayer bridge."""
+        with self._lock:
+            live = bool(self._state.get("connected"))
+            cursor = self._last_chat_id if since_id is None else int(since_id)
+        if not live:
+            with self._lock:
+                return {
+                    "ok": True,
+                    "live": False,
+                    "last_id": self._last_chat_id,
+                    "messages": list(self._state.get("chat_inbox") or []),
+                    "nearby_players": list(self._state.get("nearby_players") or []),
+                }
+        try:
+            data = self._bridge_get(f"/chat-inbox?since_id={cursor}", timeout=8.0)
+            msgs = list(data.get("messages") or [])
+            players = list(data.get("nearby_players") or [])
+            last_id = int(data.get("last_id") or cursor)
+            with self._lock:
+                self._last_chat_id = max(self._last_chat_id, last_id)
+                self._state["nearby_players"] = players
+                if msgs:
+                    inbox = list(self._state.get("chat_inbox") or []) + msgs
+                    self._state["chat_inbox"] = inbox[-30:]
+            return {
+                "ok": True,
+                "live": True,
+                "last_id": last_id,
+                "messages": msgs,
+                "nearby_players": players,
+            }
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            return {"ok": False, "live": True, "error": str(exc)[:240], "messages": [], "nearby_players": []}
+
+    def _run_coop_bridge(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            res = self._bridge_post("/coop", payload, timeout=45.0)
+            with self._lock:
+                if res.get("observation") is not None:
+                    self._ingest_observation(res["observation"])
+                if isinstance(res.get("modes"), dict) and isinstance(res["modes"].get("modes"), dict):
+                    self._state["modes"] = res["modes"]["modes"]
+                if isinstance(res.get("nearby_players"), list):
+                    self._state["nearby_players"] = res["nearby_players"]
+                self._state["last_error"] = "" if res.get("ok") else str(res.get("summary") or res.get("error") or "")
+            return {
+                "ok": bool(res.get("ok")),
+                "live": True,
+                "summary": str(res.get("summary") or ""),
+                "nearby_players": res.get("nearby_players") or [],
+                "modes": self._state.get("modes") or {},
+                "state": dict(self._state),
+            }
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            with self._lock:
+                self._state["last_error"] = str(exc)[:240]
+            return {"ok": False, "live": True, "error": str(exc)[:240]}
+
     def act(self, action: str, params: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
         p = dict(params or {})
         if action == "connect":
@@ -334,6 +414,9 @@ class MinecraftEmbodiment:
             return self.disconnect()
         if action == "step":
             return self.run_step(str(p.get("code") or ""), programs=str(p.get("programs") or ""))
+        if action == "read_chat":
+            since = int(p["since_id"]) if p.get("since_id") is not None else None
+            return self.poll_chat_inbox(since_id=since)
 
         with self._lock:
             if self._estop_latched:
@@ -345,6 +428,24 @@ class MinecraftEmbodiment:
             self._state["last_action"] = action
 
         if live:
+            if action == "set_mode":
+                mode_name = str(p.get("mode") or "").strip()
+                enabled = bool(p.get("enabled", True))
+                body: dict[str, Any] = {"mode": mode_name, "enabled": enabled}
+                if p.get("player") or p.get("target"):
+                    body["target"] = str(p.get("player") or p.get("target"))
+                if p.get("distance") is not None:
+                    body["distance"] = int(p["distance"])
+                try:
+                    res = self._bridge_post("/modes", body, timeout=10.0)
+                    with self._lock:
+                        if isinstance(res.get("modes"), dict):
+                            self._state["modes"] = res["modes"]
+                    return {"ok": bool(res.get("ok")), "live": True, "modes": self._state.get("modes"), "state": dict(self._state)}
+                except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+                    return {"ok": False, "live": True, "error": str(exc)[:240]}
+            if action in ("follow_player", "go_to_player", "give_to_player", "eat", "go_to_bed", "nearby_players", "stop_actions"):
+                return self._run_coop_bridge({**p, "action": action})
             if action == "move_to":
                 pos = dict(self._state.get("position") or {"x": 0, "y": 64, "z": 0})
                 x = int(p.get("x", pos["x"]))
@@ -356,13 +457,11 @@ class MinecraftEmbodiment:
                 msg = json.dumps(str(p["message"])[:200])
                 return self.run_step(f"bot.chat({msg});")
             if action == "gather" and p.get("item"):
-                item = json.dumps(str(p["item"]))
-                cnt = max(1, min(int(p.get("count", 1)), 16))
-                js = (
-                    f"const blk = bot.findBlock({{matching: b => b && b.name && b.name.includes({item}), maxDistance: 32}});"
-                    f"if (blk) {{ await bot.collectBlock.collect(blk, {{count: {cnt}}}); }}"
-                )
-                return self.run_step(js)
+                return self._run_coop_bridge({
+                    "action": "collect_blocks",
+                    "item": str(p["item"]),
+                    "count": max(1, min(int(p.get("count", 1)), 16)),
+                })
             if action == "idle_tick":
                 # Gentle autonomous exploration step around current coordinates
                 pos = self._state.get("position") or {"x": 0, "y": 64, "z": 0}
@@ -376,6 +475,28 @@ class MinecraftEmbodiment:
         with self._lock:
             if action == "set_goal" and p.get("goal"):
                 self._state["active_goal"] = str(p["goal"])
+            elif action == "set_mode" and p.get("mode"):
+                modes = dict(self._state.get("modes") or {})
+                mname = str(p["mode"]).strip()
+                entry = dict(modes.get(mname) or {})
+                entry["enabled"] = bool(p.get("enabled", True))
+                if p.get("player") or p.get("target"):
+                    entry["target"] = str(p.get("player") or p.get("target"))
+                if p.get("distance") is not None:
+                    entry["distance"] = int(p["distance"])
+                modes[mname] = entry
+                self._state["modes"] = modes
+            elif action == "follow_player":
+                target = str(p.get("player") or p.get("username") or "").strip()
+                modes = dict(self._state.get("modes") or {})
+                modes["follow_player"] = {"enabled": True, "target": target or None, "distance": int(p.get("distance") or 3)}
+                self._state["modes"] = modes
+            elif action == "stop_actions":
+                modes = dict(self._state.get("modes") or {})
+                modes["follow_player"] = {"enabled": False, "target": None, "distance": 3}
+                self._state["modes"] = modes
+            elif action == "eat":
+                self._state["food"] = 20.0
             elif action == "move_to":
                 pos = dict(self._state.get("position") or {"x": 0, "y": 64, "z": 0})
                 for axis in ("x", "y", "z"):
