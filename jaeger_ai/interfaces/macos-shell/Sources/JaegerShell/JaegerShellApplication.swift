@@ -1,0 +1,735 @@
+// Derived from AetherStudio @ ece0209 — Aether CAD/Launcher/AetherCADApplication.swift
+// Copyright (c) Jonathan Jenkins and Jenkins Robotics (AetherStudio). Licensed under the Apache License 2.0
+// (see LICENSES/AetherStudio-Apache-2.0.txt). Modified for Jaeger by Jenkins Robotics on 2026-10-17:
+// renamed; engine spawn (python animacore.httpbridge, .venv, Resources/Web) removed; loads the
+// loopback Jaeger WebUI (http://127.0.0.1:8790/?host=macos or the dev override); loopback-only
+// navigation + WKContentRuleList; inline "not running" page instead of alert+quit; minimal main
+// menu (Quit, Edit, Reload); developer extras only in DEBUG; menu-bar (accessory) app with a
+// status item, window hides on close; --verify-launch self-check; global hotkey (JaegerHotkey);
+// `jaeger` JS⇄native bridge (NativeBridge) + headless --verify-bridge; gated visible --visible-check;
+// solid 1040×760 window with the WKWebView as content (NativeChrome); headless --snapshot <dir>.
+
+import AppKit
+import JaegerShellCore
+import ServiceManagement
+import WebKit
+import UserNotifications
+import os
+
+private let shellLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.jenkinsrobotics.JaegerAI", category: "shell")
+
+/// Public unified-log line (NSLog arguments are redacted) + stderr.
+func shellLog(_ message: String) {
+    shellLogger.notice("\(message, privacy: .public)")
+    FileHandle.standardError.write(Data((message + "\n").utf8))
+}
+
+final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate,
+    WKUIDelegate, WKDownloadDelegate, UNUserNotificationCenterDelegate
+{
+    let notificationNavigation = NotificationNavigationMailbox()
+    private var window: NSWindow?
+    private var webView: WKWebView?
+    private var loadAttempts = 0
+    private var showingErrorPage = false
+    private var rulesInstalled = false
+    private(set) var statusController: StatusItemController?
+    let start: StartURL.Resolution = ShellEnvironment.webUI()
+    let verifyMode = CommandLine.arguments.contains("--verify-launch")
+    let verifyBridgeMode = CommandLine.arguments.contains("--verify-bridge")
+    let verifyLeaseMode = CommandLine.arguments.contains("--verify-lease")
+    let verifyLeasePolicyMode = CommandLine.arguments.contains("--verify-lease-policy")
+    private var leaseVerifier: LeaseVerifier?
+    /// `--snapshot <dir>`: headless light/dark PNGs of the main window (Snapshot.swift).
+    let snapshotDir: String? = {
+        let a = CommandLine.arguments
+        guard let i = a.firstIndex(of: "--snapshot"), i + 1 < a.count else { return nil }
+        return a[i + 1]
+    }()
+    var snapshotMode: Bool { snapshotDir != nil }
+    private var snapshotter: Snapshotter?
+    private(set) var bridge: NativeBridge?
+    private var bridgeVerifier: BridgeVerifier?
+    private var visibleChecker: VisibleChecker?
+    var hotkeyLabel: String { hotkeyChoice.spec.label }
+    private(set) var voiceController: VoiceController?
+    private(set) var pauseState = ShellPauseState()
+    private var appearanceObservation: NSKeyValueObservation?
+    private(set) lazy var stack = StackController(app: self)
+
+    /// Created on first voice use (never in --verify-launch / --verify-bridge).
+    func voice() -> VoiceController {
+        if let voiceController { return voiceController }
+        let created = VoiceController(emit: { [weak self] detail in self?.bridge?.send(detail) })
+        voiceController = created
+        return created
+    }
+    var mainWindow: NSWindow? { window }
+    /// One files.pick panel at a time.
+    var filePanelOpen = false
+    var mainWebView: WKWebView? { webView }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if let rejected = start.rejected { shellLog("[shell][override] rejected \(rejected)") }
+        if let override = start.override { shellLog("[shell][override] accepted \(override)") }
+        shellLog("[shell] start_url=\(start.url.absoluteString)")
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                if let self, let window = self.window, let webView = self.webView {
+                    NativeChrome.applyAppearance(window, webView: webView)
+                }
+                self?.sendAppearanceChanged()
+            }
+        }
+        let gw = ShellEnvironment.gateway()
+        if let rejected = gw.rejected { shellLog("[shell][override] gateway rejected \(rejected)") }
+        shellLog("[shell] gateway=\(gw.origin.string)")
+        if case .failure(let error) = ShellEnvironment.devStack, StackMode.resolve(
+            env: ProcessInfo.processInfo.environment, isDevBuild: ShellEnvironment.isDevBuild) == .dev {
+            shellLog("[shell][stack] dev mode unavailable: \(error.message)")
+        }
+        shellLog("[shell][stack] \(stack.summary)")
+        if verifyLeasePolicyMode { LeasePolicyCheck.run(app: self); return }  // headless, no window
+        if verifyLeaseMode {
+            // Headless: no menu, status item, hotkey or window; dev stack only.
+            let verifier = LeaseVerifier(app: self)
+            leaseVerifier = verifier
+            verifier.run()
+            return
+        }
+        if let snapshotDir {
+            // Headless: no menu, status item, hotkey or activation; the window sits off every display.
+            let snapshotter = Snapshotter(app: self, dir: snapshotDir)
+            self.snapshotter = snapshotter
+            _ = makeWindow()
+            snapshotter.start()
+            installRulesThenLoad()
+            return
+        }
+        if verifyBridgeMode {
+            // Headless: no menu, status item, hotkey or visible window.
+            let verifier = BridgeVerifier(app: self)
+            bridgeVerifier = verifier
+            _ = makeWindow()
+            if CommandLine.arguments.contains("--with-dev-stack") {
+                verifier.startTimeout(seconds: 120)
+                verifier.startDevStackThenLoad { [weak self] in self?.installRulesThenLoad() }
+            } else {
+                installRulesThenLoad()
+                verifier.startTimeout(seconds: 30)
+            }
+            return
+        }
+        statusController = StatusItemController(app: self)
+        installMainMenu()
+        registerHotkey()
+        if verifyMode {
+            _ = makeWindow()  // created, never shown, nothing loaded
+            emitVerifyReport()
+            NSApp.terminate(nil)
+            return
+        }
+        UNUserNotificationCenter.current().delegate = self
+        statusController?.startLiveTasks()
+        if VisibleChecker.enabled {
+            shellLog("[shell][visible-check] enabled")
+            let checker = VisibleChecker(app: self)
+            visibleChecker = checker
+            checker.startTimeout()
+        }
+        showWindow()
+        installRulesThenLoad()
+        statusController?.refreshIcon()
+        if CommandLine.arguments.contains(ForegroundLease.argument) {
+            if let error = stack.acquireForegroundOwnership() {
+                shellLog("[shell][lease] foreground startup refused: \(error)")
+                let alert = NSAlert()
+                alert.messageText = "Lifecycle ownership was not acquired"
+                alert.informativeText = error + "\nNo services were started."
+                alert.runModal()
+            }
+        } else {
+            stack.acquireLeaseIfStackRunning()
+        }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        // Latest explicit navigation wins. Invalid URLs never reach a web load,
+        // service command, permission broker or model turn; do not log raw URLs.
+        for url in urls {
+            guard let destination = JaegerDeepLink.destination(url) else {
+                shellLog("[shell][navigation] unsupported deep link refused")
+                continue
+            }
+            notificationNavigation.receive(destination)
+            if window != nil {
+                showWindow()
+                bridge?.send(["type": "notification.open"])
+            }
+        }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+              let destination = NotificationDestination.parse(response.notification.request.content.userInfo) else {
+            completionHandler(); return
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { completionHandler(); return }
+            // One pending UI destination, consumed by the trusted renderer after
+            // mount. Showing the existing window never reloads or starts services.
+            self.notificationNavigation.receive(destination)
+            self.showWindow()
+            self.bridge?.send(["type": "notification.open"])
+            completionHandler()
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false  // closing the window hides it while keeping the Dock + menu-bar app running
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWindow()
+        return true
+    }
+
+    private lazy var hotkeyChoice = HotkeyConfig.resolve(
+        Bundle.main.object(forInfoDictionaryKey: HotkeyConfig.infoPlistKey) as? String)
+
+    private func registerHotkey() {
+        if let note = hotkeyChoice.note { shellLog("[shell][hotkey] \(note)") }
+        Hotkey.shared.register(hotkeyChoice.spec) { [weak self] in
+            shellLog("[shell][hotkey] pressed")
+            self?.toggleWindow()
+            self?.bridge?.send(["type": "hotkey"])
+        }
+    }
+
+    /// Shell-level pause (reuses Hotkey.register/unregister and VoiceController.shutdown). Never touches
+    /// the gateway, the WebUI or launchd.
+    func setPaused(_ value: Bool) {
+        guard pauseState.set(value) else { return }
+        if value {
+            Hotkey.shared.unregister()
+            voiceController?.shutdown()
+        } else {
+            registerHotkey()
+        }
+        shellLog("[shell][pause] \(value ? "paused (hotkey unregistered, voice stopped)" : "resumed (hotkey registered)")")
+        statusController?.renderPauseState()
+        bridge?.send(["type": "shell.paused", "paused": value])
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Hotkey.shared.unregister()
+        voiceController?.shutdown()
+        stack.retireLease("app quit")  // removes the lease: the stack outlives the window
+        stack.shutdown()
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        hideWindow()
+        return false
+    }
+
+    // AppKit re-lays out the standard buttons on these; put them back at the contract inset.
+    func windowDidResize(_ notification: Notification) { relayoutChrome() }
+    func windowDidBecomeKey(_ notification: Notification) {
+        relayoutChrome()
+        if let window, let webView, window.firstResponder === window { window.makeFirstResponder(webView) }
+    }
+
+    /// Activation (Dock-less app brought forward by a hotkey, the status item or another app) must leave the
+    /// main window key with the web view as first responder, or plain keys and left clicks never reach the page.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard !(verifyBridgeMode || snapshotMode), let window, window.isVisible else { return }
+        if window.isKeyWindow && window.firstResponder === webView { KeyFocus.log(window, "app activated"); return }
+        KeyFocus.focus(window, webView: webView, activate: false, reason: "app activated")
+    }
+    func windowDidResignKey(_ notification: Notification) { relayoutChrome() }
+    func windowDidEnterFullScreen(_ notification: Notification) { relayoutChrome(push: true) }
+    func windowDidExitFullScreen(_ notification: Notification) { relayoutChrome(push: true) }
+
+    private func relayoutChrome(push: Bool = false) {
+        guard let window else { return }
+        NativeChrome.layoutTrafficLights(window)
+        if push, let webView { NativeChrome.push(window, to: webView) }
+    }
+
+    var appearanceName: String {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "dark" : "light"
+    }
+
+    /// `appearance.changed` for the new UI's NativeHost.onThemeChanged.
+    func sendAppearanceChanged(_ name: String? = nil) {
+        bridge?.send(["type": "appearance.changed", "appearance": name ?? appearanceName])
+    }
+
+    func hideWindow() {
+        window?.orderOut(nil)
+        shellLog("[shell] window hidden")
+        bridge?.send(["type": "window.visibility", "visible": false])
+    }
+
+    private func emitVerifyReport() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let lsui = (info["LSUIElement"] as? Bool) == true
+        let policy = NSApp.activationPolicy()
+        let policyOK = lsui ? policy == .accessory : policy == .regular
+        let chrome = window.map { NativeChrome.report($0, webView: webView) } ?? [:]
+        let chromeOK = (chrome["ok"] as? Bool) == true
+        let report: [String: Any] = [
+            "ok": policyOK && (statusController?.isPresent ?? false)
+                && window != nil && start.origin.host == "127.0.0.1" && chromeOK,
+            "chrome": chrome,
+            "bundle_id": Bundle.main.bundleIdentifier ?? NSNull(),
+            "bundle_version": info["CFBundleVersion"] ?? NSNull(),
+            "dev_build": ShellEnvironment.isDevBuild,
+            "menu_bar_only": lsui && policy == .accessory,
+            "dock_and_menubar": !lsui && policy == .regular && (statusController?.isPresent ?? false),
+            "status_item_present": statusController?.isPresent ?? false,
+            "window_created": window != nil,
+            "window_visible": window?.isVisible ?? false,
+            "start_url": start.url.absoluteString,
+            "start_url_loopback": start.origin.host == "127.0.0.1",
+            "webui_url_override": start.override ?? NSNull(),
+            "webui_url_override_rejected": start.rejected ?? NSNull(),
+            "gateway_url": ShellEnvironment.gateway().origin.string,
+            "login_item_status": ShellEnvironment.loginItemStatus(),
+            "launcher": ShellEnvironment.launcherPath() ?? NSNull(),
+            "network_requested": false,
+            "hotkey": [
+                "configured": hotkeyChoice.spec.name,
+                "label": hotkeyChoice.spec.label,
+                "registered": Hotkey.shared.registered != nil,
+                "status": Int(Hotkey.shared.lastStatus),
+                "note": hotkeyChoice.note ?? NSNull(),
+            ] as [String: Any],
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+            FileHandle.standardOutput.write(data + Data("\n".utf8))
+        }
+    }
+
+    private let windowChrome = StudioWindowChrome()
+    var chrome: StudioWindowChrome { windowChrome }
+
+    func makeWindow() -> NSWindow {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        #if DEBUG
+        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        #endif
+        windowChrome.allowedOrigin = start.origin
+        windowChrome.install(in: configuration)
+        let host: BridgeHost = bridgeVerifier ?? snapshotter ?? self
+        let bridge = NativeBridge(allowed: start.origin, host: host, label: "main")
+        bridge.install(in: configuration)
+        self.bridge = bridge
+
+        let webView = ShellWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        webView.allowsMagnification = false
+        self.webView = webView
+        bridge.webView = webView
+
+        let windowClass: NSWindow.Type = snapshotMode ? OffscreenSnapshotWindow.self : NSWindow.self
+        let window = windowClass.init(
+            contentRect: NSRect(x: 0, y: 0, width: NativeChromeContract.defaultWidth,
+                                height: NativeChromeContract.defaultHeight),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "JaegerAI"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        windowChrome.attach(to: window)
+        NativeChrome.apply(to: window, webView: webView)
+        NativeChrome.installUserScript(NativeChrome.metrics(window), in: webView)
+        window.center()
+        // Dev builds only: JAEGER_SHELL_DEV_WINDOW_FRAME="x,y,w,h" (screen points, top-left origin, like
+        // CGWindow bounds) places the window for side-by-side checks and never writes the saved frame.
+        let devFrame = ShellEnvironment.devWindowFrame()
+        if let devFrame { window.setFrame(devFrame, display: false) }
+        // Headless checks keep the default size and never write the user's saved frame.
+        if !(snapshotMode || verifyMode || verifyBridgeMode || devFrame != nil) { window.setFrameAutosaveName("JaegerShellMainWindow") }
+        self.window = window
+        return window
+    }
+
+    func showWindow() {
+        if verifyBridgeMode || snapshotMode { return }  // never show a window in the headless checks
+        let window = self.window ?? makeWindow()
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        KeyFocus.focus(window, webView: webView, activate: true, reason: "window shown")
+        bridge?.send(["type": "window.visibility", "visible": true])
+        if !rulesInstalled && !verifyMode && webView?.url == nil { installRulesThenLoad() }
+    }
+
+    func toggleWindow() {
+        // Visibility only: an LSUIElement status-item click never makes the app active, so the old
+        // isActive/isKeyWindow condition made the second click re-show instead of hide.
+        if WindowToggle.action(windowVisible: window?.isVisible ?? false) == .hide {
+            hideWindow()
+        } else {
+            showWindow()
+            shellLog("[shell] window shown")
+        }
+    }
+
+    /// Bring Jaeger's own window forward and route it directly to `/droid` (falling back to browser if needed).
+    func openDroidView() {
+        let base = start.origin.string
+        guard let inAppURL = URL(string: base + "/droid?host=macos") else { return }
+        if verifyBridgeMode || snapshotMode {
+            if let fallback = URL(string: base + "/droid") { NSWorkspace.shared.open(fallback) }
+            return
+        }
+        showWindow()
+        if let webView, rulesInstalled, !showingErrorPage {
+            if webView.url?.host == start.origin.host && webView.url?.port == start.origin.port {
+                webView.evaluateJavaScript(
+                    "window.history.pushState(null, '', '/droid'); window.dispatchEvent(new PopStateEvent('popstate'));"
+                ) { _, error in
+                    if error != nil {
+                        DispatchQueue.main.async {
+                            webView.load(URLRequest(url: inAppURL))
+                        }
+                    }
+                }
+            } else {
+                webView.load(URLRequest(url: inAppURL))
+            }
+        } else if let fallback = URL(string: base + "/droid") {
+            NSWorkspace.shared.open(fallback)
+        }
+    }
+
+    private var compiling = false
+    private func installRulesThenLoad() {
+        guard !compiling, !rulesInstalled else { return }
+        compiling = true
+        let json = NavigationPolicy.contentRuleListJSON(allowed: start.origin)
+        WKContentRuleListStore.default().compileContentRuleList(
+            forIdentifier: "jaeger-shell-loopback-\(start.origin.port)", encodedContentRuleList: json
+        ) { [weak self] list, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.compiling = false
+                guard let list else {
+                    shellLog("[shell] content rule list failed: \(String(describing: error))")
+                    self.showErrorPage("The loopback network guard could not be installed.")
+                    return
+                }
+                self.rulesInstalled = true
+                self.webView?.configuration.userContentController.add(list)
+                shellLog("[shell] loopback rule list installed for \(self.start.origin.string)")
+                self.scheduleLoad(after: 0.35)
+            }
+        }
+    }
+
+    private func scheduleLoad(after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.rulesInstalled else { return }
+            self.loadAttempts += 1
+            self.showingErrorPage = false
+            self.webView?.load(URLRequest(url: self.start.url))
+        }
+    }
+
+    @objc func reloadShell(_ sender: Any?) {
+        loadAttempts = 0
+        if rulesInstalled { scheduleLoad(after: 0) } else { installRulesThenLoad() }
+    }
+
+    private func showErrorPage(_ detail: String) {
+        showingErrorPage = true
+        let address = start.origin.string
+        webView?.loadHTMLString("""
+            <body style="font-family:-apple-system,sans-serif;background:#f4f4f5;color:#222;
+                         display:grid;place-items:center;height:100vh;margin:0">
+            <div style="max-width:440px;text-align:center">
+            <h3>Jaeger main screen is not available</h3>
+            <p>\(detail)</p><p>Expected it at <code>\(address)</code>.
+            Start it, then choose <b>View › Reload</b> (⌘R).</p></div></body>
+            """, baseURL: nil)
+    }
+
+    private func retryOrPresent(_ error: Error) {
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return }
+        if ns.domain == "WebKitErrorDomain" && ns.code == 102 { return }  // interrupted by policy (download/external)
+        if showingErrorPage { return }
+        if loadAttempts < 12 {
+            scheduleLoad(after: 0.45)
+        } else {
+            shellLog("[shell] load failed after \(loadAttempts) attempts: \(ns.localizedDescription)")
+            showErrorPage(ns.localizedDescription)
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if !showingErrorPage {
+            shellLog("[shell] loaded \(webView.url?.absoluteString ?? "nil")")
+            bridgeVerifier?.pageLoaded(webView)
+            visibleChecker?.pageLoaded(webView)
+            snapshotter?.pageLoaded(webView)
+        }
+    }
+
+    /// A main-frame HTTP error (e.g. 404 while the gateway does not serve the UI yet) shows the inline page.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if navigationResponse.isForMainFrame, let http = navigationResponse.response as? HTTPURLResponse,
+           http.statusCode >= 400 {
+            shellLog("[shell] main screen HTTP \(http.statusCode) at \(http.url?.absoluteString ?? "?")")
+            decisionHandler(.cancel)
+            showErrorPage("The main screen answered HTTP \(http.statusCode) — it is not served at this address yet.")
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        retryOrPresent(error)
+    }
+
+    func webView(
+        _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error
+    ) {
+        retryOrPresent(error)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runOpenPanelWith parameters: WKOpenPanelParameters,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        guard let window else {
+            completionHandler(nil)
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.canChooseFiles = true
+        panel.beginSheetModal(for: window) { response in
+            completionHandler(response == .OK ? panel.urls : nil)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        preferences: WKWebpagePreferences,
+        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+    ) {
+        let url = navigationAction.request.url
+        let text = url?.absoluteString ?? "nil"
+        switch NavigationPolicy.decide(url, allowed: start.origin) {
+        case .allow:
+            shellLog("[shell][nav] allow \(text)")
+            decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow, preferences)
+        case .openExternally:
+            shellLog("[shell][nav] external \(text)")
+            if let url, navigationAction.navigationType == .linkActivated { NSWorkspace.shared.open(url) }
+            decisionHandler(.cancel, preferences)
+        case .block:
+            shellLog("[shell][nav] blocked \(text)")
+            decisionHandler(.cancel, preferences)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        let url = navigationAction.request.url
+        switch NavigationPolicy.decide(url, allowed: start.origin) {
+        case .allow: if let url { webView.load(URLRequest(url: url)) }
+        case .openExternally: if let url { shellLog("[shell][nav] external \(url.absoluteString)"); NSWorkspace.shared.open(url) }
+        case .block: shellLog("[shell][nav] blocked popup \(url?.absoluteString ?? "nil")")
+        }
+        return nil
+    }
+
+    /// Voice mode (and, later, camera) asks for capture from Jaeger's own page only.
+    /// macOS still shows its one-time privacy prompt using the Info.plist strings.
+    func webView(
+        _ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        let request = BridgeFrame(isMainFrame: frame.isMainFrame, scheme: origin.protocol, host: origin.host, port: origin.port)
+        let ok = BridgeOriginPolicy.accepts(request, allowed: start.origin)
+        shellLog("[shell][media] \(ok ? "grant" : "deny") \(type.rawValue) for \(request.description)")
+        decisionHandler(ok ? .grant : .deny)
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping (URL?) -> Void
+    ) {
+        guard let window else {
+            completionHandler(nil)
+            return
+        }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedFilename
+        panel.beginSheetModal(for: window) { result in
+            completionHandler(result == .OK ? panel.url : nil)
+        }
+    }
+
+    private func installMainMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem(); main.addItem(appItem)
+        let appMenu = NSMenu()
+        let startItem = appMenu.addItem(withTitle: "Start Jaeger…", action: #selector(StatusItemController.startStack(_:)), keyEquivalent: "")
+        startItem.target = statusController
+        let restartItem = appMenu.addItem(withTitle: "Restart Jaeger…", action: #selector(StatusItemController.restartStack(_:)), keyEquivalent: "")
+        restartItem.target = statusController
+        let stopItem = appMenu.addItem(withTitle: "Stop Jaeger…", action: #selector(StatusItemController.stopStack(_:)), keyEquivalent: "")
+        stopItem.target = statusController
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit JaegerAI", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        let editItem = NSMenuItem(); main.addItem(editItem)
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = edit
+        let viewItem = NSMenuItem(); main.addItem(viewItem)
+        let view = NSMenu(title: "View")
+        let reload = view.addItem(withTitle: "Reload", action: #selector(reloadShell(_:)), keyEquivalent: "r")
+        reload.target = self
+        viewItem.submenu = view
+        NSApp.mainMenu = main
+    }
+}
+
+/// Reads the dev-build flag and the overrides (env first, then the
+/// uirebuild defaults domain). Production builds ignore overrides.
+enum ShellEnvironment {
+    static var isDevBuild: Bool { Bundle.main.object(forInfoDictionaryKey: "JaegerDevBuild") as? Bool == true }
+
+    /// Main screen: the new UI, served by the Jaeger WebUI (`/?host=macos`) unless overridden
+    /// (JAEGER_SHELL_UI_URL, legacy JAEGER_SHELL_WEBUI_URL, or the uirebuild defaults domain).
+    static func webUI() -> StartURL.Resolution {
+        if case .success(let dev) = devStack {
+            return StartURL.Resolution(origin: dev.uiOrigin, override: dev.uiOrigin.string + "/ (dev stack)", rejected: nil)
+        }
+        return StartURL.resolve(
+            fallback: StartURL.defaultMainScreen,
+            envValue: StartURL.mainScreenEnvValue(ProcessInfo.processInfo.environment),
+            defaultsValue: UserDefaults.standard.string(forKey: StartURL.webUIDefaultsKey),
+            isDevBuild: isDevBuild)
+    }
+
+    /// JAEGER_SHELL_DEV_WINDOW_FRAME="x,y,w,h" in top-left screen points → an AppKit frame (dev builds only).
+    static func devWindowFrame() -> NSRect? {
+        guard isDevBuild, let raw = ProcessInfo.processInfo.environment["JAEGER_SHELL_DEV_WINDOW_FRAME"] else { return nil }
+        let v = raw.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard v.count == 4, v[2] > 0, v[3] > 0, let screen = NSScreen.screens.first else { return nil }
+        return NSRect(x: v[0], y: screen.frame.height - v[1] - v[3], width: v[2], height: v[3])
+    }
+
+    /// Dev/test stack (dev build + JAEGER_SHELL_STACK_MODE=dev + JAEGER_SHELL_DEV_ROOT); resolved once.
+    static let devStack: Result<DevStackConfig, DevStackError> = DevStackConfig.resolve(
+        env: ProcessInfo.processInfo.environment, home: NSHomeDirectory(), isDevBuild: isDevBuild,
+        fileExists: { FileManager.default.fileExists(atPath: $0) },
+        isExecutable: { FileManager.default.isExecutableFile(atPath: $0) })
+
+    static func gateway() -> StartURL.Resolution {
+        if case .success(let dev) = devStack {
+            return StartURL.Resolution(origin: dev.gatewayOrigin, override: dev.gatewayOrigin.string + "/ (dev stack)", rejected: nil)
+        }
+        return StartURL.resolve(
+            fallback: StartURL.defaultGateway,
+            envValue: StartURL.gatewayEnvValue(ProcessInfo.processInfo.environment),
+            defaultsValue: UserDefaults.standard.string(forKey: StartURL.gatewayDefaultsKey),
+            isDevBuild: isDevBuild)
+    }
+
+    static func loginItemStatus() -> String {
+        switch SMAppService.mainApp.status {
+        case .notRegistered: return "not_registered"
+        case .enabled: return "enabled"
+        case .requiresApproval: return "requires_approval"
+        case .notFound: return "not_found"
+        @unknown default: return "unknown"
+        }
+    }
+
+    /// Launcher for `jaeger stack up` (LauncherResolver, ported from the old BridgeProcess.jaegerPath()).
+    static func launcherPath() -> String? {
+        LauncherResolver.resolve(
+            env: ProcessInfo.processInfo.environment,
+            plistLauncher: Bundle.main.object(forInfoDictionaryKey: "JaegerLauncher") as? String,
+            bundlePath: Bundle.main.bundlePath, home: NSHomeDirectory(),
+            isExecutable: { FileManager.default.isExecutableFile(atPath: $0) })
+    }
+
+    /// Opt-in only. Ported (adapted) from jaeger_ai/interfaces/swift/Sources/JaegerAI/MenuCard/LaunchAtLogin.swift:45-62
+    /// (guarded register/unregister + refresh). The old init's default registration (lines 24-35, which turned
+    /// Launch at Login on for every fresh install) is deliberately NOT ported. Called only from a user action.
+    @discardableResult
+    static func setLoginItem(_ enabled: Bool) throws -> String {
+        let service = SMAppService.mainApp
+        if enabled {
+            if service.status != .enabled { try service.register() }
+        } else {
+            if service.status == .enabled { try service.unregister() }
+        }
+        return loginItemStatus()
+    }
+}
+
+@main
+enum JaegerShellMain {
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = JaegerShellApplication()
+        application.delegate = delegate
+        let headlessFlags: Set<String> = ["--verify-bridge", "--verify-lease", "--verify-lease-policy", "--snapshot"]
+        let isHeadless = CommandLine.arguments.contains { headlessFlags.contains($0) }
+        let lsui = (Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool) == true
+        application.setActivationPolicy((isHeadless || lsui) ? .accessory : .regular)
+        application.run()
+    }
+}
+
+
+/// The main web view acts on the first click into an inactive Jaeger window, like Grok Bot (Electron) does.
+/// Stock WKWebView declines first mouse, so that click only activated the window: Send, menus and outside-click
+/// dismissal never saw it (proved headlessly with --snapshot nsclick: real NSEvents, no DOM events until this).
+final class ShellWebView: WKWebView {
+    private var loggedFirstMouse = false
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// A non-opaque view reports true by default, so with isMovableByWindowBackground AppKit could treat a left
+    /// press on the page as a window drag. Window dragging is explicit (data-aether-window-drag-region →
+    /// performDrag in StudioWindowChrome), so presses on web content always go to the page.
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func mouseDown(with event: NSEvent) {
+        if !loggedFirstMouse { loggedFirstMouse = true; KeyFocus.log(window, "first left mouseDown") }
+        super.mouseDown(with: event)
+    }
+}
