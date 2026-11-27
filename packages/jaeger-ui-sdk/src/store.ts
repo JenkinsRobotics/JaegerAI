@@ -20,6 +20,7 @@ export class SessionStore {
   private state: SessionStreamState;
   private readonly cursor: SeqCursor;
   private readonly transport: GatewayTransport;
+  private readonly settledHistory = new Set<string>();
   private readonly listeners = new Set<SessionListener>();
   private readonly batcher: StreamingDeltaBatcher<GatewayEventEnvelope>;
 
@@ -32,7 +33,7 @@ export class SessionStore {
       for (const frame of frames) {
         const res = this.cursor.advance(frame.seq);
         if (frame.seq === 0 || res.accepted) {
-          next = reduceSessionEvent(next, frame);
+          next = this.reduce(next, frame);
         }
       }
       if (next !== this.state) {
@@ -40,6 +41,60 @@ export class SessionStore {
         this.emit();
       }
     });
+  }
+
+  private reduce(state: SessionStreamState, event: GatewayEventEnvelope): SessionStreamState {
+    const request = event.payload.request_id;
+    if (typeof request === "string" && this.settledHistory.has(request)) {
+      return { ...state, lastSeq: Math.max(state.lastSeq, event.seq) };
+    }
+    return reduceSessionEvent(state, event);
+  }
+
+  reconcileHistory(messages: ChatMessage[], afterSeq: number): void {
+    this.flush();
+    const existing = new Map(this.state.messages.map((message) => [message.id, message]));
+    for (const message of messages) {
+      if (message.role === "assistant" && message.request_id) this.settledHistory.add(message.request_id);
+      const previous = existing.get(message.id);
+      if (previous?.role === "assistant" && previous.content.trimEnd().endsWith(message.content.trimEnd())) {
+        existing.set(message.id, { ...previous, created_at: message.created_at });
+      } else {
+        existing.set(message.id, message);
+      }
+    }
+    const persistedIds = new Set(messages.map((message) => message.id));
+    const firstDate = messages[0]?.created_at;
+    const reconciled = [...existing.values()].filter((message) =>
+      persistedIds.has(message.id) ||
+      (firstDate !== undefined && message.created_at < firstDate) ||
+      (message.request_id !== undefined && this.settledHistory.has(message.request_id)),
+    );
+    this.cursor.reset(afterSeq);
+    this.state = {
+      ...this.state, lastSeq: afterSeq, status: "idle",
+      messages: reconciled.sort((a, b) => a.created_at - b.created_at),
+    };
+    this.emit();
+  }
+
+  prependHistory(messages: ChatMessage[]): void {
+    const existing = new Set(this.state.messages.map((message) => message.id));
+    for (const message of messages) {
+      if (message.role === "assistant" && message.request_id) this.settledHistory.add(message.request_id);
+    }
+    this.state = { ...this.state, messages: [...messages.filter((message) => !existing.has(message.id)), ...this.state.messages] };
+    this.emit();
+  }
+
+  mergeExternalHistory(messages: ChatMessage[]): void {
+    const known = new Set(this.state.messages.map((message) => message.id));
+    const added = messages.filter((message) => !known.has(message.id));
+    if (!added.length) return;
+    this.state = {
+      ...this.state, messages: [...this.state.messages, ...added].sort((a, b) => a.created_at - b.created_at),
+    };
+    this.emit();
   }
 
   getSnapshot(): SessionStreamState {
@@ -61,7 +116,7 @@ export class SessionStore {
     if (immediate) {
       const res = this.cursor.advance(envelope.seq);
       if (envelope.seq === 0 || res.accepted) {
-        this.state = reduceSessionEvent(this.state, envelope);
+        this.state = this.reduce(this.state, envelope);
         this.emit();
       }
       return;
@@ -89,7 +144,7 @@ export class SessionStore {
       role: "user",
       content: prompt,
       parts: [{ type: "text", text: prompt }],
-      created_at: Date.now(),
+      created_at: Date.now() / 1000,
       request_id: rid,
       optimistic: true,
     };

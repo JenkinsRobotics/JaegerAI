@@ -4,10 +4,12 @@ import type { ThinkingPart } from "@jaeger/ui-protocol";
 export interface ThinkingDisclosureProps {
   part: ThinkingPart;
   defaultOpen?: boolean;
+  autoOpen?: boolean;
 }
 
-export function ThinkingDisclosure({ part, defaultOpen = false }: ThinkingDisclosureProps) {
-  const [open, setOpen] = useState(defaultOpen);
+export function ThinkingDisclosure({ part, defaultOpen = false, autoOpen = false }: ThinkingDisclosureProps) {
+  const [manualOpen, setManualOpen] = useState<boolean>();
+  const open = manualOpen ?? (defaultOpen || autoOpen);
   const label = part.streaming
     ? "Thinking…"
     : typeof part.durationMs === "number"
@@ -28,7 +30,7 @@ export function ThinkingDisclosure({ part, defaultOpen = false }: ThinkingDisclo
     >
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setManualOpen(!open)}
         aria-expanded={open}
         style={{
           display: "inline-flex",
@@ -54,7 +56,15 @@ export function ThinkingDisclosure({ part, defaultOpen = false }: ThinkingDisclo
         <span>{label}</span>
       </button>
       {open && (
-        <div style={{ marginTop: "4px", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
+        <div
+          style={{
+            marginTop: "4px",
+            whiteSpace: "pre-wrap",
+            lineHeight: 1.45,
+            maxHeight: "320px",
+            overflowY: "auto",
+          }}
+        >
           {part.text}
         </div>
       )}

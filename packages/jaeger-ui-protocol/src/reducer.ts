@@ -24,27 +24,35 @@ export function createInitialSessionState(sessionId: string): SessionStreamState
   };
 }
 
+function finishStreamingThinking(parts: MessagePart[]): MessagePart[] {
+  let changed = false;
+  const next = parts.map((part) => {
+    if (part.type === "thinking" && part.streaming) {
+      changed = true;
+      return { ...part, streaming: false };
+    }
+    return part;
+  });
+  return changed ? next : parts;
+}
+
 function ensureStreamingAssistant(
   messages: ChatMessage[],
   sessionId: string,
   requestId?: string,
 ): { messages: ChatMessage[]; index: number } {
   const copy = [...messages];
-  const lastIdx = copy.length - 1;
-  if (
-    lastIdx >= 0 &&
-    copy[lastIdx].role === "assistant" &&
-    (!requestId || !copy[lastIdx].request_id || copy[lastIdx].request_id === requestId)
-  ) {
-    return { messages: copy, index: lastIdx };
-  }
+  const index = requestId
+    ? copy.findIndex((message) => message.role === "assistant" && message.request_id === requestId)
+    : copy.length - 1;
+  if (index >= 0 && copy[index].role === "assistant") return { messages: copy, index };
   const created: ChatMessage = {
     id: requestId ? `asst_${requestId}` : `asst_${Date.now()}_${copy.length}`,
     session_id: sessionId,
     role: "assistant",
     content: "",
     parts: [],
-    created_at: Date.now(),
+    created_at: Date.now() / 1000,
     request_id: requestId,
   };
   copy.push(created);
@@ -63,13 +71,25 @@ export function reduceSessionEvent(
   const requestId = typeof p.request_id === "string" ? p.request_id : undefined;
 
   switch (envelope.event) {
-    case "run.started":
-      return {
-        ...state,
-        status: "running",
-        lastSeq: nextSeq,
-        lastError: null,
-      };
+    case "run.started": {
+      const existing = requestId && state.messages.find((message) => message.role === "user" && message.request_id === requestId);
+      const recordId = typeof p.message_id === "number" ? p.message_id : undefined;
+      const prompt = typeof p.prompt === "string" ? p.prompt : "";
+      let messages = state.messages;
+      if (existing && recordId !== undefined && existing.record_id === undefined) {
+        messages = messages.map((message) => message === existing ? { ...message, record_id: recordId } : message);
+      } else if (requestId && prompt && !existing) messages = [...messages, {
+        id: `opt_${requestId}`,
+        session_id: state.sessionId,
+        role: "user",
+        content: prompt,
+        parts: [{ type: "text", text: prompt }],
+        created_at: typeof p.created_at === "number" ? p.created_at : Date.now() / 1000,
+        request_id: requestId,
+        record_id: recordId,
+      }];
+      return { ...state, status: "running", lastSeq: nextSeq, lastError: null, messages };
+    }
 
     case "text.delta": {
       const delta = String(p.delta ?? p.text ?? "");
@@ -77,7 +97,7 @@ export function reduceSessionEvent(
       const { messages, index } = ensureStreamingAssistant(state.messages, state.sessionId, requestId);
       const target = { ...messages[index] };
       target.content = target.content + delta;
-      const parts: MessagePart[] = [...target.parts];
+      const parts: MessagePart[] = [...finishStreamingThinking(target.parts)];
       const lastPart = parts[parts.length - 1];
       if (lastPart && lastPart.type === "text") {
         parts[parts.length - 1] = { type: "text", text: lastPart.text + delta };
@@ -119,7 +139,7 @@ export function reduceSessionEvent(
             : "failed";
       const { messages, index } = ensureStreamingAssistant(state.messages, state.sessionId, requestId);
       const target = { ...messages[index] };
-      const parts: MessagePart[] = [...target.parts];
+      const parts: MessagePart[] = [...finishStreamingThinking(target.parts)];
       const existingIdx = parts.findIndex((part) => part.type === "tool" && part.callId === callId);
       const nextTool: ToolCallPart = {
         type: "tool",
@@ -169,20 +189,54 @@ export function reduceSessionEvent(
       };
     }
 
-    case "run.completed":
-      return {
-        ...state,
-        status: "completed",
-        lastSeq: nextSeq,
-      };
+    case "run.completed": {
+      const content = typeof p.content === "string" ? p.content : "";
+      let messages = state.messages;
+      const existingIdx = requestId
+        ? messages.findIndex((message) => message.role === "assistant" && message.request_id === requestId)
+        : messages.length - 1;
+      if (content || (existingIdx >= 0 && messages[existingIdx].role === "assistant")) {
+        const assistant = ensureStreamingAssistant(messages, state.sessionId, requestId);
+        messages = assistant.messages;
+        const target = messages[assistant.index];
+        let parts = finishStreamingThinking(target.parts).map((part) =>
+          part.type === "tool" && part.status === "running"
+            ? { ...part, status: "completed" as const }
+            : part,
+        );
+        let nextContent = target.content;
+        if (content && !target.content.trimEnd().endsWith(content.trimEnd())) {
+          nextContent = target.content ? `${target.content}\n\n${content}` : content;
+          parts = [...parts, { type: "text", text: content }];
+        }
+        messages[assistant.index] = { ...target, content: nextContent, parts };
+      }
+      return { ...state, status: "completed", lastSeq: nextSeq, messages };
+    }
 
-    case "run.failed":
+    case "run.failed": {
+      const error = String(p.error ?? "Run failed");
+      const content = String(p.content ?? error);
+      const { messages, index } = ensureStreamingAssistant(state.messages, state.sessionId, requestId);
+      const target = messages[index];
+      const parts: MessagePart[] = finishStreamingThinking(target.parts).map((part) =>
+        part.type === "tool" && part.status === "running"
+          ? { ...part, status: "failed", error: "Interrupted before a result was confirmed." }
+          : part,
+      );
+      messages[index] = {
+        ...target,
+        content: target.content ? `${target.content}\n\n${content}` : content,
+        parts: [...parts, { type: "text", text: content }],
+      };
       return {
         ...state,
         status: "failed",
         lastSeq: nextSeq,
-        lastError: String(p.error ?? "Run failed"),
+        lastError: error,
+        messages,
       };
+    }
 
     default:
       return { ...state, lastSeq: nextSeq };

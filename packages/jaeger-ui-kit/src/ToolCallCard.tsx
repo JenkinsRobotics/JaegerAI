@@ -4,10 +4,12 @@ import type { ToolCallPart } from "@jaeger/ui-protocol";
 export interface ToolCallCardProps {
   part: ToolCallPart;
   defaultOpen?: boolean;
+  autoOpen?: boolean;
 }
 
-export function ToolCallCard({ part, defaultOpen = false }: ToolCallCardProps) {
-  const [open, setOpen] = useState(defaultOpen);
+export function ToolCallCard({ part, defaultOpen = false, autoOpen = false }: ToolCallCardProps) {
+  const [manualOpen, setManualOpen] = useState<boolean>();
+  const open = manualOpen ?? (defaultOpen || autoOpen);
 
   return (
     <div
@@ -24,7 +26,7 @@ export function ToolCallCard({ part, defaultOpen = false }: ToolCallCardProps) {
     >
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setManualOpen(!open)}
         aria-expanded={open}
         style={{
           width: "100%",

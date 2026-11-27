@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Character2DStage } from "./Character2DStage";
+import { LiveAvatarApp, useAvatarApp } from "./LiveAvatarApp";
 import type { AvatarStageHandle, VisemeFrame } from "./vrmEngine";
 
 export interface AvatarStageProps {
@@ -14,6 +15,7 @@ export interface AvatarStageProps {
   mode?: "3d_vrm" | "2d_character" | "rive";
   modelUrl?: string | null;
   imageUrl?: string | null;
+  videoUrl?: string | null;
   emotion?: string;
   cognitiveMode?: string;
   focusText?: string;
@@ -28,6 +30,7 @@ export function AvatarStage({
   mode = "2d_character",
   modelUrl = null,
   imageUrl = null,
+  videoUrl = null,
   emotion = "warm",
   cognitiveMode = "observing",
   focusText = "Aware & standing by",
@@ -51,6 +54,7 @@ export function AvatarStage({
   });
 
   const use3D = mode === "3d_vrm" && Boolean(modelUrl);
+  const liveAvatarUp = useAvatarApp();
 
   useEffect(() => {
     if (!use3D || !modelUrl || !canvasRef.current) return;
@@ -159,7 +163,9 @@ export function AvatarStage({
           handleRef.current?.setOrbit(dragRef.current.yaw, dragRef.current.pitch, dragRef.current.zoom);
         }}
       >
-        {use3D ? (
+        {liveAvatarUp && !paused ? (
+          <LiveAvatarApp compact={compact} />
+        ) : use3D ? (
           <>
             <canvas ref={canvasRef} className="jg-avatar-canvas" />
             {vrmError && <div className="jg-avatar-error">{vrmError}</div>}
@@ -172,6 +178,7 @@ export function AvatarStage({
             amplitude={amplitude}
             visemes={visemes}
             imageUrl={imageUrl}
+            videoUrl={videoUrl}
             paused={paused}
             compact={compact}
           />

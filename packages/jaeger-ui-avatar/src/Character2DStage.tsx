@@ -17,6 +17,7 @@ export interface Character2DStageProps {
   amplitude?: number;
   visemes?: VisemeFrame[];
   imageUrl?: string | null;
+  videoUrl?: string | null;
   paused?: boolean;
   compact?: boolean;
 }
@@ -28,9 +29,21 @@ export function Character2DStage({
   amplitude = 0,
   visemes = [],
   imageUrl = null,
+  videoUrl = null,
   paused = false,
   compact = false,
 }: Character2DStageProps) {
+  const [failedVideo, setFailedVideo] = useState<string>();
+  const [reduceMotion, setReduceMotion] = useState(
+    () => typeof window !== "undefined" && (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false),
+  );
+  useEffect(() => {
+    const preference = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const onChange = (event: MediaQueryListEvent) => setReduceMotion(event.matches);
+    preference?.addEventListener("change", onChange);
+    return () => preference?.removeEventListener("change", onChange);
+  }, []);
+
   const [blink, setBlink] = useState(false);
   const [gaze, setGaze] = useState({ x: 0, y: 0 });
   const [activeViseme, setActiveViseme] = useState<string>("closed");
@@ -114,7 +127,21 @@ export function Character2DStage({
         className="jg-avatar-halo"
         style={{ transform: `scale(${(1 + Math.max(amplitude, mouthOpen / 24) * 0.14).toFixed(3)})` }}
       />
-      {imageUrl ? (
+      {videoUrl && videoUrl !== failedVideo && !paused && !reduceMotion ? (
+        <video
+          key={videoUrl}
+          src={videoUrl}
+          poster={imageUrl ?? undefined}
+          className="jg-avatar-portrait"
+          role="img"
+          aria-label={name}
+          autoPlay
+          muted
+          loop
+          playsInline
+          onError={() => setFailedVideo(videoUrl)}
+        />
+      ) : imageUrl ? (
         <img
           src={imageUrl}
           alt={name}
