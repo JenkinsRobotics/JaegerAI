@@ -216,10 +216,27 @@ def _progress_digest(old_groups: list[list[dict[str, Any]]], ledger_text: str) -
     )
     if errors:
         para1 += f" {errors} of those calls returned an error."
-    para2 = (ledger_text or "").strip() or (
-        "No work ledger was present at compaction time; continue from "
-        "the last two verbatim turns and do not re-do finished work."
-    )
+    para2 = (ledger_text or "").strip()
+    if not para2:
+        excerpts: list[str] = []
+        for group in old_groups[-6:]:
+            for message in group:
+                if str(message.get("role") or "") == "user":
+                    snippet = " ".join(str(message.get("content") or "").split())[:120]
+                    if snippet:
+                        excerpts.append(f"- {snippet}")
+                    break
+        if excerpts:
+            para2 = (
+                "Earlier user turns summarized:\n"
+                + "\n".join(excerpts)
+                + "\nContinue from the last two verbatim turns and do not re-do finished work."
+            )
+        else:
+            para2 = (
+                "No work ledger was present at compaction time; continue from "
+                "the last two verbatim turns and do not re-do finished work."
+            )
     if para2.startswith(_ledger_tag) or para2.upper().startswith("[WORK LEDGER"):
         para2 = "Current work ledger:\n" + para2
     return f"{DIGEST_TAG}\n{para1}\n\n{para2}"

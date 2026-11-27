@@ -1,6 +1,7 @@
 """jaeger-loop: standalone middleware-composable AgentLoop, state machine, mailbox, backstop & cancellation."""
 
-from . import backstop, budget, interrupt, primitives, safety
+from . import backstop, budget, interrupt, nudge, primitives, safety
+from .nudge import LearningNudgeTracker
 from .backstop import (
     MAIL_TOOLS,
     MAX_IDENTICAL_CALLS,
@@ -61,6 +62,7 @@ __all__ = [
     "CallProgress",
     "CancelScope",
     "CapabilityOrdering",
+    "LearningNudgeTracker",
     "LoopEffect",
     "LoopMiddleware",
     "LoopOperation",

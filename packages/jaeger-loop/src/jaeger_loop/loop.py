@@ -12,12 +12,14 @@ combining the strongest donor patterns:
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
 from jaeger_contracts import (
     EventBusPort,
@@ -26,6 +28,11 @@ from jaeger_contracts import (
     StateMemoryPort,
     ToolPort,
     ToolResult,
+)
+from jaeger_memory.compactor import (
+    compact_messages,
+    estimate_compactor_tokens,
+    should_compact,
 )
 
 
@@ -158,7 +165,7 @@ class PostEditVerificationGuard:
 
 _READ_TOOLS = frozenset({
     "read_file", "read_many_files", "search_files", "list_skill_dir", "glob", "repo_map",
-    "search_offloaded_output", "list_tools", "describe_tool", "tool_search",
+    "search_offloaded_output", "list_tools", "describe_tool", "tool_search", "web_fetch",
 })
 _ARTIFACT_RE = re.compile(
     r"(?:write|create|save|output|produce|generate|implement|update|into|as|to)\s+"
@@ -280,16 +287,20 @@ class TaskConvergenceController:
         if name in _READ_TOOLS:
             self.read_calls_since_edit += 1
             if (
-                has_edit_tool
-                and not self._read_alarm_fired
+                not self._read_alarm_fired
                 and not self.mutated_files
                 and self.read_calls_since_edit >= self._max_read_stall
             ):
                 self._read_alarm_fired = True
+                if has_edit_tool:
+                    return (
+                        f"STRATEGY SHIFT: You have made {self.read_calls_since_edit} read/search/fetch calls "
+                        "without acting or answering. Either apply your targeted edit now or synthesize "
+                        "what you already verified and answer the user directly."
+                    )
                 return (
-                    f"STRATEGY SHIFT (localize -> edit): You spent {self.read_calls_since_edit} "
-                    "read/search calls with zero workspace edits. State your concrete hypothesis, "
-                    "use `repo_map` if needed, and write your targeted reproduction test or patch now."
+                    f"STRATEGY SHIFT: You have made {self.read_calls_since_edit} read/search/fetch calls "
+                    "in this turn. Stop exploring and synthesize a direct answer from the evidence already gathered."
                 )
         return None
 
@@ -349,7 +360,8 @@ class AgentLoop:
         events: EventBusPort | None = None,
         middlewares: Sequence[LoopMiddleware] = (),
         system_prompt: str = "You are Jaeger, an autonomous engineering agent.",
-        max_context_tokens: int = 24_000,
+        max_context_tokens: int | None = None,
+        compact_threshold: float | None = None,
         session_id: str = "default",
         name: str = "jaeger_loop",
         verify_after_edit: bool = False,
@@ -363,6 +375,8 @@ class AgentLoop:
         self._middlewares = list(middlewares)
         self._system_prompt = system_prompt
         self._max_context_tokens = max_context_tokens
+        self._compact_threshold = compact_threshold
+        self._window = self._resolve_window()
         self._session_id = session_id
         self._verify_after_edit = bool(verify_after_edit)
 
@@ -370,13 +384,86 @@ class AgentLoop:
     def name(self) -> str:
         return self._name
 
+    def _resolve_window(self) -> int:
+        """Real model context window: ModelPort.profile -> JAEGER_CTX_WINDOW -> 24k fallback."""
+        try:
+            profile = self._model.profile(getattr(self._model, "model_id", self._model.name))
+            window = int(getattr(profile, "context_window", 0) or 0)
+            if window > 0:
+                return window
+        except Exception:  # noqa: BLE001 - profile lookup must never break the loop
+            pass
+        env_window = os.environ.get("JAEGER_CTX_WINDOW", "").strip()
+        if env_window:
+            try:
+                window = int(env_window)
+                if window > 0:
+                    return window
+            except ValueError:
+                pass
+        return 24_000
+
+    def select_history(self, prompt: str, newest_first: Iterable[dict[str, str]]) -> list[dict[str, str]]:
+        """Keep the newest complete session messages that fit before the current turn."""
+        llm_tools = [
+            {
+                "name": t.get("name", ""),
+                "description": t.get("description", ""),
+                "schema": t.get("schema", {}),
+            }
+            for t in self._tools.list_tools()
+        ]
+        schemas = json.dumps(llm_tools, ensure_ascii=False, separators=(",", ":"), default=str)
+        used = estimate_compactor_tokens([{"content": prompt}, {"content": schemas}],
+                                         system_prompt=self._system_prompt)
+        remaining = int(self._window * 0.75) - used
+        history = []
+        for message in newest_first:
+            cost = 4 + estimate_compactor_tokens([message])
+            if cost > remaining:
+                break
+            history.append(message)
+            remaining -= cost
+        return history[::-1]
+
+    def _compact(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Percentage-of-window compaction (default 80%, JAEGER_COMPACT_AT) with a
+        fixed-token fallback when no window is known. Emits context.compacted events."""
+        window = self._window
+        used = estimate_compactor_tokens(messages)
+        if should_compact(
+            messages,
+            ctx_window=window,
+            used_tokens=used,
+            threshold=self._compact_threshold,
+            system_prompt=self._system_prompt,
+        ):
+            before = len(messages)
+            messages = compact_messages(
+                messages,
+                ctx_window=window,
+                used_tokens=used,
+                threshold=self._compact_threshold,
+                system_prompt=self._system_prompt,
+            )
+            self._emit("context.compacted", {
+                "used_tokens": used,
+                "ctx_window": window,
+                "messages_before": before,
+                "messages_after": len(messages),
+            })
+            return messages
+        if self._max_context_tokens is not None:
+            return self._memory.compact(messages, max_tokens=self._max_context_tokens) if self._memory is not None else messages
+        return messages
+
     def _emit(self, event_type: str, payload: Mapping[str, Any]) -> None:
         if self._events is not None:
             self._events.publish(event_type, payload, session_id=self._session_id)
 
-    def _invoke_model(self, ctx: TurnContext) -> Mapping[str, Any]:
+    def _invoke_model(self, ctx: TurnContext, *, allow_tools: bool = True) -> Mapping[str, Any]:
         def base(c: TurnContext) -> Mapping[str, Any]:
-            tool_schemas = list(self._tools.list_tools())
+            tool_schemas = list(self._tools.list_tools()) if allow_tools else []
             return self._model.complete(c.messages, tools=tool_schemas)
 
         chain = base
@@ -385,7 +472,16 @@ class AgentLoop:
             chain = lambda c, m=mw, nxt=prev: m.on_model_call(c, nxt)
         return chain(ctx)
 
+    def _resolve_tool_name(self, tool_name: str) -> str:
+        if self._reliability is not None and hasattr(self._reliability, "resolve_tool_alias"):
+            try:
+                return str(self._reliability.resolve_tool_alias(tool_name))
+            except Exception:  # noqa: BLE001
+                return tool_name
+        return tool_name
+
     def _invoke_tool(self, ctx: TurnContext, tool_name: str, raw_args: Any) -> ToolResult:
+        tool_name = self._resolve_tool_name(tool_name)
         args: Mapping[str, Any]
         if self._reliability is not None:
             spec = getattr(self._tools, "get_spec", lambda _n: None)(tool_name)
@@ -409,7 +505,8 @@ class AgentLoop:
         return chain(tool_name, args)
 
     def _is_read_only(self, tool_name: str) -> bool:
-        spec = getattr(self._tools, "get_spec", lambda _n: None)(tool_name)
+        resolved = self._resolve_tool_name(tool_name)
+        spec = getattr(self._tools, "get_spec", lambda _n: None)(resolved)
         return bool(spec and getattr(spec, "read_only", False))
 
     def _execute_tool_batch(
@@ -447,6 +544,9 @@ class AgentLoop:
         prompt: str,
         *,
         max_steps: int = 20,
+        extra_slices: int = 0,
+        pre_slice_guard: Any = None,
+        history: Sequence[Mapping[str, Any]] = (),
         mailbox: Any = None,
         cancel_scope: Any = None,
     ) -> Mapping[str, Any]:
@@ -457,13 +557,25 @@ class AgentLoop:
         try:
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": self._system_prompt},
+                *(dict(message) for message in history),
                 {"role": "user", "content": prompt},
             ]
             ctx = TurnContext(session_id=self._session_id, messages=messages)
             verify_guard = PostEditVerificationGuard(max_nudges=1) if self._verify_after_edit else None
+            convergence = TaskConvergenceController(prompt)
+            available_tool_names = {
+                str(t.get("name") or "").strip().lower()
+                for t in (self._tools.list_tools() or ())
+                if isinstance(t, Mapping)
+            }
+            has_edit_tool = bool(available_tool_names & _CODE_EDIT_TOOLS)
+            has_verify_tool = bool(available_tool_names & _VERIFY_TOOLS)
+            empty_recovery_used = False
             self._emit("turn.start", {"prompt": prompt, "max_steps": max_steps})
 
-            for step in range(1, max(1, max_steps) + 1):
+            slice_steps = max(1, max_steps)
+            total_steps = slice_steps * (1 + min(2, max(0, extra_slices)))
+            for step in range(1, total_steps + 1):
                 if cancel_scope is not None and getattr(cancel_scope, "is_cancelled", False):
                     self._emit("turn.cancelled", {"step": step})
                     return {
@@ -486,9 +598,18 @@ class AgentLoop:
                         ctx.messages.append({"role": "user", "content": f"[STEER] {m.content}"})
 
                 ctx.step = step
-                if self._memory is not None:
-                    ctx.messages = self._memory.compact(ctx.messages, max_tokens=self._max_context_tokens)
+                ctx.messages = self._compact(ctx.messages)
 
+                if step > slice_steps and (step - 1) % slice_steps == 0:
+                    if pre_slice_guard is not None and pre_slice_guard():
+                        self._emit("turn.estop_halted", {"step": step})
+                        return {
+                            "verdict": TurnVerdict.LOOP_HALTED.value,
+                            "content": "Halted by E-Stop before continuation slice.",
+                            "steps": step - 1,
+                            "messages": ctx.messages,
+                        }
+                    self._emit("turn.continued", {"step": step, "slice_steps": slice_steps})
                 self._emit("step.model_start", {"step": step})
                 resp = self._invoke_model(ctx)
                 content = str(resp.get("content") or "")
@@ -500,7 +621,36 @@ class AgentLoop:
                 ctx.messages.append(assistant_msg)
 
                 if not tool_calls:
-                    if verify_guard is not None and step < max_steps:
+                    if not content.strip() and not empty_recovery_used:
+                        empty_recovery_used = True
+                        self._emit("turn.empty_recovery", {"step": step})
+                        ctx.messages.pop()
+                        ctx.messages.append({
+                            "role": "user",
+                            "content": (
+                                f"Your previous response had no text. Answer the user's request directly and concisely "
+                                f"using the information already gathered above. Do not call tools.\n"
+                                f"User request: {prompt[:300]}"
+                            ),
+                        })
+                        try:
+                            recovered = self._invoke_model(ctx, allow_tools=False)
+                            recovered_text = str(recovered.get("content") or "").strip()
+                        except Exception:  # noqa: BLE001
+                            recovered_text = ""
+                        ctx.messages.pop()
+                        if recovered_text:
+                            content = recovered_text
+                        elif ctx.tool_history:
+                            tools_used = ", ".join(dict.fromkeys(str(h.get("tool") or "tool") for h in ctx.tool_history[-6:]))
+                            content = (
+                                f"I completed {len(ctx.tool_history)} tool call(s) ({tools_used}) "
+                                "but the model returned an empty final message. Ask me to summarize or continue if needed."
+                            )
+                        else:
+                            content = "The model returned an empty response. Please retry or rephrase."
+                        ctx.messages.append({"role": "assistant", "content": content})
+                    if verify_guard is not None and step < total_steps:
                         nudge = verify_guard.maybe_nudge(has_verify_tool=True)
                         if nudge:
                             ctx.messages.append({"role": "user", "content": nudge})
@@ -521,9 +671,10 @@ class AgentLoop:
                     }
 
                 batch_results = self._execute_tool_batch(ctx, tool_calls)
+                strategy_hint: str | None = None
                 for tc, res in batch_results:
                     tc_id = str(tc.get("id") or f"call_{step}")
-                    t_name = str(tc.get("name") or "")
+                    t_name = self._resolve_tool_name(str(tc.get("name") or ""))
                     t_args = tc.get("arguments", {})
                     if verify_guard is not None:
                         verify_guard.record_tool_result(
@@ -531,6 +682,15 @@ class AgentLoop:
                             t_args if isinstance(t_args, Mapping) else None,
                             ok=res.ok,
                         )
+                    hint = convergence.record_tool_result(
+                        t_name,
+                        t_args if isinstance(t_args, Mapping) else None,
+                        ok=res.ok,
+                        has_edit_tool=has_edit_tool,
+                        has_verify_tool=has_verify_tool,
+                    )
+                    if hint:
+                        strategy_hint = hint
                     ctx.tool_history.append({"tool": t_name, "arguments": t_args, "ok": res.ok})
                     self._emit("tool.result", {"step": step, "tool": t_name, "ok": res.ok})
                     ctx.messages.append({
@@ -549,11 +709,35 @@ class AgentLoop:
                         "messages": ctx.messages,
                     }
 
-            self._emit("turn.budget_exhausted", {"steps": max_steps})
+                if strategy_hint and step < total_steps:
+                    self._emit("turn.strategy_shift", {"step": step, "hint": strategy_hint})
+                    ctx.messages.append({"role": "user", "content": strategy_hint})
+
+            self._emit("turn.budget_exhausted", {"steps": total_steps})
+            content = f"Reached the {total_steps}-step tool limit. The tool results above show what ran."
+            if cancel_scope is None or not getattr(cancel_scope, "is_cancelled", False):
+                ctx.messages.append({
+                    "role": "user",
+                    "content": (
+                        f"The tool-step limit for this turn has been reached. Give a concise answer or progress update "
+                        f"specifically for the current user request ({prompt[:300]}) using the tool results already available. "
+                        "State what was verified, anything incomplete or blocked, and the next step. Do not ask for or call tools."
+                    ),
+                })
+                ctx.step = total_steps + 1
+                try:
+                    summary = self._invoke_model(ctx, allow_tools=False)
+                    report = str(summary.get("content") or "").strip()
+                    if report and not summary.get("tool_calls"):
+                        content = report
+                except Exception as exc:
+                    self._emit("turn.summary_failed", {"error_type": type(exc).__name__})
+                ctx.messages.pop()
+            ctx.messages.append({"role": "assistant", "content": content})
             return {
                 "verdict": TurnVerdict.BUDGET_EXHAUSTED.value,
-                "content": "Stopped: max_steps budget exhausted.",
-                "steps": max_steps,
+                "content": content,
+                "steps": total_steps,
                 "messages": ctx.messages,
             }
         finally:
