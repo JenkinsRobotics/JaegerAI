@@ -167,7 +167,7 @@ def _interactive_chat() -> int:
 
     print(f"{_BOLD}{_CYAN}━━━ {ai_name} Terminal Chat ━━━{_RESET}")
     print(f"{_DIM}Model: {health.get('model')} · Session: {sid} · Studio UI: {_webui_url()}{_RESET}")
-    print(f"{_DIM}Commands: /status  /droid  /identity  /goals  /clear  /help  /quit{_RESET}\n")
+    print(f"{_DIM}Commands: /status  /model  /briefing  /context  /tools  /skills  /cron  /search  /droid  /goals  /clear  /help  /quit{_RESET}\n")
 
     while True:
         try:
@@ -180,10 +180,43 @@ def _interactive_chat() -> int:
         if user_text in ("/quit", "/exit", "exit", "quit"):
             return 0
         if user_text == "/help":
-            print("Slash commands: /status, /droid, /identity, /goals, /clear, /open, /quit")
+            print(
+                "Slash commands: /status, /model [id|routing ...], /briefing, /context, /tools [q], /skills, "
+                "/cron, /search <q>, /droid, /identity, /goals, /clear, /open, /quit"
+            )
             continue
         if user_text == "/status":
             _print_status()
+            continue
+        if user_text == "/briefing":
+            _cmd_briefing()
+            continue
+        if user_text == "/model" or user_text.startswith("/model "):
+            target = user_text[6:].strip()
+            _cmd_model(target.split() if target else [])
+            continue
+        if user_text == "/context":
+            _print_context()
+            continue
+        if user_text == "/tools" or user_text.startswith("/tools "):
+            q = user_text[6:].strip()
+            _cmd_tools([q] if q else [])
+            continue
+        if user_text == "/skills":
+            _cmd_skills([])
+            continue
+        if user_text == "/cron":
+            _cmd_cron(["list"])
+            continue
+        if user_text.startswith("/search "):
+            q = user_text[8:].strip()
+            if q:
+                import urllib.parse
+                hits = _api_json("GET", f"/v1/chat/search?{urllib.parse.urlencode({'q': q, 'limit': 8})}").get("results") or []
+                if not hits:
+                    print(f"{_DIM}No matching past messages.{_RESET}")
+                for h in hits:
+                    print(f"  [{h['session_title']} #{h['id']}] ({h['role']}) {h['excerpt']}")
             continue
         if user_text == "/droid":
             d = _api_json("GET", "/v1/droid/devices?refresh=1").get("devices") or {}
@@ -213,20 +246,385 @@ def _interactive_chat() -> int:
         print()
 
 
+def _print_context() -> int:
+    health = _api_json("GET", "/health")
+    res = _api_json("GET", "/v1/system/resources").get("resources") or {}
+    facts = _api_json("GET", "/v1/memory/facts").get("facts") or []
+    skills = _api_json("GET", "/v1/skills").get("skills") or []
+    print(f"{_BOLD}{_CYAN}Jaeger Context & Budget{_RESET}")
+    print(f"  Model:        {health.get('model')}")
+    print(f"  Active tools: {health.get('tools_count')}")
+    print(f"  Saved facts:  {len(facts)}")
+    print(f"  Skills found: {len(skills)}")
+    print(f"  Host memory:  {res.get('host_available_gb', '?')}/{res.get('host_total_gb', 32)} GB free")
+    print(f"  Browser:      {(health.get('browser') or {}).get('mode', 'unknown')}")
+    return 0
+
+
+def _cmd_config() -> int:
+    health = _api_json("GET", "/health")
+    ident = _api_json("GET", "/v1/identity").get("identity") or {}
+    ch = _api_json("GET", "/v1/channels/status")
+    hosts = _api_json("GET", "/v1/remote/hosts").get("hosts") or []
+    print(f"{_BOLD}{_CYAN}JaegerAI Configuration{_RESET}")
+    print(f"  State dir:    {health.get('state_dir')}")
+    print(f"  Workspace:    {health.get('workspace')}")
+    print(f"  Identity:     {ident.get('ai_name', 'Jaeger')} · Owner: {ident.get('owner_name', 'Owner')}")
+    print(f"  Model:        {health.get('model')}")
+    print(f"  Browser:      {(health.get('browser') or {}).get('mode', 'unknown')}")
+    adapters = (ch.get("channels") or {}).get("configured_adapters") or []
+    print(f"  Channels:     {', '.join(adapters) or 'local_log'}")
+    print(f"  Remote hosts: {', '.join(h['alias'] for h in hosts) or '(none)'}")
+    return 0
+
+
+def _cmd_model(args: list[str]) -> int:
+    if args and args[0] == "routing":
+        rest = args[1:]
+        if not rest:
+            data = _api_json("GET", "/v1/models/routing")
+            r = data.get("routing") or {}
+            print(f"{_BOLD}{_CYAN}Hybrid Model Routing{_RESET} (active: {data.get('active')})")
+            print(f"  primary:    {r.get('primary') or '(default)'}")
+            print(f"  background: {r.get('background') or '(same as primary)'}")
+            print(f"  vision:     {r.get('vision') or 'qwen3-vl:8b-instruct'}")
+            print(f"  fallback:   {r.get('fallback') or '(none)'}")
+            return 0
+        if len(rest) >= 2 and rest[0] in ("primary", "background", "vision", "fallback"):
+            tier, val = rest[0], "" if rest[1] in ("none", "clear", "-") else rest[1]
+            res = _api_json("PUT", "/v1/models/routing", {tier: val})
+            print(f"{_GREEN}Updated {tier}:{_RESET} {json.dumps(res.get('routing'))}")
+            return 0
+        print("Usage: ./jaeger model routing [primary|background|vision|fallback <model_id|none>]")
+        return 2
+    if args:
+        res = _api_json("POST", "/v1/models/select", {"model": args[0]})
+        print(f"{_GREEN}Active model:{_RESET} {res.get('active')}")
+        return 0
+    info = _api_json("GET", "/v1/models")
+    active = info.get("active") or ""
+    r = info.get("routing") or {}
+    print(f"{_BOLD}Active model:{_RESET} {active}")
+    if any(r.get(k) for k in ("background", "fallback")):
+        print(f"{_DIM}Routing: background={r.get('background') or '-'} · vision={r.get('vision') or '-'} · fallback={r.get('fallback') or '-'}{_RESET}")
+    for m in info.get("models") or []:
+        mid = m.get("id") or ""
+        mark = f"{_GREEN}*{_RESET}" if mid == active else " "
+        print(f"  {mark} {mid}")
+    return 0
+
+
+def _cmd_briefing() -> int:
+    data = _api_json("GET", "/v1/cognition/briefing")
+    print(f"{_BOLD}{_CYAN}While You Were Out{_RESET}")
+    print(data.get("summary") or "All quiet.")
+    return 0
+
+
+def _cmd_onboard() -> int:
+    st = _api_json("GET", "/v1/onboarding/status")
+    ident = st.get("identity") or {}
+    routing = st.get("model_routing") or {}
+    print(f"{_BOLD}{_CYAN}JaegerAI Day-1 Setup Wizard{_RESET}")
+    print(f"Press Enter to keep the value in [brackets].\n")
+    owner = input(f"Your name [{ident.get('owner_name') or 'Owner'}]: ").strip()
+    ai_name = input(f"Assistant name [{ident.get('ai_name') or 'Jaeger'}]: ").strip()
+    mission = input(f"What should {ai_name or ident.get('ai_name') or 'Jaeger'} help you with? [{ident.get('mission') or ''}]: ").strip()
+    primary = input(f"Primary model (cloud or local) [{routing.get('primary') or ''}]: ").strip()
+    background = input(f"Background/autonomy model (fast/cheap, optional) [{routing.get('background') or ''}]: ").strip()
+    fallback = input(f"Offline local fallback model (optional) [{routing.get('fallback') or ''}]: ").strip()
+    first_goal = input("First multi-day goal to track (optional): ").strip()
+    payload: dict[str, Any] = {}
+    if owner:
+        payload["owner_name"] = owner
+    if ai_name:
+        payload["ai_name"] = ai_name
+    if mission:
+        payload["mission"] = mission
+    if primary:
+        payload["primary_model"] = primary
+    if background:
+        payload["background_model"] = background
+    if fallback:
+        payload["fallback_model"] = fallback
+    if first_goal:
+        payload["first_goal"] = first_goal
+    res = _api_json("POST", "/v1/onboarding/complete", payload)
+    print(f"\n{_GREEN}Onboarding saved!{_RESET} Starter skills ready: {res.get('starter_skills_count', 0)}")
+    if res.get("next_steps"):
+        print(f"{_DIM}Optional next steps:{_RESET}")
+        for step in res["next_steps"]:
+            print(f"  • {step}")
+    return 0
+
+
+def _cmd_avatar(args: list[str]) -> int:
+    from jaeger_avatar import DEFAULT_AVATAR_PORT, DEFAULT_FACE, AvatarLink, avatar_app_serving, launch_avatar_app
+
+    face = DEFAULT_FACE
+    port = int(os.environ.get("JAEGER_AVATAR_PORT") or DEFAULT_AVATAR_PORT)
+    browser = False
+    check = False
+    it = iter(args)
+    for tok in it:
+        if tok == "--face":
+            face = next(it, DEFAULT_FACE)
+        elif tok == "--port":
+            port = int(next(it, str(port)))
+        elif tok == "--browser":
+            browser = True
+        elif tok == "--check":
+            check = True
+        elif tok in ("-h", "--help"):
+            print("Usage: ./jaeger avatar [--face vita] [--port 8791] [--browser] [--check]")
+            return 0
+    if check:
+        up = avatar_app_serving(port)
+        link = AvatarLink(url=f"http://127.0.0.1:{port}")
+        print(json.dumps({"serving": up, "port": port, "control_token_configured": bool(link.token)}, indent=2))
+        return 0 if up else 1
+    try:
+        url = launch_avatar_app(face=face, port=port, browser=browser)
+        print(f"{_GREEN}Living Avatar running:{_RESET} {url}")
+        return 0
+    except FileNotFoundError as exc:
+        print(f"{_YELLOW}{exc}{_RESET}", file=sys.stderr)
+        print("Clone sibling JaegerAvatar or set JAEGER_AVATAR_HOME=/path/to/JaegerAvatar.", file=sys.stderr)
+        return 1
+    except TimeoutError as exc:
+        print(f"{_RED}{exc}{_RESET}", file=sys.stderr)
+        return 1
+
+
+def _cmd_tools(args: list[str]) -> int:
+    q = " ".join(args).strip().lower()
+    tools = _api_json("GET", "/v1/tools").get("tools") or []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for t in tools:
+        hay = f"{t.get('name', '')} {t.get('description', '')} {t.get('source', '')}".lower()
+        if q and q not in hay:
+            continue
+        grouped.setdefault(str(t.get("source") or "builtin"), []).append(t)
+    total = sum(len(v) for v in grouped.values())
+    print(f"{_BOLD}Enabled Tools ({total}){_RESET}")
+    for src in sorted(grouped):
+        print(f"  {_CYAN}{src}{_RESET}")
+        for t in sorted(grouped[src], key=lambda x: x.get("name", "")):
+            ro = "ro" if t.get("read_only") else "rw"
+            print(f"    {_GREEN}✓{_RESET} {t['name']} [{ro}] — {str(t.get('description') or '')[:90]}")
+    return 0
+
+
+def _cmd_skills(args: list[str]) -> int:
+    q = " ".join(args).strip().lower()
+    skills = _api_json("GET", "/v1/skills").get("skills") or []
+    shown = [s for s in skills if not q or q in str(s.get("name", "")).lower()]
+    print(f"{_BOLD}Discovered Skills ({len(shown)}){_RESET}")
+    for s in shown:
+        print(f"  {_GREEN}✓{_RESET} {s['name']} [{s.get('security_verdict', 'safe')}] — {s['path']}")
+    return 0
+
+
+def _cmd_cron(args: list[str]) -> int:
+    sub = args[0] if args else "list"
+    sid = "sess_jaeger_chat"
+    if sub == "list":
+        jobs = _api_json("GET", f"/v1/sessions/{sid}/jobs").get("jobs") or []
+        print(f"{_BOLD}Scheduled Jobs ({len(jobs)}){_RESET}")
+        for j in jobs:
+            sched = j.get("cron_expr") or (f"every {j.get('interval_s')}s" if j.get("interval_s") else "one-shot")
+            print(f"  [{j['status']}] {j['job_id']} ({sched}) series={j.get('series_id') or '-'} — {str(j.get('prompt') or '')[:80]}")
+        return 0
+    if sub == "add" and len(args) >= 3:
+        cron_expr, prompt = args[1], " ".join(args[2:]).strip()
+        res = _api_json("POST", f"/v1/sessions/{sid}/jobs", {"cron_expr": cron_expr, "prompt": prompt})
+        job = res.get("job") or {}
+        print(f"{_GREEN}Scheduled:{_RESET} {job.get('job_id')} (series={job.get('series_id')}, cron={job.get('cron_expr')})")
+        return 0
+    if sub in ("pause", "resume", "cancel") and len(args) >= 2:
+        target = args[1]
+        if target.startswith("series_"):
+            status_map = {"pause": "paused", "resume": "active", "cancel": "cancelled"}
+            res = _api_json("PATCH", f"/v1/sessions/{sid}/job-series/{target}", {"status": status_map[sub]})
+            print(json.dumps(res, indent=2))
+            return 0
+        if sub == "cancel":
+            res = _api_json("POST", f"/v1/sessions/{sid}/jobs/{target}/cancel", {})
+            print(json.dumps(res, indent=2))
+            return 0
+    print("Usage: ./jaeger cron [list | add \"<5-field-cron>\" \"<prompt>\" | pause <series_id> | resume <series_id> | cancel <job_or_series_id>]")
+    return 2
+
+
+def _cmd_channels(args: list[str]) -> int:
+    sub = args[0] if args else "status"
+    if sub == "status":
+        data = _api_json("GET", "/v1/channels/status")
+        print(json.dumps({"channels": data.get("channels"), "config": data.get("config"), "ingress": data.get("ingress")}, indent=2))
+        return 0
+    if sub == "setup":
+        state_dir = Path(os.environ.get("JAEGER_STATE_DIR") or (Path.home() / ".jaeger")).expanduser().resolve()
+        cfg_path = state_dir / "channels.json"
+        existing = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.is_file() else {}
+        print(f"{_BOLD}{_CYAN}Jaeger Channels Setup Wizard{_RESET} ({cfg_path})")
+        print("Leave any prompt blank to skip. Restart Gateway after saving (`./jaeger stack down gateway && ./jaeger stack up gateway`).\n")
+        tg_tok = input("Telegram Bot Token: ").strip()
+        if tg_tok:
+            tg_chats = [c.strip() for c in input("Telegram Allowed Chat IDs (comma-separated): ").split(",") if c.strip()]
+            existing["telegram"] = {"enabled": True, "bot_token": tg_tok, "allowed_chat_ids": tg_chats, "poll_inbound": True, "auto_reply_owner": False}
+        dc_hook = input("Discord Webhook URL (or leave blank): ").strip()
+        if dc_hook:
+            existing["discord"] = {"enabled": True, "webhook_url": dc_hook}
+        sl_hook = input("Slack Webhook URL (or leave blank): ").strip()
+        if sl_hook:
+            existing["slack"] = {"enabled": True, "webhook_url": sl_hook}
+        im_ans = input("Enable macOS iMessage adapter? [y/N]: ").strip().lower()
+        if im_ans in ("y", "yes"):
+            existing["imessage"] = {"enabled": True}
+        state_dir.mkdir(parents=True, exist_ok=True)
+        cfg_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+        print(f"{_GREEN}Saved channel configuration to {cfg_path}{_RESET}")
+        return 0
+    print("Usage: ./jaeger channels [status | setup]")
+    return 2
+
+
+def _cmd_remote(args: list[str]) -> int:
+    sub = args[0] if args else "list"
+    if sub == "list":
+        hosts = _api_json("GET", "/v1/remote/hosts").get("hosts") or []
+        print(f"{_BOLD}Allowlisted SSH Hosts ({len(hosts)}){_RESET}")
+        for h in hosts:
+            target = f"{h['user']}@{h['hostname']}" if h.get("user") else h["hostname"]
+            print(f"  {_GREEN}✓{_RESET} {h['alias']} -> {target}:{h.get('port', 22)} (enabled={h.get('enabled')})")
+        return 0
+    if sub == "add" and len(args) >= 3:
+        alias, hostname = args[1], args[2]
+        user, port = "", 22
+        it = iter(args[3:])
+        for tok in it:
+            if tok == "--user":
+                user = next(it, "")
+            elif tok == "--port":
+                port = int(next(it, "22"))
+        res = _api_json("PUT", f"/v1/remote/hosts/{alias}", {"hostname": hostname, "user": user, "port": port, "enabled": True})
+        print(f"{_GREEN}Saved remote host:{_RESET} {json.dumps(res.get('host'))}")
+        return 0
+    if sub == "remove" and len(args) >= 2:
+        res = _api_json("DELETE", f"/v1/remote/hosts/{args[1]}")
+        print(json.dumps(res))
+        return 0
+    print("Usage: ./jaeger remote [list | add <alias> <hostname> [--user u] [--port 22] | remove <alias>]")
+    return 2
+
+
+def _cmd_autonomy(args: list[str]) -> int:
+    sub = args[0] if args else "status"
+    if sub == "status":
+        data = _api_json("GET", "/v1/cognition/actions?limit=5")
+        st = data.get("status") or {}
+        cfg = st.get("config") or {}
+        dr = st.get("drives") or {}
+        print(f"{_BOLD}{_CYAN}Jaeger Autonomous Self-Actions{_RESET}")
+        print(f"  Enabled:    {'ON' if cfg.get('enabled') else 'OFF'} · Cooldown: {cfg.get('cooldown_s')}s · Cap: {st.get('actions_last_hour', 0)}/{cfg.get('max_actions_per_hour')}/hr")
+        print(f"  Drives:     curiosity={dr.get('curiosity')} momentum={dr.get('goal_momentum')} social={dr.get('social')} energy={dr.get('energy')}")
+        print(f"  Next turn:  in {st.get('next_eligible_in_s', 0)}s")
+        for act in data.get("actions") or []:
+            print(f"  • [{act['kind']}] {act['summary'][:90]}")
+        return 0
+    if sub in ("on", "off"):
+        res = _api_json("POST", "/v1/cognition/autonomy", {"enabled": sub == "on"})
+        print(f"{_GREEN}Autonomy {'enabled' if sub == 'on' else 'paused'}.{_RESET} ({json.dumps(res.get('status', {}).get('config'))})")
+        return 0
+    if sub == "step":
+        res = _api_json("POST", "/v1/cognition/autonomy", {"trigger_now": True}, timeout=60.0)
+        print(json.dumps(res.get("triggered"), indent=2))
+        return 0
+    if sub == "log":
+        actions = _api_json("GET", "/v1/cognition/actions?limit=20").get("actions") or []
+        print(f"{_BOLD}Initiative Journal ({len(actions)}){_RESET}")
+        for act in actions:
+            print(f"  [{act['status']}] {act['kind']} — {act['summary']}")
+        return 0
+    print("Usage: ./jaeger autonomy [status | on | off | step | log]")
+    return 2
+
+
+def _cmd_minecraft(args: list[str]) -> int:
+    sub = args[0] if args else "status"
+    if sub == "status":
+        mc = _api_json("GET", "/v1/embodiment/status").get("minecraft") or {}
+        print(json.dumps(mc, indent=2))
+        return 0
+    if sub == "connect":
+        body: dict[str, Any] = {"action": "connect", "params": {}}
+        if len(args) >= 2:
+            body["params"]["host"] = args[1]
+        if len(args) >= 3:
+            body["params"]["port"] = int(args[2])
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", body, timeout=45.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "disconnect":
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "disconnect", "params": {}})
+        print(json.dumps(res, indent=2))
+        return 0
+    if sub == "goal" and len(args) >= 2:
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "set_goal", "params": {"goal": " ".join(args[1:])}})
+        print(json.dumps(res, indent=2))
+        return 0
+    if sub == "step" and len(args) >= 2:
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "step", "params": {"code": " ".join(args[1:])}}, timeout=60.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    print("Usage: ./jaeger minecraft [status | connect [host] [port] | disconnect | goal \"<goal>\" | step \"<js>\"]")
+    return 2
+
+
+def _open_desktop_app() -> int:
+    app_path = Path(os.environ.get("JAEGER_APP_PATH") or "/Applications/JaegerAI.app")
+    if not app_path.exists():
+        print(f"{_RED}JaegerAI app not found at {app_path}{_RESET}", file=sys.stderr)
+        return 1
+    if sys.platform == "darwin":
+        rc = subprocess.call(["open", str(app_path)])
+    else:
+        rc = 0 if webbrowser.open(app_path.as_uri()) else 1
+    if rc == 0:
+        print(f"Opened {app_path}")
+    return rc
+
+
 def _print_help() -> None:
     print(
         f"""{_BOLD}JaegerAI Operator CLI{_RESET}
 
 Usage:
-  ./jaeger                  Interactive streaming terminal chat (TUI)
-  ./jaeger chat             Interactive streaming terminal chat (TUI)
-  ./jaeger ask "<prompt>"   Run a single prompt against the live Gateway
-  ./jaeger start            Start standalone Gateway (:33418) + 5-Tab Studio WebUI (:8790)
-  ./jaeger status           Show live Gateway, 32 GB RAM, Mind Loop, Droid & Minecraft status
-  ./jaeger doctor [--json]  Verify all modular packages, binaries, WebUI & Gateway
-  ./jaeger setup [flags]    Run one-command reproducible setup (scripts/setup.sh)
-  ./jaeger verify [target]  Run full verification suite (scripts/verify.sh)
-  ./jaeger open             Open 5-Tab Studio WebUI in default browser ({_webui_url()})
+  ./jaeger                          Interactive streaming terminal chat (TUI)
+  ./jaeger chat                     Interactive streaming terminal chat (TUI)
+  ./jaeger ask "<prompt>"           Run a single prompt against the live Gateway
+  ./jaeger start                    Start standalone Gateway (:33418) + 5-Tab Studio WebUI (:8790)
+  ./jaeger stop [svc...] [--json]   Stop Gateway (or specified stack services) cleanly
+  ./jaeger restart [svc...] [--json] Restart Gateway (or specified stack services) cleanly
+  ./jaeger stack <cmd> [args]       Manage launchd stack (status | up | down | restart) [--json]
+  ./jaeger status                   Show live Gateway, 32 GB RAM, Mind Loop, Droid & Minecraft status
+  ./jaeger config                   Inspect active paths, identity, model, channels & remote hosts
+  ./jaeger model [id | routing ...] List models, switch active model, or configure hybrid routing tiers
+  ./jaeger onboard                  Run the 30-second Day-1 setup wizard (identity, routing & first goal)
+  ./jaeger briefing                 Show Jaeger's "While You Were Out" status & self-action briefing
+  ./jaeger avatar [--face vita]     Launch or check the optional sibling JaegerAvatar living stage (:8791)
+  ./jaeger tools [query]            List or search enabled tools grouped by package
+  ./jaeger skills [query]           List discovered SKILL.md playbooks and security scan status
+  ./jaeger cron [list|add|...]      Manage recurring 5-field cron & scheduled jobs
+  ./jaeger channels [status|setup]  Inspect messaging channels or run interactive channel setup wizard
+  ./jaeger remote [list|add|remove] Manage owner-allowlisted SSH remote hosts (e.g. rack PC)
+  ./jaeger autonomy [status|on|off|step|log] Control & audit Jaeger's persistent self-actions
+  ./jaeger minecraft [status|connect|...]    Inspect or connect Jaeger's live Mineflayer Minecraft body
+  ./jaeger doctor [--json]          Verify all modular packages, binaries, WebUI & Gateway
+  ./jaeger setup [flags]            Run one-command reproducible setup (scripts/setup.sh)
+  ./jaeger verify [target]          Run full verification suite (scripts/verify.sh)
+  ./jaeger open                     Open 5-Tab Studio WebUI in default browser ({_webui_url()})
+  ./jaeger app                      Open the JaegerAI macOS desktop & menubar app (/Applications/JaegerAI.app)
 """
     )
 
@@ -253,8 +651,46 @@ def main(argv: list[str] | None = None) -> int:
 
         asyncio.run(serve_modular_gateway())
         return 0
+    if cmd == "stack":
+        from .stack import main as stack_main
+
+        return stack_main(rest)
+    if cmd == "stop":
+        from .stack import main as stack_main
+
+        return stack_main(["down", *rest])
+    if cmd == "restart":
+        from .stack import main as stack_main
+
+        return stack_main(["restart", *rest])
+    if cmd == "app":
+        return _open_desktop_app()
     if cmd == "status":
         return _print_status()
+    if cmd == "config":
+        return _cmd_config()
+    if cmd == "model":
+        return _cmd_model(rest)
+    if cmd == "onboard":
+        return _cmd_onboard()
+    if cmd == "briefing":
+        return _cmd_briefing()
+    if cmd == "avatar":
+        return _cmd_avatar(rest)
+    if cmd == "tools":
+        return _cmd_tools(rest)
+    if cmd == "skills":
+        return _cmd_skills(rest)
+    if cmd == "cron":
+        return _cmd_cron(rest)
+    if cmd == "channels":
+        return _cmd_channels(rest)
+    if cmd == "remote":
+        return _cmd_remote(rest)
+    if cmd == "autonomy":
+        return _cmd_autonomy(rest)
+    if cmd == "minecraft":
+        return _cmd_minecraft(rest)
     if cmd == "doctor":
         return subprocess.call([sys.executable, "-B", str(REPO_ROOT / "scripts/doctor.py"), *rest])
     if cmd == "setup":
