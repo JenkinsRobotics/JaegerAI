@@ -104,3 +104,7 @@
 :root { --jg-safe-top: env(safe-area-inset-top); --jg-safe-bottom: env(safe-area-inset-bottom); --jg-safe-left: env(safe-area-inset-left); --jg-safe-right: env(safe-area-inset-right); }
 @media (pointer: coarse) { .jg-av-strip__item, .jg-av-viewer__tools .jg-u-btn, .jg-av-panel__tools .jg-u-btn, .jg-av-mini__tools .jg-u-btn { min-height: 44px; min-width: 44px; } }
 @media (prefers-reduced-motion: reduce) { .jg-av-stage__canvas { transition: none; } }
+
+/* The living avatar: the JaegerAvatar app's stage, embedded (LiveAvatarApp.tsx) */
+.jg-av-live { display:block; width:100%; aspect-ratio:3/4; border:0; border-radius:12px; background:#000; }
+.jg-av-live[data-compact] { aspect-ratio:1; }
