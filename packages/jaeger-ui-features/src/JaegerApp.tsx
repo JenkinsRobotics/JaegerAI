@@ -319,6 +319,10 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const droidEpochRef = useRef(0);
   const [mcpNewName, setMcpNewName] = useState("");
   const [mcpNewUrl, setMcpNewUrl] = useState("");
+  const [mcpAetherUrl, setMcpAetherUrl] = useState("http://127.0.0.1:8780/mcp");
+  const [mcpAetherToken, setMcpAetherToken] = useState("");
+  const [mcpPresetBusy, setMcpPresetBusy] = useState("");
+  const [mcpNotice, setMcpNotice] = useState("");
   const [mediaArchive, setMediaArchive] = useState<Array<{ asset_id: string; kind: string; scene_description: string; source_path: string; is_reconstructed: boolean }>>([]);
 
   const transportRef = useRef<HttpSseTransport | null>(null);
@@ -1959,10 +1963,120 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         )}
 
         {dest === "integrations" && (
-          <div className="jg-content jg-workspace-page">
+          <div className="jg-content jg-workspace-page" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div className="jg-card">
+                <h4 style={{ marginTop: 0, marginBottom: 8 }}>One-Click Ecosystem MCP Presets</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+                  <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <strong>Aether Studio &amp; Aether-CAD</strong>
+                      <span className="jg-pill">streamable_http</span>
+                    </div>
+                    <div className="jg-muted" style={{ fontSize: 12 }}>
+                      17 CAD part/assembly tools + viewport PNG visual inspection (`:8780`).
+                    </div>
+                    <input
+                      className="jg-input"
+                      aria-label="Aether Studio MCP URL"
+                      placeholder="http://127.0.0.1:8780/mcp"
+                      value={mcpAetherUrl}
+                      onChange={(e) => setMcpAetherUrl(e.target.value)}
+                    />
+                    <input
+                      className="jg-input"
+                      type="password"
+                      aria-label="Aether Studio Bearer Token"
+                      placeholder="Agent Connection Bearer Token (optional)"
+                      value={mcpAetherToken}
+                      onChange={(e) => setMcpAetherToken(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="jg-btn jg-btn-primary"
+                      disabled={mcpPresetBusy !== ""}
+                      onClick={async () => {
+                        setMcpPresetBusy("aether_studio");
+                        setMcpNotice("");
+                        try {
+                          const r = await fetch(`${baseUrl}/v1/mcp/servers`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              preset: "aether_studio",
+                              url: mcpAetherUrl.trim() || "http://127.0.0.1:8780/mcp",
+                              bearer_token: mcpAetherToken.trim() || undefined,
+                              connect: true,
+                            }),
+                          });
+                          const d = await r.json();
+                          if (r.ok) {
+                            setMcpServers(d.servers ?? []);
+                            setMcpAetherToken("");
+                            setMcpNotice("Saved Aether Studio MCP preset.");
+                          } else {
+                            setMcpNotice(d.error || "Could not add Aether Studio preset.");
+                          }
+                        } catch {
+                          setMcpNotice("Gateway unreachable.");
+                        } finally {
+                          setMcpPresetBusy("");
+                        }
+                      }}
+                    >
+                      {mcpPresetBusy === "aether_studio" ? "Connecting…" : "Connect Aether Studio"}
+                    </button>
+                  </div>
+
+                  <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <strong>REA (Reverse Engineer Anything)</strong>
+                      <span className="jg-pill">stdio</span>
+                    </div>
+                    <div className="jg-muted" style={{ fontSize: 12 }}>
+                      Bridges Ghidra, Hopper, JADX, Electron &amp; APK binary analysis via <code>npx -y rea-agents mcp</code>.
+                    </div>
+                    <button
+                      type="button"
+                      className="jg-btn"
+                      style={{ marginTop: "auto" }}
+                      disabled={mcpPresetBusy !== ""}
+                      onClick={async () => {
+                        setMcpPresetBusy("rea");
+                        setMcpNotice("");
+                        try {
+                          const r = await fetch(`${baseUrl}/v1/mcp/servers`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ preset: "rea", connect: true }),
+                          });
+                          const d = await r.json();
+                          if (r.ok) {
+                            setMcpServers(d.servers ?? []);
+                            setMcpNotice("Saved REA MCP preset.");
+                          } else {
+                            setMcpNotice(d.error || "Could not add REA preset.");
+                          }
+                        } catch {
+                          setMcpNotice("Gateway unreachable.");
+                        } finally {
+                          setMcpPresetBusy("");
+                        }
+                      }}
+                    >
+                      {mcpPresetBusy === "rea" ? "Connecting…" : "Connect REA"}
+                    </button>
+                  </div>
+                </div>
+                {mcpNotice && (
+                  <div className="jg-muted" role="status" style={{ fontSize: 12, marginTop: 8 }}>
+                    {mcpNotice}
+                  </div>
+                )}
+              </div>
+
               <div className="jg-card">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <h4 style={{ margin: 0 }}>Live MCP Servers (Aether / Resolve / Blender)</h4>
+                  <h4 style={{ margin: 0 }}>Live MCP Servers (Aether / REA / Resolve / Blender)</h4>
                   <button
                     type="button"
                     className="jg-btn-ghost"
@@ -1999,9 +2113,22 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                   <div className="jg-muted">No external MCP servers configured in ~/.jaeger/mcp_servers.json yet.</div>
                 ) : (
                   mcpServers.map((m) => (
-                    <div key={m.name} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--jg-border-subtle)" }}>
+                    <div key={m.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--jg-border-subtle)" }}>
                       <span>{m.name} ({m.transport})</span>
-                      <span className="jg-pill">{m.connected ? `Connected (${m.tools_count})` : "Offline"}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span className="jg-pill">{m.connected ? `Connected (${m.tools_count})` : "Offline"}</span>
+                        <button
+                          type="button"
+                          className="jg-btn-ghost"
+                          style={{ fontSize: 11.5 }}
+                          onClick={async () => {
+                            const r = await fetch(`${baseUrl}/v1/mcp/servers/${encodeURIComponent(m.name)}`, { method: "DELETE" });
+                            if (r.ok) setMcpServers((await r.json()).servers ?? []);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}

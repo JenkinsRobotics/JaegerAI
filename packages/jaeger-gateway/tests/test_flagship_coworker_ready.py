@@ -243,5 +243,19 @@ async def test_gateway_hybrid_routing_onboarding_and_briefing(tmp_path: Path) ->
             assert chat_out["acted"] is True
             assert "oak wood" in chat_out["summary"]
             assert any(p.modality == "minecraft" and p.kind == "chat" for p in rt.world.recent_perceptions(limit=5))
+
+            # 8. Ecosystem MCP presets (Aether Studio + REA) & preset upsert
+            presets_resp = await client.get("/v1/mcp/presets")
+            assert presets_resp.status == 200
+            presets_data = await presets_resp.json()
+            preset_ids = {p["preset_id"] for p in presets_data["presets"]}
+            assert "aether_studio" in preset_ids and "rea" in preset_ids
+
+            add_aether = await client.post(
+                "/v1/mcp/servers",
+                json={"preset": "aether_studio", "bearer_token": "tok_test", "connect": False},
+            )
+            assert add_aether.status == 201
+            assert any(t["name"] == "inspect_image" for t in rt.tools.list_tools(limit=200))
     finally:
         rt.close()
