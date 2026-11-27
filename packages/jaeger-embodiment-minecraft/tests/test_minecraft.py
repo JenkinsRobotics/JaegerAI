@@ -48,3 +48,36 @@ def test_voyager_control_primitives_and_skill_library(tmp_path: Path) -> None:
     assert s1.version == 1 and s1.verified_runs == 1
     hits = lib.retrieve("need a wooden pickaxe to mine stone")
     assert hits and hits[0].name == "craftWoodenPickaxe"
+
+
+def test_mindcraft_coop_modes_actions_and_chat_inbox(tmp_path: Path) -> None:
+    from jaeger_embodiment_minecraft.embodiment import MINEFLAYER_DIR
+
+    assert (MINEFLAYER_DIR / "lib" / "coopModes.js").is_file()
+    assert (MINEFLAYER_DIR / "lib" / "coopActions.js").is_file()
+    assert (MINEFLAYER_DIR.parent.parent.parent / "NOTICE").is_file()
+
+    mc = MinecraftEmbodiment(tmp_path)
+    obs = mc.observe()
+    modes = obs["state"]["modes"]
+    assert modes["self_preservation"]["enabled"] is True
+    assert modes["auto_eat"]["enabled"] is True
+    assert modes["self_defense"]["enabled"] is True
+    assert modes["unstuck"]["enabled"] is True
+    assert modes["follow_player"]["enabled"] is False
+
+    # Co-op follow, mode toggle, stop, eat, and chat inbox all work cleanly offline & persist
+    follow_res = mc.act("follow_player", {"player": "Matthew", "distance": 4})
+    assert follow_res["ok"] is True
+    assert follow_res["state"]["modes"]["follow_player"] == {"enabled": True, "target": "Matthew", "distance": 4}
+
+    mode_res = mc.act("set_mode", {"mode": "self_defense", "enabled": False})
+    assert mode_res["ok"] is True
+    assert mode_res["state"]["modes"]["self_defense"]["enabled"] is False
+
+    stop_res = mc.act("stop_actions")
+    assert stop_res["ok"] is True
+    assert stop_res["state"]["modes"]["follow_player"]["enabled"] is False
+
+    inbox = mc.act("read_chat")
+    assert inbox["ok"] is True and isinstance(inbox["messages"], list) and isinstance(inbox["nearby_players"], list)
