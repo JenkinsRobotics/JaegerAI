@@ -93,3 +93,60 @@ def test_response_fold_and_per_attempt_fallback_audit() -> None:
     assert sf.complete([{"role": "user", "content": "hi"}])["content"] == "ok"
     assert len(seen_models) == 2
     assert [(a.model_name, a.ok) for a in sf.last_attempts] == [(primary.name, False), (fb.name, True)]
+
+
+def test_ollama_retries_502_before_stream_output(monkeypatch):
+    from urllib.error import HTTPError
+
+    from jaeger_models import providers
+
+    delays = []
+    attempts = []
+
+    def stream(url, payload, **kwargs):
+        attempts.append(payload)
+        if len(attempts) < 3:
+            try:
+                raise HTTPError(url, 502, "upstream disconnected", {}, None)
+            except HTTPError as exc:
+                raise RuntimeError("HTTP 502") from exc
+        yield '{"message":{"content":"Recovered"},"done":true}'
+
+    monkeypatch.setattr(providers, "_post_stream_lines", stream)
+    monkeypatch.setattr(providers.time, "sleep", delays.append)
+    output = []
+    with providers.bind_stream_sink(lambda kind, text: output.append(text)):
+        result = providers.OllamaModel().complete([{"role": "user", "content": "Continue"}])
+    assert result["content"] == "Recovered"
+    assert output == ["Recovered"]
+    assert delays == [0.5, 2.0]
+    assert attempts[0] == attempts[-1]
+
+
+def test_ollama_reports_truncated_stream_without_replaying_output(monkeypatch):
+    from jaeger_models import providers
+
+    def stream(*args, **kwargs):
+        yield '{"message":{"content":"Partial"},"done":false}'
+
+    monkeypatch.setattr(providers, "_post_stream_lines", stream)
+    output = []
+    with providers.bind_stream_sink(lambda kind, text: output.append(text)):
+        with pytest.raises(RuntimeError, match="dropped after the response began"):
+            providers.OllamaModel().complete([])
+    assert output == ["Partial"]
+
+
+def test_ollama_profile_falls_back_to_show_and_cloud_default(monkeypatch) -> None:
+    from jaeger_models import providers
+
+    monkeypatch.setattr(providers, "_get_json", lambda *args, **kwargs: {"models": []})
+    monkeypatch.setattr(
+        providers,
+        "_post_json",
+        lambda url, payload, **kwargs: {"model_info": {"qwen3.context_length": 65536}}
+        if payload.get("name") == "qwen3:8b"
+        else {},
+    )
+    assert providers.OllamaModel("qwen3:8b").profile("qwen3:8b").context_window == 65536
+    assert providers.OllamaModel("mistral-large-4:cloud").profile("mistral-large-4:cloud").context_window == 131_072

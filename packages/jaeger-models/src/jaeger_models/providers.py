@@ -10,11 +10,14 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 import uuid
 from contextvars import ContextVar
 from typing import Any, Callable, Iterator, Mapping, Sequence
+
+from jaeger_contracts import ModelProfile
 
 StreamSink = Callable[[str, str], None]
 _stream_sink_var: ContextVar[StreamSink | None] = ContextVar("jaeger_model_stream_sink", default=None)
@@ -166,6 +169,31 @@ class OllamaModel:
     def model_id(self) -> str:
         return self._model
 
+    def profile(self, model_id: str) -> ModelProfile:
+        """Resolve context window from loaded Ollama runner (/api/ps), falling back to /api/show."""
+        window = 0
+        try:
+            runners = _get_json(f"{self._base_url}/api/ps", timeout_s=1.0)
+            window = next((int(row.get("context_length") or 0)
+                           for row in runners.get("models", [])
+                           if model_id in (row.get("model"), row.get("name"))), 0)
+        except Exception:  # noqa: BLE001
+            window = 0
+        if window <= 0:
+            try:
+                info = _post_json(f"{self._base_url}/api/show", {"name": model_id}, timeout_s=2.0)
+                model_info = info.get("model_info") if isinstance(info, Mapping) else None
+                if isinstance(model_info, Mapping):
+                    for key, val in model_info.items():
+                        if str(key).endswith(".context_length") and isinstance(val, (int, float)) and int(val) > 0:
+                            window = int(val)
+                            break
+            except Exception:  # noqa: BLE001
+                window = 0
+        if window <= 0 and model_id.endswith((":cloud", "-cloud")):
+            window = 131_072
+        return ModelProfile(model_id=model_id, provider="ollama", context_window=window)
+
     def list_models(self) -> list[dict[str, Any]]:
         try:
             data = _get_json(f"{self._base_url}/api/tags", timeout_s=3.0)
@@ -190,6 +218,46 @@ class OllamaModel:
             return {"ok": False, "url": self._base_url, "error": str(exc)}
 
     def complete(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        tools: Sequence[Mapping[str, Any]] | None = None,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+    ) -> Mapping[str, Any]:
+        sink = _stream_sink_var.get()
+        emitted = False
+
+        def forward(kind: str, delta: str) -> None:
+            nonlocal emitted
+            emitted = True
+            if sink is not None:
+                sink(kind, delta)
+
+        delays = (0.5, 2.0, 5.0)
+        for attempt in range(len(delays) + 1):
+            try:
+                with bind_stream_sink(forward if sink is not None else None):
+                    return self._complete_once(
+                        messages, tools=tools, temperature=temperature, max_tokens=max_tokens,
+                    )
+            except (RuntimeError, OSError) as exc:
+                cause = exc.__cause__ or exc
+                if isinstance(cause, urllib.error.HTTPError):
+                    transient = cause.code in {408, 500, 502, 503, 504}
+                else:
+                    if isinstance(cause, urllib.error.URLError):
+                        cause = cause.reason
+                    transient = isinstance(cause, (ConnectionError, TimeoutError))
+                if not transient:
+                    raise
+                if emitted:
+                    raise RuntimeError("The model connection dropped after the response began.") from exc
+                if attempt == len(delays):
+                    raise RuntimeError("The model connection is still unavailable after three retries.") from exc
+                time.sleep(delays[attempt])
+
+    def _complete_once(
         self,
         messages: Sequence[Mapping[str, Any]],
         *,
@@ -238,10 +306,13 @@ class OllamaModel:
             raw_calls: list[dict[str, Any]] = []
             prompt_tokens = 0
             completion_tokens = 0
+            done = False
             for line in _post_stream_lines(f"{self._base_url}/api/chat", payload, timeout_s=self._timeout_s):
                 if not line.strip():
                     continue
                 chunk = json.loads(line)
+                if chunk.get("error"):
+                    raise RuntimeError(f"Ollama stream error: {chunk['error']}")
                 msg = chunk.get("message") or {}
                 th = str(msg.get("thinking") or "")
                 if th:
@@ -254,8 +325,11 @@ class OllamaModel:
                 if msg.get("tool_calls"):
                     raw_calls.extend(msg["tool_calls"])
                 if chunk.get("done"):
+                    done = True
                     prompt_tokens = int(chunk.get("prompt_eval_count") or 0)
                     completion_tokens = int(chunk.get("eval_count") or 0)
+            if not done:
+                raise ConnectionError("Ollama closed the stream before completion.")
             content = "".join(content_parts)
             thinking = "".join(thinking_parts)
         else:
