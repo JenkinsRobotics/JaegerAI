@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - standalone fallback
         return value
 
 
-SUPPORTED_CHANNELS = ("local_log", "imessage", "telegram", "webhook")
+SUPPORTED_CHANNELS = ("local_log", "imessage", "telegram", "discord", "slack", "webhook", "email")
 
 _OUTBOX_COLS = (
     "message_id, channel, recipient, body, status, dry_run, approved, receipt_json, created_at"
@@ -323,6 +323,17 @@ class ChannelHub:
             # persist-before-delivery path (claim -> adapter -> terminal status).
             msg = self._deliver(msg)
         return msg
+
+    def stage_notification(self, event: str, recipient: str, label: str) -> None:
+        import hashlib
+
+        message_id = "notification_" + hashlib.sha256(event.encode()).hexdigest()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO outbox (message_id, channel, recipient, body, status, dry_run, approved, receipt_json, created_at) "
+                "VALUES (?, 'email', ?, ?, 'queued_for_approval', 0, 0, '{}', ?)",
+                (message_id, recipient, label, time.time()),
+            )
 
     def list_outbox(self, *, limit: int = 50) -> list[OutboxMessage]:
         with self._lock, self._connect() as conn:
