@@ -26,6 +26,13 @@ from .destructive import (
 )
 from .engine import PolicyEngine
 from .guardrails import GuardrailResult
+from .privacy import (
+    DataSensitivity,
+    PrivacyDecision,
+    classify_sensitivity,
+    evaluate_cloud_egress,
+    filter_items_for_egress,
+)
 from .redact import SENSITIVE_QUERY_PARAMS, redact_object, redact_text
 from .inspectors import (
     ActorTrustInspector,
@@ -51,6 +58,7 @@ __all__ = [
     "BoundaryAndSecretsInspector",
     "ContainerSandbox",
     "ControlPlaneInspector",
+    "DataSensitivity",
     "DestructiveAndEvasionInspector",
     "EgressInspector",
     "GuardrailResult",
@@ -63,14 +71,18 @@ __all__ = [
     "PermissionRules",
     "PolicyEngine",
     "PrecedenceAndAutonomyInspector",
+    "PrivacyDecision",
     "SENSITIVE_QUERY_PARAMS",
     "SHELL_TOOL_IDS",
     "ToolInspector",
     "UnconfinedSandbox",
     "canonical_tool_id",
+    "classify_sensitivity",
     "default_os_sandbox",
     "destructive_reason",
+    "evaluate_cloud_egress",
     "evasion_reason",
+    "filter_items_for_egress",
     "guardrails",
     "is_banned_standing_grant",
     "is_owner_actor",
