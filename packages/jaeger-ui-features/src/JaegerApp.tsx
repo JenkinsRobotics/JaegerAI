@@ -16,6 +16,7 @@ import {
   type StudioClip,
 } from "@jaeger/ui-kit";
 import { AvatarStage, type VisemeFrame } from "@jaeger/ui-avatar";
+import { OfficeWorkspace } from "@jaeger/ui-office";
 import "./unifiedShell.css";
 import { AwakeningWizard } from "./AwakeningWizard";
 import { ConversationTimeline, type ConversationTopic } from "./ConversationTimeline";
@@ -279,8 +280,6 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
   const [episodes, setEpisodes] = useState<Array<{ episode_id: string; title: string; stage: string; assigned_role: string; owner_approved: boolean; timeline_clips: StudioClip[] }>>([]);
   const [newEpTitle, setNewEpTitle] = useState("");
-  const [teamRoles, setTeamRoles] = useState<Array<{ role_id: string; title: string; mission: string; default_model: string }>>([]);
-  const [budgets, setBudgets] = useState<{ daily_cap_usd?: number; daily_spent_usd?: number; daily_remaining_usd?: number }>({});
   const [dryRunResult, setDryRunResult] = useState<string>("");
   const [dryRunBusy, setDryRunBusy] = useState(false);
 
@@ -617,11 +616,6 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
       void fetchJson(`${baseUrl}/v1/skills`).then((d) => setSkills(d.skills ?? []));
     } else if (dest === "integrations") {
       void fetchJson(`${baseUrl}/v1/mcp/servers`).then((d) => setMcpServers(d.servers ?? []));
-    } else if (dest === "office") {
-      void fetchJson(`${baseUrl}/v1/business/team`).then((d) => {
-        if (Array.isArray(d.team)) setTeamRoles(d.team);
-        if (d.budgets) setBudgets(d.budgets);
-      });
     } else if (dest === "tasks") {
       void fetchJson(`${baseUrl}/v1/workflows`).then((d) => setWorkflows(d.workflows ?? []));
     } else if (dest === "youtube" || dest === "studio") {
@@ -1890,30 +1884,12 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         )}
 
         {dest === "office" && (
-          <div className="jg-content jg-workspace-page">
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <h3 style={{ margin: 0 }}>Autonomous Business Team Roles</h3>
-                {budgets.daily_cap_usd !== undefined && (
-                  <span className="jg-pill">
-                    Daily Budget: ${budgets.daily_spent_usd?.toFixed(2) ?? "0.00"} / ${budgets.daily_cap_usd.toFixed(2)}
-                  </span>
-                )}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10 }}>
-                {teamRoles.length === 0 && <p className="jg-muted">No team roles returned by the Gateway.</p>}
-                {teamRoles.map((role) => (
-                  <div key={role.role_id} className="jg-card">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <strong>{role.title}</strong>
-                      <span className="jg-pill">{role.default_model}</span>
-                    </div>
-                    <p className="jg-muted" style={{ marginBottom: 0 }}>{role.mission}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <OfficeWorkspace
+            baseUrl={baseUrl}
+            onOpenChat={() => setDest("chat")}
+            onOpenWorkflows={() => setDest("tasks")}
+            onOpenDroid={() => setDest("droid")}
+          />
         )}
 
         {dest === "tools" && <ToolsPage baseUrl={baseUrl} />}
