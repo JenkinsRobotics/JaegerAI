@@ -1421,7 +1421,7 @@ class ModularGatewayRuntime:
                 },
             },
             lambda args: self.store.index_directory(
-                str(args["root"]) if args.get("root") else self._workspace_root(),
+                str(args["root"]) if args.get("root") else str(self.workspace),
                 max_files=int(args.get("max_files") or 2000),
                 max_file_bytes=int(args.get("max_file_bytes") or 262144),
             ),
