@@ -15,11 +15,10 @@ import sys
 import time
 from pathlib import Path
 
-from . import serve, shell
+from . import faces, serve, shell
 from .gateway import Bridge, Gateway
 
 WEB = Path(__file__).with_name('web')
-LOOK = Path(__file__).with_name('look.json')   # Jaeger's own frozen screen look: the character owns it, the app never makes one
 KEEP = []   # the menu-bar item and hotkey live as long as the app
 SUGGEST = ['What can you do?', 'What is on my schedule today?', 'Summarize my unread mail', 'What time is it?']
 
@@ -54,8 +53,10 @@ def main(argv=None):
     actions = shell.Actions(gw, mon, bridge)
     port = a.port if a.port is not None else (8795 if a.browser else 0)
     screen = serve.Screen(bridge, actions, {'name': 'Jaeger', 'title': 'Jaeger AI', 'suggestions': SUGGEST,
-                                            'gateway': gw.url, 'webui': shell.WEBUI, 'face': json.loads(LOOK.read_text()),
+                                            'gateway': gw.url, 'webui': shell.WEBUI, 'faces': faces.faces(),
                                             'company': os.environ.get('JAEGER_COMPANY', '')}, port).start()
+    try: screen.wear(shell.load().get('face') or 'jaeger')
+    except ValueError: screen.wear('jaeger')   # the saved face's pack is gone
     mon.start()
     if a.open:
         screen.open_link(a.open)

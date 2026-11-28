@@ -3,8 +3,10 @@
 Copied from Omni's UI server (jaeger-module-omni, jaeger_omni_v2/ui/serve.py) and made Jaeger AI's own: the agent is
 the Gateway (gateway.Bridge), and /shell/* gives the screen what the Swift app's menus and bridge give the WebUI.
 
-GET  /ui/config, /health, /agent/events (a stream), /shell/status, /shell/pending (a deep link waiting to be opened)
+GET  /ui/config, /health, /agent/events (a stream), /shell/status, /shell/pending (a deep link waiting to be opened),
+     /avatars/<pack>/... (a face's own files: faces.py)
 POST /agent/text, /agent/interrupt, /agent/new, /agent/audio ({pcm}: 16 kHz 16-bit mono, base64, one clip),
+     /agent/face ({id}: which face to wear; a pack's persona then rides on each message),
      /shell/action ({name, arg}), /shell/open ({link}: a jaeger:// deep link)
 
 Every POST must carry X-Jaeger and come to a loopback Host: no other web page can drive the agent or the Mac.
@@ -16,6 +18,7 @@ import io
 import json
 import os
 import queue
+import shutil
 import subprocess
 import threading
 import urllib.error
@@ -25,7 +28,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import shell
+from . import faces, shell
 
 SCREEN = Path(os.environ.get('JAEGER_NEXUS_SCREEN') or Path.home() / '.cache/jaeger/nexus-ui/dist')   # outside the repo (Golden Rule 1)
 KEEP = 15   # seconds between keep-alives on the event stream
@@ -55,6 +58,15 @@ class Screen:
 
     def stop(self):
         self.http.shutdown(); self.http.server_close()
+
+    def wear(self, face_id: str) -> dict:
+        f = next((f for f in self.config['faces'] if f['id'] == face_id), None)
+        if f is None:
+            raise ValueError(f'no face {face_id!r}')
+        self.bridge.persona = f.get('persona')
+        self.config['worn'] = face_id
+        shell.save(face=face_id)
+        return {'worn': face_id}
 
     def open_link(self, link: str) -> dict:
         dest = shell.deep_link(link)
@@ -111,6 +123,14 @@ class Screen:
                 if path == '/health': return self._json(screen.health())
                 if path == '/agent/events': return self._events()
                 if path == '/shell/status': return self._json(screen.actions.status())
+                if path.startswith('/avatars/'):
+                    f = faces.file(path)
+                    if f is None: return self._json({'error': 'No such file'}, 404)
+                    self.send_response(200)
+                    self.send_header('Content-Type', {'.png': 'image/png', '.vrm': 'model/gltf-binary'}.get(f.suffix, 'application/octet-stream'))
+                    self.send_header('Content-Length', str(f.stat().st_size)); self.send_header('Cache-Control', 'max-age=3600'); self.end_headers()
+                    with f.open('rb') as fh: shutil.copyfileobj(fh, self.wfile)
+                    return
                 if path == '/shell/pending':
                     p, screen.pending = screen.pending, None
                     return self._json({'destination': p})
@@ -146,6 +166,7 @@ class Screen:
                     if path == '/agent/text': screen.bridge.send({'op': 'text', 'text': str(body.get('text', ''))[:4000]})
                     elif path == '/agent/interrupt': screen.bridge.send({'op': 'interrupt'})
                     elif path == '/agent/new': screen.bridge.send({'op': 'new'})
+                    elif path == '/agent/face': return self._json(screen.wear(str(body.get('id', ''))))
                     elif path == '/agent/audio':
                         heard = screen.transcribe(str(body.get('pcm', '')))
                         if heard: screen.bridge.send({'op': 'text', 'text': heard})

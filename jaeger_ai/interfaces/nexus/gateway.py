@@ -84,10 +84,24 @@ class Gateway:
                     data.append(line[5:].lstrip())
 
 
+IN_CHARACTER = '[In character: '   # a face's persona rides on each message (faces.py); the screen never shows it
+
+
+def wrap(text: str, persona: str | None) -> str:
+    return f"{IN_CHARACTER}{persona}]\n\n{text}" if persona else text
+
+
+def unwrap(text: str) -> str:
+    """The person's own words: a worn face's persona line taken off the front."""
+    if text.startswith(IN_CHARACTER) and ']\n\n' in text:
+        return text.split(']\n\n', 1)[1]
+    return text
+
+
 def translate(ev: str, p: dict) -> list[dict]:
     """One Gateway SSE event -> the screen's chat events (web/src/chat.ts)."""
     if ev == 'run.started':
-        return [{'event': 'user', 'text': p.get('prompt', '')}, {'event': 'state', 'text': 'Thinking'}]
+        return [{'event': 'user', 'text': unwrap(p.get('prompt', ''))}, {'event': 'state', 'text': 'Thinking'}]
     if ev == 'text.delta':
         return [{'event': 'delta', 'text': p.get('delta', '')}]
     if ev == 'thinking.delta':
@@ -114,6 +128,7 @@ class Bridge:
         self.history: list[dict] = []
         self.report = {'agent': {'model': None}}
         self.voice = None   # voice.Voice: each finished reply is spoken (the avatar's mouth follows the sound)
+        self.persona = None   # the worn face's character sheet (faces.py), or None for Jaeger's own
         self._stop = threading.Event()
 
     def start(self):
@@ -149,7 +164,7 @@ class Bridge:
         for m in j.get('messages', []) if st == 200 else []:
             role, text = m.get('role'), m.get('content') or m.get('text') or ''
             if role == 'user' and text:
-                hist.append({'event': 'user', 'text': text})
+                hist.append({'event': 'user', 'text': unwrap(text)})
             elif role == 'assistant' and text:
                 hist += [{'event': 'assistant', 'text': text}, {'event': 'done'}]
         return hist, int(j.get('after_seq') or 0)
@@ -212,7 +227,7 @@ class Bridge:
         if op == 'text':
             # interrupt: a new message replaces a running one, as the WebUI does when you send while it works
             st, j = self.gw.call('POST', f'/v1/sessions/{self.session}/runs',
-                                 {'prompt': msg['text'], 'multitask_strategy': 'interrupt'})
+                                 {'prompt': wrap(msg['text'], self.persona), 'multitask_strategy': 'interrupt'})
             if st not in (200, 202):
                 raise RuntimeError(j.get('error') or f'Gateway refused the message ({st})')
         elif op == 'interrupt':
