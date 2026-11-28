@@ -8,7 +8,7 @@
 
 [app]
 name = "jaeger-ai"
-version = "0.13.0"
+version = "1.0.0"
 requires_framework = ">=0.1"
 mode = "fused"
 single_instance = true

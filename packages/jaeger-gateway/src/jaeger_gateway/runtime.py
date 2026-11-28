@@ -50,7 +50,7 @@ from jaeger_contracts import AutonomyMode, SandboxProfile, ToolResult
 from jaeger_droid import HostDroidEmbodiment
 from jaeger_embodiment_minecraft import MinecraftEmbodiment, MinecraftSkillLibrary
 from jaeger_events import EventBus
-from jaeger_hardware import JP01Embodiment
+from jaeger_hardware import JP01Embodiment, NexusStationBridge, build_jp01_telemetry_channels
 from jaeger_loop import (
     PLAN_MODE_SYSTEM_NOTE,
     AgentLoop,
@@ -2238,6 +2238,42 @@ class ModularGatewayRuntime:
             read_only=True,
             source="jaeger-avatar",
         )
+        _reg(
+            "nexus_telemetry",
+            "Inspect live NexusUI hardware workbench stations (info, snapshot, layouts) or export JP01 channels. Read-only.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["info", "snapshot", "layouts", "jp01_channels"]},
+                    "station_url": {"type": "string", "default": "http://127.0.0.1:8000"},
+                    "allow_remote": {"type": "boolean", "default": False},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._nexus_telemetry_tool(args),
+            read_only=True,
+            source="jaeger-hardware",
+        )
+        _reg(
+            "nexus_control",
+            "Send a fail-closed channel write or command to a NexusUI hardware station (requires E-Stop clear, allow_write=true, and free operator lock).",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["write_channel", "run_command"]},
+                    "station_url": {"type": "string", "default": "http://127.0.0.1:8000"},
+                    "channel": {"type": "string"},
+                    "value": {},
+                    "command": {"type": "string"},
+                    "args": {"type": "object"},
+                    "allow_write": {"type": "boolean", "default": False},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._nexus_control_tool(args),
+            read_only=False,
+            source="jaeger-hardware",
+        )
 
     def _task_board_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
         act = str(args.get("action") or "summary").strip().lower()
@@ -2284,6 +2320,53 @@ class ModularGatewayRuntime:
     def _avatar_packs_info(self) -> dict[str, Any]:
         packs = [p.to_dict() for p in discover_avatar_packs(state_dir=self.state_dir)]
         return {"ok": True, "packs": packs, "count": len(packs)}
+
+    def _nexus_telemetry_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "jp01_channels").strip().lower()
+        if act == "jp01_channels":
+            return {"ok": True, **build_jp01_telemetry_channels(self.jp01.observe())}
+        url = str(args.get("station_url") or "http://127.0.0.1:8000").strip()
+        allow_remote = bool(args.get("allow_remote", False))
+        bridge = NexusStationBridge(
+            url,
+            estop_latch=self.jp01.latch,
+            read_only=True,
+            allow_remote=allow_remote,
+        )
+        if act == "info":
+            return bridge.get_info()
+        if act == "layouts":
+            return bridge.list_layouts()
+        if act == "snapshot":
+            return {"ok": True, **bridge.snapshot().to_dict()}
+        raise ValueError(f"unsupported nexus_telemetry action: {act!r}")
+
+    def _nexus_control_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "").strip().lower()
+        url = str(args.get("station_url") or "http://127.0.0.1:8000").strip()
+        allow_write = bool(args.get("allow_write", False))
+        bridge = NexusStationBridge(
+            url,
+            estop_latch=self.jp01.latch,
+            read_only=True,
+            allow_remote=False,
+        )
+        if act == "write_channel":
+            return bridge.write_channel(
+                str(args.get("channel") or ""),
+                args.get("value"),
+                allow_write=allow_write,
+                force_claim=False,
+            )
+        if act == "run_command":
+            cmd_args = args.get("args") if isinstance(args.get("args"), Mapping) else {}
+            return bridge.run_command(
+                str(args.get("command") or ""),
+                cmd_args,
+                allow_write=allow_write,
+                force_claim=False,
+            )
+        raise ValueError(f"unsupported nexus_control action: {act!r}")
 
     def _browser_gotchas_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
         act = str(args.get("action") or "list").strip().lower()
@@ -3406,6 +3489,7 @@ class ModularGatewayRuntime:
             kanban_board=self.board,
             reminder_store=self.reminders,
             avatar_packs_provider=self._avatar_packs_info,
+            nexus_provider=self._nexus_telemetry_tool,
             routing_provider=self._get_routing,
             routing_updater=self._update_routing,
             onboarding_provider=self._onboarding_status,
