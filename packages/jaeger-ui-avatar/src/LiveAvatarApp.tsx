@@ -66,7 +66,15 @@ export function LiveAvatarApp({
       title={`Live avatar (${face})`}
       src={`${avatarAppUrl()}/?face=${encodeURIComponent(face)}&stream`}
       allow="autoplay"
-      style={{ width: "100%", height: compact ? 180 : 320, border: 0, borderRadius: 12 }}
+      style={{
+        display: "block",
+        width: "100%",
+        aspectRatio: compact ? "1 / 1" : "3 / 4",
+        minHeight: compact ? 180 : 320,
+        border: 0,
+        borderRadius: 12,
+        background: "#000",
+      }}
     />
   );
 }

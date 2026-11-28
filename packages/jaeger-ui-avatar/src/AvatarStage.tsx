@@ -22,6 +22,7 @@ export interface AvatarStageProps {
   amplitude?: number;
   visemes?: VisemeFrame[];
   compact?: boolean;
+  liveFace?: string;
   onToggleExpand?: () => void;
 }
 
@@ -37,6 +38,7 @@ export function AvatarStage({
   amplitude = 0,
   visemes = [],
   compact = false,
+  liveFace = "vita",
   onToggleExpand,
 }: AvatarStageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -116,6 +118,9 @@ export function AvatarStage({
           <span className={`jg-dot is-${cognitiveMode}`} />
           <strong>{name}</strong>
           <span className="jg-pill">{modeLabel}</span>
+          {liveAvatarUp && !paused && (
+            <span className="jg-pill jg-pill-live">live · {liveFace}</span>
+          )}
         </div>
         <div className="jg-avatar-stage-actions">
           <button
@@ -164,7 +169,7 @@ export function AvatarStage({
         }}
       >
         {liveAvatarUp && !paused ? (
-          <LiveAvatarApp compact={compact} />
+          <LiveAvatarApp face={liveFace} compact={compact} />
         ) : use3D ? (
           <>
             <canvas ref={canvasRef} className="jg-avatar-canvas" />

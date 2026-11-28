@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -24,6 +25,8 @@ __all__ = [
     "DEFAULT_FACE",
     "avatar_app_serving",
     "launch_avatar_app",
+    "main",
+    "probe_avatar_link",
 ]
 
 DEFAULT_FACE = "vita"
@@ -160,3 +163,99 @@ class AvatarLink:
 
     def state(self) -> Any:
         return _get_json(f"{self.url}/control/state", timeout=2.0)
+
+
+def probe_avatar_link(
+    *,
+    face: str = DEFAULT_FACE,
+    port: int | None = None,
+    browser: bool = False,
+    launch_if_needed: bool = True,
+    state_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Verify the living avatar app answers and probe its `avatar-control/v1` link.
+
+    Launches the sibling JaegerAvatar app when ``launch_if_needed`` is True, then sends a
+    ``feel("joy")`` control probe so callers can distinguish:
+      - ``control_accepted``: stage is attached and accepted the emotion command.
+      - ``stage_not_attached``: control link is alive, but no stage window is showing yet.
+      - ``not_serving``: app is not running (when ``launch_if_needed=False``).
+    """
+    p = int(port or os.environ.get("JAEGER_AVATAR_PORT") or DEFAULT_AVATAR_PORT)
+    if launch_if_needed:
+        url = launch_avatar_app(face=face, port=p, browser=browser, state_dir=state_dir)
+    else:
+        if not avatar_app_serving(p):
+            return {
+                "serving": False,
+                "port": p,
+                "url": f"http://127.0.0.1:{p}/?face={face}",
+                "status": "not_serving",
+                "control_token_configured": bool(AvatarLink(url=f"http://127.0.0.1:{p}", state_dir=state_dir).token),
+            }
+        url = f"http://127.0.0.1:{p}/?face={face}"
+
+    link = AvatarLink(url=f"http://127.0.0.1:{p}", state_dir=state_dir)
+    try:
+        resp = link.feel("joy")
+    except RuntimeError as exc:
+        if "No avatar attached" in str(exc):
+            return {
+                "serving": True,
+                "port": p,
+                "url": url,
+                "status": "stage_not_attached",
+                "control_token_configured": bool(link.token),
+                "note": "control link alive; no stage is showing the avatar yet (open the window and it will be)",
+            }
+        raise
+    return {
+        "serving": True,
+        "port": p,
+        "url": url,
+        "status": "control_accepted",
+        "control_token_configured": bool(link.token),
+        "response": resp,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point: ``python3 -m jaeger_avatar.living_link [--check] [--browser]``."""
+    args = list(argv) if argv is not None else sys.argv[1:]
+    face = DEFAULT_FACE
+    port: int | None = None
+    browser = False
+    check = False
+    no_launch = False
+    it = iter(args)
+    for tok in it:
+        if tok == "--face":
+            face = next(it, DEFAULT_FACE)
+        elif tok == "--port":
+            port = int(next(it, str(DEFAULT_AVATAR_PORT)))
+        elif tok == "--browser":
+            browser = True
+        elif tok == "--check":
+            check = True
+        elif tok == "--no-launch":
+            no_launch = True
+        elif tok in ("-h", "--help"):
+            print("Usage: python3 -m jaeger_avatar.living_link [--face vita] [--port 8791] [--browser] [--check] [--no-launch]")
+            return 0
+    if check:
+        result = probe_avatar_link(face=face, port=port, browser=browser, launch_if_needed=not no_launch)
+        print("avatar app:", result["url"])
+        if result["status"] == "control_accepted":
+            print("control accepted:", result.get("response"))
+            return 0
+        if result["status"] == "stage_not_attached":
+            print(result["note"])
+            return 0
+        print("avatar app not serving on port", result["port"])
+        return 1
+    print(launch_avatar_app(face=face, port=port, browser=browser))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
