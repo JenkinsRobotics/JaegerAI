@@ -150,5 +150,12 @@ class JaegerClient:
     def avatar_packs(self) -> dict[str, Any]:
         return self._request("GET", "/v1/avatars/packs")
 
+    def nexus_jp01_channels(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/hardware/nexus/jp01-channels")
+
+    def nexus_snapshot(self, station_url: str = "http://127.0.0.1:8000") -> dict[str, Any]:
+        qs = urllib.parse.urlencode({"station_url": station_url})
+        return self._request("GET", f"/v1/hardware/nexus/snapshot?{qs}")
+
 
 __all__ = ["JaegerClient", "JaegerClientError"]

@@ -10,7 +10,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from aiohttp import web
 from jaeger_avatar import AvatarError, build_viseme_timeline
@@ -76,6 +76,7 @@ def create_gateway_app(
     kanban_board: Any = None,
     reminder_store: Any = None,
     avatar_packs_provider: Callable[[], dict[str, Any]] | None = None,
+    nexus_provider: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
     routing_provider: Callable[[], dict[str, Any]] | None = None,
     routing_updater: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     onboarding_provider: Callable[[], dict[str, Any]] | None = None,
@@ -860,6 +861,33 @@ def create_gateway_app(
         if avatar_packs_provider is None:
             return web.json_response({"ok": True, "packs": [], "count": 0})
         return web.json_response(await asyncio.to_thread(avatar_packs_provider))
+
+    async def get_nexus_jp01_channels(_request: web.Request) -> web.Response:
+        if nexus_provider is None:
+            return web.json_response({"ok": False, "error": "nexus bridge unavailable"}, status=501)
+        return web.json_response(await asyncio.to_thread(nexus_provider, {"action": "jp01_channels"}))
+
+    async def get_nexus_info(request: web.Request) -> web.Response:
+        if nexus_provider is None:
+            return web.json_response({"ok": False, "error": "nexus bridge unavailable"}, status=501)
+        url = request.query.get("station_url") or "http://127.0.0.1:8000"
+        try:
+            return web.json_response(await asyncio.to_thread(nexus_provider, {"action": "info", "station_url": url}))
+        except (PermissionError, ValueError) as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": str(exc), "station_url": url}, status=502)
+
+    async def get_nexus_snapshot(request: web.Request) -> web.Response:
+        if nexus_provider is None:
+            return web.json_response({"ok": False, "error": "nexus bridge unavailable"}, status=501)
+        url = request.query.get("station_url") or "http://127.0.0.1:8000"
+        try:
+            return web.json_response(await asyncio.to_thread(nexus_provider, {"action": "snapshot", "station_url": url}))
+        except (PermissionError, ValueError) as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": str(exc), "station_url": url}, status=502)
 
     async def get_board(_request: web.Request) -> web.Response:
         if kanban_board is None:
@@ -2072,6 +2100,9 @@ def create_gateway_app(
     app.router.add_get("/v1/skills/importers", list_importers_route)
     app.router.add_post("/v1/skills/import", run_importer_route)
     app.router.add_get("/v1/avatars/packs", get_avatar_packs)
+    app.router.add_get("/v1/hardware/nexus/jp01-channels", get_nexus_jp01_channels)
+    app.router.add_get("/v1/hardware/nexus/info", get_nexus_info)
+    app.router.add_get("/v1/hardware/nexus/snapshot", get_nexus_snapshot)
     app.router.add_get("/v1/board", get_board)
     app.router.add_post("/v1/board/cards", create_board_card)
     app.router.add_post("/v1/board/cards/{card_id}/move", move_board_card)
