@@ -65,6 +65,10 @@ def create_gateway_app(
     tool_workspace: ToolWorkspace | None = None,
     models_provider: Callable[[], dict[str, Any]] | None = None,
     model_selector: Callable[[str], dict[str, Any]] | None = None,
+    cookbook_provider: Callable[..., dict[str, Any]] | None = None,
+    roundtable_runner: Callable[..., dict[str, Any]] | None = None,
+    research_runner: Callable[..., dict[str, Any]] | None = None,
+    research_lister: Callable[..., list[dict[str, Any]]] | None = None,
     routing_provider: Callable[[], dict[str, Any]] | None = None,
     routing_updater: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     onboarding_provider: Callable[[], dict[str, Any]] | None = None,
@@ -618,6 +622,76 @@ def create_gateway_app(
         if not model_id:
             return web.json_response({"ok": False, "error": "model is required"}, status=400)
         return web.json_response({"ok": True, **model_selector(model_id)})
+
+    async def get_model_cookbook(request: web.Request) -> web.Response:
+        if cookbook_provider is None:
+            return web.json_response({"ok": False, "error": "model cookbook unavailable"}, status=501)
+        modality = (request.query.get("modality") or "all").strip().lower()
+        ram_raw = (request.query.get("ram_gb") or "").strip()
+        host_ram: float | None = None
+        if ram_raw:
+            try:
+                host_ram = float(ram_raw)
+            except ValueError:
+                return web.json_response({"ok": False, "error": "invalid ram_gb"}, status=400)
+        include_unfit = (request.query.get("include_unfit") or "true").strip().lower() not in ("0", "false", "no")
+        try:
+            payload = await asyncio.to_thread(
+                cookbook_provider,
+                modality=modality,
+                host_ram_gb=host_ram,
+                include_unfit=include_unfit,
+            )
+            return web.json_response(payload)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def run_model_roundtable(request: web.Request) -> web.Response:
+        if roundtable_runner is None:
+            return web.json_response({"ok": False, "error": "roundtable unavailable"}, status=501)
+        body = await request.json()
+        prompt = str(body.get("prompt") or "").strip()
+        if not prompt:
+            return web.json_response({"ok": False, "error": "prompt is required"}, status=400)
+        models = body.get("models") if isinstance(body.get("models"), list) else []
+        try:
+            res = await asyncio.to_thread(
+                roundtable_runner,
+                prompt=prompt,
+                models=[str(m) for m in models],
+                blind=bool(body.get("blind", False)),
+                critique_round=bool(body.get("critique_round", False)),
+                consensus=bool(body.get("consensus", True)),
+            )
+            return web.json_response(res)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def run_deep_research(request: web.Request) -> web.Response:
+        if research_runner is None:
+            return web.json_response({"ok": False, "error": "deep research unavailable"}, status=501)
+        body = await request.json()
+        topic = str(body.get("topic") or "").strip()
+        if not topic:
+            return web.json_response({"ok": False, "error": "topic is required"}, status=400)
+        try:
+            res = await asyncio.to_thread(
+                research_runner,
+                topic=topic,
+                max_queries=int(body.get("max_queries") or 3),
+                max_sources=int(body.get("max_sources") or 6),
+                fetch_pages=bool(body.get("fetch_pages", True)),
+            )
+            return web.json_response(res)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def list_research_reports_route(request: web.Request) -> web.Response:
+        if research_lister is None:
+            return web.json_response({"ok": True, "reports": []})
+        limit = int(request.query.get("limit") or "25")
+        rows = await asyncio.to_thread(research_lister, limit)
+        return web.json_response({"ok": True, "reports": rows, "count": len(rows)})
 
     async def get_model_routing(_request: web.Request) -> web.Response:
         if routing_provider is None:
@@ -1744,6 +1818,10 @@ def create_gateway_app(
     app.router.add_put("/v1/tools/source", tool_source)
     app.router.add_get("/v1/models", list_models)
     app.router.add_post("/v1/models/select", select_model)
+    app.router.add_get("/v1/models/cookbook", get_model_cookbook)
+    app.router.add_post("/v1/models/roundtable", run_model_roundtable)
+    app.router.add_post("/v1/research/run", run_deep_research)
+    app.router.add_get("/v1/research/reports", list_research_reports_route)
     app.router.add_get("/v1/models/routing", get_model_routing)
     app.router.add_put("/v1/models/routing", put_model_routing)
     app.router.add_get("/v1/onboarding/status", get_onboarding_status)

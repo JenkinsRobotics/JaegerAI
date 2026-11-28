@@ -28,5 +28,10 @@ This repository incorporates adapted modular components, specifications, and ref
 | **Voyager** (`MineDojo/Voyager`) | MIT | Headless Mineflayer Minecraft JS control primitives (`control_primitives/*.js`) and lifelong skill-library pattern |
 | **Pixel Agents** (`pixel-agents-hq/pixel-agents`) | MIT | 2D HTML5 Canvas pixel-art virtual office architecture, BFS tile-map pathfinding, sprite state machine, and Matrix spawn visuals (`@jaeger/ui-office`) |
 | **Mindcraft** (`mindcraft-bots/mindcraft`) | MIT | Minecraft survival reflex modes (`self_preservation`, `auto_eat`, `self_defense`, `unstuck`, `follow_player`) and deterministic co-op companion skills (`jaeger-embodiment-minecraft`) |
+| **OpenClaw** (`openclaw/openclaw`) | MIT | Ambient room context buffering, mention gating, and bot-loop protection patterns for Discord (`jaeger-channels/discord_guard.py`) |
+| **Open-LLM-VTuber** (`Open-LLM-VTuber/Open-LLM-VTuber`) | MIT | First-comma streaming TTS chunking, `[expression]` cue extraction, and inner-thought/action speech stripping (`jaeger-realtime/speech_prep.py`) |
+| **Project AIRI** (`moeru-ai/airi`) | MIT | Natural technical speech preprocessing (URLs, file paths, currency, math), pause-aware turn-end judgement (`jaeger-realtime/speech_prep.py`), and sensitive-app computer-use deny-list + 4-stage audit record (`jaeger-macos/computer_guard.py`) |
+| **llmfit** (`AlexsJones/llmfit`) | MIT | Hardware-aware unified-RAM model fit scoring patterns (`jaeger-models/hwfit.py`) |
+| **Tongyi DeepResearch** (`Alibaba-NLP/DeepResearch`) | Apache-2.0 | Multi-step query planning, source extraction, and cited synthesis pipeline patterns (`jaeger-orchestration/deep_research.py`) |
 
 Full upstream license texts are preserved in each donor module's header or `LICENSE` attribution block when extracted.

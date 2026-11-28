@@ -150,3 +150,66 @@ def test_ollama_profile_falls_back_to_show_and_cloud_default(monkeypatch) -> Non
     )
     assert providers.OllamaModel("qwen3:8b").profile("qwen3:8b").context_window == 65536
     assert providers.OllamaModel("mistral-large-4:cloud").profile("mistral-large-4:cloud").context_window == 131_072
+
+
+def test_hwfit_cookbook_multi_modality_and_what_if() -> None:
+    from jaeger_models import benchmark_model, recommend_models
+
+    # 32 GB Mac: 70B won't fit, 8B/14B/Whisper/Kokoro/Nomic fit nicely
+    report_32 = recommend_models(host_ram_gb=32.0, installed_names=["qwen3:8b"])
+    assert report_32["ok"] is True
+    assert report_32["hardware"]["simulated"] is True
+    by_id = {r["recipe"]["recipe_id"]: r for r in report_32["recommendations"]}
+    assert by_id["ollama/qwen3-8b"]["fit"] == "ideal"
+    assert by_id["ollama/qwen3-8b"]["installed"] is True
+    assert by_id["ollama/llama3.3-70b"]["fit"] == "wont_fit"
+    assert by_id["mlx/kokoro-82m"]["fit"] == "ideal"
+    assert by_id["mlx/flux-schnell-4bit"]["fit"] == "ideal"
+
+    # Filter by modality
+    stt_only = recommend_models(modality="stt", host_ram_gb=32.0)
+    assert stt_only["count"] >= 2
+    assert all(r["recipe"]["modality"] == "stt" for r in stt_only["recommendations"])
+
+    # Quick benchmark
+    bench = benchmark_model(ReplayModel([{"content": "Ready to assist you now."}], model_id="local/test"))
+    assert bench["ok"] is True and bench["output_chars"] > 0
+
+
+def test_model_roundtable_blind_critique_and_consensus() -> None:
+    from jaeger_models import ModelRoundtable, RoundtableParticipant
+
+    m1 = ReplayModel(
+        [{"content": "Use aluminum 6061 for the chassis."}, {"content": "- Agree on 6061\n- Watch weight"}],
+        model_id="local/qwen",
+    )
+    m2 = ReplayModel(
+        [{"content": "Use carbon fiber plates with 6061 brackets."}, {"content": "- Hybrid is lightest"}],
+        model_id="cloud/claude",
+    )
+    synth = ReplayModel([{"content": "Consensus: hybrid carbon + 6061 brackets."}], model_id="local/synth")
+
+    rt = ModelRoundtable(
+        [
+            RoundtableParticipant(name="local/qwen", model=m1),
+            RoundtableParticipant(name="cloud/claude", model=m2),
+        ],
+        synthesizer=synth,
+    )
+    report = rt.run(
+        "Best chassis material for JP01?",
+        blind=True,
+        critique_round=True,
+        consensus=True,
+        seed=42,
+    )
+    payload = report.to_dict()
+    assert payload["ok"] is True
+    assert payload["blind"] is True
+    assert len(payload["responses"]) == 2
+    # In blind mode model_name is masked to label while reveal_map holds true names
+    assert all(r["model_name"] == r["label"] for r in payload["responses"])
+    assert set(payload["reveal_map"].values()) == {"local/qwen", "cloud/claude"}
+    assert "hybrid carbon" in payload["consensus"]
+    assert all(r.get("critique") for r in payload["responses"])
+    assert "# Roundtable Comparison" in report.to_markdown()

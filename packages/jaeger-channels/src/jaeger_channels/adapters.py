@@ -22,6 +22,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 
+from .discord_guard import AmbientRoomBuffer, BotLoopGuard, is_mentioned
 from .webhook import _NoRedirect, _validate_token, _validate_webhook_url
 
 __all__ = [
@@ -454,6 +455,9 @@ class DiscordChannelPoller:
         auto_reply_owner: bool = False,
         api_base: str = "https://discord.com/api/v10",
         poll_interval_s: float = 4.0,
+        mention_tokens: list[str] | None = None,
+        ambient_buffer: AmbientRoomBuffer | None = None,
+        loop_guard: BotLoopGuard | None = None,
     ) -> None:
         self._token = _validate_token((bot_token or "").strip())
         self._base = _validate_webhook_url(api_base.rstrip("/"))
@@ -465,8 +469,15 @@ class DiscordChannelPoller:
         self._allowed_users = {str(u).strip() for u in (allowed_user_ids or set()) if str(u).strip()}
         self._auto_reply = bool(auto_reply_owner)
         self._poll_interval_s = max(0.5, float(poll_interval_s))
+        self._mention_tokens = [t.strip() for t in (mention_tokens or []) if t and t.strip()]
+        self._ambient = ambient_buffer or AmbientRoomBuffer()
+        self._loop_guard = loop_guard or BotLoopGuard()
         self._opener = _safe_opener()
         self._last_id: dict[str, str] = {}
+
+    @property
+    def ambient_buffer(self) -> AmbientRoomBuffer:
+        return self._ambient
 
     def _fetch_channel_sync(self, channel_id: str) -> list[dict[str, Any]]:
         qs = f"?limit=10&after={self._last_id[channel_id]}" if channel_id in self._last_id else "?limit=10"
@@ -486,7 +497,9 @@ class DiscordChannelPoller:
                     continue
                 self._last_id[cid] = mid
                 author = msg.get("author") if isinstance(msg.get("author"), dict) else {}
-                if author.get("bot"):
+                is_bot = bool(author.get("bot"))
+                if is_bot:
+                    self._loop_guard.allow_inbound(cid, is_bot_author=True)
                     continue
                 uid = str(author.get("id") or "").strip()
                 if self._allowed_users and uid not in self._allowed_users:
@@ -495,9 +508,19 @@ class DiscordChannelPoller:
                 if not text:
                     continue
                 sender = str(author.get("username") or uid or "discord_user")
-                res = self._on_message("discord", cid, mid, sender, text, self._auto_reply)
+                if self._mention_tokens and not is_mentioned(text, self._mention_tokens):
+                    self._ambient.record(cid, sender, text)
+                    continue
+                allowed, _reason = self._loop_guard.allow_inbound(cid, is_bot_author=False)
+                if not allowed:
+                    self._ambient.record(cid, sender, text)
+                    continue
+                context_prefix = self._ambient.format_context(cid, limit=8)
+                delivered_text = f"{context_prefix}\n\n{text}" if context_prefix else text
+                res = self._on_message("discord", cid, mid, sender, delivered_text, self._auto_reply)
                 if asyncio.iscoroutine(res):
                     await res
+                self._loop_guard.record_reply(cid)
                 processed += 1
         return processed
 

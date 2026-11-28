@@ -71,18 +71,23 @@ from jaeger_memory import (
 from jaeger_models import (
     ConversationCacheMarkStore,
     HybridRoutingStore,
+    ModelRoundtable,
     OllamaModel,
+    RoundtableParticipant,
     StickyFallbackModel,
     bind_stream_sink,
     build_default_model,
+    recommend_models,
 )
 from jaeger_orchestration import (
+    DeepResearchEngine,
     DryRunSimulator,
     DurableMailbox,
     PriorityTier,
     ResourceGovernor,
     SubagentOrchestrator,
     WorkflowEngine,
+    list_research_reports,
 )
 from jaeger_realtime import RealtimeVoiceSession
 from jaeger_reliability import ReliabilityEngine
@@ -94,6 +99,7 @@ from jaeger_tools import (
     ToolRegistry,
     ToolSpec,
     register_builtin_tools,
+    web_search,
 )
 from jaeger_vision import RollingFrameBuffer
 from jaeger_youtube import MediaArchiveStore, YouTubeStudioStore, search_public_videos
@@ -477,6 +483,7 @@ class ModularGatewayRuntime:
                 poll_cids = [str(c).strip() for c in (dc_cfg.get("channel_ids") or ()) if str(c).strip()]
                 if dc_bot and poll_cids and bool(dc_cfg.get("poll_inbound", True)):
                     allowed_u = {str(u).strip() for u in (dc_cfg.get("allowed_user_ids") or ()) if str(u).strip()}
+                    mentions = [str(m).strip() for m in (dc_cfg.get("mention_tokens") or ()) if str(m).strip()]
                     self.channel_ingress.register_poller(
                         "discord",
                         DiscordChannelPoller(
@@ -486,6 +493,7 @@ class ModularGatewayRuntime:
                             allowed_user_ids=allowed_u or None,
                             auto_reply_owner=bool(dc_cfg.get("auto_reply_owner", False)),
                             api_base=dc_base,
+                            mention_tokens=mentions or None,
                         ),
                     )
             except Exception:  # noqa: BLE001
@@ -1968,6 +1976,292 @@ class ModularGatewayRuntime:
             read_only=False,
             source="jaeger-channels",
         )
+        _reg(
+            "apple_calendar",
+            "Native macOS Calendar.app integration: list calendars, list upcoming events, or create an event.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list_calendars", "list_events", "create_event"]},
+                    "days": {"type": "integer", "default": 7, "minimum": 1, "maximum": 90},
+                    "calendar_name": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "start_iso": {"type": "string"},
+                    "end_iso": {"type": "string"},
+                    "duration_minutes": {"type": "integer", "default": 60},
+                    "location": {"type": "string"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._apple_calendar_tool(args),
+            read_only=False,
+            source="jaeger-macos",
+        )
+        _reg(
+            "apple_reminders",
+            "Native macOS Reminders.app integration: list reminder lists, list open reminders, create, or complete a reminder.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list_lists", "list", "create", "complete"]},
+                    "list_name": {"type": "string"},
+                    "title": {"type": "string"},
+                    "due_iso": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "include_completed": {"type": "boolean", "default": False},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._apple_reminders_tool(args),
+            read_only=False,
+            source="jaeger-macos",
+        )
+        _reg(
+            "apple_notes",
+            "Native macOS Notes.app integration: list folders, search notes, read a note, or create a note.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list_folders", "search", "read", "create"]},
+                    "query": {"type": "string"},
+                    "folder_name": {"type": "string"},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "limit": {"type": "integer", "default": 20},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._apple_notes_tool(args),
+            read_only=False,
+            source="jaeger-macos",
+        )
+        _reg(
+            "model_cookbook",
+            "Hardware-fit local model Cookbook across LLMs, Vision, Image Gen, STT, TTS, and Embeddings (with optional what-if RAM simulation).",
+            {
+                "type": "object",
+                "properties": {
+                    "modality": {
+                        "type": "string",
+                        "enum": ["all", "llm", "vision", "image_gen", "stt", "tts", "embedding"],
+                        "default": "all",
+                    },
+                    "what_if_ram_gb": {"type": "number"},
+                    "include_unfit": {"type": "boolean", "default": True},
+                },
+            },
+            lambda args: self._cookbook_info(
+                modality=str(args.get("modality") or "all"),
+                host_ram_gb=float(args["what_if_ram_gb"]) if args.get("what_if_ram_gb") is not None else None,
+                include_unfit=bool(args.get("include_unfit", True)),
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "model_roundtable",
+            "Compare multiple models side-by-side (optional blind A/B mode, peer critique, and unified consensus synthesis).",
+            {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string"},
+                    "models": {"type": "array", "items": {"type": "string"}},
+                    "blind": {"type": "boolean", "default": False},
+                    "critique_round": {"type": "boolean", "default": False},
+                    "consensus": {"type": "boolean", "default": True},
+                },
+                "required": ["prompt"],
+            },
+            lambda args: self._run_roundtable(
+                prompt=str(args["prompt"]),
+                models=list(args.get("models") or ()),
+                blind=bool(args.get("blind", False)),
+                critique_round=bool(args.get("critique_round", False)),
+                consensus=bool(args.get("consensus", True)),
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "deep_research",
+            "Run autonomous multi-step web research (sub-queries, safe page reading, cited Markdown + Visual HTML report saved to ~/.jaeger/reports/).",
+            {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string"},
+                    "max_queries": {"type": "integer", "default": 3, "minimum": 1, "maximum": 5},
+                    "max_sources": {"type": "integer", "default": 6, "minimum": 1, "maximum": 12},
+                    "fetch_pages": {"type": "boolean", "default": True},
+                },
+                "required": ["topic"],
+            },
+            lambda args: self._run_deep_research(
+                topic=str(args["topic"]),
+                max_queries=int(args.get("max_queries") or 3),
+                max_sources=int(args.get("max_sources") or 6),
+                fetch_pages=bool(args.get("fetch_pages", True)),
+            ),
+            read_only=False,
+            source="jaeger-orchestration",
+        )
+
+    def _apple_calendar_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        from jaeger_macos import create_calendar_event, list_calendars, list_upcoming_events
+
+        act = str(args.get("action") or "").strip().lower()
+        if act == "list_calendars":
+            return list_calendars()
+        if act == "list_events":
+            return list_upcoming_events(
+                days=int(args.get("days") or 7),
+                calendar_name=str(args["calendar_name"]) if args.get("calendar_name") else None,
+            )
+        if act == "create_event":
+            return create_calendar_event(
+                summary=str(args.get("summary") or ""),
+                start_iso=str(args.get("start_iso") or ""),
+                end_iso=str(args["end_iso"]) if args.get("end_iso") else None,
+                duration_minutes=int(args.get("duration_minutes") or 60),
+                calendar_name=str(args["calendar_name"]) if args.get("calendar_name") else None,
+                location=str(args.get("location") or ""),
+                notes=str(args.get("notes") or ""),
+            )
+        raise ValueError(f"unsupported apple_calendar action: {act!r}")
+
+    def _apple_reminders_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        from jaeger_macos import complete_reminder, create_reminder, list_reminder_lists, list_reminders
+
+        act = str(args.get("action") or "").strip().lower()
+        if act == "list_lists":
+            return list_reminder_lists()
+        if act == "list":
+            return list_reminders(
+                list_name=str(args["list_name"]) if args.get("list_name") else None,
+                include_completed=bool(args.get("include_completed", False)),
+            )
+        if act == "create":
+            return create_reminder(
+                title=str(args.get("title") or ""),
+                list_name=str(args["list_name"]) if args.get("list_name") else None,
+                due_iso=str(args["due_iso"]) if args.get("due_iso") else None,
+                notes=str(args.get("notes") or ""),
+            )
+        if act == "complete":
+            return complete_reminder(
+                title=str(args.get("title") or ""),
+                list_name=str(args["list_name"]) if args.get("list_name") else None,
+            )
+        raise ValueError(f"unsupported apple_reminders action: {act!r}")
+
+    def _apple_notes_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        from jaeger_macos import create_note, list_note_folders, read_note, search_notes
+
+        act = str(args.get("action") or "").strip().lower()
+        if act == "list_folders":
+            return list_note_folders()
+        if act == "search":
+            return search_notes(
+                query=str(args.get("query") or ""),
+                folder_name=str(args["folder_name"]) if args.get("folder_name") else None,
+                limit=int(args.get("limit") or 20),
+            )
+        if act == "read":
+            return read_note(
+                title=str(args.get("title") or ""),
+                folder_name=str(args["folder_name"]) if args.get("folder_name") else None,
+            )
+        if act == "create":
+            return create_note(
+                title=str(args.get("title") or ""),
+                body=str(args.get("body") or ""),
+                folder_name=str(args.get("folder_name") or "Notes"),
+            )
+        raise ValueError(f"unsupported apple_notes action: {act!r}")
+
+    def _cookbook_info(
+        self,
+        *,
+        modality: str = "all",
+        host_ram_gb: float | None = None,
+        include_unfit: bool = True,
+    ) -> dict[str, Any]:
+        installed: list[str] = []
+        base = self._base_model()
+        if isinstance(base, OllamaModel):
+            try:
+                installed = [str(m.get("id") or "") for m in base.list_models() if m.get("id")]
+            except Exception:  # noqa: BLE001
+                installed = []
+        return recommend_models(
+            modality=modality,
+            host_ram_gb=host_ram_gb,
+            installed_names=installed,
+            include_unfit=include_unfit,
+        )
+
+    def _run_roundtable(
+        self,
+        *,
+        prompt: str,
+        models: list[str] | None = None,
+        blind: bool = False,
+        critique_round: bool = False,
+        consensus: bool = True,
+    ) -> dict[str, Any]:
+        requested = [str(m).strip() for m in (models or ()) if str(m).strip()][:5]
+        participants: list[RoundtableParticipant] = []
+        if not requested:
+            cfg = self.routing.load()
+            active = self._base_model()
+            participants.append(
+                RoundtableParticipant(
+                    name=str(getattr(active, "model_id", active.name)),
+                    model=active,
+                )
+            )
+            if cfg.fallback and cfg.fallback != participants[0].name:
+                participants.append(
+                    RoundtableParticipant(name=cfg.fallback, model=build_default_model(model=cfg.fallback))
+                )
+        else:
+            for mid in requested:
+                participants.append(RoundtableParticipant(name=mid, model=build_default_model(model=mid)))
+        rt = ModelRoundtable(participants, synthesizer=self._base_model())
+        return rt.run(
+            prompt,
+            blind=blind,
+            critique_round=critique_round,
+            consensus=consensus,
+        ).to_dict()
+
+    def _run_deep_research(
+        self,
+        *,
+        topic: str,
+        max_queries: int = 3,
+        max_sources: int = 6,
+        fetch_pages: bool = True,
+    ) -> dict[str, Any]:
+        engine = DeepResearchEngine(
+            search_fn=lambda q, lim: web_search(q, limit=lim),
+            model=self._base_model(),
+            reports_dir=self.state_dir / "reports",
+        )
+        rep = engine.run(
+            topic,
+            max_queries=max_queries,
+            max_sources=max_sources,
+            fetch_pages=fetch_pages,
+        )
+        self.global_bus.publish(
+            "research.completed",
+            {"report_id": rep.report_id, "topic": rep.topic[:120], "sources": len(rep.sources)},
+        )
+        return rep.to_dict(include_html=False)
+
+    def _list_research_reports(self, limit: int = 25) -> list[dict[str, Any]]:
+        return list_research_reports(self.state_dir / "reports", limit=limit)
 
     def _droid_act(self, action: str, args: Mapping[str, Any]) -> dict[str, Any]:
         if action in ("sleep", "park", "camera_off"):
@@ -2872,6 +3166,10 @@ class ModularGatewayRuntime:
             tool_workspace=self.tool_workspace,
             models_provider=self._models_info,
             model_selector=self._select_model,
+            cookbook_provider=self._cookbook_info,
+            roundtable_runner=self._run_roundtable,
+            research_runner=self._run_deep_research,
+            research_lister=self._list_research_reports,
             routing_provider=self._get_routing,
             routing_updater=self._update_routing,
             onboarding_provider=self._onboarding_status,
