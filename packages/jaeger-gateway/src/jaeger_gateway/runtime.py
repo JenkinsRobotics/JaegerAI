@@ -76,14 +76,22 @@ from jaeger_memory import (
     sync_memory_markdown,
 )
 from jaeger_models import (
+    RISK_FLAG_CATALOG,
     ConversationCacheMarkStore,
+    EvalCandidate,
     HybridRoutingStore,
+    ModelEvalSuite,
     ModelRoundtable,
+    ModelUsageLedger,
     OllamaModel,
     RoundtableParticipant,
     StickyFallbackModel,
     bind_stream_sink,
     build_default_model,
+    build_static_risk_card,
+    estimate_model_pricing,
+    fetch_ollama_cloud_telemetry,
+    fetch_openrouter_telemetry,
     recommend_models,
 )
 from jaeger_orchestration import (
@@ -304,6 +312,7 @@ class ModularGatewayRuntime:
         self.avatars = AvatarStore(self.state_dir)
         self.avatar_link = AvatarLink(state_dir=self.state_dir)
         self.routing = HybridRoutingStore(self.state_dir)
+        self.model_ledger = ModelUsageLedger(self.state_dir / "model_telemetry.sqlite3")
         try:
             ensure_starter_skills(self.state_dir / "skills")
         except Exception:  # noqa: BLE001
@@ -2157,6 +2166,55 @@ class ModularGatewayRuntime:
             source="jaeger-models",
         )
         _reg(
+            "model_telemetry",
+            "Inspect live provider balances (Ollama Cloud / OpenRouter), per-model pricing per MTok, 7-day SQLite usage/cost burn ledger, and rate-limit headroom. Read-only.",
+            {
+                "type": "object",
+                "properties": {
+                    "window_days": {"type": "number", "default": 7.0},
+                    "include_live_providers": {"type": "boolean", "default": True},
+                    "include_openrouter_catalog": {"type": "boolean", "default": False},
+                },
+            },
+            lambda args: self._model_telemetry_info(
+                window_days=float(args.get("window_days") or 7.0),
+                include_live_providers=bool(args.get("include_live_providers", True)),
+                include_openrouter_catalog=bool(args.get("include_openrouter_catalog", False)),
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "model_risk_cards",
+            "Inspect industry-standard OWASP LLM Top 10, refusal-calibration, cost, data-residency, and trust-zone risk flags detected for all installed cloud & local models (or a specific model). Read-only.",
+            {
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Optional specific model ID to inspect"},
+                },
+            },
+            lambda args: self._model_risk_cards(
+                model_id=str(args.get("model_id") or "").strip() or None,
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "model_eval_compare",
+            "Run defensive Cloud vs. Local evaluation suite (OWASP IPI/secret/agency probes, BFCL JSON accuracy, XSTest/OR-Bench false-refusal & tone calibration, sycophancy, latency & cost) and persist updated risk cards.",
+            {
+                "type": "object",
+                "properties": {
+                    "models": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            lambda args: self._run_model_eval(
+                models=list(args.get("models") or ()),
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
             "deep_research",
             "Run autonomous multi-step web research (sub-queries, safe page reading, cited Markdown + Visual HTML report saved to ~/.jaeger/reports/).",
             {
@@ -2579,6 +2637,103 @@ class ModularGatewayRuntime:
             critique_round=critique_round,
             consensus=consensus,
         ).to_dict()
+
+    def _installed_model_entries(self) -> list[dict[str, Any]]:
+        base = self._base_model()
+        if isinstance(base, OllamaModel):
+            try:
+                return list(base.list_models())
+            except Exception:  # noqa: BLE001
+                return []
+        mid = str(getattr(base, "model_id", base.name))
+        return [{"id": mid, "provider": getattr(base, "name", "model"), "size": None}]
+
+    def _model_telemetry_info(
+        self,
+        *,
+        window_days: float = 7.0,
+        include_live_providers: bool = True,
+        include_openrouter_catalog: bool = False,
+    ) -> dict[str, Any]:
+        entries = self._installed_model_entries()
+        catalog = [
+            estimate_model_pricing(
+                str(m.get("id") or ""),
+                provider=str(m.get("provider") or ""),
+                size_bytes=m.get("size") if isinstance(m.get("size"), int) else None,
+            ).to_dict()
+            for m in entries
+            if m.get("id")
+        ]
+        providers: dict[str, Any] = {}
+        if include_live_providers:
+            providers["ollama_cloud"] = fetch_ollama_cloud_telemetry(
+                usage_range=f"{max(1, int(round(window_days)))}d"
+            )
+            if include_openrouter_catalog or os.environ.get("OPENROUTER_API_KEY"):
+                providers["openrouter"] = fetch_openrouter_telemetry(
+                    include_catalog=include_openrouter_catalog,
+                )
+        return {
+            "ok": True,
+            "active_model": str(getattr(self._base_model(), "model_id", self._base_model().name)),
+            "ledger": self.model_ledger.summarize(window_days=window_days),
+            "installed_pricing": catalog,
+            "providers": providers,
+        }
+
+    def _model_risk_cards(self, *, model_id: str | None = None) -> dict[str, Any]:
+        stored = {c["model_id"]: c for c in self.model_ledger.list_risk_cards() if c.get("model_id")}
+        entries = self._installed_model_entries()
+        cards: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for entry in entries:
+            mid = str(entry.get("id") or "").strip()
+            if not mid or (model_id and mid != model_id):
+                continue
+            seen.add(mid)
+            if mid in stored:
+                cards.append(stored[mid])
+            else:
+                cards.append(
+                    build_static_risk_card(
+                        mid,
+                        provider=str(entry.get("provider") or ""),
+                        size_bytes=entry.get("size") if isinstance(entry.get("size"), int) else None,
+                    ).to_dict()
+                )
+        if model_id and model_id not in seen:
+            cards.append(stored.get(model_id) or build_static_risk_card(model_id).to_dict())
+        return {
+            "ok": True,
+            "count": len(cards),
+            "cards": cards,
+            "flag_catalog": {k: v.to_dict() for k, v in RISK_FLAG_CATALOG.items()},
+        }
+
+    def _run_model_eval(self, *, models: list[str] | None = None) -> dict[str, Any]:
+        entries_by_id = {
+            str(e.get("id") or ""): e
+            for e in self._installed_model_entries()
+            if e.get("id")
+        }
+        requested = [str(m).strip() for m in (models or ()) if str(m).strip()][:5]
+        if not requested:
+            active = self._base_model()
+            requested = [str(getattr(active, "model_id", active.name))]
+        candidates: list[EvalCandidate] = []
+        for mid in requested:
+            entry = entries_by_id.get(mid, {})
+            candidates.append(
+                EvalCandidate(
+                    model_id=mid,
+                    model=build_default_model(model=mid),
+                    provider=str(entry.get("provider") or ""),
+                    size_bytes=entry.get("size") if isinstance(entry.get("size"), int) else None,
+                )
+            )
+        suite = ModelEvalSuite(ledger=self.model_ledger)
+        return suite.compare(candidates)
 
     def _run_deep_research(
         self,
@@ -3524,6 +3679,9 @@ class ModularGatewayRuntime:
             model_selector=self._select_model,
             cookbook_provider=self._cookbook_info,
             roundtable_runner=self._run_roundtable,
+            model_telemetry_provider=self._model_telemetry_info,
+            model_risk_provider=self._model_risk_cards,
+            model_eval_runner=self._run_model_eval,
             research_runner=self._run_deep_research,
             research_lister=self._list_research_reports,
             mode_getter=self._get_agent_mode,

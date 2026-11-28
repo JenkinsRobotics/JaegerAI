@@ -157,5 +157,18 @@ class JaegerClient:
         qs = urllib.parse.urlencode({"station_url": station_url})
         return self._request("GET", f"/v1/hardware/nexus/snapshot?{qs}")
 
+    def model_telemetry(self, *, window_days: float = 7.0, live: bool = True) -> dict[str, Any]:
+        qs = urllib.parse.urlencode({"window_days": window_days, "live": str(live).lower()})
+        return self._request("GET", f"/v1/models/telemetry?{qs}")
+
+    def model_risk_cards(self, *, model: str | None = None) -> dict[str, Any]:
+        path = "/v1/models/risk-cards"
+        if model:
+            path += "?" + urllib.parse.urlencode({"model": model})
+        return self._request("GET", path)
+
+    def model_eval(self, models: list[str], *, timeout_s: float = 180.0) -> dict[str, Any]:
+        return self._request("POST", "/v1/models/eval", {"models": models}, timeout_s=timeout_s)
+
 
 __all__ = ["JaegerClient", "JaegerClientError"]
