@@ -67,6 +67,9 @@ def create_gateway_app(
     model_selector: Callable[[str], dict[str, Any]] | None = None,
     cookbook_provider: Callable[..., dict[str, Any]] | None = None,
     roundtable_runner: Callable[..., dict[str, Any]] | None = None,
+    model_telemetry_provider: Callable[..., dict[str, Any]] | None = None,
+    model_risk_provider: Callable[..., dict[str, Any]] | None = None,
+    model_eval_runner: Callable[..., dict[str, Any]] | None = None,
     research_runner: Callable[..., dict[str, Any]] | None = None,
     research_lister: Callable[..., list[dict[str, Any]]] | None = None,
     mode_getter: Callable[[], dict[str, Any]] | None = None,
@@ -773,6 +776,41 @@ def create_gateway_app(
                 critique_round=bool(body.get("critique_round", False)),
                 consensus=bool(body.get("consensus", True)),
             )
+            return web.json_response(res)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def get_model_telemetry(request: web.Request) -> web.Response:
+        if model_telemetry_provider is None:
+            return web.json_response({"ok": False, "error": "model telemetry unavailable"}, status=501)
+        try:
+            window_days = float(request.query.get("window_days") or "7")
+        except ValueError:
+            return web.json_response({"ok": False, "error": "invalid window_days"}, status=400)
+        include_live = (request.query.get("live") or "true").strip().lower() not in ("0", "false", "no")
+        include_or = (request.query.get("openrouter_catalog") or "false").strip().lower() in ("1", "true", "yes")
+        payload = await asyncio.to_thread(
+            model_telemetry_provider,
+            window_days=window_days,
+            include_live_providers=include_live,
+            include_openrouter_catalog=include_or,
+        )
+        return web.json_response(payload)
+
+    async def get_model_risk_cards(request: web.Request) -> web.Response:
+        if model_risk_provider is None:
+            return web.json_response({"ok": False, "error": "model risk cards unavailable"}, status=501)
+        mid = (request.query.get("model") or "").strip() or None
+        payload = await asyncio.to_thread(model_risk_provider, model_id=mid)
+        return web.json_response(payload)
+
+    async def run_model_eval(request: web.Request) -> web.Response:
+        if model_eval_runner is None:
+            return web.json_response({"ok": False, "error": "model eval suite unavailable"}, status=501)
+        body = await request.json()
+        models = body.get("models") if isinstance(body.get("models"), list) else []
+        try:
+            res = await asyncio.to_thread(model_eval_runner, models=[str(m) for m in models])
             return web.json_response(res)
         except ValueError as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=400)
@@ -2091,6 +2129,9 @@ def create_gateway_app(
     app.router.add_post("/v1/models/select", select_model)
     app.router.add_get("/v1/models/cookbook", get_model_cookbook)
     app.router.add_post("/v1/models/roundtable", run_model_roundtable)
+    app.router.add_get("/v1/models/telemetry", get_model_telemetry)
+    app.router.add_get("/v1/models/risk-cards", get_model_risk_cards)
+    app.router.add_post("/v1/models/eval", run_model_eval)
     app.router.add_post("/v1/research/run", run_deep_research)
     app.router.add_get("/v1/research/reports", list_research_reports_route)
     app.router.add_get("/v1/system/mode", get_system_mode)
