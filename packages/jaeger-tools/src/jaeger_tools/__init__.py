@@ -22,6 +22,12 @@ from .remote_exec import (
     RemoteHostConfig,
     RemoteHostRegistry,
     SSHBackend,
+    TailscalePeer,
+    discover_tailscale_peers,
+    find_tailscale_bin,
+    probe_tailscale_ssh,
+    register_tailscale_peer,
+    ssh_setup_hint,
 )
 from .diagnostics import Diagnostic, DiagnosticReport, diagnose_file
 from .editors import (
@@ -84,6 +90,7 @@ __all__ = [
     "ScopedSecretVault",
     "SearchReplaceEditor",
     "SiteGotchasStore",
+    "TailscalePeer",
     "ToolConflict",
     "ToolDef",
     "ToolDiscoverySession",
@@ -97,6 +104,11 @@ __all__ = [
     "clear_registry",
     "coerce_args",
     "dev_mode_enabled",
+    "discover_tailscale_peers",
+    "find_tailscale_bin",
+    "probe_tailscale_ssh",
+    "register_tailscale_peer",
+    "ssh_setup_hint",
     "diagnose_file",
     "get_tool",
     "get_tools",
