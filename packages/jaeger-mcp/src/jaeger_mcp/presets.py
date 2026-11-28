@@ -51,6 +51,17 @@ BUILTIN_MCP_PRESETS: tuple[MCPServerPreset, ...] = (
         category="jenkins_robotics",
     ),
     MCPServerPreset(
+        preset_id="jaeger_arena",
+        name="jaeger_arena",
+        title="Jaeger Arena (Training & Challenges)",
+        description="Connects Jaeger to your local Jaeger Arena server (:8792) for skill-tree worlds, practice challenges, and verified XP progression.",
+        transport="streamable_http",
+        default_url="http://127.0.0.1:8792/mcp/",
+        requires_token=True,
+        token_label="Arena Participant Bearer Token",
+        category="jenkins_robotics",
+    ),
+    MCPServerPreset(
         preset_id="rea",
         name="rea",
         title="REA (Reverse Engineer Anything)",

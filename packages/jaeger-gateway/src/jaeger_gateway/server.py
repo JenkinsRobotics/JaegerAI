@@ -73,6 +73,9 @@ def create_gateway_app(
     mode_setter: Callable[[str], dict[str, Any]] | None = None,
     evidence_store: Any = None,
     agent_importer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    kanban_board: Any = None,
+    reminder_store: Any = None,
+    avatar_packs_provider: Callable[[], dict[str, Any]] | None = None,
     routing_provider: Callable[[], dict[str, Any]] | None = None,
     routing_updater: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     onboarding_provider: Callable[[], dict[str, Any]] | None = None,
@@ -616,7 +619,109 @@ def create_gateway_app(
 
     async def list_models(_request: web.Request) -> web.Response:
         info = models_provider() if models_provider is not None else {"active": "", "models": []}
-        return web.json_response({"ok": True, **info})
+        active = str(info.get("active") or "")
+        raw_models = list(info.get("models") or [])
+        openai_data: list[dict[str, Any]] = [
+            {"id": "jaeger", "object": "model", "owned_by": "jaeger", "default": True}
+        ]
+        seen_ids = {"jaeger"}
+        for m in raw_models:
+            mid = str(m.get("id") or "").strip() if isinstance(m, dict) else ""
+            if mid and mid not in seen_ids:
+                seen_ids.add(mid)
+                openai_data.append({
+                    "id": f"jaeger/{mid}",
+                    "object": "model",
+                    "owned_by": str(m.get("provider") or "local"),
+                    "default": mid == active,
+                })
+        return web.json_response({"ok": True, "object": "list", "data": openai_data, "default": "jaeger", **info})
+
+    async def openai_chat_completions(request: web.Request) -> web.StreamResponse:
+        """OpenAI-compatible /v1/chat/completions endpoint for jaeger-chat (VS Code) & SDKs."""
+        body = await request.json()
+        messages = body.get("messages")
+        if not isinstance(messages, list) or not messages:
+            return web.json_response({"error": {"message": "messages list is required", "type": "invalid_request_error"}}, status=400)
+        prompt = ""
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and str(msg.get("role") or "") == "user":
+                content = msg.get("content")
+                if isinstance(content, str):
+                    prompt = content.strip()
+                elif isinstance(content, list):
+                    prompt = " ".join(
+                        str(p.get("text") or "") for p in content if isinstance(p, dict) and p.get("type") == "text"
+                    ).strip()
+                if prompt:
+                    break
+        if not prompt:
+            return web.json_response({"error": {"message": "non-empty user message is required", "type": "invalid_request_error"}}, status=400)
+
+        req_sid = (request.headers.get("X-Jaeger-Session-Id") or "").strip()
+        if req_sid and store.get_session(req_sid) is not None:
+            sid = req_sid
+        else:
+            sid = store.main_chat_session()["session_id"]
+
+        model_name = str(body.get("model") or "jaeger")
+        want_stream = bool(body.get("stream", False))
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        created = int(time.time())
+
+        _, fut = coordinator.submit(
+            sid,
+            prompt,
+            owner_schedule_proposal_allowed=_owner_local_only(request),
+        )
+        outcome = await asyncio.to_thread(fut.result, 180.0)
+        reply_text = str(outcome.get("content") or "")
+
+        if not want_stream:
+            return web.json_response({
+                "id": completion_id,
+                "object": "chat.completion",
+                "created": created,
+                "model": model_name,
+                "session_id": sid,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": reply_text},
+                        "finish_reason": "stop",
+                    }
+                ],
+            })
+
+        resp = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Jaeger-Session-Id": sid,
+            },
+        )
+        await resp.prepare(request)
+        chunk1 = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model_name,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": reply_text}, "finish_reason": None}],
+        }
+        chunk2 = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model_name,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        await resp.write(f"data: {json.dumps(chunk1)}\n\n".encode("utf-8"))
+        await resp.write(f"data: {json.dumps(chunk2)}\n\n".encode("utf-8"))
+        await resp.write(b"data: [DONE]\n\n")
+        await resp.write_eof()
+        return resp
 
     async def select_model(request: web.Request) -> web.Response:
         if model_selector is None:
@@ -750,6 +855,84 @@ def create_gateway_app(
             return web.json_response(res)
         except ValueError as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def get_avatar_packs(_request: web.Request) -> web.Response:
+        if avatar_packs_provider is None:
+            return web.json_response({"ok": True, "packs": [], "count": 0})
+        return web.json_response(await asyncio.to_thread(avatar_packs_provider))
+
+    async def get_board(_request: web.Request) -> web.Response:
+        if kanban_board is None:
+            return web.json_response({"ok": True, "columns": {}, "counts": {}, "total": 0})
+        return web.json_response(kanban_board.summary())
+
+    async def create_board_card(request: web.Request) -> web.Response:
+        if kanban_board is None:
+            return web.json_response({"ok": False, "error": "board unavailable"}, status=501)
+        body = await request.json()
+        try:
+            card = kanban_board.create_card(
+                str(body.get("title") or ""),
+                column=str(body.get("column") or "todo"),
+                priority=int(body.get("priority") or 2),
+                tags=body.get("tags") if isinstance(body.get("tags"), list) else (),
+                notes=str(body.get("notes") or ""),
+            )
+            return web.json_response({"ok": True, "card": card.to_dict()}, status=201)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def move_board_card(request: web.Request) -> web.Response:
+        if kanban_board is None:
+            return web.json_response({"ok": False, "error": "board unavailable"}, status=501)
+        cid = request.match_info["card_id"]
+        body = await request.json()
+        try:
+            card = kanban_board.move_card(
+                cid,
+                str(body.get("column") or "in_progress"),
+                notes=str(body["notes"]) if body.get("notes") is not None else None,
+            )
+            return web.json_response({"ok": True, "card": card.to_dict()})
+        except KeyError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=404)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def delete_board_card(request: web.Request) -> web.Response:
+        if kanban_board is None:
+            return web.json_response({"ok": False, "error": "board unavailable"}, status=501)
+        cid = request.match_info["card_id"]
+        ok = kanban_board.delete_card(cid)
+        return web.json_response({"ok": ok, "deleted": cid}, status=200 if ok else 404)
+
+    async def list_reminders_route(request: web.Request) -> web.Response:
+        if reminder_store is None:
+            return web.json_response({"ok": True, "reminders": [], "count": 0})
+        status_filter = request.query.get("status", "pending") or None
+        rows = [r.to_dict() for r in reminder_store.list_reminders(status=status_filter)]
+        return web.json_response({"ok": True, "reminders": rows, "count": len(rows)})
+
+    async def create_reminder_route(request: web.Request) -> web.Response:
+        if reminder_store is None:
+            return web.json_response({"ok": False, "error": "reminders unavailable"}, status=501)
+        body = await request.json()
+        try:
+            rem = reminder_store.schedule(
+                str(body.get("message") or ""),
+                in_minutes=float(body["in_minutes"]) if body.get("in_minutes") is not None else None,
+                at_iso=str(body["at_iso"]) if body.get("at_iso") else None,
+            )
+            return web.json_response({"ok": True, "reminder": rem.to_dict()}, status=201)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def cancel_reminder_route(request: web.Request) -> web.Response:
+        if reminder_store is None:
+            return web.json_response({"ok": False, "error": "reminders unavailable"}, status=501)
+        rid = request.match_info["reminder_id"]
+        ok = reminder_store.cancel(rid)
+        return web.json_response({"ok": ok, "cancelled": rid}, status=200 if ok else 404)
 
     async def get_model_routing(_request: web.Request) -> web.Response:
         if routing_provider is None:
@@ -1868,6 +2051,8 @@ def create_gateway_app(
     app.router.add_get("/v1/sessions/{session_id}/job-series/{series_id}", get_job_series)
     app.router.add_patch("/v1/sessions/{session_id}/job-series/{series_id}", update_job_series)
     app.router.add_get("/v1/sessions/{session_id}/events", stream_events)
+    app.router.add_get("/v1/sessions/{session_id}/stream", stream_events)
+    app.router.add_post("/v1/chat/completions", openai_chat_completions)
     app.router.add_get("/v1/approvals", list_approvals)
     app.router.add_post("/v1/approvals/{approval_id}/resolve", resolve_approval)
     app.router.add_get("/v1/tools", list_tools)
@@ -1886,6 +2071,14 @@ def create_gateway_app(
     app.router.add_get("/v1/evidence/{evidence_id}", inspect_evidence_route)
     app.router.add_get("/v1/skills/importers", list_importers_route)
     app.router.add_post("/v1/skills/import", run_importer_route)
+    app.router.add_get("/v1/avatars/packs", get_avatar_packs)
+    app.router.add_get("/v1/board", get_board)
+    app.router.add_post("/v1/board/cards", create_board_card)
+    app.router.add_post("/v1/board/cards/{card_id}/move", move_board_card)
+    app.router.add_delete("/v1/board/cards/{card_id}", delete_board_card)
+    app.router.add_get("/v1/reminders", list_reminders_route)
+    app.router.add_post("/v1/reminders", create_reminder_route)
+    app.router.add_delete("/v1/reminders/{reminder_id}", cancel_reminder_route)
     app.router.add_get("/v1/models/routing", get_model_routing)
     app.router.add_put("/v1/models/routing", put_model_routing)
     app.router.add_get("/v1/onboarding/status", get_onboarding_status)
