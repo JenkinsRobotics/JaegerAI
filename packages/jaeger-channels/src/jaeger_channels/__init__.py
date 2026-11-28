@@ -12,10 +12,14 @@ from .adapters import (
     build_slack_adapter,
     build_telegram_adapter,
 )
+from .discord_guard import AmbientMessage, AmbientRoomBuffer, BotLoopGuard, is_mentioned
 from .relay import ChannelHub, OutboxMessage, SUPPORTED_CHANNELS
 from .webhook import WEBHOOK_TIMEOUT_S, WebhookConfigError, build_webhook_adapter
 
 __all__ = [
+    "AmbientMessage",
+    "AmbientRoomBuffer",
+    "BotLoopGuard",
     "ChannelConfigError",
     "ChannelConfigStore",
     "ChannelHub",
@@ -32,4 +36,5 @@ __all__ = [
     "build_slack_adapter",
     "build_telegram_adapter",
     "build_webhook_adapter",
+    "is_mentioned",
 ]

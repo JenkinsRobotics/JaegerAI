@@ -7,6 +7,13 @@ from .cron_expr import (
     parse_cron,
     validate_cron,
 )
+from .deep_research import (
+    DeepResearchEngine,
+    ResearchReport,
+    ResearchSource,
+    list_research_reports,
+    safe_fetch_text,
+)
 from .dry_run import DryRunReport, DryRunSimulator, SimulatedStep
 from .governor import HeavyModelLease, PriorityTier, ResourceGovernor
 from .orchestrator import (
@@ -51,11 +58,14 @@ __all__ = [
     "CronJob",
     "CronSchedule",
     "CronScheduler",
+    "DeepResearchEngine",
     "DurableMailbox",
     "FencedJob",
     "GraphInterrupt",
     "PregelGraph",
     "PregelRunResult",
+    "ResearchReport",
+    "ResearchSource",
     "RunAuthorization",
     "ScopedVariables",
     "Send",
@@ -72,7 +82,9 @@ __all__ = [
     "current_authorization",
     "interrupt",
     "intersect_sandbox_profiles",
+    "list_research_reports",
     "next_cron_time",
     "parse_cron",
+    "safe_fetch_text",
     "validate_cron",
 ]
