@@ -1,7 +1,6 @@
 // JaegerShellCore: `jaeger stack … --json` reply types.
 // Ported from jaeger_ai/interfaces/swift/Sources/JaegerAI/Bridge/StackManager.swift:13-47 (Jenkins Robotics),
-// made public + Equatable; `summary` added. Only `stack up` is ever run by the shell, and only from the
-// confirm sheet; `stack status` is available for a future read-only detail view.
+// made public + Equatable; `summary` and `restartArguments` added.
 import Foundation
 
 public struct StackServiceStatus: Decodable, Sendable, Equatable {
@@ -26,6 +25,22 @@ public struct StackServiceStatus: Decodable, Sendable, Equatable {
         case headCommit = "head_commit"
         case stale
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? id
+        label = try c.decodeIfPresent(String.self, forKey: .label) ?? id
+        pid = try c.decodeIfPresent(Int.self, forKey: .pid)
+        state = try c.decodeIfPresent(String.self, forKey: .state) ?? "unknown"
+        rawState = try c.decodeIfPresent(String.self, forKey: .rawState)
+        ready = try c.decodeIfPresent(Bool.self, forKey: .ready) ?? false
+        configured = try c.decodeIfPresent(Bool.self, forKey: .configured) ?? true
+        port = try c.decodeIfPresent(Int.self, forKey: .port)
+        gitCommit = try c.decodeIfPresent(String.self, forKey: .gitCommit)
+        headCommit = try c.decodeIfPresent(String.self, forKey: .headCommit)
+        stale = try c.decodeIfPresent(Bool.self, forKey: .stale) ?? false
+    }
 }
 
 public struct StackStatusReply: Decodable, Sendable {
@@ -43,6 +58,7 @@ public struct StackActionReply: Decodable, Sendable {
 public enum StackCLI {
     public static let upArguments = ["stack", "up", "--json"]
     public static let statusArguments = ["stack", "status", "--json"]
+    public static let restartArguments = ["stack", "restart", "--json"]
     /// Ported from StackManager.swift:59-61 (`down`); used only by the production Stop (never in tests).
     public static let downArguments = ["stack", "down", "--json"]
 

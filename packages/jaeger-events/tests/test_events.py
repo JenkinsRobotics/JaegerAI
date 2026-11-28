@@ -93,3 +93,61 @@ def test_trace_context_w3c_roundtrip_and_non_blocking_emitter() -> None:
     assert len(received) == 1
     assert received[0].name == "tool.shell"
     assert emitter.delivered == 1
+
+
+def test_event_bus_handler_dag_order_and_cycle_rejection() -> None:
+    import pytest
+    from jaeger_events import HandlerCycleError
+
+    bus = EventBus()
+    order: list[str] = []
+    # Subscribe child BEFORE parent — DAG must still execute parent first!
+    bus.subscribe("turn.finish", lambda _ev: order.append("notify"), name="notify", depends_on=("persist",))
+    bus.subscribe("turn.finish", lambda _ev: order.append("persist"), name="persist")
+    bus.publish("turn.finish", {"ok": True})
+    assert order == ["persist", "notify"]
+
+    with pytest.raises(HandlerCycleError):
+        bus.subscribe("turn.finish", lambda _ev: None, name="loop_a", depends_on=("loop_b",))
+        bus.subscribe("turn.finish", lambda _ev: None, name="loop_b", depends_on=("loop_a",))
+
+
+def test_fenced_event_stream_blocks_zombie_writers_and_preserves_seq_on_reopen() -> None:
+    import pytest
+    from jaeger_events import FencedEventStream, StaleWriterError
+
+    stream = FencedEventStream()
+    g1 = stream.open_attempt("run-1")
+    e1 = stream.append("run-1", g1, "turn.start", {"step": 1})
+    assert e1.seq == 1
+
+    # New attempt supersedes g1 above floor
+    g2 = stream.reopen("run-1", floor_seq=10)
+    assert g2 > g1
+    with pytest.raises(StaleWriterError):
+        stream.append("run-1", g1, "turn.delta", {"stale": True})
+    with pytest.raises(StaleWriterError):
+        stream.close_attempt("run-1", g1)
+
+    e2 = stream.append("run-1", g2, "turn.resumed", {"ok": True})
+    assert e2.seq == 11
+    assert [e.seq for e in stream.read_since("run-1", after_seq=1)] == [11]
+
+    # Reset drops buffered events without rolling back monotonic seq
+    stream.reset_events("run-1", g2)
+    e3 = stream.append("run-1", g2, "turn.retry", {"attempt": 2})
+    assert e3.seq == 12
+    assert [e.seq for e in stream.read_since("run-1", after_seq=0)] == [12]
+
+
+def test_live_contextvar_seam_stamps_tool_call_and_subagent() -> None:
+    from jaeger_events import live
+
+    seen: list[tuple[str, dict]] = []
+    assert live.active() is False
+    with live.bind(lambda ev, data: seen.append((ev, data))):
+        assert live.active() is True
+        with live.tool_call("tc-9"), live.subagent("sub-2"):
+            live.progress("working", fraction=0.5)
+    assert seen == [("tool.progress", {"message": "working", "fraction": 0.5, "call_id": "tc-9", "subagent_id": "sub-2"})]
+    assert live.active() is False

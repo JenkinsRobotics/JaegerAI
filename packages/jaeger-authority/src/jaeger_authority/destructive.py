@@ -60,7 +60,7 @@ _PY_SECRET_ACCESS = re.compile(
 )
 _AWK_SYSTEM = re.compile(r"\bsystem\s*\(", re.IGNORECASE)
 _SUBST = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
-_SEP_OPS = frozenset({";", "&&", "||", "&", "(", ")", ";;", "&;"})
+_SEP_OPS = frozenset({";", "&&", "||", "&", "(", ")", ";;", "&;", "\n"})
 _PIPE_OPS = frozenset({"|", "|&"})
 _REDIR_OPS = frozenset({">", ">>", ">|", "1>", "1>>", "2>", "&>"})
 _HEREDOC_START = re.compile(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?")
@@ -164,7 +164,8 @@ def _operands(args: list[str]) -> list[str]:
 
 def _tokenize_line(line: str) -> tuple[list[str], bool]:
     try:
-        lex = shlex.shlex(line, posix=True, punctuation_chars=";&|()>")
+        lex = shlex.shlex(line, posix=True, punctuation_chars=";&|()>\n")
+        lex.whitespace = " \t\r"
         lex.whitespace_split = True
         return list(lex), True
     except ValueError:
@@ -230,13 +231,17 @@ def _python_code_evasion(code: str) -> str | None:
         try:
             tree = ast.parse(code)
             calls: set[str] = set()
+            git_subpath_or_path_op = bool(
+                re.search(r"['\"](?:[^'\"]*/)?\.git/[^'\"]*['\"]", code, re.IGNORECASE)
+                or re.search(r"(?:Path|open|join)\s*\([^)]*['\"]\.git['\"]", code, re.IGNORECASE)
+            )
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Name):
                         calls.add(node.func.id)
                     elif isinstance(node.func, ast.Attribute):
                         calls.add(node.func.attr)
-            if has_git and (calls & {"write", "write_text", "write_bytes", "unlink", "rename", "replace"}):
+            if git_subpath_or_path_op and (calls & {"write", "write_text", "write_bytes", "unlink", "rename", "replace"}):
                 return "python code mutating .git metadata is blocked"
             if has_secret and (calls & {"open", "read_text", "read_bytes", "Path", "listdir", "scandir", "walk", "glob"}):
                 return "python code accesses protected secret/authority store"
@@ -312,13 +317,8 @@ def evasion_reason(command: str, depth: int = 0) -> str | None:
             if py_ev:
                 return py_ev
 
-    for raw_line in shell_only.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        tokens, ok = _tokenize_line(line)
-        if not ok:
-            continue  # handled by fail-closed destructive check
+    tokens, ok = _tokenize_line(shell_only)
+    if ok:
         for pipeline in _split_pipelines(tokens):
             progs: list[tuple[str, list[str]]] = []
             for raw_stage in pipeline:
@@ -382,19 +382,15 @@ def shell_command_reason(command: str, depth: int = 0) -> str | None:
             if inner_reason:
                 return inner_reason
 
-    for raw_line in shell_only.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        tokens, ok = _tokenize_line(line)
-        if not ok:
-            return "unparseable shell syntax (fail-closed)"
-        for pipeline in _split_pipelines(tokens):
-            for raw_stage in pipeline:
-                stage, _ = _extract_redirection_targets(raw_stage)
-                reason = _command_reason(stage, depth)
-                if reason:
-                    return reason
+    tokens, ok = _tokenize_line(shell_only)
+    if not ok:
+        return "unparseable shell syntax (fail-closed)"
+    for pipeline in _split_pipelines(tokens):
+        for raw_stage in pipeline:
+            stage, _ = _extract_redirection_targets(raw_stage)
+            reason = _command_reason(stage, depth)
+            if reason:
+                return reason
     return None
 
 
@@ -488,9 +484,15 @@ def _command_reason(tokens: list[str], depth: int) -> str | None:
 
 
 def destructive_reason(tool_name: str, arguments: Mapping[str, Any]) -> str | None:
-    """Canonical destructive-action check across shell, code_exec, file, and DB tools."""
-    tool = canonical_tool_id(tool_name)
+    """Canonical destructive-action check across shell, code_exec, file, framework, and DB tools."""
+    raw = str(tool_name or "").strip().lower()
     args = arguments or {}
+    if raw == "framework_delegate":
+        return f"handing a task to another agent framework ({args.get('framework') or '?'})"
+    if raw == "framework_apply_diff":
+        return f"applying another framework's patch to {args.get('workspace') or '?'}"
+
+    tool = canonical_tool_id(tool_name)
 
     if tool in SHELL_TOOL_IDS:
         cmd = str(args.get("command") or args.get("cmd") or "")
@@ -520,3 +522,29 @@ def destructive_reason(tool_name: str, arguments: Mapping[str, Any]) -> str | No
         return f"{tool} destroys persistent data"
 
     return None
+
+
+# Codex exec_policy.rs pattern: shells, interpreters, and launchers must NEVER
+# be promoted to persistent standing allow-prefixes.
+BANNED_STANDING_GRANT_PREFIXES: frozenset[str] = frozenset({
+    "sh", "bash", "zsh", "dash", "ksh", "fish",
+    "python", "python3", "node", "perl", "ruby",
+    "env", "sudo", "doas", "su", "exec", "nohup", "xargs",
+    "rm", "dd", "mkfs", "chmod", "chown", "git",
+    "curl", "wget", "ssh", "scp", "rsync",
+    "npm", "npx", "pip", "pip3", "uv",
+})
+
+
+def is_banned_standing_grant(command: str) -> bool:
+    """True when ``command``'s leading executable must never become a standing allow prefix."""
+    try:
+        tokens = shlex.split(command or "")
+    except ValueError:
+        return True  # fail closed on unparseable shell
+    for tok in tokens:
+        if _ENV_ASSIGN.match(tok):
+            continue
+        base = os.path.basename(tok).strip().lower()
+        return (not base) or (base in BANNED_STANDING_GRANT_PREFIXES)
+    return True

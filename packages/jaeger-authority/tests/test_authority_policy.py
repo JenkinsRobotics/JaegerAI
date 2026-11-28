@@ -228,3 +228,106 @@ def test_boundary_inspector_honors_allowed_roots_but_locks_secrets(tmp_path: Pat
     # Secret stores (~/.ssh) are ALWAYS denied
     v_ssh = inspector.inspect(ActionProposal("write_file", {"path": str(Path.home() / ".ssh" / "authorized_keys")}, workspace=ws))
     assert v_ssh is not None and v_ssh.decision == DecisionKind.DENY
+
+
+def test_boundary_inspector_allows_explicit_safe_read_artifacts_while_denying_secrets(tmp_path: Path) -> None:
+    from jaeger_authority import BoundaryAndSecretsInspector
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    jaeger_home = Path.home() / ".jaeger"
+    tool_results = jaeger_home / "instances" / "truth" / "logs" / "tool_results"
+    inspector = BoundaryAndSecretsInspector(read_allowed_roots=(tool_results,))
+
+    # Read-only access to explicitly admitted tool_results artifact is allowed
+    assert inspector.inspect(
+        ActionProposal("read_file", {"path": str(tool_results / "out.json")}, workspace=ws, tier="read_only")
+    ) is None
+
+    # Writes under ~/.jaeger remain DENIED even inside read_allowed_roots
+    v_write = inspector.inspect(
+        ActionProposal("write_file", {"path": str(tool_results / "out.json")}, workspace=ws, tier="write_local")
+    )
+    assert v_write is not None and v_write.decision == DecisionKind.DENY
+
+    # Secrets, env files, and databases under ~/.jaeger remain DENIED even for read_file
+    for forbidden in (
+        jaeger_home / "secrets" / "youtube_api_key",
+        jaeger_home / "secrets.env",
+        jaeger_home / "gateway_sessions.sqlite3",
+        jaeger_home / "instances" / "truth" / "credentials" / "mxmem_token",
+        Path.home() / ".ssh" / "id_rsa",
+    ):
+        v = inspector.inspect(
+            ActionProposal("read_file", {"path": str(forbidden)}, workspace=ws, tier="read_only")
+        )
+        assert v is not None and v.decision == DecisionKind.DENY, f"Expected DENY for {forbidden}"
+
+
+def test_egress_inspector_banned_standing_grants_and_guardrails(tmp_path: Path) -> None:
+    from jaeger_authority import EgressInspector, GuardrailResult, guardrails, is_banned_standing_grant
+
+    eg = EgressInspector()
+    assert eg.inspect(ActionProposal("shell", {"command": "git push origin feature"}, workspace=tmp_path)).decision == DecisionKind.REQUIRE_APPROVAL
+    assert eg.inspect(ActionProposal("shell", {"command": "curl -X POST https://api.example.com -d '{}'"}, workspace=tmp_path)).decision == DecisionKind.REQUIRE_APPROVAL
+    assert eg.inspect(ActionProposal("shell", {"command": "git status"}, workspace=tmp_path)) is None
+
+    assert is_banned_standing_grant("bash -c 'echo hi'") is True
+    assert is_banned_standing_grant("python3 -c 'print(1)'") is True
+    assert is_banned_standing_grant("pytest -q") is False
+
+    guardrails.clear()
+    unreg = guardrails.register_input(
+        lambda txt: GuardrailResult(True, "blocked secret") if "SECRET" in txt else None,
+        name="secret_guard",
+    )
+    try:
+        hit = guardrails.run("input", "leak SECRET now")
+        assert hit is not None and hit.tripwire_triggered and hit.guardrail == "secret_guard"
+        assert guardrails.run("input", "normal prompt") is None
+    finally:
+        unreg()
+
+
+def test_multiline_quoted_python_and_git_ignore_set_not_false_positive(tmp_path: Path) -> None:
+    engine = PolicyEngine()
+    # Multiline safe python3 -c "..." must NOT fail as unparseable shell syntax
+    safe_ml = 'python3 -c "\nimport sys\nprint(sys.version_info.major)\n"'
+    v_safe = engine.evaluate(ActionProposal("shell", {"command": safe_ml}, workspace=tmp_path))
+    assert v_safe.decision == DecisionKind.ALLOW, f"False positive on multiline python -c: {v_safe}"
+
+    # Multiline destructive python3 -c "..." MUST still be caught
+    bad_ml = 'python3 -c "\nimport os\nos.remove(\'foo.txt\')\n"'
+    v_bad = engine.evaluate(ActionProposal("shell", {"command": bad_ml}, workspace=tmp_path))
+    assert v_bad.decision == DecisionKind.REQUIRE_APPROVAL
+
+    # Bare ".git" in an ignore set alongside write_text on a regular file is safe
+    ignore_set = 'python3 -c "from pathlib import Path; SKIP = {\'.git\', \'node_modules\'}; Path(\'out.txt\').write_text(\'ok\')"'
+    v_ign = engine.evaluate(ActionProposal("shell", {"command": ignore_set}, workspace=tmp_path))
+    assert v_ign.decision == DecisionKind.ALLOW, f"False positive on .git ignore set: {v_ign}"
+
+    # Actual .git/ mutation MUST still be DENIED
+    real_git = 'python3 -c "from pathlib import Path; (Path(\'.git\') / \'config\').write_text(\'pwn\')"'
+    v_git = engine.evaluate(ActionProposal("shell", {"command": real_git}, workspace=tmp_path))
+    assert v_git.decision == DecisionKind.DENY
+
+
+def test_jaeger_venv_shell_execution_allowed_while_secrets_remain_denied(tmp_path: Path) -> None:
+    engine = PolicyEngine()
+    # Jaeger's canonical venv (~/.jaeger/venv) must be runnable in shell (matching Seatbelt sandbox.py)
+    for cmd in (
+        "~/.jaeger/venv/bin/python -c 'print(1)'",
+        "~/.jaeger/venv/bin/pytest -q packages/jaeger-avatar/tests",
+        "$HOME/.jaeger/venv/bin/python --version",
+    ):
+        v = engine.evaluate(ActionProposal("shell", {"command": cmd}, workspace=tmp_path))
+        assert v.decision == DecisionKind.ALLOW, f"Expected venv command allowed: {cmd} -> {v}"
+
+    # Secrets and SQLite stores under ~/.jaeger MUST remain strictly DENIED
+    for bad in (
+        "cat ~/.jaeger/secrets.env",
+        "sqlite3 ~/.jaeger/gateway_sessions.sqlite3 .tables",
+        "cat ~/.ssh/id_rsa",
+    ):
+        v = engine.evaluate(ActionProposal("shell", {"command": bad}, workspace=tmp_path))
+        assert v.decision == DecisionKind.DENY, f"Expected DENY for {bad} -> {v}"

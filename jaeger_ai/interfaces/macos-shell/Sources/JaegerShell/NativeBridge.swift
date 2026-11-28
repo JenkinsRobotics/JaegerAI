@@ -134,6 +134,29 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .ttsStop: host.bridgeTTSStop(); reply(id, ["stopped": true])
         case .openExternal(let url): host.bridgeOpenLink(url); reply(id, ["opened": url.absoluteString])
         case .openFile(let url): host.bridgeOpenFile(url); reply(id, ["opened": url.path])
+        case .historyConsent(let enabled):
+            if !enabled {
+                UserDefaults.standard.removeObject(forKey: "jaeger.history.appNamesAllowed")
+                reply(id, ["allowed": false])
+            } else if UserDefaults.standard.bool(forKey: "jaeger.history.appNamesAllowed") {
+                reply(id, ["allowed": true])
+            } else {
+                let alert = NSAlert()
+                alert.messageText = "Allow Jaeger to record foreground app names?"
+                alert.informativeText = "Computer history stores app names on this device while tracking is enabled. You can pause recording or revoke access in Settings."
+                alert.addButton(withTitle: "Cancel")
+                alert.addButton(withTitle: "Allow")
+                let allowed = alert.runModal() == .alertSecondButtonReturn
+                UserDefaults.standard.set(allowed, forKey: "jaeger.history.appNamesAllowed")
+                reply(id, ["allowed": allowed])
+            }
+        case .historyForeground:
+            guard UserDefaults.standard.bool(forKey: "jaeger.history.appNamesAllowed") else {
+                replyError(id, "activity_history_access_required")
+                return
+            }
+            // This operation returns only the app label, never window or document contents.
+            reply(id, ["name": NSWorkspace.shared.frontmostApplication?.localizedName ?? ""])
         case .computerStatus: reply(id, host.bridgeComputerStatus())
         case .computerSettings(let target): reply(id, ["open_request_accepted": host.bridgeComputerSettings(target), "permission_changed": false])
         case .clipboardRead: reply(id, host.bridgeReadClipboard())
@@ -190,6 +213,19 @@ extension ShellEnvironment {
             let code = (response as? HTTPURLResponse)?.statusCode
             let text = code.map { (200..<400).contains($0) ? "running" : "http_\($0)" } ?? "not_running"
             DispatchQueue.main.async { done(text) }
+        }.resume()
+    }
+
+    static func probeGatewayHealth(_ urlString: String, _ done: @escaping (GatewayHealthReport) -> Void) {
+        guard let url = URL(string: urlString) else {
+            DispatchQueue.main.async { done(.offline) }
+            return
+        }
+        let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 2.0)
+        URLSession(configuration: .ephemeral).dataTask(with: request) { data, response, _ in
+            let code = (response as? HTTPURLResponse)?.statusCode
+            let report = GatewayHealth.parse(statusCode: code, data: data)
+            DispatchQueue.main.async { done(report) }
         }.resume()
     }
 

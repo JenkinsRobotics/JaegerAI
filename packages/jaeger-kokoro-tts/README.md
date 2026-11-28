@@ -44,6 +44,24 @@ consumers today: the JaegerAI product and JP01's non-AI console.
 - **Operational health** — queue depth, warm state, current request,
   success/failure counters, audio backlog, underruns, output restarts, and
   the last hardware error use normal JaegerOS node health.
+- **Sound for a caller that plays it itself** — `open_voice(voice=, language=)`
+  returns a loaded engine; `synth(text, voice=None, rate=1.0)` yields float32
+  chunks and opens no device. `voice` and `rate` are for that line only (on
+  the Apple GPU a British voice, `bf_…`/`bm_…`, is read with British rules
+  whatever language the engine was opened in). Each chunk carries `marks`:
+  `[start, end, "p" | "f"]` in seconds from the chunk's start, when the lips
+  close (m/b/p) or tuck (f/v), from Kokoro's own phoneme lengths — for
+  whoever moves a mouth. Checked 2026-11-11 against Jaeger Avatar's own
+  timing code in three voices: the same marks within 3 ms. The PyTorch path
+  makes its marks the same way; that path was not run.
+- **No dead air** — Kokoro pads every clip with silence (measured: 0.28–0.43 s
+  before the voice, 0.49 s after). The engine keeps 12 ms before and 90 ms
+  after (`TRIM`, the values Jaeger Avatar's voice code was tuned to by ear),
+  fades a cut edge over 6 ms, and moves the lip marks to match. `synth`,
+  `render` and `speak` (bus and device) all play the same trimmed chunks. A
+  speaker that swallows its first milliseconds wants more lead: set
+  `tts.trim = (lead_s, tail_s)` on that robot, or `None` for Kokoro's own
+  padding. Not run on a robot or a real speaker.
 - **`Synthesizer` protocol** — `TTSNode` (the generic node) is decoupled
   from `KokoroTTS` (the real engine) behind a small protocol, so a
   future sibling module (e.g. a different TTS backend) can bind the

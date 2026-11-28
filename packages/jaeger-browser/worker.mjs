@@ -75,6 +75,69 @@ function webUrl(value) {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Use an http or https URL without embedded credentials');
   return url.href;
 }
+// Supervised tabs: a page permanently pinned to one approved origin. Requests
+// without approved_origin keep the legacy behavior and never touch this map.
+const guarded = new Map(); // targetId -> { origin, navigated }
+function guardedOrigin(value) {
+  const url = new URL(String(value));
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('approved_origin must be an exact http or https origin without embedded credentials');
+  if (url.pathname !== '/' || url.search || url.hash) throw new Error('approved_origin must be an origin only, not a URL');
+  return url.origin;
+}
+function originOf(value) {
+  try { const u = new URL(String(value)); return ['http:', 'https:'].includes(u.protocol) ? u.origin : null; } catch { return null; }
+}
+async function pinGuard(page, origin) {
+  const id = idOf(page);
+  const existing = guarded.get(id);
+  if (existing) return existing;
+  const state = { origin, navigated: false };
+  try {
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      // Cooperate with Steel listeners: never double-resolve an intercepted request.
+      if (req.isInterceptResolutionHandled()) return;
+      const url = req.url();
+      if (url === 'about:blank' && !state.navigated) { req.continue().catch(() => {}); return; }
+      if (originOf(url) === state.origin) { req.continue().catch(() => {}); return; }
+      // Fail closed: off-origin HTTP(S) including redirect hops, and other schemes.
+      req.abort().catch(() => {});
+    });
+  } catch {
+    throw new Error('Supervised browsing protection could not be established; refusing the action');
+  }
+  guarded.set(id, state);
+  return state;
+}
+async function supervisedAct(body, action, target) {
+  if (!target) throw new Error('Supervised actions require an explicit page_id');
+  const origin = guardedOrigin(body.approved_origin);
+  const id = idOf(target);
+  const pinned = guarded.get(id);
+  if (pinned && pinned.origin !== origin) throw new Error('This tab is already pinned to a different approved origin');
+  if (!['navigate', 'scroll', 'snapshot', 'content', 'close'].includes(action)) throw new Error('Supervised tabs only allow navigate, scroll, snapshot and close');
+  const state = await pinGuard(target, origin);
+  if (action === 'close') { await target.close(); guarded.delete(id); selected = ''; return { closed: id }; }
+  if (action === 'navigate') {
+    const url = webUrl(body.url);
+    if (originOf(url) !== origin) throw new Error('Navigation URL must match the approved origin');
+    await target.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    state.navigated = true;
+  } else if (action === 'scroll') {
+    await target.mouse.wheel({ deltaY: body.direction === 'up' ? -800 : 800 });
+  } else {
+    const snap = await snapshot(target);
+    const now = target.url();
+    if (now !== 'about:blank' && originOf(now) !== origin) {
+      guarded.delete(id); await target.close().catch(() => {});
+      throw new Error('Cross-origin snapshot refused; tab closed');
+    }
+    return snap;
+  }
+  const now = target.url();
+  if (now !== 'about:blank' && originOf(now) !== origin) throw new Error('Cross-origin navigation refused');
+  return status();
+}
 async function webMcpTools(page) {
   return page.evaluate(async () => {
     const context = document.modelContext;
@@ -123,12 +186,26 @@ async function callWebMcpTool(page, body) {
 }
 async function act(body) {
   const action = body.action || 'status';
+  if (body.approved_origin !== undefined && !body.page_id) throw new Error('approved_origin requires an explicit page_id');
+  // Compatibility marker for the supervised origin guard. Must be answered
+  // before any page is selected so a client can verify the worker enforces
+  // approved_origin before creating a dedicated tab.
+  if (action === 'supervised-capabilities') return { supervised_origin_guard: 1 };
   if (body.page_id) {
     const target = (await pages()).find(p => idOf(p) === body.page_id);
     if (!target) throw new Error('This browser tab is closed');
+    if (body.approved_origin !== undefined) return supervisedAct(body, action, target);
+    const pinned = guarded.get(idOf(target));
+    if (pinned && action !== 'close') throw new Error('This tab is pinned to an approved origin; supervised actions require approved_origin');
     selected = idOf(target);
   }
   const page = await current();
+  // A pinned current tab must not be driven through implicit selection:
+  // only status and new-tab are allowed without an explicit page_id, and
+  // even status must not leak a snapshot of the pinned page.
+  if (guarded.get(idOf(page)) && !body.page_id && ((action !== 'status' && action !== 'new-tab') || body.snapshot)) {
+    throw new Error('This tab is pinned to an approved origin; supervised actions require page_id and approved_origin');
+  }
   if (!observations.has(page)) {
     const data = { console_logs: [], failed_requests: [] }; observations.set(page, data);
     page.on('console', msg => { data.console_logs.push({ type: msg.type(), text: msg.text().slice(0, 2000) }); if (data.console_logs.length > 50) data.console_logs.shift(); });

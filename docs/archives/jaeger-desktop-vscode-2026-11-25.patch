@@ -1,0 +1,833 @@
+diff --git a/build/gulpfile.reh.ts b/build/gulpfile.reh.ts
+index c41a6045fb9..07c14f34608 100644
+--- a/build/gulpfile.reh.ts
++++ b/build/gulpfile.reh.ts
+@@ -23,14 +23,14 @@ import glob from 'glob';
+ import { promisify } from 'util';
+ import rceditCallback from 'rcedit';
+ import { compileApiProposalNamesTask, copyCodiconsTask } from './lib/compilation.ts';
+-import { cleanExtensionsBuildTask, compileNonNativeExtensionsBuildTask, compileNativeExtensionsBuildTask, compileExtensionMediaBuildTask, compileCopilotExtensionBuildTask } from './gulpfile.extensions.ts';
++import { cleanExtensionsBuildTask, compileNonNativeExtensionsBuildTask, compileNativeExtensionsBuildTask, compileExtensionMediaBuildTask } from './gulpfile.extensions.ts';
+ import * as cp from 'child_process';
+ import crypto from 'crypto';
+ import log from 'fancy-log';
+ import { runEsbuildBundle, getBootstrapEntryPointsForTarget } from './lib/esbuild.ts';
+ import { fetchUrls } from './lib/fetch.ts';
+ import { downloadFeedPackage } from './lib/azureFeed.ts';
+-import { ensureCopilotPlatformPackage, getCopilotExcludeFilter, getCopilotRuntimePrebuildFiles, getCopilotTgrepExcludeFilter, getRipgrepExcludeFilter, prepareBuiltInCopilotRipgrepShim } from './lib/copilot.ts';
++import { getRipgrepExcludeFilter } from './lib/copilot.ts';
+ import { readAgentSdkResults } from './agent-sdk/common.ts';
+ import { getServerNodeVersion } from './lib/node.ts';
+ 
+@@ -346,18 +346,15 @@ function packageTask(type: string, platform: string, arch: string, sourceFolderN
+ 
+ 		const jsFilter = util.filter(data => !data.isDirectory() && /\.js$/.test(data.path));
+ 
+-		const productionDependencies = getProductionDependencies(REMOTE_FOLDER);
++		const productionDependencies = getProductionDependencies(REMOTE_FOLDER)
++			.filter(dependency => !path.relative(REPO_ROOT, dependency).startsWith(`remote${path.sep}node_modules${path.sep}@github${path.sep}copilot`));
+ 		const dependenciesSrc = productionDependencies.map(d => path.relative(REPO_ROOT, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`, `!${d}/.bin/**`]).flat();
+ 		const cleanedDeps = gulp.src(dependenciesSrc, { base: 'remote', dot: true })
+ 			// filter out unnecessary files, no source maps in server build
+ 			.pipe(filter(['**', '!**/package-lock.json', '!**/*.{js,css}.map']))
+ 			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, '.moduleignore')))
+ 			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, `.moduleignore.${process.platform}`)));
+-		ensureCopilotPlatformPackage(platform, arch, 'remote/node_modules');
+-		const copilotRuntimePrebuilds = gulp.src(getCopilotRuntimePrebuildFiles(platform, arch, 'remote/node_modules'), { base: 'remote', dot: true, allowEmpty: true });
+-		const deps = es.merge(cleanedDeps, copilotRuntimePrebuilds)
+-			.pipe(filter(getCopilotExcludeFilter(platform, arch)))
+-			.pipe(filter(getCopilotTgrepExcludeFilter(platform, arch)))
++		const deps = cleanedDeps
+ 			.pipe(filter(getRipgrepExcludeFilter(platform, arch)))
+ 			.pipe(jsFilter)
+ 			.pipe(util.stripSourceMappingURL())
+@@ -514,16 +511,6 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
+ 	};
+ }
+ 
+-function prepareCopilotRipgrepShimTaskREH(platform: string, arch: string, destinationFolderName: string) {
+-	return async () => {
+-		const outputDir = path.join(BUILD_ROOT, destinationFolderName);
+-		const nodeModulesDir = path.join(outputDir, 'node_modules');
+-
+-		const builtInCopilotExtensionDir = path.join(outputDir, 'extensions', 'copilot');
+-		prepareBuiltInCopilotRipgrepShim(platform, arch, builtInCopilotExtensionDir, nodeModulesDir);
+-	};
+-}
+-
+ ['reh', 'reh-web'].forEach(type => {
+ 	const target = type === 'reh' ? 'server' : 'server-web';
+ 	const esbuildBundleTask = task.define(`esbuild-vscode-${type}`, () => runEsbuildBundle(`out-vscode-${type}`, false, true, target));
+@@ -542,8 +529,7 @@ function prepareCopilotRipgrepShimTaskREH(platform: string, arch: string, destin
+ 				compileNativeExtensionsBuildTask,
+ 				task.task(`node-${platform}-${arch}`) as task.Task,
+ 				util.rimraf(path.join(BUILD_ROOT, destinationFolderName)),
+-				packageTask(type, platform, arch, sourceFolderName, destinationFolderName),
+-				prepareCopilotRipgrepShimTaskREH(platform, arch, destinationFolderName)
++				packageTask(type, platform, arch, sourceFolderName, destinationFolderName)
+ 			];
+ 
+ 			if (platform === 'win32') {
+@@ -558,7 +544,6 @@ function prepareCopilotRipgrepShimTaskREH(platform: string, arch: string, destin
+ 				compileApiProposalNamesTask,
+ 				cleanExtensionsBuildTask,
+ 				compileNonNativeExtensionsBuildTask,
+-				compileCopilotExtensionBuildTask,
+ 				compileExtensionMediaBuildTask,
+ 				writeISODate('out-build'),
+ 				minified ? esbuildBundleMinTask : esbuildBundleTask,
+diff --git a/build/gulpfile.vscode.ts b/build/gulpfile.vscode.ts
+index f1875976b70..fb59936824a 100644
+--- a/build/gulpfile.vscode.ts
++++ b/build/gulpfile.vscode.ts
+@@ -24,10 +24,9 @@ import { getProductionDependencies } from './lib/dependencies.ts';
+ import { config } from './lib/electron.ts';
+ import { createAsar } from './lib/asar.ts';
+ import minimist from 'minimist';
+-import { compileNonNativeExtensionsBuildTask, compileNativeExtensionsBuildTask, compileAllExtensionsBuildTask, compileExtensionMediaBuildTask, cleanExtensionsBuildTask, compileCopilotExtensionBuildTask } from './gulpfile.extensions.ts';
++import { compileNonNativeExtensionsBuildTask, compileNativeExtensionsBuildTask, compileAllExtensionsBuildTask, compileExtensionMediaBuildTask, cleanExtensionsBuildTask } from './gulpfile.extensions.ts';
+ import { checkApiProposalNamesTask, copyCodiconsTask } from './lib/compilation.ts';
+-import { ensureCopilotPlatformPackage, getCopilotExcludeFilter, getCopilotRuntimePrebuildFiles, getCopilotRuntimeVersion, getCopilotTgrepExcludeFilter, getRipgrepExcludeFilter, prepareBuiltInCopilotRipgrepShim, renderCopilotShimLauncher } from './lib/copilot.ts';
+-import { getLockedVersion } from './lib/pnpmLock.ts';
++import { getRipgrepExcludeFilter } from './lib/copilot.ts';
+ import { ensureOSProxyResolverPlatformPackage, getOSProxyResolverExcludeFilter, getOSProxyResolverPlatformFiles } from './lib/osProxyResolver.ts';
+ import { readAgentSdkResults } from './agent-sdk/common.ts';
+ import { readDictationRuntimeResults } from './dictation-runtime/common.ts';
+@@ -43,20 +42,6 @@ const glob = promisify(globCallback);
+ const rcedit = promisify(rceditCallback);
+ const root = path.dirname(import.meta.dirname);
+ const commit = getVersion(root);
+-const copilotRuntimeVersion = getCopilotRuntimeVersion(path.join(root, 'node_modules'));
+-if (packageJson.copilotRuntimeVersion !== copilotRuntimeVersion) {
+-	throw new Error(`package.json declares Copilot runtime ${packageJson.copilotRuntimeVersion}, but @github/copilot-sdk bundles ${copilotRuntimeVersion}.`);
+-}
+-
+-function getLockedPackageVersion(packageName: string): string {
+-	const version = getLockedVersion('', packageName, root);
+-	if (!version) {
+-		throw new Error(`Package ${packageName} is missing a version in pnpm-lock.yaml.`);
+-	}
+-
+-	return version;
+-}
+-
+ const sourceMappingURLBase = `https://main.vscode-cdn.net/sourcemaps/${commit}`;
+ const isCI = !!process.env['CI'] || !!process.env['BUILD_ARTIFACTSTAGINGDIRECTORY'] || !!process.env['GITHUB_WORKSPACE'];
+ const useCdnSourceMapsForPackagingTasks = isCI;
+@@ -204,10 +189,6 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
+ 				json.date = readISODate(out);
+ 				json.checksums = checksums;
+ 				json.version = version;
+-				json.copilotVersions = {
+-					runtime: copilotRuntimeVersion,
+-					sdk: getLockedPackageVersion('@github/copilot-sdk'),
+-				};
+ 				// Stamp agentSdks from the per-platform results file produced
+ 				// by `build/agent-sdk/produce.ts` (an earlier pipeline step).
+ 				// Local dev: file absent → empty → not stamped.
+@@ -238,7 +219,8 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
+ 
+ 		const jsFilter = util.filter(data => !data.isDirectory() && /\.js$/.test(data.path));
+ 		const root = path.resolve(path.join(import.meta.dirname, '..'));
+-		const productionDependencies = getProductionDependencies(root);
++		const productionDependencies = getProductionDependencies(root)
++			.filter(dependency => !path.relative(root, dependency).startsWith(`node_modules${path.sep}@github${path.sep}copilot`));
+ 		const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat().concat('!**/*.mk');
+ 
+ 		const depFilterPattern = ['**', `!**/${config.version}/**`, '!**/bin/darwin-arm64-87/**', '!**/package-lock.json', '!**/yarn.lock'];
+@@ -250,13 +232,9 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
+ 			.pipe(filter(depFilterPattern))
+ 			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, '.moduleignore')))
+ 			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, `.moduleignore.${process.platform}`)));
+-		ensureCopilotPlatformPackage(platform, arch);
+-		const copilotRuntimePrebuilds = gulp.src(getCopilotRuntimePrebuildFiles(platform, arch), { base: '.', dot: true, allowEmpty: true });
+ 		ensureOSProxyResolverPlatformPackage(platform, arch);
+ 		const osProxyResolverPlatformPackage = gulp.src(getOSProxyResolverPlatformFiles(platform, arch), { base: '.', dot: true, allowEmpty: true });
+-		const deps = es.merge(cleanedDeps, copilotRuntimePrebuilds, osProxyResolverPlatformPackage)
+-			.pipe(filter(getCopilotExcludeFilter(platform, arch)))
+-			.pipe(filter(getCopilotTgrepExcludeFilter(platform, arch)))
++		const deps = es.merge(cleanedDeps, osProxyResolverPlatformPackage)
+ 			.pipe(filter(getRipgrepExcludeFilter(platform, arch)))
+ 			.pipe(filter(getFoundryLocalExcludeFilter()))
+ 			.pipe(filter(getOSProxyResolverExcludeFilter(platform, arch)))
+@@ -266,8 +244,6 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
+ 			.pipe(createAsar(path.join(process.cwd(), 'node_modules'), [
+ 				'**/*.node',
+ 				'**/@vscode/ripgrep-universal/bin/**',
+-				// The SDK runtime wrapper and native module must remain adjacent on disk.
+-				'**/@github/copilot-sdk-{darwin,linux,linuxmusl,win32}-*/**',
+ 				// The Dev Container CLI is spawned as an external Node process,
+ 				// so its bundled entrypoint must be available outside the ASAR.
+ 				'**/@devcontainers/cli/**',
+@@ -426,20 +402,6 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
+ 				.pipe(replace('@@VERSIONFOLDER@@', versionedResourcesFolder ? `${versionedResourcesFolder}\\` : ''))
+ 				.pipe(rename(product.nameShort + '.VisualElementsManifest.xml')));
+ 
+-			// Setup publishes it next to the copilot.exe shim; see build/win32/copilot.iss.
+-			result = es.merge(result, gulp.src('resources/win32/bin/copilot.sh', { base: 'resources/win32' })
+-				.pipe(es.through(function (file) {
+-					file.contents = Buffer.from(renderCopilotShimLauncher(file.contents.toString('utf8'), {
+-						commit: String(commit),
+-						quality: String(quality),
+-						applicationName: product.applicationName,
+-						dataFolderName: product.dataFolderName,
+-						serverDataFolderName: product.serverDataFolderName || '.vscode-remote',
+-					}));
+-					this.emit('data', file);
+-				}))
+-				.pipe(rename(f => { f.dirname = 'bin/copilot-shim'; f.basename = 'copilot'; f.extname = ''; })));
+-
+ 			result = es.merge(result, gulp.src('.build/policies/win32/**', { base: '.build/policies/win32' })
+ 				.pipe(rename(f => f.dirname = `policies/${f.dirname}`)));
+ 
+@@ -551,23 +513,6 @@ function patchWin32DependenciesTask(destinationFolderName: string) {
+ 	};
+ }
+ 
+-function prepareCopilotRipgrepShimTask(platform: string, arch: string, destinationFolderName: string) {
+-	const outputDir = path.join(path.dirname(root), destinationFolderName);
+-
+-	return async () => {
+-		// On Windows with win32VersionedUpdate, app resources live under a
+-		// commit-hash prefix: {output}/{commitHash}/resources/app/
+-		const versionedResourcesFolder = util.getVersionedResourcesFolder(platform, commit!);
+-		const appBase = platform === 'darwin'
+-			? path.join(outputDir, `${product.nameLong}.app`, 'Contents', 'Resources', 'app')
+-			: path.join(outputDir, versionedResourcesFolder, 'resources', 'app');
+-		const appNodeModulesDir = path.join(appBase, 'node_modules.asar.unpacked');
+-
+-		const builtInCopilotExtensionDir = path.join(appBase, 'extensions', 'copilot');
+-		prepareBuiltInCopilotRipgrepShim(platform, arch, builtInCopilotExtensionDir, appNodeModulesDir);
+-	};
+-}
+-
+ function generateNodeCompileCacheTask(platform: string, destinationFolderName: string) {
+ 	const outputDirectory = path.join(path.dirname(root), destinationFolderName);
+ 
+@@ -603,8 +548,7 @@ BUILD_TARGETS.forEach(buildTarget => {
+ 		const packageTasks: task.Task[] = [
+ 			compileNativeExtensionsBuildTask,
+ 			util.rimraf(path.join(buildRoot, destinationFolderName)),
+-			packageTask(platform, arch, sourceFolderName, destinationFolderName, opts),
+-			prepareCopilotRipgrepShimTask(platform, arch, destinationFolderName)
++			packageTask(platform, arch, sourceFolderName, destinationFolderName, opts)
+ 		];
+ 
+ 		if (platform === 'win32') {
+@@ -631,7 +575,6 @@ BUILD_TARGETS.forEach(buildTarget => {
+ 			copyCodiconsTask,
+ 			cleanExtensionsBuildTask,
+ 			compileNonNativeExtensionsBuildTask,
+-			compileCopilotExtensionBuildTask,
+ 			compileExtensionMediaBuildTask,
+ 			writeISODate('out-build'),
+ 			esbuildBundleTask,
+diff --git a/build/lib/extensions.ts b/build/lib/extensions.ts
+index d440640f34d..9a090bb380d 100644
+--- a/build/lib/extensions.ts
++++ b/build/lib/extensions.ts
+@@ -338,6 +338,8 @@ const nativeExtensions = [
+ 
+ const excludedExtensions = [
+ 	'copilot',
++	'github',
++	'github-authentication',
+ 	'vscode-api-tests',
+ 	'vscode-colorize-tests',
+ 	'vscode-colorize-perf-tests',
+@@ -434,11 +436,12 @@ export function packageAllLocalExtensionsStream(forWeb: boolean): Stream {
+ function doPackageLocalExtensionsStream(forWeb: boolean, native: boolean): Stream {
+ 	const nativeExtensionsSet = new Set(nativeExtensions);
+ 	const localExtensionsDescriptions = (
+-		(glob.sync('extensions/*/package.json') as string[])
++		(glob.sync('extensions/*/package.json', { follow: true }) as string[])
+ 			.map(manifestPath => {
+ 				const absoluteManifestPath = path.join(root, manifestPath);
+-				const extensionPath = path.dirname(path.join(root, manifestPath));
+-				const extensionName = path.basename(extensionPath);
++				const linkedExtensionPath = path.dirname(absoluteManifestPath);
++				const extensionPath = fs.realpathSync(linkedExtensionPath);
++				const extensionName = path.basename(linkedExtensionPath);
+ 				return { name: extensionName, path: extensionPath, manifestPath: absoluteManifestPath };
+ 			})
+ 			.filter(({ name }) => native ? nativeExtensionsSet.has(name) : !nativeExtensionsSet.has(name))
+diff --git a/product.json b/product.json
+index 64e1c4d2c64..57a424e902f 100644
+--- a/product.json
++++ b/product.json
+@@ -1,10 +1,10 @@
+ {
+-	"nameShort": "Code - OSS",
+-	"nameLong": "Code - OSS",
+-	"applicationName": "code-oss",
+-	"dataFolderName": ".vscode-oss",
+-	"sharedDataFolderName": ".vscode-oss-shared",
+-	"win32MutexName": "vscodeoss",
++	"nameShort": "Jaeger",
++	"nameLong": "Jaeger Desktop",
++	"applicationName": "jaeger-desktop",
++	"dataFolderName": ".jaeger-desktop",
++	"sharedDataFolderName": ".jaeger-desktop-shared",
++	"win32MutexName": "jaeger-desktop",
+ 	"licenseName": "MIT",
+ 	"licenseUrl": "https://github.com/microsoft/vscode/blob/main/LICENSE.txt",
+ 	"serverLicenseUrl": "https://github.com/microsoft/vscode/blob/main/LICENSE.txt",
+@@ -14,27 +14,27 @@
+ 	"serverApplicationName": "code-server-oss",
+ 	"serverDataFolderName": ".vscode-server-oss",
+ 	"tunnelApplicationName": "code-tunnel-oss",
+-	"win32DirName": "Microsoft Code OSS",
+-	"win32NameVersion": "Microsoft Code OSS",
+-	"win32RegValueName": "CodeOSS",
++	"win32DirName": "Jaeger Desktop",
++	"win32NameVersion": "Jaeger Desktop",
++	"win32RegValueName": "JaegerDesktop",
+ 	"win32x64AppId": "{{D77B7E06-80BA-4137-BCF4-654B95CCEBC5}",
+ 	"win32arm64AppId": "{{D1ACE434-89C5-48D1-88D3-E2991DF85475}",
+ 	"win32x64UserAppId": "{{CC6B787D-37A0-49E8-AE24-8559A032BE0C}",
+ 	"win32arm64UserAppId": "{{3AEBF0C8-F733-4AD4-BADE-FDB816D53D7B}",
+-	"win32AppUserModelId": "Microsoft.CodeOSS",
+-	"win32ShellNameShort": "C&ode - OSS",
+-	"win32TunnelServiceMutex": "vscodeoss-tunnelservice",
+-	"win32TunnelMutex": "vscodeoss-tunnel",
+-	"darwinBundleIdentifier": "com.visualstudio.code.oss",
++	"win32AppUserModelId": "JenkinsRobotics.JaegerDesktop",
++	"win32ShellNameShort": "&Jaeger",
++	"win32TunnelServiceMutex": "jaeger-desktop-tunnelservice",
++	"win32TunnelMutex": "jaeger-desktop-tunnel",
++	"darwinBundleIdentifier": "com.jenkinsrobotics.jaeger.desktop",
+ 	"darwinProfileUUID": "47827DD9-4734-49A0-AF80-7E19B11495CC",
+ 	"darwinProfilePayloadUUID": "CF808BE7-53F3-46C6-A7E2-7EDB98A5E959",
+-	"linuxDesktopName": "com.visualstudio.CodeOSS",
+-	"linuxIconName": "code-oss",
++	"linuxDesktopName": "com.jenkinsrobotics.JaegerDesktop",
++	"linuxIconName": "jaeger-desktop",
+ 	"licenseFileName": "LICENSE.txt",
+ 	"reportIssueUrl": "https://github.com/microsoft/vscode/issues/new",
+ 	"nodejsArtifactFeed": "",
+ 	"electronArtifactFeed": "",
+-	"urlProtocol": "code-oss",
++	"urlProtocol": "jaeger-desktop",
+ 	"agentsTelemetryAppName": "agents",
+ 	"webviewContentExternalBaseUrlTemplate": "https://{{uuid}}.vscode-cdn.net/insider/ef65ac1ba57f57f2a3961bfe94aa20481caca4c6/out/vs/workbench/contrib/webview/browser/pre/",
+ 	"builtInExtensions": [
+@@ -88,85 +88,64 @@
+ 		}
+ 	],
+ 	"defaultChatAgent": {
+-		"extensionId": "GitHub.copilot",
+-		"chatExtensionId": "GitHub.copilot-chat",
+-		"chatExtensionOutputId": "GitHub.copilot-chat.GitHub Copilot Chat.log",
+-		"chatExtensionOutputExtensionStateCommand": "github.copilot.debug.extensionState",
+-		"documentationUrl": "https://aka.ms/github-copilot-overview",
+-		"termsStatementUrl": "https://aka.ms/github-copilot-terms-statement",
+-		"privacyStatementUrl": "https://aka.ms/github-copilot-privacy-statement",
+-		"skusDocumentationUrl": "https://aka.ms/github-copilot-plans",
+-		"optimizeUsageDocumentationUrl": "https://aka.ms/token-usage-tips",
+-		"publicCodeMatchesUrl": "https://aka.ms/github-copilot-match-public-code",
+-		"managePlanUrl": "https://aka.ms/github-copilot-manage-plan",
+-		"upgradePlanUrl": "https://aka.ms/github-copilot-upgrade-plan",
+-		"signUpUrl": "https://aka.ms/github-sign-up",
++		"authenticationRequired": false,
++		"agentHostEnabled": false,
++		"extensionId": "",
++		"chatExtensionId": "jenkins-robotics.jaeger-ide",
++		"chatExtensionOutputId": "Jaeger",
++		"chatExtensionOutputExtensionStateCommand": "jaeger.checkStatus",
++		"documentationUrl": "",
++		"termsStatementUrl": "",
++		"privacyStatementUrl": "",
++		"skusDocumentationUrl": "",
++		"optimizeUsageDocumentationUrl": "",
++		"publicCodeMatchesUrl": "",
++		"managePlanUrl": "",
++		"upgradePlanUrl": "",
++		"signUpUrl": "",
+ 		"provider": {
+ 			"default": {
+-				"id": "github",
+-				"name": "GitHub"
++				"id": "jaeger",
++				"name": "Jaeger Gateway"
+ 			},
+ 			"enterprise": {
+-				"id": "github-enterprise",
+-				"name": "GHE"
++				"id": "jaeger",
++				"name": "Jaeger Gateway"
+ 			},
+ 			"google": {
+-				"id": "google",
+-				"name": "Google"
++				"id": "jaeger",
++				"name": "Jaeger Gateway"
+ 			},
+ 			"apple": {
+-				"id": "apple",
+-				"name": "Apple"
++				"id": "jaeger",
++				"name": "Jaeger Gateway"
+ 			},
+ 			"microsoft": {
+-				"id": "microsoft",
+-				"name": "Microsoft"
++				"id": "jaeger",
++				"name": "Jaeger Gateway"
+ 			}
+ 		},
+-		"providerExtensionId": "vscode.github-authentication",
+-		"providerUriSetting": "github-enterprise.uri",
+-		"providerScopes": [
+-			[
+-				"read:user",
+-				"user:email",
+-				"repo",
+-				"workflow"
+-			],
+-			[
+-				"user:email"
+-			],
+-			[
+-				"read:user"
+-			]
+-		],
+-		"entitlementUrl": "https://api.github.com/copilot_internal/user",
+-		"entitlementSignupLimitedUrl": "https://api.github.com/copilot_internal/subscribe_limited_user",
+-		"chatQuotaExceededContext": "github.copilot.chat.quotaExceeded",
+-		"completionsQuotaExceededContext": "github.copilot.completions.quotaExceeded",
+-		"walkthroughCommand": "github.copilot.open.walkthrough",
+-		"completionsMenuCommand": "github.copilot.toggleStatusMenu",
+-		"chatRefreshTokenCommand": "github.copilot.refreshToken",
+-		"generateCommitMessageCommand": "github.copilot.git.generateCommitMessage",
+-		"resolveMergeConflictsCommand": "github.copilot.git.resolveMergeConflicts",
+-		"completionsAdvancedSetting": "github.copilot.advanced",
+-		"completionsEnablementSetting": "github.copilot.enable",
+-		"nextEditSuggestionsSetting": "github.copilot.nextEditSuggestions.enabled",
+-		"tokenEntitlementUrl": "https://api.github.com/copilot_internal/v2/token",
+-		"mcpRegistryDataUrl": "https://api.github.com/copilot/mcp_registry",
+-		"mcpConnectorsUrl": "https://api.github.com/copilot-connectors/api/v1",
+-		"managedSettingsUrl": "https://api.github.com/copilot_internal/managed_settings"
+-	},
+-	"trustedExtensionAuthAccess": {
+-		"github": [
+-			"GitHub.copilot-chat"
+-		],
+-		"github-enterprise": [
+-			"GitHub.copilot-chat"
+-		],
+-		"microsoft": [
+-			"vscode.github-authentication"
+-		]
++		"providerExtensionId": "jenkins-robotics.jaeger-ide",
++		"providerUriSetting": "jaeger.gatewayUrl",
++		"providerScopes": [],
++		"entitlementUrl": "",
++		"entitlementSignupLimitedUrl": "",
++		"chatQuotaExceededContext": "jaeger.chat.quotaExceeded",
++		"completionsQuotaExceededContext": "jaeger.completions.quotaExceeded",
++		"walkthroughCommand": "jaeger.openChat",
++		"completionsMenuCommand": "jaeger.open",
++		"chatRefreshTokenCommand": "jaeger.checkStatus",
++		"generateCommitMessageCommand": "",
++		"resolveMergeConflictsCommand": "",
++		"completionsAdvancedSetting": "jaeger",
++		"completionsEnablementSetting": "jaeger.enabled",
++		"nextEditSuggestionsSetting": "jaeger.nextEditSuggestions.enabled",
++		"tokenEntitlementUrl": "",
++		"mcpRegistryDataUrl": "",
++		"mcpConnectorsUrl": "",
++		"managedSettingsUrl": ""
+ 	},
++	"trustedExtensionAuthAccess": {},
+ 	"onboardingKeymaps": [
+ 		{
+ 			"id": "vscode",
+@@ -242,9 +221,13 @@
+ 			"type": "light"
+ 		}
+ 	],
+-	"builtInExtensionsEnabledWithAutoUpdates": [
+-		"GitHub.copilot-chat"
+-	],
++	"extensionEnabledApiProposals": {
++		"jenkins-robotics.jaeger-ide": [
++			"chatProvider",
++			"defaultChatParticipant"
++		]
++	},
++	"builtInExtensionsEnabledWithAutoUpdates": [],
+ 	"sessionsWindowAllowedExtensions": [],
+ 	"voiceWsUrl": "wss://falcon-caas.mai.microsoft.com/voice-code/api/v1/realtime/voice"
+ }
+diff --git a/src/vs/base/common/product.ts b/src/vs/base/common/product.ts
+index 37cbeefd169..875ed1e09ab 100644
+--- a/src/vs/base/common/product.ts
++++ b/src/vs/base/common/product.ts
+@@ -429,6 +429,12 @@ export interface IAiGeneratedWorkspaceTrust {
+ }
+ 
+ export interface IDefaultChatAgent {
++	/** Whether the product's default chat provider needs an account sign-in/setup flow. */
++	readonly authenticationRequired?: boolean;
++
++	/** Whether the product ships and enables VS Code's separate Agent Host runtime. */
++	readonly agentHostEnabled?: boolean;
++
+ 	readonly extensionId: string;
+ 	readonly chatExtensionId: string;
+ 
+diff --git a/src/vs/platform/agentHost/browser/agentHostEnablementService.ts b/src/vs/platform/agentHost/browser/agentHostEnablementService.ts
+index 7f52f4a3c9e..316bab751eb 100644
+--- a/src/vs/platform/agentHost/browser/agentHostEnablementService.ts
++++ b/src/vs/platform/agentHost/browser/agentHostEnablementService.ts
+@@ -12,6 +12,7 @@ import { IContextKeyService } from '../../contextkey/common/contextkey.js';
+ import { InstantiationType, registerSingleton } from '../../instantiation/common/extensions.js';
+ import { bindContextKey, observableConfigValue } from '../../observable/common/platformObservableUtils.js';
+ import { COPILOT_SANDBOX_ALLOW_BYPASS_KEY, COPILOT_SANDBOX_ENABLED_KEY, IManagedSettingsService } from '../../policy/common/copilotManagedSettings.js';
++import { IProductService } from '../../product/common/productService.js';
+ import { AGENT_HOST_ENABLED_CONTEXT_KEY, IAgentHostEnablementService } from '../common/agentHostEnablementService.js';
+ 
+ export class AgentHostEnablementService extends Disposable implements IAgentHostEnablementService {
+@@ -47,8 +48,9 @@ class BrowserAgentHostEnablementService extends AgentHostEnablementService {
+ 		@IConfigurationService configurationService: IConfigurationService,
+ 		@IContextKeyService contextKeyService: IContextKeyService,
+ 		@IManagedSettingsService managedSettingsService: IManagedSettingsService,
++		@IProductService productService: IProductService,
+ 	) {
+-		super(!isWeb, configurationService, contextKeyService, managedSettingsService);
++		super(!isWeb && productService.defaultChatAgent?.agentHostEnabled !== false, configurationService, contextKeyService, managedSettingsService);
+ 	}
+ }
+ 
+diff --git a/src/vs/workbench/browser/workbench.contribution.ts b/src/vs/workbench/browser/workbench.contribution.ts
+index 75c746cf9eb..975b5f17077 100644
+--- a/src/vs/workbench/browser/workbench.contribution.ts
++++ b/src/vs/workbench/browser/workbench.contribution.ts
+@@ -616,7 +616,7 @@ const registry = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Con
+ 			'workbench.secondarySideBar.defaultVisibility': {
+ 				'type': 'string',
+ 				'enum': ['hidden', 'visibleInWorkspace', 'visible', 'maximizedInWorkspace', 'maximized'],
+-				'default': 'visibleInWorkspace',
++				'default': product.applicationName === 'jaeger-desktop' ? 'visible' : 'visibleInWorkspace',
+ 				'description': localize('secondarySideBarDefaultVisibility', "Controls the default visibility of the secondary side bar in workspaces or empty windows that are opened for the first time. Can be overridden by the agent sessions startup editor setting."),
+ 				'enumDescriptions': [
+ 					localize('workbench.secondarySideBar.defaultVisibility.hidden', "The secondary side bar is hidden by default."),
+diff --git a/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/codexContinuation.contribution.ts b/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/codexContinuation.contribution.ts
+index 54a78328dc7..d04cbe794b1 100644
+--- a/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/codexContinuation.contribution.ts
++++ b/src/vs/workbench/contrib/chat/browser/agentSessions/agentHost/codexContinuation.contribution.ts
+@@ -8,6 +8,7 @@ import { localize } from '../../../../../../nls.js';
+ import { CommandsRegistry } from '../../../../../../platform/commands/common/commands.js';
+ import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+ import { INotificationService, NotificationsFilter, Severity } from '../../../../../../platform/notification/common/notification.js';
++import product from '../../../../../../platform/product/common/product.js';
+ import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../common/contributions.js';
+ import { ICodexContinuationService } from '../../../../../services/agentHost/browser/codexContinuationService.js';
+ import { IWorkbenchEnvironmentService } from '../../../../../services/environment/common/environmentService.js';
+@@ -83,17 +84,21 @@ class CodexContinuationContribution extends Disposable {
+ 		}));
+ 	}
+ }
+-registerWorkbenchContribution2(CodexContinuationContribution.ID, CodexContinuationContribution, WorkbenchPhase.AfterRestored);
++if (product.defaultChatAgent?.agentHostEnabled !== false) {
++	registerWorkbenchContribution2(CodexContinuationContribution.ID, CodexContinuationContribution, WorkbenchPhase.AfterRestored);
++}
+ 
+ // Private commands are manually bindable, but are not offered in the Command
+ // Palette or the Keyboard Shortcuts editor's unbound-command list.
+-CommandsRegistry.registerCommand('_chat.showCodexContinuation', async accessor => {
+-	const nudge = accessor.get(ICodexContinuationService);
+-	const notifications = accessor.get(INotificationService);
+-	if (accessor.get(IWorkbenchEnvironmentService).isSessionsWindow) {
+-		accessor.get(IWorkbenchLayoutService).setPartHidden(false, Parts.SIDEBAR_PART);
+-	}
+-	if (!await nudge.showPreview()) {
+-		notifications.info(localize('codexContinuation.previewUnavailable', "To preview the suggestion, open a Codex conversation that uses ChatGPT and has a matching model available through GitHub Copilot."));
+-	}
+-});
++if (product.defaultChatAgent?.agentHostEnabled !== false) {
++	CommandsRegistry.registerCommand('_chat.showCodexContinuation', async accessor => {
++		const nudge = accessor.get(ICodexContinuationService);
++		const notifications = accessor.get(INotificationService);
++		if (accessor.get(IWorkbenchEnvironmentService).isSessionsWindow) {
++			accessor.get(IWorkbenchLayoutService).setPartHidden(false, Parts.SIDEBAR_PART);
++		}
++		if (!await nudge.showPreview()) {
++			notifications.info(localize('codexContinuation.previewUnavailable', "To preview the suggestion, open a Codex conversation that uses ChatGPT and has a matching model available through GitHub Copilot."));
++		}
++	});
++}
+diff --git a/src/vs/workbench/contrib/chat/browser/chatManagement/chatModelsWidget.ts b/src/vs/workbench/contrib/chat/browser/chatManagement/chatModelsWidget.ts
+index bf7621d3be1..d7831519ec7 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatManagement/chatModelsWidget.ts
++++ b/src/vs/workbench/contrib/chat/browser/chatManagement/chatModelsWidget.ts
+@@ -1179,6 +1179,7 @@ export class ChatModelsWidget extends Disposable {
+ 		@IExtensionsWorkbenchService private readonly extensionsWorkbenchService: IExtensionsWorkbenchService,
+ 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
+ 		@IDefaultAccountService private readonly defaultAccountService: IDefaultAccountService,
++		@IProductService private readonly productService: IProductService,
+ 	) {
+ 		super();
+ 
+@@ -1677,7 +1678,8 @@ export class ChatModelsWidget extends Disposable {
+ 			configurableVendors,
+ 			supportsAddingModels,
+ 			vendor => this.addModelsForVendor(vendor),
+-			this.defaultAccountResolved && this.defaultAccountService.currentDefaultAccount === null
++			this.productService.defaultChatAgent?.authenticationRequired !== false
++				&& this.defaultAccountResolved && this.defaultAccountService.currentDefaultAccount === null
+ 				? () => this.commandService.executeCommand(CHAT_SETUP_ACTION_ID)
+ 				: undefined,
+ 		);
+diff --git a/src/vs/workbench/contrib/chat/browser/chatStatus/chatStatusEntry.ts b/src/vs/workbench/contrib/chat/browser/chatStatus/chatStatusEntry.ts
+index 4c547b3e523..dea29e991f8 100644
+--- a/src/vs/workbench/contrib/chat/browser/chatStatus/chatStatusEntry.ts
++++ b/src/vs/workbench/contrib/chat/browser/chatStatus/chatStatusEntry.ts
+@@ -123,7 +123,7 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
+ 	private readonly dashboardTooltip: IStatusbarEntry['tooltip'];
+ 	private promo: ChatStatusPromo | undefined;
+ 
+-	private quotaResumeState: ChatQuotaResumeState;
++	private quotaResumeState: ChatQuotaResumeState = 'none';
+ 	private readonly quotaResetTimer = this._register(new MutableDisposable());
+ 	private readonly quotaRefresh = this._register(new MutableDisposable());
+ 	private readonly clearResumedScheduler = this._register(new MutableDisposable());
+@@ -141,6 +141,9 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
+ 		@ILifecycleService lifecycleService: ILifecycleService,
+ 	) {
+ 		super();
++		if (product.defaultChatAgent?.authenticationRequired === false) {
++			return;
++		}
+ 
+ 		this.quotaResumeState = this.readPersistedQuotaResumeState();
+ 		lifecycleService.when(LifecyclePhase.Restored).then(() => {
+diff --git a/src/vs/workbench/contrib/chat/browser/speechToText/chatSpeechToTextService.ts b/src/vs/workbench/contrib/chat/browser/speechToText/chatSpeechToTextService.ts
+index 49fab28724e..46e754d79b1 100644
+--- a/src/vs/workbench/contrib/chat/browser/speechToText/chatSpeechToTextService.ts
++++ b/src/vs/workbench/contrib/chat/browser/speechToText/chatSpeechToTextService.ts
+@@ -572,24 +572,26 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
+ 		this._preparingContextKey = ChatContextKeys.speechToTextPreparing.bindTo(contextKeyService);
+ 		this._usesMaiContextKey = ChatContextKeys.speechToTextUsesMai.bindTo(contextKeyService);
+ 		this._updateConfiguredContextKey();
+-		void this._refreshGitHubSession();
+-		this._register(this._authenticationService.onDidChangeSessions(e => {
+-			if (e.providerId === 'github') {
+-				void this._refreshGitHubSession();
+-			}
+-		}));
+-		this._register(this._authenticationService.onDidRegisterAuthenticationProvider(e => {
+-			if (e.id === 'github') {
+-				void this._refreshGitHubSession();
+-			}
+-		}));
+-		this._register(this._authenticationService.onDidUnregisterAuthenticationProvider(e => {
+-			if (e.id === 'github') {
+-				this._githubSessionGeneration++;
+-				this._hasGitHubSession = false;
+-				this._updateConfiguredContextKey();
+-			}
+-		}));
++		if (this._productService.defaultChatAgent?.authenticationRequired !== false) {
++			void this._refreshGitHubSession();
++			this._register(this._authenticationService.onDidChangeSessions(e => {
++				if (e.providerId === 'github') {
++					void this._refreshGitHubSession();
++				}
++			}));
++			this._register(this._authenticationService.onDidRegisterAuthenticationProvider(e => {
++				if (e.id === 'github') {
++					void this._refreshGitHubSession();
++				}
++			}));
++			this._register(this._authenticationService.onDidUnregisterAuthenticationProvider(e => {
++				if (e.id === 'github') {
++					this._githubSessionGeneration++;
++					this._hasGitHubSession = false;
++					this._updateConfiguredContextKey();
++				}
++			}));
++		}
+ 		this._register(this._configurationService.onDidChangeConfiguration(e => {
+ 			if (e.affectsConfiguration(ENABLED_SETTING) || e.affectsConfiguration(DICTATION_MODEL_SETTING)) {
+ 				this._updateConfiguredContextKey();
+diff --git a/src/vs/workbench/contrib/chat/browser/widget/input/modelPicker/modelPickerWidget.ts b/src/vs/workbench/contrib/chat/browser/widget/input/modelPicker/modelPickerWidget.ts
+index 107ec4c98d3..98ac395470c 100644
+--- a/src/vs/workbench/contrib/chat/browser/widget/input/modelPicker/modelPickerWidget.ts
++++ b/src/vs/workbench/contrib/chat/browser/widget/input/modelPicker/modelPickerWidget.ts
+@@ -596,8 +596,8 @@ export class ModelPickerWidget extends Disposable {
+ 	 * given a tab.
+ 	 */
+ 	private _providerPlaceholders(models: readonly ILanguageModelChatMetadataAndIdentifier[], { reason, activating }: IModelPickerAvailability, onLinkClick: (uri: URI) => void): IModelPickerProviderPlaceholder[] {
+-		const vendor = COPILOT_VENDOR_ID;
+-		const label = getLanguageModelProviderDisplayName(this._languageModelsService, COPILOT_VENDOR_ID);
++		const vendor = this._productService.defaultChatAgent?.provider.default?.id || COPILOT_VENDOR_ID;
++		const label = getLanguageModelProviderDisplayName(this._languageModelsService, vendor);
+ 		if (reason === ModelPickerUnavailableReason.Restricted) {
+ 			return [{
+ 				vendor,
+diff --git a/src/vs/workbench/contrib/chat/electron-browser/chat.contribution.ts b/src/vs/workbench/contrib/chat/electron-browser/chat.contribution.ts
+index 4744157d593..eec7189090b 100644
+--- a/src/vs/workbench/contrib/chat/electron-browser/chat.contribution.ts
++++ b/src/vs/workbench/contrib/chat/electron-browser/chat.contribution.ts
+@@ -238,14 +238,16 @@ class ChatLifecycleHandler extends Disposable {
+ 	}
+ }
+ 
+-registerAction2(OpenWorkspaceInAgentsWindowAction);
+-registerAction2(OpenWorkspaceInAgentsWindowChatTitleAction);
+-registerAction2(OpenWorkspaceInAgentsWindowTitleBarAction);
+-registerAction2(ToggleOpenInAgentsWindowTitleBarAction);
+-registerAction2(OpenAgentsWindowAction);
+-registerAction2(OpenChatSessionInAgentsWindowAction);
+-if (!product.quality) {
+-	registerAction2(ResetCopilotHarnessIntroductionAction);
++if (product.defaultChatAgent?.agentHostEnabled !== false) {
++	registerAction2(OpenWorkspaceInAgentsWindowAction);
++	registerAction2(OpenWorkspaceInAgentsWindowChatTitleAction);
++	registerAction2(OpenWorkspaceInAgentsWindowTitleBarAction);
++	registerAction2(ToggleOpenInAgentsWindowTitleBarAction);
++	registerAction2(OpenAgentsWindowAction);
++	registerAction2(OpenChatSessionInAgentsWindowAction);
++	if (!product.quality) {
++		registerAction2(ResetCopilotHarnessIntroductionAction);
++	}
+ }
+ registerAction2(StartVoiceChatAction);
+ 
+@@ -271,9 +273,11 @@ registerWorkbenchContribution2(NativeBuiltinToolsContribution.ID, NativeBuiltinT
+ registerWorkbenchContribution2(ChatCommandLineHandler.ID, ChatCommandLineHandler, WorkbenchPhase.BlockRestore);
+ registerWorkbenchContribution2(ChatSuspendThrottlingHandler.ID, ChatSuspendThrottlingHandler, WorkbenchPhase.AfterRestored);
+ registerWorkbenchContribution2(ChatLifecycleHandler.ID, ChatLifecycleHandler, WorkbenchPhase.AfterRestored);
+-registerWorkbenchContribution2(OpenWorkspaceInAgentsContribution.ID, OpenWorkspaceInAgentsContribution, WorkbenchPhase.BlockRestore);
+-registerWorkbenchContribution2(AgentsWindowInvitationContribution.ID, AgentsWindowInvitationContribution, WorkbenchPhase.BlockRestore);
+-registerWorkbenchContribution2(CopilotHarnessIntroductionContribution.ID, CopilotHarnessIntroductionContribution, WorkbenchPhase.Eventually);
++if (product.defaultChatAgent?.agentHostEnabled !== false) {
++	registerWorkbenchContribution2(OpenWorkspaceInAgentsContribution.ID, OpenWorkspaceInAgentsContribution, WorkbenchPhase.BlockRestore);
++	registerWorkbenchContribution2(AgentsWindowInvitationContribution.ID, AgentsWindowInvitationContribution, WorkbenchPhase.BlockRestore);
++	registerWorkbenchContribution2(CopilotHarnessIntroductionContribution.ID, CopilotHarnessIntroductionContribution, WorkbenchPhase.Eventually);
++}
+ 
+ // How long to wait for the agent host to surface an AgentInfo before
+ // throwing an error. Long enough for normal startup, short enough to avoid
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
+index ca1f60615df..fa5c80f359f 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.contribution.ts
+@@ -31,6 +31,7 @@ import { Categories } from '../../../../platform/action/common/actionCommonCateg
+ import { DisposableStore } from '../../../../base/common/lifecycle.js';
+ import { AccessibleViewRegistry } from '../../../../platform/accessibility/browser/accessibleViewRegistry.js';
+ import { GettingStartedAccessibleView } from './gettingStartedAccessibleView.js';
++import product from '../../../../platform/product/common/product.js';
+ 
+ export * as icons from './gettingStartedIcons.js';
+ 
+@@ -307,7 +308,7 @@ configurationRegistry.registerConfiguration({
+ 				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.welcomePageInEmptyWorkbench' }, "Open the Welcome page when opening an empty workbench."),
+ 				localize({ comment: ['This is the description for a setting. Values surrounded by single quotes are not to be translated.'], key: 'workbench.startupEditor.terminal' }, "Open a new terminal in the editor area."),
+ 			],
+-			'default': 'welcomePage',
++			'default': product.applicationName === 'jaeger-desktop' ? 'none' : 'welcomePage',
+ 			'description': localize('workbench.startupEditor', "Controls which editor is shown at startup, if none are restored from the previous session."),
+ 			'experiment': { mode: 'auto' },
+ 			agentsWindow: { default: 'none', readOnly: true },
+diff --git a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
+index db913f20c45..9747172bbdc 100644
+--- a/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
++++ b/src/vs/workbench/contrib/welcomeGettingStarted/browser/gettingStarted.ts
+@@ -952,20 +952,24 @@ export class GettingStartedPage extends EditorPane {
+ 		const gettingStartedList = this.buildGettingStartedWalkthroughsList();
+ 
+ 		const footerChildren: HTMLElement[] = [];
+-		const agentsWindowGraphic = this.categoriesSlideDisposables.add(this.instantiationService.createInstance(AgentsWindowGraphic));
+-		const agentsBanner = createAgentsBanner(
+-			{
+-				cssClass: 'getting-started-category.agents-banner',
+-				graphic: { element: agentsWindowGraphic.element, shownDesign: agentsWindowGraphic.shownDesign, isExposed: this.categoriesSlideShown },
+-			},
+-			this.commandService,
+-			this.telemetryService,
+-			this.configurationService,
+-			this.chatEntitlementService,
+-			this.defaultAccountService,
+-		);
+-		this.categoriesSlideDisposables.add(agentsBanner.disposables);
+-		footerChildren.push(agentsBanner.element);
++		let agentsWindowGraphic: AgentsWindowGraphic | undefined;
++		let agentsBanner: ReturnType<typeof createAgentsBanner> | undefined;
++		if (this.productService.defaultChatAgent?.agentHostEnabled !== false) {
++			agentsWindowGraphic = this.categoriesSlideDisposables.add(this.instantiationService.createInstance(AgentsWindowGraphic));
++			agentsBanner = createAgentsBanner(
++				{
++					cssClass: 'getting-started-category.agents-banner',
++					graphic: { element: agentsWindowGraphic.element, shownDesign: agentsWindowGraphic.shownDesign, isExposed: this.categoriesSlideShown },
++				},
++				this.commandService,
++				this.telemetryService,
++				this.configurationService,
++				this.chatEntitlementService,
++				this.defaultAccountService,
++			);
++			this.categoriesSlideDisposables.add(agentsBanner.disposables);
++			footerChildren.push(agentsBanner.element);
++		}
+ 		footerChildren.push($('p.showOnStartup', {},
+ 			showOnStartupCheckbox.domNode,
+ 			showOnStartupLabel,
+@@ -973,7 +977,7 @@ export class GettingStartedPage extends EditorPane {
+ 
+ 		const footer = $('.footer', {}, ...footerChildren);
+ 		const categoriesContainer = $('.gettingStartedCategoriesContainer', {}, header, leftColumn, rightColumn, footer,);
+-		const graphic = derived(reader => agentsBanner.visible.read(reader) ? agentsWindowGraphic.shownDesign.read(reader) : undefined);
++		const graphic = derived(reader => agentsBanner?.visible.read(reader) ? agentsWindowGraphic?.shownDesign.read(reader) : undefined);
+ 		const layoutAgentsWindowGraphic = () => this.fitAgentsWindowGraphic(categoriesContainer, graphic.get() !== undefined);
+ 
+ 		const layoutLists = () => {
+@@ -1009,11 +1013,13 @@ export class GettingStartedPage extends EditorPane {
+ 		this.categoriesPageScrollbar?.scanDomNode();
+ 
+ 		// The graphics and section styles differ in height, so fit again whenever either changes
+-		this.categoriesSlideDisposables.add(autorun(reader => {
+-			graphic.read(reader);
+-			categoriesContainer.setAttribute('data-agents-window-section-style', agentsWindowGraphic.sectionStyle.read(reader));
+-			layoutAgentsWindowGraphic();
+-		}));
++		if (agentsWindowGraphic) {
++			this.categoriesSlideDisposables.add(autorun(reader => {
++				graphic.read(reader);
++				categoriesContainer.setAttribute('data-agents-window-section-style', agentsWindowGraphic.sectionStyle.read(reader));
++				layoutAgentsWindowGraphic();
++			}));
++		}
+ 		this.layoutAgentsWindowGraphic = layoutAgentsWindowGraphic;
+ 		this.categoriesSlideDisposables.add(toDisposable(() => this.layoutAgentsWindowGraphic = undefined));
+ 
+diff --git a/src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts b/src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts
+index 125bc26bc9e..2681b868da2 100644
+--- a/src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts
++++ b/src/vs/workbench/contrib/welcomeOnboarding/browser/onboardingVariationA.ts
+@@ -169,6 +169,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
+ 	}
+ 
+ 	show(): void {
++		if (defaultChat.authenticationRequired === false) {
++			this._onDidComplete.fire();
++			return;
++		}
++
+ 		if (this.overlay) {
+ 			return;
+ 		}
+diff --git a/src/vs/workbench/services/chat/common/chatEntitlementService.ts b/src/vs/workbench/services/chat/common/chatEntitlementService.ts
+index 29ce4272e78..2fcf3f387aa 100644
+--- a/src/vs/workbench/services/chat/common/chatEntitlementService.ts
++++ b/src/vs/workbench/services/chat/common/chatEntitlementService.ts
+@@ -455,7 +455,7 @@ export class ChatEntitlementService extends Disposable implements IChatEntitleme
+ 			return;
+ 		}
+ 
+-		if (!productService.defaultChatAgent) {
++		if (!productService.defaultChatAgent || productService.defaultChatAgent.authenticationRequired === false) {
+ 			return; // we need a default chat agent configured going forward from here
+ 		}
+ 

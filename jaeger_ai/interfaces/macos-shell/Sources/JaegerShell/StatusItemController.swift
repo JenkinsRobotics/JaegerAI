@@ -5,7 +5,7 @@
 // The menu probes the loopback WebUI and gateway only when it opens (and once after a normal launch,
 // never in --verify-launch). "Start/Stop Jaeger stack…" go through StackController after a confirm sheet
 // (dev mode: own child processes; production: `<launcher> stack up|down --json`). Launch at Login is opt-in through SMAppService.mainApp and never changed automatically.
-// A Droid section in this same menu talks to the headless Droid host over its unix socket; the host no longer has its own status item.
+// A Droid section in this same menu talks to the modular Gateway HTTP API (`/v1/droid/*`).
 
 import AppKit
 import JaegerShellCore
@@ -22,9 +22,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let pauseItem = NSMenuItem(title: "Pause Jaeger Shell", action: nil, keyEquivalent: "")
     private let runningIcon = StatusItemController.loadIcon("jaeger_icon_22")
     private var lastRunning = true
+    private var lastWebUIRunning: Bool?
+    private var lastGatewayHealthy: Bool?
+    private var healthTimer: Timer?
     private var activityBadge: ActivityBadgeState = .off
     private let offIcon = StatusItemController.loadIcon("jaeger_icon_off_22")
-    private let droidMenu = DroidMenuController()
+    private let droidMenu: DroidMenuController
     private let macMenu = MacControlMenuController()
     // Live task progress (LiveTaskMonitor): ring on the icon + running-task menu section.
     private(set) var liveMonitor: LiveTaskMonitor?
@@ -37,12 +40,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     init(app: JaegerShellApplication) {
         self.app = app
+        self.droidMenu = DroidMenuController(app: app)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         if let button = statusItem.button {
             button.image = runningIcon
                 ?? NSImage(systemSymbolName: "circle.hexagongrid", accessibilityDescription: "Jaeger")
-            button.toolTip = "Jaeger (ui-rebuild)"
+            button.toolTip = "JaegerAI"
             button.target = self
             button.action = #selector(clicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -50,8 +54,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         buildMenu()
     }
 
-    /// Start the live task feed (normal launch only; never in --verify-launch).
+    /// Start the live task feed and periodic health refresh (normal launch only; never in --verify-launch).
     func startLiveTasks() {
+        if healthTimer == nil {
+            let timer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
+                self?.refreshIcon()
+            }
+            timer.tolerance = 2.0
+            healthTimer = timer
+        }
         guard liveMonitor == nil else { return }
         let monitor = LiveTaskMonitor(status: self)
         monitor.onChange = { [weak self] in self?.refreshLiveMenu() }
@@ -160,13 +171,32 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let suffix = activityBadge == .present ? " — unread retained activity" : activityBadge == .unknown ? " — unread activity unknown" : ""
         let pausedNote = paused ? " — paused" : ""
         let liveNote = liveBusy ? " — \(liveCount) task\(liveCount == 1 ? "" : "s") running" : ""
-        statusItem.button?.toolTip = "Jaeger" + pausedNote + liveNote + (lastRunning ? "" : " — WebUI not running") + suffix
-        statusItem.button?.setAccessibilityLabel("Jaeger" + pausedNote + suffix)
+        statusItem.button?.toolTip = "JaegerAI" + pausedNote + liveNote + (lastRunning ? "" : " — Offline") + suffix
+        statusItem.button?.setAccessibilityLabel("JaegerAI" + pausedNote + suffix)
     }
 
-    /// One read-only probe of the WebUI to pick the icon (normal launch only).
+    /// Read-only probe of Gateway /health and WebUI to keep the menubar icon active when online.
     func refreshIcon() {
-        ShellEnvironment.probe(app.start.origin.string + "/") { [weak self] text in self?.setRunning(text == "running") }
+        let group = DispatchGroup()
+        var webOK = false
+        var gwOK = false
+        group.enter()
+        ShellEnvironment.probe(app.start.origin.string + "/") { text in
+            webOK = (text == "running")
+            group.leave()
+        }
+        group.enter()
+        ShellEnvironment.probeGatewayHealth(ShellEnvironment.gateway().origin.string + "/health") { report in
+            gwOK = report.isHealthy
+            group.leave()
+        }
+        group.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            self.lastWebUIRunning = webOK
+            self.lastGatewayHealthy = gwOK
+            self.setRunning(gwOK || webOK)
+            if gwOK { self.droidMenu.refresh() }
+        }
     }
 
     private func add(_ title: String, _ action: Selector?, _ key: String = "") -> NSMenuItem {
@@ -185,6 +215,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         shellItem.isEnabled = false; menu.addItem(shellItem)
         pauseItem.target = self; pauseItem.action = #selector(togglePause(_:)); menu.addItem(pauseItem)
         _ = add("Start Jaeger stack…", #selector(startStack(_:)))
+        _ = add("Restart Jaeger stack…", #selector(restartStack(_:)))
         _ = add("Stop Jaeger stack…", #selector(stopStack(_:)))
         menu.addItem(.separator())
         droidMenu.install(in: menu)
@@ -195,7 +226,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         _ = add("Reload", #selector(reload(_:)))
         _ = add("Open in Browser", #selector(openInBrowser(_:)))
         menu.addItem(.separator())
-        _ = add("Quit Jaeger Shell", #selector(quit(_:)))
+        _ = add("Quit JaegerAI", #selector(quit(_:)))
     }
 
     @objc private func clicked(_ sender: Any?) {
@@ -213,18 +244,35 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        probe(webUIItem, "Main screen", app.start.origin.string + "/")
-        probe(gatewayItem, "Gateway", ShellEnvironment.gateway().origin.string + "/health")
+        probeWebUI()
+        probeGateway()
         droidMenu.refresh()
     }
 
-    private func probe(_ item: NSMenuItem, _ name: String, _ urlString: String) {
-        item.title = "\(name): checking…"
+    private func probeWebUI() {
+        let urlString = app.start.origin.string + "/"
+        webUIItem.title = "Main screen: checking…"
         let url = URL(string: urlString)
         ShellEnvironment.probe(urlString) { [weak self] text in
-            item.title = "\(name): \(text.replacingOccurrences(of: "_", with: " ")) (\(url?.host ?? ""):\(url?.port ?? 0))"
-            shellLog("[shell][status] \(name.lowercased()) \(text)")
-            if name == "Main screen" { self?.setRunning(text == "running") }
+            guard let self else { return }
+            self.webUIItem.title = "Main screen: \(text.replacingOccurrences(of: "_", with: " ")) (\(url?.host ?? ""):\(url?.port ?? 0))"
+            shellLog("[shell][status] main screen \(text)")
+            self.lastWebUIRunning = (text == "running")
+            self.setRunning((self.lastGatewayHealthy ?? false) || (self.lastWebUIRunning ?? false))
+        }
+    }
+
+    private func probeGateway() {
+        let urlString = ShellEnvironment.gateway().origin.string + "/health"
+        gatewayItem.title = "Gateway: checking…"
+        let url = URL(string: urlString)
+        ShellEnvironment.probeGatewayHealth(urlString) { [weak self] report in
+            guard let self else { return }
+            let label = report.statusText.replacingOccurrences(of: "_", with: " ")
+            self.gatewayItem.title = "Gateway: \(label) (\(url?.host ?? ""):\(url?.port ?? 0))"
+            shellLog("[shell][status] gateway \(report.statusText)")
+            self.lastGatewayHealthy = report.isHealthy
+            self.setRunning((self.lastGatewayHealthy ?? false) || (self.lastWebUIRunning ?? false))
         }
     }
 
@@ -255,9 +303,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc func startStack(_ sender: Any?) { runStack(.start) }
+    @objc func restartStack(_ sender: Any?) { runStack(.restart) }
     @objc func stopStack(_ sender: Any?) { runStack(.stop) }
 
-    /// Confirm sheet, then StackController (dev: own children; production: `jaeger stack up|down --json`).
+    /// Confirm sheet, then StackController (dev: own children; production: `jaeger stack up|restart|down --json`).
     private func runStack(_ action: StackController.Action) {
         app.stack.confirmThen(action) { [weak self] in
             guard let self else { return }
@@ -266,7 +315,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 self?.app.reloadShell(nil)
                 self?.refreshIcon()
             }
-            action == .start ? self.app.stack.start(done: finish) : self.app.stack.stop(done: finish)
+            switch action {
+            case .start: self.app.stack.start(done: finish)
+            case .restart: self.app.stack.restart(done: finish)
+            case .stop: self.app.stack.stop(done: finish)
+            }
         }
     }
 }

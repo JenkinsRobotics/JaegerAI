@@ -12,7 +12,7 @@ import Darwin
 import JaegerShellCore
 
 final class StackController {
-    enum Action: String { case start, stop }
+    enum Action: String { case start, restart, stop }
 
     unowned let app: JaegerShellApplication
     let mode: StackMode
@@ -56,23 +56,46 @@ final class StackController {
 
     func confirmThen(_ action: Action, _ body: @escaping () -> Void) {
         let alert = NSAlert()
-        alert.messageText = action == .start ? "Start the Jaeger stack?" : "Stop the Jaeger stack?"
+        switch action {
+        case .start: alert.messageText = "Start the Jaeger stack?"
+        case .restart: alert.messageText = "Restart the Jaeger stack?"
+        case .stop: alert.messageText = "Stop the Jaeger stack?"
+        }
         if let dev {
-            alert.informativeText = action == .start
-                ? "Dev mode: starts the worktree gateway (127.0.0.1:\(dev.gatewayPort)) and the main screen (127.0.0.1:\(dev.uiPort)) as this app's own processes, with isolated state. launchd is not used."
-                : "Dev mode: stops the gateway and main screen this app started (by their own PIDs)."
+            switch action {
+            case .start:
+                alert.informativeText = "Dev mode: starts the worktree gateway (127.0.0.1:\(dev.gatewayPort)) and the main screen (127.0.0.1:\(dev.uiPort)) as this app's own processes, with isolated state. launchd is not used."
+            case .restart:
+                alert.informativeText = "Dev mode: restarts the gateway and main screen this app started."
+            case .stop:
+                alert.informativeText = "Dev mode: stops the gateway and main screen this app started (by their own PIDs)."
+            }
         } else if let launcher = ShellEnvironment.launcherPath() {
-            let args = action == .start ? StackCLI.upArguments : StackCLI.downArguments
-            alert.informativeText = "This runs:\n\(launcher) \(args.joined(separator: " "))\n\n"
-                + (action == .start ? "It starts the Jaeger services the same way the CLI does."
-                                    : "It stops the Jaeger services the same way the CLI does.")
+            let args: [String]
+            let detail: String
+            switch action {
+            case .start:
+                args = StackCLI.upArguments
+                detail = "It starts the Jaeger services the same way the CLI does."
+            case .restart:
+                args = StackCLI.restartArguments
+                detail = "It restarts the Jaeger services the same way the CLI does."
+            case .stop:
+                args = StackCLI.downArguments
+                detail = "It stops the Jaeger services the same way the CLI does."
+            }
+            alert.informativeText = "This runs:\n\(launcher) \(args.joined(separator: " "))\n\n\(detail)"
         } else {
             alert.informativeText = "No jaeger launcher was found (set JaegerLauncher in Info.plist or install the CLI)."
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return
         }
-        alert.addButton(withTitle: action == .start ? "Start" : "Stop")
+        switch action {
+        case .start: alert.addButton(withTitle: "Start")
+        case .restart: alert.addButton(withTitle: "Restart")
+        case .stop: alert.addButton(withTitle: "Stop")
+        }
         alert.addButton(withTitle: "Cancel")
         let handle: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .alertFirstButtonReturn else { shellLog("[shell][stack] \(action.rawValue) cancelled"); return }
@@ -84,17 +107,22 @@ final class StackController {
 
     /// Bridge entry: dev runs directly; production needs the confirm sheet and is refused in verify modes.
     func fromBridge(_ action: Action, done: @escaping BridgeDone) {
-        if dev != nil { return action == .start ? start(done: done) : stop(done: done) }
+        let dispatch: () -> Void = { [weak self] in
+            guard let self else { return }
+            switch action {
+            case .start: self.start(done: done)
+            case .restart: self.restart(done: done)
+            case .stop: self.stop(done: done)
+            }
+        }
+        if dev != nil { dispatch(); return }
         if mode == .dev { return done(nil, "dev_stack_unavailable: \(devError?.message ?? "?")") }
         if app.verifyMode || app.verifyBridgeMode { return done(nil, "production_stack_disabled_in_verify") }
-        confirmThen(action) { [weak self] in
-            guard let self else { return }
-            action == .start ? self.start(done: done) : self.stop(done: done)
-        }
+        confirmThen(action, dispatch)
         // no reply until the user decides; a cancel replies below via the sheet's cancel path
     }
 
-    // MARK: start / stop
+    // MARK: start / restart / stop
 
     func start(done: @escaping BridgeDone) {
         if let dev { return startDev(dev, done: done) }
@@ -109,6 +137,24 @@ final class StackController {
         }
         runProduction(StackCLI.upArguments) { [weak self] result, error in
             if error != nil && !alreadyOwned { self?.retireLease("stack start failed") }
+            done(result, error)
+        }
+    }
+
+    func restart(done: @escaping BridgeDone) {
+        if let dev {
+            stopDev { [weak self] _, _ in self?.startDev(dev, done: done) }
+            return
+        }
+        if mode == .dev { return done(nil, "dev_stack_unavailable: \(devError?.message ?? "?")") }
+        guard !headless else { return done(nil, "production_stack_disabled_in_verify") }
+        guard !busy else { return done(nil, "busy") }
+        let alreadyOwned = lease?.isRunning == true
+        if leasePolicy.isEnabled, let error = acquireLease("stack restarting") {
+            return done(nil, error)
+        }
+        runProduction(StackCLI.restartArguments) { [weak self] result, error in
+            if error != nil && !alreadyOwned { self?.retireLease("stack restart failed") }
             done(result, error)
         }
     }

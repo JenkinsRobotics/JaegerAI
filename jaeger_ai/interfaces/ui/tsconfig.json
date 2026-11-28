@@ -14,8 +14,21 @@
     "types": ["vite/client", "node"],
     "baseUrl": ".",
     "paths": {
-      "@aether/ui": ["vendor/aether-ui/src/index.ts"],
-      "@aether/ui/*": ["vendor/aether-ui/*"]
+      "lucide-react": ["node_modules/lucide-react/dist/lucide-react.d.ts"],
+      "@jaeger/ui-protocol": ["../../../packages/jaeger-ui-protocol/src/index.ts"],
+      "@jaeger/ui-sdk": ["../../../packages/jaeger-ui-sdk/src/index.ts"],
+      "@jaeger/ui-kit": ["../../../packages/jaeger-ui-kit/src/index.ts"],
+      "@jaeger/ui-kit/tokens.css": ["../../../packages/jaeger-ui-kit/src/tokens.css"],
+      "@jaeger/ui-avatar": ["../../../packages/jaeger-ui-avatar/src/index.ts"],
+      "@jaeger/ui-office": ["../../../packages/jaeger-ui-office/src/index.ts"],
+      "@jaeger/ui-features": ["../../../packages/jaeger-ui-features/src/index.ts"],
+      "react": ["node_modules/@types/react/index.d.ts"],
+      "react/*": ["node_modules/@types/react/*"],
+      "react-dom": ["node_modules/@types/react-dom/index.d.ts"],
+      "react-dom/*": ["node_modules/@types/react-dom/*"],
+      "three": ["node_modules/@types/three/index.d.ts"],
+      "three/*": ["node_modules/@types/three/*"],
+      "@pixiv/three-vrm": ["node_modules/@pixiv/three-vrm/types/index.d.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

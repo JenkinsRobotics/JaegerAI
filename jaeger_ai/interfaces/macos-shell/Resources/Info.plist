@@ -2,30 +2,30 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Derived from AetherStudio @ ece0209 — Aether CAD/Launcher/Info.plist
      Copyright (c) Jonathan Jenkins and Jenkins Robotics (AetherStudio). Licensed under the Apache License 2.0
-     (see LICENSES/AetherStudio-Apache-2.0.txt). Modified for Jaeger by Jenkins Robotics on 2026-10-17:
-     Jaeger names/ID/icon/category, macOS 14 floor, dev-build keys. -->
+     (see LICENSES/AetherStudio-Apache-2.0.txt). Modified for Jaeger by Jenkins Robotics:
+     Production bundle identity, Dock + menubar mode, macOS 14 floor. -->
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>Jaeger AI (ui-rebuild)</string>
+  <string>JaegerAI</string>
   <key>CFBundleExecutable</key>
   <string>JaegerShell</string>
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
-  <string>com.jenkinsrobotics.JaegerAI.uirebuild</string>
+  <string>com.jenkinsrobotics.JaegerAI</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>JaegerShell</string>
+  <string>JaegerAI</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.0.0</string>
+  <string>1.0.0</string>
   <key>CFBundleVersion</key>
-  <string>0</string>
+  <string>1</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
@@ -42,7 +42,7 @@
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <key>LSUIElement</key>
-  <true/>
+  <false/>
   <key>JaegerHotkey</key>
   <string>ctrl-opt-space</string>
   <key>NSMicrophoneUsageDescription</key>
@@ -51,8 +51,6 @@
   <string>Jaeger uses your camera only when you turn it on in voice mode. Frames stay on this Mac unless you allow cloud vision in Settings.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>Jaeger uses speech recognition (on-device when available) to turn your dictation into text.</string>
-  <key>JaegerDevBuild</key>
-  <true/>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>

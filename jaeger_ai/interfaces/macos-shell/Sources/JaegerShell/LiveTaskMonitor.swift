@@ -59,6 +59,8 @@ final class LiveTaskMonitor {
     private var finishedNotified: Set<String> = []
     private var authorizationAsked = false
     private var loggedUnauthorized = false
+    private var endpointUnsupported = false
+    private var loggedUnsupported = false
     var onChange: (() -> Void)?
 
     init(status: StatusItemController) { self.status = status }
@@ -75,24 +77,33 @@ final class LiveTaskMonitor {
     }
 
     static func token() -> String? {
-        let env = ProcessInfo.processInfo.environment
-        if let t = env["JAEGER_CALLER_TOKEN"], !t.isEmpty { return t }
-        let root = env["JAEGER_STATE_DIR"].map { ($0 as NSString).expandingTildeInPath }
-            ?? (NSHomeDirectory() as NSString).appendingPathComponent(".jaeger")
-        let path = (root as NSString).appendingPathComponent("caller_tokens/menubar.token")
-        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return ShellEnvironment.callerToken() }
-        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? nil : t
+        ShellEnvironment.callerToken()
     }
 
     private func poll() {
-        guard let url = URL(string: ShellEnvironment.gateway().origin.string + "/v1/live/tasks"),
-              let token = Self.token() else { return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 4
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard !endpointUnsupported,
+              let url = URL(string: ShellEnvironment.gateway().origin.string + "/v1/live/tasks") else { return }
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        if let token = Self.token() {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         URLSession(configuration: .ephemeral).dataTask(with: req) { [weak self] data, response, _ in
-            guard let data, (response as? HTTPURLResponse)?.statusCode == 200,
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            if let code = statusCode, LiveTasksResponsePolicy.shouldDisablePolling(statusCode: code) {
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.endpointUnsupported = true
+                    self.timer?.invalidate()
+                    self.timer = nil
+                    if !self.loggedUnsupported {
+                        self.loggedUnsupported = true
+                        shellLog("[shell][live-tasks] /v1/live/tasks not exposed by Gateway (HTTP \(code)); disabling live task polling")
+                    }
+                    self.apply(running: [], recent: [], seq: -2)
+                }
+                return
+            }
+            guard let data, statusCode == 200,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 DispatchQueue.main.async { self?.apply(running: [], recent: [], seq: -2) }
                 return

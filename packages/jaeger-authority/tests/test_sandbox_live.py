@@ -98,6 +98,21 @@ try:
     print('SECRET_READ:ESCAPED')
 except PermissionError:
     print('SECRET_READ:BLOCKED')
+
+import socket, urllib.request
+srv = socket.socket()
+srv.bind(('127.0.0.1', 0))
+srv.listen(1)
+p = srv.getsockname()[1]
+cli = socket.create_connection(('127.0.0.1', p), timeout=2)
+cli.close()
+srv.close()
+print('LOOPBACK_SOCKET:OK')
+try:
+    urllib.request.urlopen('https://example.com', timeout=2)
+    print('EXTERNAL_NET:ESCAPED')
+except Exception:
+    print('EXTERNAL_NET:BLOCKED')
 """
     spec = sb.prepare([sys.executable, "-B", "-c", script], profile)
     res = subprocess.run(spec.argv, capture_output=True, text=True, timeout=15)
@@ -107,6 +122,8 @@ except PermissionError:
         "OUTSIDE_WRITE:BLOCKED",
         "GIT_HOOK:BLOCKED",
         "SECRET_READ:BLOCKED",
+        "LOOPBACK_SOCKET:OK",
+        "EXTERNAL_NET:BLOCKED",
     ]
     assert (ws / "hello.txt").read_text() == "INSIDE_OK"
     assert not (outside_dir / "escaped.txt").exists()

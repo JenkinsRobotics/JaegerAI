@@ -96,3 +96,35 @@ def test_deterministic_argument_repair_and_loop_detection() -> None:
         {"tool": "edit_file", "arguments": {"path": "a.py"}},
         {"tool": "shell", "arguments": {"cmd": "pytest"}},
     ]) is False
+
+
+def test_detailed_classification_retry_after_and_x_should_retry() -> None:
+    from jaeger_reliability import classify_error_detailed, retry_call, sanitize_property_key, unrename_tool_args
+
+    class _HeaderErr(Exception):
+        def __init__(self, status_code: int, headers: dict[str, str]) -> None:
+            super().__init__(f"HTTP {status_code}")
+            self.status_code = status_code
+            self.headers = headers
+
+    d_forbid = classify_error_detailed(_HeaderErr(429, {"x-should-retry": "false"}))
+    assert d_forbid.provider_forbids_retry is True and d_forbid.retryable is False
+
+    d_ra = classify_error_detailed(_HeaderErr(429, {"Retry-After": "1.5"}))
+    assert d_ra.retryable is True and d_ra.retry_after_s == 1.5
+
+    sleeps: list[float] = []
+    calls = [0]
+
+    def flaky() -> str:
+        calls[0] += 1
+        if calls[0] == 1:
+            raise _HeaderErr(429, {"Retry-After": "0.25"})
+        return "recovered"
+
+    assert retry_call(flaky, attempts=3, sleep_fn=sleeps.append) == "recovered"
+    assert sleeps == [0.25]
+
+    k = sanitize_property_key("foo.bar/baz")
+    assert k == "foo_bar_baz"
+    assert unrename_tool_args({k: 7}, {k: "foo.bar/baz"}) == {"foo.bar/baz": 7}

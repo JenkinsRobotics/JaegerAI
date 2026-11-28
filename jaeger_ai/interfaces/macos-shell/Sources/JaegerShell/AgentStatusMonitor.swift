@@ -6,7 +6,7 @@ import JaegerShellCore
 
 /// Agent status monitor — polls Gateway and notifies observers of state changes.
 final class AgentStatusMonitor {
-    
+
     enum AgentState: String {
         case idle
         case thinking
@@ -15,7 +15,7 @@ final class AgentStatusMonitor {
         case error
         case disconnected
     }
-    
+
     struct Status {
         let state: AgentState
         let currentTask: String?
@@ -23,15 +23,15 @@ final class AgentStatusMonitor {
         let sessionId: String?
         let timestamp: Date
     }
-    
+
     // MARK: - Singleton
-    
+
     static let shared = AgentStatusMonitor()
-    
+
     private init() {}
-    
+
     // MARK: - Properties
-    
+
     private var timer: Timer?
     private var currentStatus = Status(
         state: .disconnected,
@@ -42,66 +42,63 @@ final class AgentStatusMonitor {
     )
     private var observers: [UUID: (Status) -> Void] = [:]
     private let pollInterval: TimeInterval = 5.0
-    
+
     // MARK: - Public API
-    
+
     /// Start monitoring the Gateway
     func start(gatewayURL: String = "http://127.0.0.1:33418") {
         stop()
-        
+
         // Initial poll
         poll(gatewayURL: gatewayURL)
-        
+
         // Start timer
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             self?.poll(gatewayURL: gatewayURL)
         }
     }
-    
+
     /// Stop monitoring
     func stop() {
         timer?.invalidate()
         timer = nil
     }
-    
+
     /// Get current status
     var status: Status { currentStatus }
-    
+
     /// Subscribe to status changes
     @discardableResult
     func observe(_ observer: @escaping (Status) -> Void) -> UUID {
         let id = UUID()
         observers[id] = observer
-        // Immediately notify with current status
         observer(currentStatus)
         return id
     }
-    
+
     /// Unsubscribe
     func removeObserver(_ id: UUID) {
         observers.removeValue(forKey: id)
     }
-    
+
     // MARK: - Private
-    
+
     private func poll(gatewayURL: String) {
         guard let url = URL(string: gatewayURL + "/health") else { return }
-        
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 5
-        
-        // Add auth token if available
+
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 5)
+
         if let token = ShellEnvironment.callerToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+
+        URLSession(configuration: .ephemeral).dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
-                guard let self = self else { return }
-                
-                if let error = error {
+                guard let self else { return }
+
+                if error != nil {
                     self.updateStatus(.init(
-                        state: .error,
+                        state: .disconnected,
                         currentTask: "Gateway unreachable",
                         model: nil,
                         sessionId: nil,
@@ -109,66 +106,53 @@ final class AgentStatusMonitor {
                     ))
                     return
                 }
-                
-                guard let data = data,
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    self.updateStatus(.init(
-                        state: .error,
-                        currentTask: "Invalid response",
-                        model: nil,
-                        sessionId: nil,
-                        timestamp: Date()
-                    ))
-                    return
-                }
-                
-                self.parseHealth(json)
+
+                let code = (response as? HTTPURLResponse)?.statusCode
+                let report = GatewayHealth.parse(statusCode: code, data: data)
+                let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                self.applyHealth(report, json: json)
             }
         }.resume()
     }
-    
-    private func parseHealth(_ json: [String: Any]) {
-        // Extract status info
-        let status = json["status"] as? String ?? "unknown"
-        let model = json["model"] as? String
-        let diagnostics = json["diagnostics"] as? [String: Any]
+
+    private func applyHealth(_ report: GatewayHealthReport, json: [String: Any]?) {
+        let diagnostics = json?["diagnostics"] as? [String: Any]
         let ownerRuntime = diagnostics?["owner_runtime"] as? [String: Any]
         let resident = ownerRuntime?["resident"] as? Bool ?? false
         let executionVerified = ownerRuntime?["execution_verified"] as? Bool ?? true
-        
-        // Determine state
+
         let state: AgentState
-        if status != "ok" {
+        switch report.state {
+        case .offline:
+            state = .disconnected
+        case .degraded:
             state = .error
-        } else if !resident {
-            state = .idle
-        } else if !executionVerified {
-            state = .thinking
-        } else {
-            state = .idle
+        case .online:
+            if resident && !executionVerified {
+                state = .thinking
+            } else {
+                state = .idle
+            }
         }
-        
+
         let newStatus = Status(
             state: state,
             currentTask: state == .thinking ? "Processing…" : nil,
-            model: model,
+            model: report.model,
             sessionId: nil,
             timestamp: Date()
         )
-        
         updateStatus(newStatus)
     }
-    
+
     private func updateStatus(_ newStatus: Status) {
         let previousState = currentStatus.state
         currentStatus = newStatus
-        
-        // Notify observers
+
         for observer in observers.values {
             observer(newStatus)
         }
-        
-        // Log state changes
+
         if previousState != newStatus.state {
             shellLog("[agent-status] \(previousState.rawValue) → \(newStatus.state.rawValue)")
         }
@@ -178,24 +162,17 @@ final class AgentStatusMonitor {
 // MARK: - ShellEnvironment Extension
 
 extension ShellEnvironment {
-    /// Get caller token for Gateway auth
+    /// Get optional caller token for Gateway auth without triggering Keychain prompts.
     static func callerToken() -> String? {
-        // Try environment
-        if let token = ProcessInfo.processInfo.environment["JAEGER_CALLER_TOKEN"] {
+        let env = ProcessInfo.processInfo.environment
+        if let token = env["JAEGER_CALLER_TOKEN"]?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {
             return token
         }
-        // Try keychain
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "ai.jaeger.gateway.caller",
-            kSecAttrAccount as String: "menubar",
-            kSecReturnData as String: true,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecSuccess, let data = result as? Data {
-            return String(data: data, encoding: .utf8)
-        }
-        return nil
+        let root = env["JAEGER_STATE_DIR"].map { ($0 as NSString).expandingTildeInPath }
+            ?? (NSHomeDirectory() as NSString).appendingPathComponent(".jaeger")
+        let path = (root as NSString).appendingPathComponent("caller_tokens/menubar.token")
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
     }
 }

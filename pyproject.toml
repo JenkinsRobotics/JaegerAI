@@ -1,195 +1,82 @@
-# JaegerAI — packaging + dev-tooling config.
-#
-# Split out of the JaegerAI monorepo (0.9 four-way split); the turnkey
-# product (the Mind) — JaegerAgent-powered tools, skills, memory, persona, local
-# inference, AND its own faces (chat app, TUI, voice, protocol). Ships
-# `main.py` + the `jaeger` command. Depends on jaeger-os (the framework
-# tier, nothing above it), the reusable jaeger-agent mind module, plus
-# the kokoro_tts/whisper_stt engine modules as git dependencies in
-# requirements.txt. Engine modules are each their own
-# repo, pinning jaeger-os only (never jaeger-ai) — a robot body can run
-# those standalone, without the AI product installed at all — but
-# JaegerAI installs them by DEFAULT (not as opt-in extras): the curl
-# one-liner should produce a voice-capable agent, not a mute one.
-#
-# JaegerAI installs as an EDITABLE package (PEP 660), same model as
-# jaeger-os: the curl installer — and ./install.sh — run
-# `uv pip install -e .` INTO the clone. The code stays writable in
-# place (the agent self-modifies its skills) while you still get real
-# packaging: machine-readable version metadata (`jaeger --version`) and
-# `jaeger update` = git pull + editable reinstall.
-#
-# The `jaeger` command is a first-class console-script entry point
-# (jaeger_ai.cli.entry:main) — one dispatcher behind both the installed
-# `jaeger` (on PATH after install) and the ./jaeger wrapper, which
-# delegates to it. jaeger-os ships NO console script of its own (0.9
-# step 4 staging finding: every real cli/ verb imports
-# core.instance.schemas at module level — there is no layering-clean
-# framework-only CLI subset, so cli/ moved to JaegerAI entirely).
-#
-# Version is single-sourced from jaeger_ai/__init__.py; runtime deps
-# are single-sourced from requirements.txt (includes a2a-sdk[http-server]==1.1.2).
+# JaegerAI — 100% Standalone Modular Cognitive Platform + Thin Product Composition Root
 
 [tool.uv.workspace]
 members = ["packages/*"]
-exclude = ["packages/jaeger-browser"]
+exclude = [
+    "packages/jaeger-browser",
+    "packages/jaeger-ui-protocol",
+    "packages/jaeger-ui-sdk",
+    "packages/jaeger-ui-kit",
+    "packages/jaeger-ui-avatar",
+    "packages/jaeger-ui-office",
+    "packages/jaeger-ui-features",
+]
 
 [tool.uv.sources]
-jaeger-agent = { workspace = true }
-jaeger-os = { workspace = true }
-jaeger-kokoro-tts = { workspace = true }
-jaeger-whisper-stt = { workspace = true }
-jaeger-contracts = { workspace = true }
 jaeger-authority = { workspace = true }
+jaeger-avatar = { workspace = true }
+jaeger-business = { workspace = true }
+jaeger-channels = { workspace = true }
+jaeger-checkpoints = { workspace = true }
+jaeger-cognition = { workspace = true }
+jaeger-contracts = { workspace = true }
+jaeger-droid = { workspace = true }
+jaeger-embodiment-minecraft = { workspace = true }
+jaeger-evals = { workspace = true }
 jaeger-events = { workspace = true }
+jaeger-gateway = { workspace = true }
+jaeger-hardware = { workspace = true }
+jaeger-kokoro-tts = { workspace = true }
 jaeger-loop = { workspace = true }
+jaeger-lsp = { workspace = true }
+jaeger-macos = { workspace = true }
+jaeger-mcp = { workspace = true }
 jaeger-memory = { workspace = true }
 jaeger-models = { workspace = true }
 jaeger-orchestration = { workspace = true }
+jaeger-protocols = { workspace = true }
+jaeger-realtime = { workspace = true }
 jaeger-reliability = { workspace = true }
-jaeger-tools = { workspace = true }
-jaeger-mcp = { workspace = true }
-jaeger-macos = { workspace = true }
-jaeger-lsp = { workspace = true }
-jaeger-checkpoints = { workspace = true }
 jaeger-skills = { workspace = true }
-jaeger-workflows = { workspace = true }
+jaeger-tools = { workspace = true }
+jaeger-vision = { workspace = true }
+jaeger-whisper-stt = { workspace = true }
+jaeger-youtube = { workspace = true }
 
 [build-system]
-requires = ["setuptools>=83"]
+requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-ai"
-description = "Jaeger: an AI assistant product built on its own model-agnostic agent framework"
+description = "JaegerAI: Persistent, local-first modular AI platform (30 standalone backend + 6 React 19 UI packages)"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
-dynamic = ["version", "dependencies"]
-
-[project.optional-dependencies]
-mcp-events = ["PyJWT[crypto]>=2.10,<3", "keyring>=25,<26"]
-test = ["pytest>=8", "pytest-asyncio>=0.24,<2", "jaeger-ai[mcp-events]"]
-# Acoustic echo cancellation for duplex voice — passed through from
-# jaeger-os (core/audio/aec.py); re-declared here so `pip install
-# 'jaeger-ai[aec]'` works without the operator needing to know it's
-# actually a jaeger-os extra.
-aec = ["speexdsp>=0.1.1"]
-# Standalone wake-word engine. An extra, not a base dependency: it pulls
-# tflite-runtime, which ships no cp312 wheel, and nothing in the tree
-# imports it today (the shipped wake-word path is the STT layer's
-# ``require_wake_word``). Install with `pip install 'jaeger-ai[wakeword]'`.
-wakeword = ["openwakeword>=0.6"]
+dynamic = ["version"]
+dependencies = [
+    "aiohttp>=3.10",
+    "httpx>=0.27",
+    "mcp>=1.0",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+]
 
 [project.scripts]
-jaeger = "jaeger_ai.cli.entry:main"
-
-[project.entry-points."jaeger_os.module_roots"]
-# The out-of-tree discover_modules() seam (0.9 step 4 split) — see
-# jaeger_ai/module_roots.py. JaegerAI finds this WITHOUT ever naming
-# jaeger_ai; it only knows the group.
-jaeger_ai = "jaeger_ai.module_roots:roots"
+jaeger = "jaeger_ai.cli:main"
 
 [tool.setuptools]
 include-package-data = false
 
 [tool.setuptools.dynamic]
-version = {attr = "jaeger_ai.__version__"}
-dependencies = {file = ["requirements.txt"]}
+version = { attr = "jaeger_ai.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["jaeger_ai*"]
 exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__"]
-# Much of JaegerAI intentionally uses PEP 420 namespace directories (notably
-# core/, core/instance/, and nodes/). Disabling namespace discovery
-# made editable installs work while silently omitting those modules from a
-# built wheel.
 namespaces = true
 
-[tool.setuptools.package-data]
-"jaeger_ai.core.instance" = ["name_corpus.json"]
-# Non-.py assets under the package (module.yaml/plugin.yaml, character
-# personas + card art, skill markdown + paper-writing templates, ...) —
-# setuptools only auto-includes .py files for a found package; a REAL
-# (non-editable) install of jaeger_ai silently drops everything else
-# without this. The default install path is editable (masks the gap —
-# editable installs read straight from the source tree) but a
-# non-editable install (a future PyPI release, or jaeger-ai pulled in
-# as someone else's dependency) needs it too — found via the sibling
-# engine repos hitting this for real under a git-dependency install.
-jaeger_ai = [
-    "nodes/**/*.yaml",
-    "plugins/**/*.yaml", "plugins/**/*.json", "plugins/**/*.md",
-    "features/personality/**/*.yaml", "features/personality/**/*.md",
-    "features/personality/**/*.png", "features/personality/**/*.jpg", "features/personality/**/*.jpeg",
-    "assets/**/*", "docs/**/*.md", "contract/**/*.json",
-    "interfaces/macos-shell/Package.swift", "interfaces/macos-shell/Sources/**/*.swift",
-    "interfaces/macos-shell/Resources/**/*", "interfaces/macos-shell/Scripts/*.sh",
-    "interfaces/macos-shell/NOTICE", "interfaces/macos-shell/ATTRIBUTION.md", "interfaces/macos-shell/LICENSES/**/*",
-    "interfaces/ui/package.json", "interfaces/ui/package-lock.json", "interfaces/ui/index.html",
-    "interfaces/ui/tsconfig.json", "interfaces/ui/vite.config.ts", "interfaces/ui/src/**/*",
-    "interfaces/ui/public/**/*", "interfaces/ui/vendor/**/*", "interfaces/ui/scripts/**/*",
-    "interfaces/avatar/Package.swift", "interfaces/avatar/Sources/**/*.swift",
-    "interfaces/avatar/Resources/**/*",
-]
-
-[tool.ruff]
-# Ruff writes .ruff_cache to the CWD by default, which lands in the repo
-# root every time CI or an operator lints — the exact in-tree runtime junk
-# test_repo_root_has_zero_runtime_junk fails on. Redirect it the same way
-# pytest's cache_dir is redirected below, so the tree stays clean at the
-# producer instead of being masked in .gitignore.
-cache-dir = "~/.cache/ruff"
-
-[tool.setuptools.exclude-package-data]
-# Editable development keeps model symlinks and bytecode beside the source.
-# Neither belongs in a wheel: following a local GGUF symlink can otherwise
-# turn a small application release into a tens-of-gigabytes artifact.
-"*" = [
-    "**/__pycache__/*",
-    "**/*.pyc",
-    "**/*.pyo",
-    "models/*.gguf",
-    "models/*.bin",
-    "models/*.safetensors",
-]
-
 [tool.pytest.ini_options]
-cache_dir = "~/.cache/pytest"
-# "jaeger_ai" is deliberately NOT on this path. With both "." and "jaeger_ai"
-# present, jaeger_ai/contract/ports.py imports as TWO distinct module objects
-# (jaeger_ai.contract.ports and contract.ports), each with its own module-level
-# globals — so a process-wide singleton like EntityRuntime.get_singleton() can
-# exist twice in one interpreter. Verified: `a is b` was False. Nothing imports
-# these subpackages bare, so the entry only created the hazard.
-pythonpath = [".", "packages/jaeger-os", "packages/jaeger-agent", "packages/jaeger-kokoro-tts", "packages/jaeger-whisper-stt"]
-# The application suite only. The packages carry their own suites and are run
-# as SEPARATE pytest processes by dev/scripts/run_tests.sh — jaeger-os's app
-# tests assert on process singletons ("second instance refused") and fail once
-# another tree has booted in the same interpreter.
-#
-# Run `dev/scripts/run_tests.sh` for the real total. A bare `pytest` covers
-# dev/tests only, which is how a failing packages test went unnoticed.
-testpaths = ["dev/tests"]
-addopts = ["--import-mode=importlib", "-p", "dev.bytecode_guard"]
-# Marker tiers — the bench, daemon, model-load, UI, and integration
-# suites take real wall time. Plain pytest runs all tiers; the
-# ``dev/scripts/run_tests.sh`` driver picks the right subset for CI vs
-# local iteration. New tests should pick the closest marker that
-# applies (or none — unmarked = fast deterministic unit test).
-markers = [
-    "slow: tests that fork real processes or do real network I/O (a few seconds each).",
-    "integration: cross-module end-to-end paths; may touch the filesystem heavily.",
-    "model: tests that load a real GGUF / external LLM; minutes-scale.",
-    "ui: TUI / rumps tray tests that may render to a terminal or display.",
-    "subprocess: tests that spawn a real Python subprocess (boot, daemon, bench).",
-    "flaky: quarantined timing-sensitive test; excluded from the unit tier and included in --full.",
-    "smoke: a tiny set tagged so ``pytest -m smoke`` is a 30-second sanity check.",
-    "regression: pins a specific bug fix — run on every PR even when narrowing markers.",
-    "requires_agent_modules: requires the optional Hermes Agent source checkout.",
-    "production_path: canonical execution, authority, effects, and runtime-truth contracts.",
-    "acceptance: live client/WebUI runtime truth against a running stack.",
-    "security: negative tests for trust domains, path traversal, CSRF, injection.",
-    "fault_injection: systematic failure campaigns in the resilience harness.",
-    "external_eval: independent benchmark harness contracts.",
-    "soak: multi-turn leak and resource-growth checks.",
-]
+# Golden Rule #1: zero in-repo runtime junk — never create .pytest_cache in the repo root
+# (dev/tests/test_ci_hygiene.py forbids it).
+addopts = "-p no:cacheprovider"
+asyncio_default_fixture_loop_scope = "function"

@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-cognition"
+version = "0.1.0"
+description = "Persistent, asynchronous, event-driven cognitive architecture: evolving SQLite WAL world model, temporal awareness, and 24/7 proactive life loop independent of chat."
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -99,7 +99,35 @@ enum NativeChrome {
     static func installUserScript(_ m: Metrics, in webView: WKWebView) {
         webView.configuration.userContentController.addUserScript(
             WKUserScript(source: script(m), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        webView.configuration.userContentController.addUserScript(
+            WKUserScript(source: modularHeaderCompatScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
     }
+
+    /// Reserves left padding for native macOS traffic lights and marks the modular Studio header
+    /// as a window drag region so the window can be moved cleanly by its top bar.
+    private static let modularHeaderCompatScript = """
+    (() => {
+      if (!document.getElementById('jaeger-macos-chrome-compat')) {
+        const style = document.createElement('style');
+        style.id = 'jaeger-macos-chrome-compat';
+        style.textContent = `
+          html[data-jaeger-host="macos"] .jg-ushell__header {
+            padding-left: max(12px, var(--jaeger-native-traffic-light-reserve, 88px));
+          }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+      }
+      const markHeader = () => {
+        const header = document.querySelector('.jg-ushell__header');
+        if (header && !header.hasAttribute('data-aether-window-drag-region')) {
+          header.setAttribute('data-aether-window-drag-region', 'true');
+        }
+      };
+      markHeader();
+      const observer = new MutationObserver(markHeader);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    })();
+    """
 
     /// Re-injects the metrics into the live page (full-screen enter/exit).
     static func push(_ window: NSWindow, to webView: WKWebView) {

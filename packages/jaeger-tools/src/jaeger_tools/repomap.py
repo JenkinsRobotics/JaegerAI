@@ -1,4 +1,4 @@
-"""Token-budgeted repository symbol map (aider RepoMap pattern using stdlib Python AST)."""
+"""Token-budgeted repository symbol map with PageRank reference weighting (aider RepoMap pattern)."""
 
 from __future__ import annotations
 
@@ -14,18 +14,21 @@ _TS_SYMBOL_RE = re.compile(
     re.MULTILINE,
 )
 _TOKEN_RE = re.compile(r"[a-z0-9_]+")
+_IDENT_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
 
 
-def _extract_python_symbols(path: Path) -> list[str]:
+def _extract_python_symbols(text: str) -> tuple[list[str], set[str]]:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        tree = ast.parse(text)
     except SyntaxError:
-        return []
+        return [], set()
     out: list[str] = []
+    defined: set[str] = set()
     for node in tree.body:
         lineno = getattr(node, "lineno", 0)
         loc = f" [L{lineno}]" if lineno else ""
         if isinstance(node, ast.ClassDef):
+            defined.add(node.name)
             methods = [
                 n.name for n in node.body
                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and not n.name.startswith("__")
@@ -33,13 +36,42 @@ def _extract_python_symbols(path: Path) -> list[str]:
             suffix = f" ({', '.join(methods[:8])})" if methods else ""
             out.append(f"class {node.name}{suffix}{loc}")
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defined.add(node.name)
             out.append(f"def {node.name}(){loc}")
-    return out
+    return out, defined
 
 
-def _extract_ts_symbols(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    return [m.group(1) for m in _TS_SYMBOL_RE.finditer(text)][:12]
+def _extract_ts_symbols(text: str) -> tuple[list[str], set[str]]:
+    names = [m.group(1) for m in _TS_SYMBOL_RE.finditer(text)][:12]
+    return names, set(names)
+
+
+def _pagerank(
+    nodes: list[str],
+    edges: dict[str, set[str]],
+    *,
+    damping: float = 0.85,
+    iterations: int = 8,
+) -> dict[str, float]:
+    """Lightweight damped PageRank over the file reference graph."""
+    n = len(nodes)
+    if n == 0:
+        return {}
+    ranks = {node: 1.0 / n for node in nodes}
+    inbound: dict[str, list[str]] = {node: [] for node in nodes}
+    out_deg: dict[str, int] = {node: len(edges.get(node, ())) for node in nodes}
+    for src, targets in edges.items():
+        for dst in targets:
+            if dst in inbound:
+                inbound[dst].append(src)
+    base = (1.0 - damping) / n
+    for _ in range(iterations):
+        nxt: dict[str, float] = {}
+        for node in nodes:
+            acc = sum(ranks[src] / max(1, out_deg[src]) for src in inbound[node])
+            nxt[node] = base + damping * acc
+        ranks = nxt
+    return ranks
 
 
 def _score_entry(rel_str: str, syms: list[str], q_tokens: list[str]) -> int:
@@ -66,12 +98,7 @@ def build_repo_map(
     max_chars: int = 4000,
     max_files: int = 200,
 ) -> str:
-    """Render a compact, token-budgeted symbol outline of a repository.
-
-    Supports optional ``subpath`` scoping and ``query`` relevance ranking so
-    large repositories return the most relevant files and symbol line numbers
-    first instead of truncating alphabetically.
-    """
+    """Render a compact, PageRank-ranked, token-budgeted symbol outline of a repository."""
     root = workspace.expanduser().resolve()
     scan_root = (root / subpath).resolve() if subpath else root
     if not scan_root.exists():
@@ -80,7 +107,7 @@ def build_repo_map(
         raise ValueError(f"subpath escapes workspace: {subpath!r}")
 
     q_tokens = [t for t in _TOKEN_RE.findall((query or "").lower()) if len(t) >= 2]
-    candidates: list[tuple[int, str, list[str]]] = []
+    records: list[tuple[str, list[str], set[str], set[str]]] = []
     scanned = 0
 
     for path in sorted(scan_root.rglob("*")):
@@ -95,19 +122,43 @@ def build_repo_map(
             break
         if q_tokens and scanned > max(max_files * 8, 2000):
             break
-        syms = _extract_python_symbols(path) if path.suffix == ".py" else _extract_ts_symbols(path)
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        syms, defined = _extract_python_symbols(text) if path.suffix == ".py" else _extract_ts_symbols(text)
         if not syms:
             continue
         rel = str(path.relative_to(root))
-        if q_tokens:
-            score = _score_entry(rel, syms, q_tokens)
-            if score > 0:
-                candidates.append((score, rel, syms))
-        else:
-            candidates.append((0, rel, syms))
+        refs = set(_IDENT_RE.findall(text)) - defined
+        records.append((rel, syms, defined, refs))
 
-    if q_tokens:
-        candidates.sort(key=lambda item: (-item[0], item[1]))
+    # Build symbol -> defining files map for reference-graph PageRank
+    sym_owners: dict[str, list[str]] = {}
+    for rel, _syms, defined, _refs in records:
+        for name in defined:
+            sym_owners.setdefault(name, []).append(rel)
+
+    nodes = [r[0] for r in records]
+    edges: dict[str, set[str]] = {rel: set() for rel in nodes}
+    for rel, _syms, _defined, refs in records:
+        for ident in refs:
+            owners = sym_owners.get(ident)
+            if owners and len(owners) <= 4:
+                for owner in owners:
+                    if owner != rel:
+                        edges[rel].add(owner)
+
+    pr = _pagerank(nodes, edges)
+
+    candidates: list[tuple[float, str, list[str]]] = []
+    for rel, syms, _defined, _refs in records:
+        rank_boost = pr.get(rel, 0.0)
+        if q_tokens:
+            q_score = _score_entry(rel, syms, q_tokens)
+            if q_score > 0:
+                candidates.append((float(q_score) + rank_boost * 5.0, rel, syms))
+        else:
+            candidates.append((rank_boost, rel, syms))
+
+    candidates.sort(key=lambda item: (-item[0], item[1]))
 
     entries: list[str] = []
     used = 0
@@ -126,3 +177,6 @@ def build_repo_map(
         used += len(block)
 
     return "".join(entries).strip()
+
+
+__all__ = ["build_repo_map"]

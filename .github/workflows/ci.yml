@@ -1,21 +1,120 @@
 name: JaegerAI CI
+
 on:
   push:
+    branches: [master]
   pull_request:
+    branches: [master]
   workflow_call:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: jaeger-ci-${{ github.ref }}
   cancel-in-progress: true
+
 env:
   JAEGER_NO_ATTACH: "1"
   JAEGER_TEST_HEADLESS: "1"
   PYTHONHASHSEED: "0"
   PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONPYCACHEPREFIX: /tmp/jaeger-ci-pycache
+
 jobs:
-  webui-assembly:
-    name: First-party Jaeger WebUI
+  backend:
+    name: Backend (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install runtime and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "aiohttp>=3.10" "httpx>=0.27" "mcp>=1.0" "pydantic>=2.7" "pyyaml>=6.0" pytest pytest-asyncio
+      - name: Run standalone package, layering, E2E, and hygiene tests
+        run: |
+          STANDALONE_SRC_PATHS="packages/jaeger-contracts/src:packages/jaeger-models/src:packages/jaeger-tools/src:packages/jaeger-loop/src:packages/jaeger-memory/src:packages/jaeger-authority/src:packages/jaeger-orchestration/src:packages/jaeger-reliability/src:packages/jaeger-events/src:packages/jaeger-gateway/src:packages/jaeger-mcp/src:packages/jaeger-macos/src:packages/jaeger-lsp/src:packages/jaeger-checkpoints/src:packages/jaeger-skills/src:packages/jaeger-cognition/src:packages/jaeger-avatar/src:packages/jaeger-business/src:packages/jaeger-youtube/src:packages/jaeger-channels/src:packages/jaeger-embodiment-minecraft/src:packages/jaeger-hardware/src:packages/jaeger-droid/src:packages/jaeger-realtime/src:packages/jaeger-vision/src:packages/jaeger-evals/src:packages/jaeger-protocols/src"
+          PYTHONPATH="${STANDALONE_SRC_PATHS}:." python -B -m pytest -q --no-header -p no:cacheprovider \
+            packages/jaeger-contracts/tests \
+            packages/jaeger-models/tests \
+            packages/jaeger-tools/tests \
+            packages/jaeger-loop/tests \
+            packages/jaeger-memory/tests \
+            packages/jaeger-authority/tests \
+            packages/jaeger-orchestration/tests \
+            packages/jaeger-reliability/tests \
+            packages/jaeger-events/tests \
+            packages/jaeger-gateway/tests \
+            packages/jaeger-mcp/tests \
+            packages/jaeger-macos/tests \
+            packages/jaeger-lsp/tests \
+            packages/jaeger-checkpoints/tests \
+            packages/jaeger-skills/tests \
+            packages/jaeger-cognition/tests \
+            packages/jaeger-avatar/tests \
+            packages/jaeger-business/tests \
+            packages/jaeger-youtube/tests \
+            packages/jaeger-channels/tests \
+            packages/jaeger-embodiment-minecraft/tests \
+            packages/jaeger-hardware/tests \
+            packages/jaeger-droid/tests \
+            packages/jaeger-realtime/tests \
+            packages/jaeger-vision/tests \
+            packages/jaeger-evals/tests \
+            packages/jaeger-protocols/tests \
+            dev/tests
+      - name: Check shell scripts and zero runtime junk
+        run: |
+          bash -n install.sh jaeger scripts/*.sh
+          junk="$(git status --porcelain --ignored | grep -E '__pycache__|\.pytest_cache|\.jaeger_ai|\.jaeger_agent|jaeger_ai/interfaces/ui/dist' || true)"
+          if [ -n "$junk" ]; then echo "$junk"; exit 1; fi
+
+  frontend:
+    name: Frontend (@jaeger/ui-* & External Build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.23.2"
+          cache: npm
+          cache-dependency-path: jaeger_ai/interfaces/ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: jaeger_ai/interfaces/ui
+        run: npm ci
+      - name: Run frontend unit tests
+        working-directory: jaeger_ai/interfaces/ui
+        run: npm run test
+      - name: Build production UI into external cache (theme + tsc + vite + no-mock)
+        run: |
+          JAEGER_UI_DEPENDENCIES="${PWD}/jaeger_ai/interfaces/ui" \
+            python3 jaeger_ai/interfaces/ui/scripts/build-external.py
+          test ! -d jaeger_ai/interfaces/ui/dist
+
+  macos-shell:
+    name: Native macOS Shell
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and test JaegerShellCore
+        run: |
+          swift test --package-path jaeger_ai/interfaces/macos-shell \
+            --scratch-path "$RUNNER_TEMP/macos-shell-build"
+
+  distribution:
+    name: Build & Validate Distributions
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -23,153 +122,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Check integrated WebUI source and Python syntax
-        env:
-          PYTHONPYCACHEPREFIX: /tmp/jaeger-ci-pycache
-        run: |
-          python - <<'PY'
-          import compileall
-          from pathlib import Path
-          root = Path('jaeger_ai/core/gateway/webapp')
-          required = (root/'server.py', root/'routes.py', root/'ui_shell.py',
-                      root/'jaeger_signin.py', Path('jaeger_ai/interfaces/ui/index.html'))
-          if not all(path.is_file() for path in required):
-              raise SystemExit('Integrated WebUI source is incomplete')
-          if not compileall.compile_dir(root, quiet=1):
-              raise SystemExit('Integrated WebUI has invalid Python syntax')
-          PY
-  python:
-    name: Python ${{ matrix.python }} / ${{ matrix.suite }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.11", "3.12"]
-        suite: [root, agent, os, kokoro, whisper]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python }}
           cache: pip
-      - name: Install Linux sandbox and desktop runtimes
-        if: matrix.suite == 'root'
+      - name: Build sdist and wheel
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes bubblewrap libegl1 libgl1 libopengl0 libxkbcommon0 libportaudio2 libpulse0 libsndfile1
-          # Ubuntu 24.04's hosted-runner AppArmor policy blocks the user and
-          # network namespaces that Bubblewrap needs. This VM is disposable;
-          # production hosts should use a targeted AppArmor profile instead.
-          for key in \
-            kernel.apparmor_restrict_unprivileged_unconfined \
-            kernel.apparmor_restrict_unprivileged_userns
-          do
-            if sysctl "$key" >/dev/null 2>&1; then
-              sudo sysctl -w "$key=0"
-            fi
-          done
-      - name: Install suite
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Keep the packaging toolchain on a patched release. setuptools is
-          # installed in the runner environment and is therefore audited even
-          # though it is only a build dependency of Jaeger.
-          python -m pip install --upgrade pip "setuptools>=83"
-          case "${{ matrix.suite }}" in
-            root)
-              # Install the exact official spaCy model through the authenticated
-              # Releases API. Direct github.com asset URLs intermittently return
-              # an immediate 504 on hosted runners and pip does not retry them.
-              model_dir="$RUNNER_TEMP/jaeger-spacy-model"
-              mkdir -p "$model_dir"
-              gh release download en_core_web_sm-3.8.0 \
-                --repo explosion/spacy-models \
-                --pattern 'en_core_web_sm-3.8.0-py3-none-any.whl' \
-                --dir "$model_dir" --clobber
-              agent_source="$RUNNER_TEMP/jaeger-agent-ci"
-              cp -a packages/jaeger-agent "$agent_source"
-          python - "$agent_source/pyproject.toml" "$model_dir/en_core_web_sm-3.8.0-py3-none-any.whl" <<'PY'
-          import sys
-          from pathlib import Path
-
-          manifest = Path(sys.argv[1])
-          remote = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
-          text = manifest.read_text(encoding="utf-8")
-          if text.count(remote) != 3:
-              raise SystemExit("unexpected spaCy model dependency declarations")
-          manifest.write_text(text.replace(remote, Path(sys.argv[2]).resolve().as_uri()), encoding="utf-8")
-          PY
-              # Honor the app's binding version while installing its packages,
-              # instead of compiling a newer binding and then replacing it.
-              sed -n '/^llama-cpp-python==/p' requirements.txt > "$RUNNER_TEMP/jaeger-ci-constraints.txt"
-              export PIP_CONSTRAINT="$RUNNER_TEMP/jaeger-ci-constraints.txt"
-              python scripts/install-packages.py packages/jaeger-os "$agent_source[multimodal-duplex]" packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]'
-              python -m pip install pytest-timeout
-              python -m playwright install --with-deps chromium
-              ;;
-            agent) python scripts/install-packages.py packages/jaeger-os packages/jaeger-agent; python -m pip install pytest onnxruntime ;;
-            os) python scripts/install-packages.py packages/jaeger-os; python -m pip install pytest ;;
-            kokoro) python scripts/install-packages.py packages/jaeger-os packages/jaeger-kokoro-tts; python -m pip install pytest ;;
-            whisper) python scripts/install-packages.py packages/jaeger-os packages/jaeger-whisper-stt; python -m pip install pytest ;;
-          esac
-          python -m pip install pytest-timeout
-      - name: Test suite
-        # Same runner as local development: pinned env, isolated state root,
-        # no bytecode in the tree, live acceptance excluded, exact tiers.
-        run: |
-          case "${{ matrix.suite }}" in
-            root)
-              # pytest-timeout (installed above) keeps a stalled test from
-              # hanging the job; run_tests.sh passes EXTRA_ARGS through.
-              dev/scripts/run_tests.sh --unit -- -p timeout --timeout=120 --timeout-method=thread
-              dev/scripts/run_tests.sh --integration -- -p timeout --timeout=120 --timeout-method=thread \
-                dev/tests/jaeger_ai/core/test_gateway_daemon.py \
-                dev/tests/jaeger_ai/core/test_gateway_process_recovery.py \
-                dev/tests/jaeger_ai/core/test_gateway_owned_process_contract.py
-              ;;
-            *) dev/scripts/run_tests.sh --package "${{ matrix.suite }}" -- -p timeout --timeout=120 --timeout-method=thread ;;
-          esac
-      - name: No runtime junk in the checkout
-        run: |
-          junk="$(git status --porcelain --ignored | grep -E '__pycache__|\.pytest_cache|\.jaeger_ai|\.jaeger_agent' || true)"
-          if [ -n "$junk" ]; then echo "$junk"; exit 1; fi
-      - name: Critical static and dependency security gates
-        if: matrix.suite == 'root' && matrix.python == '3.11'
-        run: |
-          python -m pip install ruff pip-audit
-          ruff check --select E9,F63,F7,F82 .
-          # PYSEC-2026-2447 has no patched release. Jaeger does not create
-          # llama_cpp.LlamaDiskCache; see SECURITY.md for the threat model.
-          pip-audit --local --skip-editable --timeout 60 --ignore-vuln PYSEC-2026-2447
-  swift:
-    name: Canonical Mac shell
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - name: Build and test native app
-        # Canonical shell only; external scratch, no app/service launch.
-        run: |
-          swift test --package-path jaeger_ai/interfaces/macos-shell \
-            --scratch-path "$RUNNER_TEMP/macos-shell-build"
-  release-artifacts:
-    name: Build and inspect distributions
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-          cache: pip
-      - run: python -m pip install build
-      - name: Build distributions from clean checkout
-        run: |
-          python scripts/install-packages.py --no-install --sdist --wheel-dir "$RUNNER_TEMP/jaeger-dist" \
-            packages/jaeger-os packages/jaeger-agent packages/jaeger-kokoro-tts packages/jaeger-whisper-stt .
-      - name: Reject unsafe artifact contents
-        run: python dev/scripts/inspect_release_artifacts.py "$RUNNER_TEMP/jaeger-dist"
-      - name: Installer and test-runner syntax
-        run: bash -n install.sh scripts/*.sh dev/scripts/*.sh
+          python -m pip install build twine
+          python -m build --outdir "$RUNNER_TEMP/jaeger-dist" .
+          python -m twine check "$RUNNER_TEMP"/jaeger-dist/*

@@ -245,7 +245,7 @@ final class VisibleChecker {
                 let titles = snap["titles"] as? [String] ?? []
                 step("status_item_present", snap["present"] as? Bool == true)
                 step("icon_running_with_webui_up", snap["icon"] as? String == "running", snap["icon"] ?? NSNull())
-                let expected = ["Show / Hide Jaeger", "Start Jaeger stack…", "Launch at Login", "Reload", "Open in Browser", "Quit Jaeger Shell"]
+                let expected = ["Show / Hide Jaeger", "Start Jaeger stack…", "Restart Jaeger stack…", "Stop Jaeger stack…", "Launch at Login", "Reload", "Open in Browser", "Quit JaegerAI"]
                 step("menu_items", expected.allSatisfy(titles.contains), titles)
                 step("webui_probe_running", titles.contains { $0.hasPrefix("Main screen: running") }, titles.first { $0.hasPrefix("Main screen") } ?? "")
                 step("gateway_probe_running", titles.contains { $0.hasPrefix("Gateway: running") }, titles.first { $0.hasPrefix("Gateway") } ?? "")
