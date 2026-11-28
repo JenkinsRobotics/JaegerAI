@@ -97,7 +97,7 @@ describe("First-Run Awakening Wizard & Live Mind Autonomy Panel", () => {
       new Response(
         JSON.stringify({
           ok: true,
-          summary: "Welcome back, Matthew.",
+          summary: "Welcome back, DemoOwner.",
           pending_approvals_count: 1,
           recent_actions: [{ action_id: "act1", kind: "goal_step", summary: "Advanced Episode 02 script" }],
         }),

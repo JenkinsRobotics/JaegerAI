@@ -72,9 +72,13 @@ import webrtcvad
 # the operator's LM Studio cache if the in-repo path is missing.
 _REPO_ROOT = Path(__file__).resolve().parent
 _IN_REPO_MODEL = _REPO_ROOT / "jaeger_os" / "models" / "gemma-4-26B-A4B-it-Q4_K_M.gguf"
-_LMSTUDIO_MODEL = Path(
-    "/Users/developer/.lmstudio/models/lmstudio-community/"
-    "gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf"
+_LMSTUDIO_MODEL = (
+    Path.home()
+    / ".lmstudio"
+    / "models"
+    / "lmstudio-community"
+    / "gemma-4-26B-A4B-it-GGUF"
+    / "gemma-4-26B-A4B-it-Q4_K_M.gguf"
 )
 LLM_MODEL_PATH = _IN_REPO_MODEL if _IN_REPO_MODEL.exists() else _LMSTUDIO_MODEL
 

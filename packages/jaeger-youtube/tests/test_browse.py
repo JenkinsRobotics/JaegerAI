@@ -39,7 +39,7 @@ def test_navigate_requires_approval_and_allowlists_youtube() -> None:
         session.open("https://www.youtube.com/feed/subscriptions", approval="forged")
     with pytest.raises(NavigationNotAllowed):
         session.open("https://evil.example.com/phish", approval=session.approve())
-    token = session.approve("matthew authorized youtube")
+    token = session.approve("demo-owner authorized youtube")
     result = session.open("https://www.youtube.com/feed/subscriptions", approval=token)
     assert result["pages"][0]["url"] == "https://www.youtube.com/"
     assert worker.calls[-1]["action"] == "navigate"

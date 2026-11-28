@@ -1,16 +1,16 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <strong>A persistent, asynchronous, event-driven cognitive platform — local-first on 32 GB Apple Silicon</strong><br>
+  <strong>A persistent, asynchronous, event-driven cognitive platform — cross-platform Jaeger Core &amp; full 32 GB Apple Silicon stack</strong><br>
   <em>Conversation is an interface to the intelligence, not its execution loop.</em>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-0A84FF?style=for-the-badge" alt="Version 1.0.0">
+  <img src="https://img.shields.io/badge/version-1.0.1-0A84FF?style=for-the-badge" alt="Version 1.0.1">
   <img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="Apache-2.0">
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-5B8DEF?style=for-the-badge" alt="macOS | Linux | Windows">
   <img src="https://img.shields.io/badge/python-3.11--3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11-3.12">
   <img src="https://img.shields.io/badge/react-19%20%2B%20Three.js%20VRM-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React 19 + VRM">
-  <img src="https://img.shields.io/badge/memory-32GB%20Unified%20Budget-5B8DEF?style=for-the-badge" alt="32GB Budget">
 </p>
 
 ---
@@ -33,7 +33,35 @@ Every capability lives in an independently testable standalone package under `pa
 
 ---
 
-## Quick Start (One-Command Reproducible Setup)
+## Jaeger Core (macOS Apple Silicon & Intel, Linux, Windows x64)
+
+Core runs the same Gateway, chat, memory, Authorized Task Handling, model telemetry/risk cards, and 5-Tab WebUI without the native Mac app, MLX, or Node.js on the target machine. Download the release ZIP from [GitHub Releases](https://github.com/JenkinsRobotics/JaegerAI/releases/latest) (requires Python 3.11 or 3.12 and network access for initial Python dependency installation).
+
+| Platform | Install Command (after extracting `jaeger-core-1.0.1.zip`) |
+|---|---|
+| **macOS (Apple Silicon & Intel)** | `python3 install-core.py` |
+| **Linux (x64 / arm64)** | `python3 install-core.py` |
+| **Windows (x64 PowerShell)** | `py -3.12 install-core.py` |
+
+1. Download and extract `jaeger-core-1.0.1.zip` from [GitHub Releases](https://github.com/JenkinsRobotics/JaegerAI/releases/latest).
+2. Run the platform installer command above.
+3. Run the exact launch command printed by the installer, then open **http://127.0.0.1:8790**. Configure an available local (Ollama / llama.cpp) or cloud model in the WebUI.
+
+Core binds to localhost and stores its data in `~/.jaeger/core` by default.
+Each fresh installation starts with a neutral owner profile and its own
+local chat and memory stores. Cloning this repo or installing Core does not
+copy another installation's state or credentials.
+Set `JAEGER_WORKSPACE` to an existing folder to use it as your working directory.
+Host shell, Python snippets, PTY, and native Apple/Droid hardware controls are
+not part of the portable profile. Use the full Mac setup below for those tools.
+
+For contributors, build the same ZIP from a Git checkout with
+`python scripts/build-core.py --output <directory>` (requires npm, setuptools, and wheel).
+The build stages only tracked product source and builds a fresh WebUI.
+To run Core directly from a POSIX checkout, use
+`./install.sh --profile core` followed by `./jaeger core`.
+
+## Full macOS Setup
 
 ```bash
 git clone https://github.com/JenkinsRobotics/JaegerAI.git

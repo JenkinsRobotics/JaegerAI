@@ -70,17 +70,17 @@ def test_acceptance_2_connect_device_reuses_ssh_profile_from_empty_list_and_flag
     ssh_cfg.write_text(
         "\n".join([
             "Host rack-pc-lan",
-            "  HostName 10.0.0.20",
-            "  User matthew",
+            "  HostName 192.0.2.19",
+            "  User demo-owner",
             "  IdentityFile ~/.ssh/id_ed25519",
             "",
             "Host macbook-pro",
-            "  HostName 100.64.0.22",
-            "  User matthew",
+            "  HostName 192.0.2.21",
+            "  User demo-owner",
             "",
             "Host mac-studio",
             "  HostName 100.64.0.20",
-            "  User matthew",
+            "  User demo-owner",
         ]),
         encoding="utf-8",
     )

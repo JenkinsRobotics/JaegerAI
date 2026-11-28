@@ -28,7 +28,7 @@ def routed(cfg):
             and [(f.provider, f.model) for f in em.fallback] == [("ollama", fallback)])
 if layout.exists() and routed(load_yaml(layout.config_path, Config)):
     print("dev instance already routed:", primary, "→ fallback", fallback); sys.exit(0)
-layout = create_instance(character_id="assistant", name="jaeger", display_name="Jaeger", user_name="Matthew",
+layout = create_instance(character_id="assistant", name="jaeger", display_name="Jaeger", user_name="Owner",
                          awake_model=primary, awake_provider="ollama", asleep_model=coder,
                          permission_mode="confirm", overwrite=layout.exists())
 cfg = load_yaml(layout.config_path, Config)

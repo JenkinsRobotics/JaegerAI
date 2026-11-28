@@ -50,7 +50,7 @@ SWE_DATA = BENCH_ROOT / "swebench_verified_500.json"
 SYMPY_CACHE = BENCH_ROOT / "repos" / "sympy"
 PORT = 18842
 BASE = f"http://127.0.0.1:{PORT}"
-VENV_PY = "/Users/developer/.jaeger/venv/bin/python"
+VENV_PY = os.environ.get("JAEGER_BENCH_PYTHON", sys.executable)
 
 # Canaries outside workspaces to detect real sandbox/security escapes
 CANARY_AWK = Path("/tmp/jaeger_dojo_awk_canary.txt")

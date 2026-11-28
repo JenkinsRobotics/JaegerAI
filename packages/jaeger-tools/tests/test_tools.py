@@ -235,7 +235,7 @@ def test_tailscale_peer_discovery_and_verified_host_registration(tmp_path: Path)
     assert denied["ok"] is False and "Tailscale" in denied["error"]
 
     # Substring "rack" uniquely matches RackPCExample, writes remote_hosts.json, and gives Windows OpenSSH hint
-    res = register_tailscale_peer(reg, "rack", user="matthew", tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_closed)
+    res = register_tailscale_peer(reg, "rack", user="demo-owner", tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_closed)
     assert res["ok"] is True
     assert res["registered"]["alias"] == "rackpcexample"
     assert res["registered"]["hostname"] == "100.64.0.21"
@@ -263,13 +263,13 @@ def test_remote_connect_reuses_ssh_config_profile_when_allowlist_starts_empty(tm
             "  ServerAliveInterval 60",
             "",
             "Host rack-pc-lan",
-            "  HostName 10.0.0.20",
-            "  User matthew",
+            "  HostName 192.0.2.19",
+            "  User demo-owner",
             "  IdentityFile ~/.ssh/id_ed25519",
             "",
             "Host rack-pc-overlay",
             "  HostName 100.64.0.21",
-            "  User matthew",
+            "  User demo-owner",
         ]),
         encoding="utf-8",
     )

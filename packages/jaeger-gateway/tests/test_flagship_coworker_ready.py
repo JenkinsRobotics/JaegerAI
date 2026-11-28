@@ -239,7 +239,7 @@ async def test_gateway_hybrid_routing_onboarding_and_briefing(tmp_path: Path) ->
                     return {"content": "I am right behind you, let's gather oak wood!"}
 
             rt.model = _EchoModel()
-            chat_out = rt._handle_minecraft_chat_message("Matthew", "What should we build first?")  # noqa: SLF001
+            chat_out = rt._handle_minecraft_chat_message("DemoOwner", "What should we build first?")  # noqa: SLF001
             assert chat_out["acted"] is True
             assert "oak wood" in chat_out["summary"]
             assert any(p.modality == "minecraft" and p.kind == "chat" for p in rt.world.recent_perceptions(limit=5))

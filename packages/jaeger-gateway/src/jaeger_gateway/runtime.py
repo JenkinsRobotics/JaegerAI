@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from aiohttp import web
 
 from jaeger_authority import (
+    DisabledProcessSandbox,
     MacOsSeatbeltSandbox,
     PolicyEngine,
     UnconfinedSandbox,
@@ -280,19 +281,27 @@ class ModularGatewayRuntime:
         model_id: str | None = None,
         static_ui_dir: Path | None = None,
         auth: GatewayAuthPolicy | None = None,
+        portable_core: bool = False,
     ) -> None:
+        self.portable_core = portable_core
         env_state = os.environ.get("JAEGER_STATE_DIR", "").strip()
+        default_state = Path.home() / ".jaeger"
+        if portable_core:
+            default_state /= "core"
         self.state_dir = (
             Path(state_dir).expanduser().resolve()
             if state_dir is not None
-            else (Path(env_state).expanduser().resolve() if env_state else (Path.home() / ".jaeger"))
+            else (Path(env_state).expanduser().resolve() if env_state else default_state)
         )
         self.state_dir.mkdir(parents=True, exist_ok=True)
+        default_workspace = self.state_dir / "workspace" if portable_core else Path.cwd()
         self.workspace = (
             Path(workspace).expanduser().resolve()
             if workspace is not None
-            else Path(os.environ.get("JAEGER_WORKSPACE") or os.getcwd()).expanduser().resolve()
+            else Path(os.environ.get("JAEGER_WORKSPACE") or default_workspace).expanduser().resolve()
         )
+        if portable_core and self.workspace == default_workspace.resolve():
+            self.workspace.mkdir(parents=True, exist_ok=True)
 
         self.tool_workspace = ToolWorkspace(self.workspace)
         self.events = EventBus()
@@ -328,7 +337,8 @@ class ModularGatewayRuntime:
         self.channels.recover_interrupted_deliveries()
         self.channel_config = ChannelConfigStore(self.state_dir)
         self.channel_ingress = ChannelIngressSupervisor()
-        self._register_configured_channels()
+        if not portable_core:
+            self._register_configured_channels()
         self.minecraft = MinecraftEmbodiment(self.state_dir)
         self.minecraft_skills = MinecraftSkillLibrary(self.state_dir)
         self.jp01 = JP01Embodiment(dry_run=True)
@@ -363,7 +373,7 @@ class ModularGatewayRuntime:
             goal_executor=self._autonomous_goal_step,
             minecraft_executor=self._autonomous_minecraft_step,
             maintenance_executor=self._autonomous_maintenance_step,
-            enabled=True,
+            enabled=not portable_core,
             cooldown_s=900.0,
             max_actions_per_hour=4,
         )
@@ -410,13 +420,14 @@ class ModularGatewayRuntime:
             global_stop_fn=lambda: bool(self.governor.snapshot().get("estop_active")),
             embodiment_enabled=True,
         )
-        self._elevated_mode = self._load_elevated_mode()
-        self.sandbox = (
-            UnconfinedSandbox()
-            if (self._elevated_mode or sys.platform != "darwin")
-            else MacOsSeatbeltSandbox()
-        )
-        self.pty = PtySessionManager(self.workspace, sandbox=self.sandbox)
+        self._elevated_mode = not portable_core and self._load_elevated_mode()
+        if portable_core:
+            self.sandbox = DisabledProcessSandbox()
+        elif self._elevated_mode or sys.platform != "darwin":
+            self.sandbox = UnconfinedSandbox()
+        else:
+            self.sandbox = MacOsSeatbeltSandbox()
+        self.pty = None if portable_core else PtySessionManager(self.workspace, sandbox=self.sandbox)
         self.tools = ToolRegistry(
             workspace=self.workspace,
             policy=self.policy,
@@ -429,6 +440,8 @@ class ModularGatewayRuntime:
             memory=self.memory,
             workflows=self.workflows,
             extra_read_roots=safe_read_roots,
+            include_macos=not portable_core,
+            include_process_tools=not portable_core,
             allow_network=self._elevated_mode,
             shell_timeout_s=120.0 if self._elevated_mode else 45.0,
         )
@@ -438,20 +451,23 @@ class ModularGatewayRuntime:
         self._mcp_config_path = self.state_dir / "mcp_servers.json"
         mcp_configs = load_mcp_server_configs(self._mcp_config_path)
         self.mcp = LiveMCPManager(mcp_configs, image_dir=self.state_dir / "offload" / "mcp_images")
-        if mcp_configs:
+        if mcp_configs and not portable_core:
             try:
                 self.mcp.register_into_registry(self.tools)
             except Exception:  # noqa: BLE001
                 pass
 
         self.model = self._build_active_model(explicit_model_id=model_id)
-        self.static_ui_dir = static_ui_dir or self._default_ui_dir()
+        if portable_core and static_ui_dir is None:
+            core_ui = self.state_dir / "ui/dist"
+            static_ui_dir = core_ui if (core_ui / "index.html").is_file() else None
+        self.static_ui_dir = static_ui_dir if portable_core else static_ui_dir or self._default_ui_dir()
         if auth is not None:
             self.auth = auth
         else:
             gw_token = (os.environ.get("JAEGER_GATEWAY_TOKEN") or "").strip()
             default_tokens = {gw_token: "owner:token"} if gw_token else {}
-            allow_lan = _env_truthy("JAEGER_ALLOW_LAN_ACCESS", False)
+            allow_lan = not portable_core and _env_truthy("JAEGER_ALLOW_LAN_ACCESS", False)
             self.auth = GatewayAuthPolicy(
                 tokens=default_tokens,
                 allow_loopback_unauthenticated=True,
@@ -1159,6 +1175,9 @@ class ModularGatewayRuntime:
             read_only: bool = False,
             source: str = "platform",
         ) -> None:
+            if self.portable_core and name.startswith(("pty_", "droid_", "jp01_", "nexus_", "apple_")):
+                return
+
             def _wrapped(args: Mapping[str, Any]) -> ToolResult:
                 try:
                     return _ok(name, fn(args))
@@ -3202,6 +3221,12 @@ class ModularGatewayRuntime:
         """
         import json as _json
 
+        if self.portable_core:
+            return {
+                "ok": False, "elevated": False, "sandbox": self.sandbox.name,
+                "error": "Host process execution is not enabled in Jaeger Core.",
+            }
+
         self._elevated_mode = bool(enabled)
         cfg_file = self.state_dir / "execution_mode.json"
         cfg_file.write_text(
@@ -3242,6 +3267,7 @@ class ModularGatewayRuntime:
             ollama_probe = {"ok": True}
         return {
             "model": getattr(base, "model_id", base.name),
+            "profile": "core" if self.portable_core else "full",
             "routing": self.routing.load().to_dict(),
             "elevated": self._elevated_mode,
             "sandbox": self.sandbox.name,
@@ -3851,7 +3877,7 @@ class ModularGatewayRuntime:
             kanban_board=self.board,
             reminder_store=self.reminders,
             avatar_packs_provider=self._avatar_packs_info,
-            nexus_provider=self._nexus_telemetry_tool,
+            nexus_provider=None if self.portable_core else self._nexus_telemetry_tool,
             routing_provider=self._get_routing,
             routing_updater=self._update_routing,
             onboarding_provider=self._onboarding_status,
@@ -3878,8 +3904,8 @@ class ModularGatewayRuntime:
             remote_hosts=self.remote_hosts,
             authorized_tasks=self.authorized_tasks,
             minecraft_embodiment=self.minecraft,
-            jp01_embodiment=self.jp01,
-            droid_embodiment=self.droid,
+            jp01_embodiment=None if self.portable_core else self.jp01,
+            droid_embodiment=None if self.portable_core else self.droid,
             voice_presence=self.voice_presence,
             vision_buffer=self.vision,
             memory_store=self.memory,
@@ -3921,21 +3947,28 @@ async def serve_modular_gateway(
     webui_port: int | None = None,
     state_dir: Path | None = None,
     workspace: Path | None = None,
+    static_ui_dir: Path | None = None,
+    portable_core: bool = False,
 ) -> None:
     """Boot the standalone modular Gateway API + WebApp listeners."""
     gw_host = host or os.environ.get("JAEGER_GATEWAY_HOST") or "127.0.0.1"
     gw_port = int(port or os.environ.get("JAEGER_GATEWAY_PORT") or "33418")
     ui_host = webui_host or os.environ.get("JAEGER_WEBUI_HOST") or gw_host
     ui_port = int(webui_port or os.environ.get("JAEGER_WEBUI_PORT") or "8790")
-    allow_lan_env = _env_truthy("JAEGER_ALLOW_LAN_ACCESS", False)
+    if portable_core and not all(GatewayAuthPolicy._is_loopback(h) for h in (gw_host, ui_host)):
+        raise ValueError("Jaeger Core must listen on loopback. Use a local browser.")
+    allow_lan_env = not portable_core and _env_truthy("JAEGER_ALLOW_LAN_ACCESS", False)
 
-    runtime = ModularGatewayRuntime(state_dir=state_dir, workspace=workspace)
+    runtime = ModularGatewayRuntime(
+        state_dir=state_dir, workspace=workspace, static_ui_dir=static_ui_dir, portable_core=portable_core,
+    )
     # Sync physical Droid peripherals & gimbal pose truthfully on live boot (never during unit tests).
-    try:
-        runtime.droid.refresh_devices()
-        runtime.droid.reflex.start()
-    except Exception:  # noqa: BLE001
-        pass
+    if not portable_core:
+        try:
+            runtime.droid.refresh_devices()
+            runtime.droid.reflex.start()
+        except Exception:  # noqa: BLE001
+            pass
 
     api_allow_private = (
         runtime.auth.allow_private_network_unauthenticated

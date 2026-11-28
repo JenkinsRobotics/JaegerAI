@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Jaeger's GitHub connector (P10): the official GitHub MCP server, read-only.
-# Auth comes from Matthew's existing `gh` login at launch; the token is never
+# Auth comes from the local user's existing `gh` login at launch; the token is never
 # written to disk or config and never printed.
 set -eu
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"

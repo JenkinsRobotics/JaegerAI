@@ -5,7 +5,7 @@
 # Mochi demo audit (operator's animation engine, vendoring-source for 0.5)
 
 **Date:** 2026-06-08
-**Source:** `/Users/developer/GITHUB/Mochi/`
+**Source:** `~/GitHub/Mochi/`
 **License:** Apache 2.0 (compatible with JROS's Apache 2.0 — vendoring OK)
 **Why this audit:** Mochi is the operator's prior animation work.  The
 plan for 0.5 is to bring its `animation_node` into JROS as the
@@ -46,7 +46,7 @@ Swift renderer).
 
 ### KEEP as reference (read-only — operator's prior art)
 
-* `/Users/developer/GITHUB/Mochi/` stays in the workspace.  The
+* `~/GitHub/Mochi/` stays in the workspace.  The
   Mscript engine + GUI players + sample assets are reference
   material.  We don't redistribute them as part of JROS.
 

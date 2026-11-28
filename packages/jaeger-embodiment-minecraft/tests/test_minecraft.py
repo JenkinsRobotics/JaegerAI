@@ -67,9 +67,9 @@ def test_mindcraft_coop_modes_actions_and_chat_inbox(tmp_path: Path) -> None:
     assert modes["follow_player"]["enabled"] is False
 
     # Co-op follow, mode toggle, stop, eat, and chat inbox all work cleanly offline & persist
-    follow_res = mc.act("follow_player", {"player": "Matthew", "distance": 4})
+    follow_res = mc.act("follow_player", {"player": "DemoOwner", "distance": 4})
     assert follow_res["ok"] is True
-    assert follow_res["state"]["modes"]["follow_player"] == {"enabled": True, "target": "Matthew", "distance": 4}
+    assert follow_res["state"]["modes"]["follow_player"] == {"enabled": True, "target": "DemoOwner", "distance": 4}
 
     mode_res = mc.act("set_mode", {"mode": "self_defense", "enabled": False})
     assert mode_res["ok"] is True

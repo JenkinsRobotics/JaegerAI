@@ -12,7 +12,7 @@ def test_world_model_build_awareness_brief(tmp_path: Path) -> None:
     wm.record_perception(
         modality="minecraft",
         kind="chat",
-        payload={"summary": "[MC Chat] Matthew: Follow me to the cave!"},
+        payload={"summary": "[MC Chat] DemoOwner: Follow me to the cave!"},
         salience=0.9,
     )
     brief = wm.build_awareness_brief(
@@ -25,8 +25,8 @@ def test_world_model_build_awareness_brief(tmp_path: Path) -> None:
                 "biome": "plains",
                 "health": 20.0,
                 "food": 18.0,
-                "nearby_players": [{"username": "Matthew"}],
-                "modes": {"follow_player": {"enabled": True, "target": "Matthew"}},
+                "nearby_players": [{"username": "DemoOwner"}],
+                "modes": {"follow_player": {"enabled": True, "target": "DemoOwner"}},
             }
         },
         goals=[{"domain": "youtube", "title": "Film Episode 02 Co-Op"}],
@@ -38,7 +38,7 @@ def test_world_model_build_awareness_brief(tmp_path: Path) -> None:
     assert "18.4GB free" in brief
     assert "Droid Body: awake (tracking" in brief
     assert "Minecraft Body: LIVE @ (12,64,-5) plains" in brief
-    assert "following=Matthew" in brief
+    assert "following=DemoOwner" in brief
     assert "Film Episode 02 Co-Op" in brief
     assert "Follow me to the cave!" in brief
     assert len(brief) <= 950

@@ -9,7 +9,11 @@ while [ -L "$SELF" ]; do
   [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
 done
 REPO_ROOT="$(cd "$(dirname "$SELF")" && pwd)"
-VENV_PY="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
+DEFAULT_VENV="${HOME}/.jaeger/venv"
+if [[ "${1:-}" == "core" ]]; then
+  DEFAULT_VENV="${HOME}/.jaeger/core-venv"
+fi
+VENV_PY="${JAEGER_VENV:-${DEFAULT_VENV}}/bin/python"
 
 if [[ "${1:-}" == "setup" ]]; then
   shift
@@ -17,8 +21,12 @@ if [[ "${1:-}" == "setup" ]]; then
 fi
 
 if [[ ! -x "${VENV_PY}" ]]; then
-  echo "[jaeger] Environment not installed yet at ${JAEGER_VENV:-~/.jaeger/venv}." >&2
-  echo "Run: ./install.sh  (or ./jaeger setup --profile full)" >&2
+  echo "[jaeger] Environment not installed yet at ${JAEGER_VENV:-${DEFAULT_VENV}}." >&2
+  if [[ "${1:-}" == "core" ]]; then
+    echo "Run: ./install.sh --profile core" >&2
+  else
+    echo "Run: ./install.sh  (or ./jaeger setup --profile full)" >&2
+  fi
   exit 1
 fi
 

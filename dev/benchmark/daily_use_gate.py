@@ -171,7 +171,7 @@ def run_gate(*, live_model: str = "") -> dict:
             dry_run=True,
         )
         catastrophic_dec = PolicyKernel().evaluate(
-            ProposedAction(tool_name="exec_command", arguments={"command": "rm -rf /Users/developer/Documents"}, actor="owner:webui"),
+            ProposedAction(tool_name="exec_command", arguments={"command": "rm -rf /home/example/Documents"}, actor="owner:webui"),
             instance_root=inst_dir,
             dry_run=True,
         )

@@ -225,6 +225,17 @@ class ContainerSandbox:
         )
 
 
+class DisabledProcessSandbox:
+    """Fail closed for profiles that do not offer host process execution."""
+
+    @property
+    def name(self) -> str:
+        return "host_processes_disabled"
+
+    def prepare(self, command: Sequence[str], profile: SandboxProfile) -> SandboxSpec:
+        raise PermissionError("Host process execution is not enabled in Jaeger Core.")
+
+
 class UnconfinedSandbox:
     """Explicit opt-in unconfined runner (used ONLY for FULL_ACCESS or diagnostics)."""
 

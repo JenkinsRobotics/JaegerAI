@@ -2,7 +2,7 @@
 
 This module reuses the existing ``packages/jaeger-browser`` worker (Steel
 Browser adapter exposing ``POST /jaeger/action``) instead of adding a second
-browser stack. It adds the supervision layer Matthew asked for:
+browser stack. It adds a browser supervision layer:
 
 * **Owner approval per action** — every mutating action (navigate, scroll)
   must carry the token returned by :meth:`YouTubeBrowserSession.approve`.

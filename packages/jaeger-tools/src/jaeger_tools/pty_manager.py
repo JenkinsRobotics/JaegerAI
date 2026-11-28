@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import errno
 import os
-import pty
 import select
 import signal
 import subprocess
@@ -24,6 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from jaeger_contracts import SandboxPort, SandboxProfile
+
+try:
+    import pty
+except ImportError:  # pty is Unix-only; importing the portable Gateway must still work.
+    pty = None
 
 __all__ = ["PtySessionError", "PtySessionManager"]
 
@@ -180,6 +184,8 @@ class PtySessionManager:
         initial_wait_s: float = 0.25,
         allow_network: bool = False,
     ) -> dict[str, Any]:
+        if pty is None:
+            raise PtySessionError("Interactive terminals are not supported on this host.")
         cmd = (command or "").strip()
         if not cmd:
             raise PtySessionError("command is required")

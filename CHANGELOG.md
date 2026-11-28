@@ -3,6 +3,15 @@
 JaegerAI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## 1.0.1 — 2026-11-27 — Cross-Platform Jaeger Core, Public Privacy Hardening & Authorized Task Handling
+
+- **Cross-Platform Jaeger Core Release Installer (`scripts/build-core.py`, `scripts/install-core.py`):** Browser-first portable distribution (`jaeger-core-1.0.1.zip`) verified across **macOS (Apple Silicon & Intel)**, **Linux**, and **Windows x64** on Python 3.11–3.12 with zero Node.js, MLX, or native macOS requirements on the target machine. Starts with a neutral owner profile, isolated `~/.jaeger/core` state, and bundled production WebUI.
+- **Public Privacy & Release Hygiene:** Scrubbed developer usernames, hostnames, private LAN/Tailscale addresses, and personal project names from tracked source, tests, and UI previews; hardened `.gitignore` and `scripts/build-core.py` to fail closed if untracked files, credentials, or local databases are ever present.
+- **Gateway-Owned Authorized Task Handling (`jaeger-gateway`):** Model-free local workflows (`/find`, `/audit`, `/connect`, `/recover`), scoped owner grants rejecting untrusted webpage/document origins, automatic cloud refusal recovery, and direct-chat / owner-autonomy settings.
+- **LLM Provider Telemetry & OWASP Model Risk Cards (`jaeger-models`):** Live provider telemetry (Ollama Cloud balance/usage, OpenRouter catalog/credits, OpenAI/Anthropic rate-limit header tracking), SQLite WAL cost ledger, 18 industry-standard model risk flags (OWASP LLM Top 10, XSTest/OR-Bench over-refusal, BFCL, 32 GB fit), and Cloud vs Local head-to-head evaluation suite.
+- **Saved SSH Config & Tailscale Peer Auto-Connect (`jaeger-tools`):** Unified `remote_discover` and `remote_connect` reusing saved `~/.ssh/config` aliases via OS OpenSSH (zero private keys exposed) and Tailscale peers.
+- **Living Avatar & NexusUI Desktop Shell (`jaeger-avatar`, `@jaeger/ui-avatar`, `jaeger_ai/interfaces/nexus`):** Merged PR #41 (`jaeger-avatar` live control probe, `--gif`, live stage badge) and PR #42 (NexusUI pywebview desktop shell with Vita 3D VRM avatar).
+
 ## 1.0.0 — 2026-11-27 — 100% modular local-first cognitive platform
 
 JaegerAI 1.0.0 completes the ground-up modularization into **30 standalone backend packages** and **6 standalone React 19 UI packages** (`packages/`), engineered for 24/7 operation on a single 32 GB Apple Silicon machine with **zero external infrastructure daemons** (pure embedded SQLite WAL + in-process `asyncio`).

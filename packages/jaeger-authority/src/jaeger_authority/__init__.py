@@ -46,6 +46,7 @@ from .inspectors import (
 )
 from .sandbox import (
     ContainerSandbox,
+    DisabledProcessSandbox,
     LinuxBwrapSandbox,
     MacOsSeatbeltSandbox,
     UnconfinedSandbox,
@@ -59,6 +60,7 @@ __all__ = [
     "ContainerSandbox",
     "ControlPlaneInspector",
     "DataSensitivity",
+    "DisabledProcessSandbox",
     "DestructiveAndEvasionInspector",
     "EgressInspector",
     "GuardrailResult",

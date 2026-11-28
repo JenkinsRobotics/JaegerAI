@@ -10,7 +10,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ORIGIN = "https://${TAILSCALE_HOST:-test-host.tail1234.ts.net}:8443"
+ORIGIN = os.environ.get("JAEGER_TEST_REMOTE_ORIGIN", "").rstrip("/")
+TAILNET_HOST = os.environ.get("JAEGER_TEST_TAILNET_HOST", "")
 import sys as _sys
 from pathlib import Path as _Path
 
@@ -61,7 +62,7 @@ def isolated(tmp: Path) -> dict:
     ok = bool(res.get("ok")) and consume_pairing_token(pair["token"]) and not consume_pairing_token(pair["token"])
     remote_disable(stop_serve=False)
     svc.tailscale_status = real_ts
-    return {"ok": ok, "origin": res.get("origin"), "pair": pair["url"]}
+    return {"ok": ok, "origin": res.get("origin")}
 
 
 def operator_snapshot() -> dict:
@@ -72,7 +73,7 @@ def operator_snapshot() -> dict:
         entity = str(((gw["body"].get("Agent") or {}).get("entity_id")) or "")
     sessions_https = _json("GET", ORIGIN + "/api/jaeger/sessions")
     auth = _json("GET", ORIGIN + "/api/auth/status")
-    gw_tailnet = _json("GET", f"http://100.64.0.20:{GATEWAY_PORT}/health")
+    gw_tailnet = _json("GET", f"http://{TAILNET_HOST}:{GATEWAY_PORT}/health")
     return {
         "entity_id": entity,
         "gateway_loopback": gw.get("status") == 200,
@@ -88,6 +89,8 @@ def operator_snapshot() -> dict:
 
 
 def main() -> int:
+    if not (ORIGIN and TAILNET_HOST):
+        raise SystemExit("Set JAEGER_TEST_REMOTE_ORIGIN and JAEGER_TEST_TAILNET_HOST for your installation.")
     tmp = Path(tempfile.mkdtemp(prefix="jaeger-remote-"))
     iso = isolated(tmp)
     snap = operator_snapshot()

@@ -52,7 +52,7 @@ export function GeneralSettings({children}: {children: ReactNode}) {
       <Menu title="Speed" description="Choose how quickly Jaeger runs across chats, subagents, and compaction" options={["Fast","Standard"]}/>
       <Row title="Available reasoning efforts" description="Choose which reasoning effort levels appear in model controls. Availability varies by model."><button aria-expanded={effortsOpen} onClick={()=>setEffortsOpen(!effortsOpen)}>{efforts.length} selected ⌄</button></Row>
       {effortsOpen && <fieldset><legend>Available reasoning efforts</legend>{levels.map(level=><label key={level}><input type="checkbox" checked={efforts.includes(level)} onChange={e=>setEfforts(e.target.checked ? [...efforts,level] : efforts.filter(l=>l!==level))}/>{level} </label>)}</fieldset>}
-      <Row title="Open source licenses" description="Third-party notices for bundled dependencies"><a href="https://github.com/JenkinsRobotics/JaegerAI/blob/main/jaeger_ai/interfaces/ui/THIRD_PARTY_NOTICES.md" target="_blank" rel="noreferrer">View</a></Row>
+      <Row title="Open source licenses" description="Third-party notices for bundled dependencies"><a href="https://github.com/JenkinsRobotics/JaegerAI/blob/master/THIRD_PARTY_NOTICES.md" target="_blank" rel="noreferrer">View</a></Row>
       <Toggle title="Plugins" initial description="Allow Jaeger to use installed plugins"/>
     </Card>
     <Card title="Composer">

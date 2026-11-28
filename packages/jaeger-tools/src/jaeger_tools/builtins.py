@@ -48,6 +48,7 @@ def register_builtin_tools(
     workflows: Any = None,
     extra_read_roots: tuple[Path, ...] = (),
     include_macos: bool = True,
+    include_process_tools: bool = True,
     allow_network: bool = False,
     shell_timeout_s: float = 45.0,
 ) -> list[str]:
@@ -60,8 +61,9 @@ def register_builtin_tools(
         registered.append(spec.name)
 
     # 1. Shell (Policy + Seatbelt/Elevated sandbox gated)
-    registry.register_shell_tool(allow_network=allow_network, timeout_s=shell_timeout_s)
-    registered.append("shell")
+    if include_process_tools:
+        registry.register_shell_tool(allow_network=allow_network, timeout_s=shell_timeout_s)
+        registered.append("shell")
 
     # 2. read_file (paged line reader)
     def _read_file(args: Mapping[str, Any]) -> ToolResult:
@@ -356,22 +358,23 @@ def register_builtin_tools(
             metadata={"returncode": proc.returncode},
         )
 
-    _add(ToolSpec(
-        name="execute_code",
-        description="Run a Python script snippet inside the workspace sandbox for computation or data transforms.",
-        schema={
-            "type": "object",
-            "properties": {
-                "code": {"type": "string"},
-                "timeout_s": {"type": "number", "default": 30.0},
+    if include_process_tools:
+        _add(ToolSpec(
+            name="execute_code",
+            description="Run a Python script snippet inside the workspace sandbox for computation or data transforms.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string"},
+                    "timeout_s": {"type": "number", "default": 30.0},
+                },
+                "required": ["code"],
             },
-            "required": ["code"],
-        },
-        handler=_execute_code,
-        tier="write_local",
-        read_only=False,
-        tags=("python", "code", "compute"),
-    ))
+            handler=_execute_code,
+            tier="write_local",
+            read_only=False,
+            tags=("python", "code", "compute"),
+        ))
 
     # 8. Memory + offload tools (when SqliteStateMemory attached)
     if memory is not None:

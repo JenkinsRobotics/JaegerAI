@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -296,6 +297,51 @@ def test_setup_dry_run_and_pyproject_workspace_sync() -> None:
     assert '"packages/jaeger-ui-avatar"' in pyproj
     assert "jaeger-droid = { workspace = true }" in pyproj
     assert "jaeger-cognition = { workspace = true }" in pyproj
+
+
+def test_portable_core_starts_without_process_tools_or_full_profile_state(tmp_path, monkeypatch) -> None:
+    from jaeger_gateway import ModularGatewayRuntime
+
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "core"))
+    monkeypatch.delenv("JAEGER_WORKSPACE", raising=False)
+    monkeypatch.setenv("JAEGER_ELEVATED", "1")
+    monkeypatch.setenv("JAEGER_ALLOW_LAN_ACCESS", "1")
+    runtime = ModularGatewayRuntime(portable_core=True)
+    try:
+        names = {tool["name"] for tool in runtime.tools.list_tools(limit=200)}
+        assert {"read_file", "search_workspace", "memory_recall"} <= names
+        assert not names & {"shell", "execute_code", "pty_start", "droid_look", "apple_notes"}
+        assert runtime.sandbox.name == "host_processes_disabled"
+        assert not runtime.auth.allow_private_network_unauthenticated
+        assert runtime.workspace == tmp_path / "core" / "workspace"
+        assert runtime.workspace.is_dir()
+        assert runtime._set_elevated_mode(True)["ok"] is False
+        assert not (runtime.state_dir / "execution_mode.json").exists()
+    finally:
+        runtime.close()
+
+
+def test_core_release_stages_only_tracked_product_files_and_rejects_private_state(tmp_path: Path) -> None:
+    stage_sources = runpy.run_path(str(REPO / "scripts/build-core.py"))["stage_tracked_sources"]
+    origin = tmp_path / "checkout"
+    product = origin / "jaeger_ai"
+    product.mkdir(parents=True)
+    tracked = product / "example.py"
+    tracked.write_text("value = 'product source'\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(origin)], check=True)
+    subprocess.run(["git", "add", "jaeger_ai/example.py"], cwd=origin, check=True)
+    private = product / "identity.json"
+    private.write_text('{"owner_name": "Private test canary"}', encoding="utf-8")
+    extra = product / "local-draft.txt"
+    extra.write_text("Untracked test canary.", encoding="utf-8")
+
+    stage = tmp_path / "stage"
+    stage_sources(origin, stage)
+    assert list(stage.rglob("*.*")) == [stage / "jaeger_ai" / "example.py"]
+
+    subprocess.run(["git", "add", "-f", "jaeger_ai/identity.json"], cwd=origin, check=True)
+    with pytest.raises(ValueError, match="Personal state or credentials"):
+        stage_sources(origin, tmp_path / "rejected")
 
 
 def test_runtime_registers_embodiment_and_studio_tools(tmp_path: Path) -> None:

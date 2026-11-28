@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="full"
 SKIP_UI=0
 DRY_RUN=0
-VENV_DIR="${JAEGER_VENV:-${HOME}/.jaeger/venv}"
+VENV_DIR="${JAEGER_VENV:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -82,7 +82,9 @@ DROID_PKGS=(
 
 SELECTED=("${CORE_PKGS[@]}")
 case "${PROFILE}" in
-  core) ;;
+  # The Gateway imports these lightweight adapters at startup. The portable
+  # profile does not need the native MLX/Kokoro and Whisper engine packages.
+  core) SELECTED+=("${BUSINESS_PKGS[@]}" jaeger-realtime jaeger-vision jaeger-embodiment-minecraft "${DROID_PKGS[@]}") ;;
   business)  SELECTED+=("${BUSINESS_PKGS[@]}") ;;
   companion) SELECTED+=("${COMPANION_PKGS[@]}") ;;
   droid)     SELECTED+=("${COMPANION_PKGS[@]}" "${DROID_PKGS[@]}") ;;
@@ -92,6 +94,16 @@ case "${PROFILE}" in
     exit 2
     ;;
 esac
+
+if [[ "${PROFILE}" == "core" ]]; then
+  VENV_DIR="${VENV_DIR:-${HOME}/.jaeger/core-venv}"
+  STATE_DIR="${JAEGER_STATE_DIR:-${HOME}/.jaeger/core}"
+  UI_OUTPUT="${STATE_DIR}/ui"
+else
+  VENV_DIR="${VENV_DIR:-${HOME}/.jaeger/venv}"
+  STATE_DIR="${JAEGER_STATE_DIR:-${HOME}/.jaeger}"
+  UI_OUTPUT="${HOME}/.cache/jaeger/ui-rebuild-mainscreen"
+fi
 
 echo "[jaeger-setup] Repo:    ${REPO_ROOT}"
 echo "[jaeger-setup] Profile: ${PROFILE} (${#SELECTED[@]} modular packages)"
@@ -125,7 +137,6 @@ done
 echo "[jaeger-setup] Installing ${#SELECTED[@]} standalone packages..."
 "${PIP}" "${PIP_ARGS[@]}"
 
-STATE_DIR="${JAEGER_STATE_DIR:-${HOME}/.jaeger}"
 mkdir -p "${STATE_DIR}"
 
 echo "[jaeger-setup] Seeding verified Day-1 starter skills into ${STATE_DIR}/skills..."
@@ -160,13 +171,17 @@ if [[ "${SKIP_UI}" -eq 0 && -d "${REPO_ROOT}/jaeger_ai/interfaces/ui" ]]; then
     fi
   )
   JAEGER_UI_DEPENDENCIES="${REPO_ROOT}/jaeger_ai/interfaces/ui" \
-    "${PY}" -B "${REPO_ROOT}/jaeger_ai/interfaces/ui/scripts/build-external.py"
+    "${PY}" -B "${REPO_ROOT}/jaeger_ai/interfaces/ui/scripts/build-external.py" --output-root "${UI_OUTPUT}"
 fi
 
 echo "[jaeger-setup] Running jaeger doctor..."
-"${PY}" -B "${REPO_ROOT}/scripts/doctor.py"
+JAEGER_UI_DIR="${UI_OUTPUT}/dist" "${PY}" -B "${REPO_ROOT}/scripts/doctor.py"
 echo "[jaeger-setup] Done! First-run commands:"
-echo "  ./jaeger start                 # Boot Gateway (:33418) + Studio WebUI (:8790)"
+if [[ "${PROFILE}" == "core" ]]; then
+  echo "  ./jaeger core                  # Boot browser-first Core on http://127.0.0.1:8790"
+else
+  echo "  ./jaeger start                 # Boot Gateway (:33418) + Studio WebUI (:8790)"
+fi
 echo "  ./jaeger onboard               # 30-second Day-1 setup (name, hybrid models & first goal)"
 echo "  ./jaeger open                  # Open Studio WebUI in your browser"
 echo "  ./jaeger model routing         # Configure cloud + local hybrid model tiers"

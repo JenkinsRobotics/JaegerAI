@@ -56,6 +56,7 @@ dynamic = ["version"]
 dependencies = [
     "aiohttp>=3.10",
     "httpx>=0.27",
+    "jaeger-gateway==0.1.0",
     "mcp>=1.0",
     "pydantic>=2.7",
     "pyyaml>=6.0",
@@ -67,12 +68,15 @@ jaeger = "jaeger_ai.cli:main"
 [tool.setuptools]
 include-package-data = false
 
+[tool.setuptools.package-data]
+jaeger_ai = ["assets/shared-ui/*", "assets/shared-ui/**/*"]
+
 [tool.setuptools.dynamic]
 version = { attr = "jaeger_ai.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["jaeger_ai*"]
-exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__"]
+exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__", "jaeger_ai.interfaces.nexus*"]
 namespaces = true
 
 [tool.pytest.ini_options]

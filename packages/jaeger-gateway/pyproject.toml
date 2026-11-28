@@ -8,8 +8,29 @@ version = "0.1.0"
 description = "Standalone single-fiber Gateway server, zombie-fenced SSE streams, WAL session/approval store & fail-closed WS/HTTP auth."
 requires-python = ">=3.11"
 dependencies = [
+    "aiohttp>=3.10",
+    "jaeger-authority",
+    "jaeger-avatar",
+    "jaeger-business",
+    "jaeger-channels",
+    "jaeger-cognition",
     "jaeger-contracts",
+    "jaeger-droid",
+    "jaeger-embodiment-minecraft",
     "jaeger-events",
+    "jaeger-hardware",
+    "jaeger-loop",
+    "jaeger-macos",
+    "jaeger-mcp",
+    "jaeger-memory",
+    "jaeger-models",
+    "jaeger-orchestration",
+    "jaeger-realtime",
+    "jaeger-reliability",
+    "jaeger-skills",
+    "jaeger-tools",
+    "jaeger-vision",
+    "jaeger-youtube",
 ]
 
 [tool.setuptools.packages.find]

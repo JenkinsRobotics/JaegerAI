@@ -719,6 +719,7 @@ Usage:
   ./jaeger chat                     Interactive streaming terminal chat (TUI)
   ./jaeger ask "<prompt>"           Run a single prompt against the live Gateway
   ./jaeger start                    Start standalone Gateway (:33418) + 5-Tab Studio WebUI (:8790)
+  jaeger core                       Start browser-first Jaeger Core on this computer
   ./jaeger stop [svc...] [--json]   Stop Gateway (or specified stack services) cleanly
   ./jaeger restart [svc...] [--json] Restart Gateway (or specified stack services) cleanly
   ./jaeger stack <cmd> [args]       Manage launchd stack (status | up | down | restart) [--json]
@@ -761,10 +762,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         sess = _api_json("POST", "/v1/sessions", {"title": prompt[:48]})["session"]
         return _stream_turn(sess["session_id"], prompt)
-    if cmd == "start":
+    if cmd in ("start", "core"):
         from jaeger_gateway import serve_modular_gateway
 
-        asyncio.run(serve_modular_gateway())
+        bundled_ui = Path(__file__).resolve().parent / "assets" / "shared-ui"
+        has_bundle = (bundled_ui / "index.html").is_file()
+        asyncio.run(serve_modular_gateway(
+            portable_core=cmd == "core" or sys.platform == "win32",
+            static_ui_dir=bundled_ui if has_bundle else None,
+        ))
         return 0
     if cmd == "stack":
         from .stack import main as stack_main

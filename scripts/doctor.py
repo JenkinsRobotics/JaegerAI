@@ -84,7 +84,8 @@ def run_doctor(*, json_output: bool = False) -> int:
     gw = _probe_http(f"http://127.0.0.1:{gw_port}/health", timeout=4.0)
     res = _probe_http(f"http://127.0.0.1:{gw_port}/v1/system/resources", timeout=4.0)
     gateway_live = bool(gw["ok"] or res["ok"])
-    ui_dist = Path.home() / ".cache" / "jaeger" / "ui-rebuild-mainscreen" / "dist" / "index.html"
+    default_ui = Path.home() / ".cache" / "jaeger" / "ui-rebuild-mainscreen" / "dist"
+    ui_dist = Path(os.environ.get("JAEGER_UI_DIR") or default_ui).expanduser() / "index.html"
 
     report = {
         "ok": len(missing_core) == 0,
