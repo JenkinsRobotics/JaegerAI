@@ -6,6 +6,7 @@ from .living_link import (
     AvatarLink,
     avatar_app_serving,
     launch_avatar_app,
+    probe_avatar_link,
 )
 from .packs import (
     AvatarPackInfo,
@@ -46,4 +47,5 @@ __all__ = [
     "inspect_avatar_pack",
     "inspect_glb_bytes",
     "launch_avatar_app",
+    "probe_avatar_link",
 ]

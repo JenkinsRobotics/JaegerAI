@@ -359,12 +359,15 @@ def _cmd_onboard() -> int:
 
 
 def _cmd_avatar(args: list[str]) -> int:
-    from jaeger_avatar import DEFAULT_AVATAR_PORT, DEFAULT_FACE, AvatarLink, avatar_app_serving, launch_avatar_app
+    from jaeger_avatar import DEFAULT_AVATAR_PORT, DEFAULT_FACE, launch_avatar_app, probe_avatar_link
 
     face = DEFAULT_FACE
     port = int(os.environ.get("JAEGER_AVATAR_PORT") or DEFAULT_AVATAR_PORT)
     browser = False
     check = False
+    no_launch = False
+    gif = False
+    out_path = "/tmp/lilith_demo.gif"
     it = iter(args)
     for tok in it:
         if tok == "--face":
@@ -375,17 +378,40 @@ def _cmd_avatar(args: list[str]) -> int:
             browser = True
         elif tok == "--check":
             check = True
+        elif tok == "--no-launch":
+            no_launch = True
+        elif tok == "--gif":
+            gif = True
+        elif tok == "--out":
+            out_path = next(it, out_path)
         elif tok in ("-h", "--help"):
-            print("Usage: ./jaeger avatar [--face vita] [--port 8791] [--browser] [--check]")
+            print(
+                "Usage: ./jaeger avatar [--face vita] [--port 8791] [--browser] "
+                "[--check [--no-launch]] [--gif [--out /tmp/lilith_demo.gif]]"
+            )
             return 0
+    if gif:
+        script = REPO_ROOT / "dev" / "scripts" / "lilith_demo.py"
+        if not script.is_file():
+            print(f"{_RED}missing demo script: {script}{_RESET}", file=sys.stderr)
+            return 1
+        venv_py = Path(os.environ.get("JAEGER_VENV") or (Path.home() / ".jaeger" / "venv")) / "bin" / "python"
+        py = str(venv_py) if venv_py.is_file() else sys.executable
+        print(f"{_DIM}running {script.name}...{_RESET}")
+        return subprocess.run([py, str(script)], check=False, cwd=str(REPO_ROOT)).returncode
     if check:
-        up = avatar_app_serving(port)
-        link = AvatarLink(url=f"http://127.0.0.1:{port}")
-        print(json.dumps({"serving": up, "port": port, "control_token_configured": bool(link.token)}, indent=2))
-        return 0 if up else 1
+        try:
+            result = probe_avatar_link(face=face, port=port, browser=browser, launch_if_needed=not no_launch)
+        except (FileNotFoundError, TimeoutError, RuntimeError) as exc:
+            print(f"{_YELLOW}{exc}{_RESET}", file=sys.stderr)
+            return 1
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("serving") else 1
     try:
         url = launch_avatar_app(face=face, port=port, browser=browser)
         print(f"{_GREEN}Living Avatar running:{_RESET} {url}")
+        if browser:
+            print(f"{_DIM}  serving only (no window); open the URL in a browser{_RESET}")
         return 0
     except FileNotFoundError as exc:
         print(f"{_YELLOW}{exc}{_RESET}", file=sys.stderr)
