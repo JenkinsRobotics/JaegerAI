@@ -1,0 +1,93 @@
+/* NexusUI app shell: the standard app container and navigation bar for NexusUI desktop apps.
+ *
+ * Recreated from Aether UI (Aether-UI src/ApplicationSidebar.css, variant "captioned", as Aether Studio's navigation
+ * shows it; src/ComingSoonHome.css's sidebar home and src/ApplicationStatusBar.css), November 27, 2026. Copied, not
+ * imported: an app copies this folder into its own source and owns it from then on.
+ *
+ * The frame: one full-height sidebar (brand, captioned sections, footer tools, Settings and Apps, the profile card)
+ * beside the app's own content, and a status bar across the bottom. No header: the sidebar carries the app's
+ * identity and every control a header used to hold. The app's pages go inside .nx-main unchanged.
+ *
+ * Needs the Aether tokens (--aether-color-*, --aether-font-family) the Jaeger apps already copy.
+ */
+.nx-app { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 100%; min-height: 0;
+  background: var(--aether-color-bg-app); color: var(--aether-color-text); font-family: var(--aether-font-family); }
+.nx-main { grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; overflow: auto; position: relative; }
+
+/* The sidebar (Aether's "captioned" reference: compact captions, solid accent selection, brand toggles the rail). */
+.nx-sidebar { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; width: 224px; min-height: 0;
+  padding: 12px 14px; background: var(--aether-color-bg-panel); border-right: 1px solid var(--aether-color-border);
+  --nx-row: 32px; --nx-icon: 18px; transition: width var(--aether-motion-base, .18s) var(--aether-motion-ease, ease); }
+.nx-sidebar-body { display: flex; flex-direction: column; gap: 24px; flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.nx-sidebar-footer { display: flex; flex-direction: column; flex: none; }
+
+.nx-brand { display: flex; align-items: center; gap: 8px; width: 100%; height: 44px; min-height: 44px; flex: none; padding: 0; margin: 0; border: 0;
+  border-radius: 4px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.nx-brand:hover { background: var(--aether-color-bg-hover); }
+.nx-mark { display: grid; place-items: center; width: 32px; height: 32px; flex: none; }
+.nx-mark > img, .nx-mark > svg { width: 32px; height: 32px; border-radius: 8px; }
+/* The wordmark: the product name in ink and the app's suffix in Aether Studio's dark accent gradient. */
+.nx-wordmark { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 21px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
+.nx-wordmark b { font-weight: 600; color: var(--aether-color-text); }
+.nx-wordmark i { font-style: normal; font-weight: 500; background: linear-gradient(0deg, #53d9ff, #55a9ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+.nx-section { display: flex; flex-direction: column; margin: 0; }
+.nx-caption { display: flex; align-items: center; justify-content: space-between; gap: 4px; height: 24px; min-height: 24px; margin: 0 0 4px; padding: 0 8px;
+  border: 0; border-radius: 4px; background: transparent; color: var(--aether-color-text); font: 500 8px/12px var(--aether-font-family);
+  letter-spacing: .035em; text-transform: uppercase; cursor: pointer; }
+.nx-caption:hover { background: var(--aether-color-bg-hover); }
+.nx-caption svg { width: 12px; height: 12px; flex: none; color: var(--aether-color-text-dim); }
+.nx-section-items { display: flex; flex-direction: column; gap: 2px; }
+.nx-section-items[hidden] { display: none; }
+.nx-sections { display: flex; flex-direction: column; gap: 22px; }
+
+.nx-row { display: flex; align-items: center; gap: 8px; width: 100%; height: var(--nx-row); min-height: var(--nx-row); box-sizing: border-box; padding: 0 8px;
+  border: 0; border-radius: 4px; background: transparent; color: var(--aether-color-text); font: 500 12px var(--aether-font-family);
+  text-align: left; text-decoration: none; cursor: pointer;
+  transition: background-color var(--aether-motion-fast, .12s) var(--aether-motion-ease, ease), color var(--aether-motion-fast, .12s) var(--aether-motion-ease, ease); }
+.nx-row:hover:not(:disabled):not([aria-current="page"]) { background: var(--aether-color-bg-hover); }
+.nx-row[aria-current="page"], .nx-row[aria-current="page"]:hover { background: var(--aether-color-accent); color: var(--aether-color-text-on-selected, #fff); font-weight: 600; }
+.nx-row[aria-pressed="true"] { background: var(--aether-color-bg-hover); }
+.nx-row:disabled { opacity: .5; cursor: default; }
+.nx-row:focus-visible, .nx-brand:focus-visible, .nx-caption:focus-visible { outline: 2px solid var(--aether-color-accent); outline-offset: -2px; }
+.nx-icon { display: grid; place-items: center; flex: none; width: var(--nx-icon); height: var(--nx-icon); color: inherit; }
+.nx-icon svg { width: var(--nx-icon); height: var(--nx-icon); }
+.nx-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-badge { flex: none; min-width: 20px; padding: 1px 6px; box-sizing: border-box; border-radius: 999px; text-align: center; font-size: 10px; font-weight: 500;
+  background: color-mix(in srgb, var(--aether-color-accent) 12%, transparent); color: var(--aether-color-accent); }
+.nx-row[aria-current="page"] .nx-badge { background: color-mix(in srgb, #fff 20%, transparent); color: inherit; }
+
+.nx-tools { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.nx-settings { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--aether-color-border); }
+.nx-profile { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px; }
+.nx-avatar { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 50%; overflow: hidden;
+  background: var(--aether-color-bg-control); color: var(--aether-color-text); font-size: 12px; font-weight: 600; }
+.nx-avatar > img, .nx-avatar > svg { width: 100%; height: 100%; object-fit: cover; }
+.nx-profile-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.nx-profile-text b { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-profile-text span { font-size: 11px; color: var(--aether-color-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-profile-text span .nx-dot { margin-right: 5px; }
+
+/* The icon rail: the brand toggles it; the person's choice is remembered per app. */
+.nx-sidebar.nx-collapsed { width: 80px; }
+.nx-collapsed .nx-wordmark, .nx-collapsed .nx-label, .nx-collapsed .nx-badge, .nx-collapsed .nx-caption, .nx-collapsed .nx-profile-text { display: none; }
+.nx-collapsed .nx-brand, .nx-collapsed .nx-row { justify-content: center; }
+.nx-collapsed .nx-row { padding: 0; }
+.nx-collapsed .nx-section-items[hidden] { display: flex !important; }   /* every destination stays reachable in the rail (important: apps often hide [hidden] with !important) */
+.nx-collapsed .nx-section + .nx-section { padding-top: 12px; border-top: 1px solid var(--aether-color-border); }
+.nx-collapsed .nx-sections { gap: 12px; }
+.nx-collapsed .nx-profile { justify-content: center; padding: 0; }
+
+/* The status bar (Aether's ApplicationStatusBar): connection and product left, a message, the company right. */
+.nx-status { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; gap: 12px; box-sizing: border-box; height: 24px; padding: 0 12px;
+  border-top: 1px solid var(--aether-color-border); background: var(--aether-color-bg-bar, var(--aether-color-bg-panel)); color: var(--aether-color-text-dim); font: 11px var(--aether-font-family); }
+.nx-status-name { font-weight: 600; white-space: nowrap; }
+.nx-status-message { flex: 1; min-width: 0; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-status-company { margin-left: auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nx-dot { display: inline-block; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--aether-color-warn, #c58b24); }
+.nx-dot[data-connection="connected"] { background: var(--aether-color-ok, #28a66b); }
+.nx-dot[data-connection="offline"] { background: var(--aether-color-error, #d15353); }
+.nx-dot[data-connection="local"] { background: var(--aether-color-text-dim); }
+
+@media (max-width: 680px) { .nx-sidebar { width: min(224px, 65vw); } }
+@media (forced-colors: active) { .nx-wordmark i { background: none; color: CanvasText; } .nx-row[aria-current="page"] { outline: 1px solid Highlight; outline-offset: -1px; } }

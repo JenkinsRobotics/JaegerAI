@@ -1,0 +1,5 @@
+{
+  "name": "Jaeger",
+  "about": "Jaeger AI's own screen look (frozen). Drawn by web/src/face (Jaeger Avatar's flat face renderer, copied via Jaeger Omni). Teal is Jaeger Avatar's brand colour (#5fe0d0). Replace this file to change the character's look; the app never makes one.",
+  "style": { "eye": "visor", "mouth": "grille", "tint": [95, 224, 208], "tint_mix": 0.6, "accent": [129, 140, 248] }
+}
