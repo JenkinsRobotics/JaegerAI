@@ -125,3 +125,57 @@ def test_cron_scheduler_ticks_and_isolates_errors() -> None:
     now[0] += 61.0
     assert sched.tick() == ["health"]
     assert len(ran) == 2
+
+
+def test_deep_research_engine_and_ssrf_guard(tmp_path: Path) -> None:
+    from jaeger_orchestration import DeepResearchEngine, list_research_reports, safe_fetch_text
+
+    # SSRF guard MUST block localhost/private targets
+    with pytest.raises(ValueError, match="non-public"):
+        safe_fetch_text("http://127.0.0.1:8790/secret")
+    with pytest.raises(ValueError, match="non-public"):
+        safe_fetch_text("http://localhost:11434/api/tags")
+
+    def fake_search(q: str, limit: int) -> dict:
+        return {
+            "provider": "mock",
+            "query": q,
+            "results": [
+                {
+                    "title": f"Guide for {q}",
+                    "url": "https://example.org/robotics-guide",
+                    "snippet": "BLDC actuators achieve high torque density.",
+                },
+                {
+                    "title": "Benchmarks",
+                    "url": "https://example.org/benchmarks",
+                    "snippet": "Thermal limits govern continuous torque.",
+                },
+            ][:limit],
+        }
+
+    def fake_fetch(url: str) -> str:
+        return f"Full extracted text from {url}: harmonic drives reduce backlash."
+
+    model = ReplayModel(
+        [
+            {"content": "BLDC robotics actuators\nHarmonic drive tradeoffs"},
+            {"content": "## Executive Summary\nHarmonic drives reduce backlash [1].\n\n## Key Findings\n- Thermal limits matter [2]."},
+        ],
+        model_id="local/test",
+    )
+    engine = DeepResearchEngine(
+        search_fn=fake_search,
+        fetch_fn=fake_fetch,
+        model=model,
+        reports_dir=tmp_path / "reports",
+    )
+    rep = engine.run("BLDC robot actuators", max_queries=2, max_sources=4)
+    assert rep.report_id.startswith("res_")
+    assert len(rep.sources) == 2
+    assert all(s.fetched for s in rep.sources)
+    assert "Harmonic drives" in rep.markdown
+    assert '<nav class="toc">' in rep.html_report
+    assert Path(rep.saved_dir, "report.html").is_file()
+    saved = list_research_reports(tmp_path / "reports")
+    assert len(saved) == 1 and saved[0]["report_id"] == rep.report_id

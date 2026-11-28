@@ -59,3 +59,79 @@ def test_git_checkpoint_manager_snapshot_and_restore(tmp_path: Path) -> None:
 
     mgr.restore(snap)
     assert target.read_text(encoding="utf-8") == "v1\n"
+
+
+def test_offloader_grep_searches_extra_tool_results_dirs_and_clips_single_line_json(tmp_path: Path) -> None:
+    import pytest
+    from jaeger_memory import ToolOutputOffloader
+
+    state_dir = tmp_path / "state"
+    tool_results = tmp_path / "instances" / "truth" / "logs" / "tool_results"
+    tool_results.mkdir(parents=True)
+    artifact = tool_results / "20261124-114442_547c2685.json"
+    huge_json = '{"pad": "' + ("x" * 2000) + '", "account": "Google", "tail": "' + ("y" * 2000) + '"}'
+    artifact.write_text(huge_json, encoding="utf-8")
+
+    offloader = ToolOutputOffloader(state_dir, extra_dirs=(tool_results,))
+    by_abs = offloader.grep(str(artifact), '"account": "Google"')
+    by_name = offloader.grep(artifact.name, '"account": "Google"')
+    assert len(by_abs) == 1 and '"account": "Google"' in by_abs[0]
+    assert len(by_abs[0]) < 600  # clipped window, not full 4KB single line
+    assert by_name == by_abs
+
+    outside = tmp_path / "secret.txt"
+    outside.write_text("Google", encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
+        offloader.grep(str(outside), "Google")
+
+
+def test_history_replayable_span_and_orphan_preserving_boundary() -> None:
+    from jaeger_memory import choose_boundary, replayable_span, snap
+
+    msgs = [
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "tool_calls": [{"id": "c1", "name": "read"}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "r1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "u2"},
+        {"role": "assistant", "tool_calls": [{"id": "c2", "name": "edit"}]},
+        {"role": "tool", "tool_call_id": "c2", "content": "r2"},
+    ]
+    # Cutting right on the tool result at index 2 must snap backward to index 1
+    assert snap(msgs, 2) == 1
+    span = replayable_span(msgs, 2)
+    assert span[0]["role"] == "assistant"
+    assert span[1]["tool_call_id"] == "c1"
+
+    # Cutting with keep_recent=1 lands on tool result c2 -> must expand to include assistant c2
+    older, recent = choose_boundary(msgs, keep_recent=1)
+    assert recent[0]["role"] == "assistant"
+    assert recent[1]["tool_call_id"] == "c2"
+    assert len(older) + len(recent) == len(msgs)
+
+
+def test_wal_checkpoint_writes_and_redos_safe_grep(tmp_path: Path) -> None:
+    import pytest
+    from jaeger_memory import RegexTimeoutError, ToolOutputOffloader, deterministic_resource_id
+
+    mem = SqliteStateMemory(tmp_path / "wal_state")
+    cp_id = mem.save_checkpoint("sess-1", {"step": 1, "notes": []})
+    mem.put_writes(cp_id, "task-a", [("step", 2), ("status", "running")])
+    mem.put_writes(cp_id, "task-b", [("summary", "ok")])
+    writes = mem.get_writes(cp_id)
+    assert len(writes) == 3
+    merged = mem.load_checkpoint_with_writes(cp_id)
+    assert merged == {"step": 2, "notes": [], "status": "running", "summary": "ok"}
+
+    # Deterministic res_ ID + lookup by res_ ID
+    offloader = ToolOutputOffloader(tmp_path / "wal_state", max_inline_chars=128)
+    body = "a" * 35 + "!\n" + ("hello world\n" * 20)
+    env, path = offloader.maybe_offload("shell", body)
+    res_id = deterministic_resource_id("shell", body)
+    assert path is not None and res_id in env
+    assert offloader.grep(res_id, "hello world", max_matches=2)
+
+    # Catastrophic backtracking regex must raise RegexTimeoutError, never hang
+    with pytest.raises(RegexTimeoutError):
+        offloader.grep(res_id, r"(a+)+$", timeout_s=0.3)
+

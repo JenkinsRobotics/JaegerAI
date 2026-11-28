@@ -1,4 +1,4 @@
-"""jaeger-reliability: error classification, credential rotation, zero-event retries, repair, watchdog."""
+"""jaeger-reliability: error classification, credential rotation, zero-event retries, schema sanitization, tool repair, watchdog."""
 
 from .engine import (
     CredentialPool,
@@ -9,13 +9,66 @@ from .engine import (
     repair_json_string,
     retry_stream_zero_event_safe,
 )
+from .errors import (
+    AUTH,
+    NOT_FOUND,
+    QUOTA,
+    RATE_LIMIT,
+    TRANSIENT,
+    UNKNOWN,
+    ClassifiedError,
+    classify_error_detailed,
+    classify_exception,
+    friendly_error_text,
+    friendly_message,
+    friendly_overflow_text,
+    retry_call,
+)
+from . import gemini_schema, hermes_schema_sanitizer, moonshot_schema
+from .schema_sanitizer import (
+    sanitize_property_key,
+    sanitize_tool_schemas,
+    strip_nullable_unions,
+    strip_pattern_and_format,
+    unrename_tool_args,
+)
+from .tool_repair import (
+    RepairedToolCall,
+    extract_xml_tool_call,
+    repair_plain_text_tool_calls,
+    repair_tool_call,
+    safe_parse_tool_arguments,
+)
 
 __all__ = [
+    "AUTH",
+    "ClassifiedError",
     "CredentialPool",
     "FailoverReason",
+    "NOT_FOUND",
+    "QUOTA",
+    "RATE_LIMIT",
     "ReliabilityEngine",
+    "RepairedToolCall",
+    "TRANSIENT",
+    "UNKNOWN",
     "classify_error",
+    "classify_error_detailed",
+    "classify_exception",
+    "extract_xml_tool_call",
+    "friendly_error_text",
+    "friendly_message",
+    "friendly_overflow_text",
     "repair_arguments",
     "repair_json_string",
+    "repair_plain_text_tool_calls",
+    "repair_tool_call",
+    "retry_call",
     "retry_stream_zero_event_safe",
+    "safe_parse_tool_arguments",
+    "sanitize_property_key",
+    "sanitize_tool_schemas",
+    "strip_nullable_unions",
+    "strip_pattern_and_format",
+    "unrename_tool_args",
 ]

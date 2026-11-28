@@ -106,7 +106,14 @@ class MacOsSeatbeltSandbox:
         if profile.allow_network:
             lines.append("(allow network*)")
         else:
-            lines.append("(deny network*)")
+            lines.extend([
+                "(deny network*)",
+                "; Permit loopback-only sockets & local IPC for local tests (e.g. aiohttp TestServer)",
+                '(allow network-bind (local ip "localhost:*"))',
+                '(allow network-inbound (local ip "localhost:*"))',
+                '(allow network-outbound (local ip "localhost:*"))',
+                "(allow network* (local unix))",
+            ])
 
         sbpl = "\n".join(dict.fromkeys(lines))
         argv = (str(_SEATBELT_BIN), "-p", sbpl, *command)

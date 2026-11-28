@@ -1,0 +1,212 @@
+"""OpenCode single-fiber RunCoordinator with doorbell wake and zombie-fenced event publishing."""
+
+from __future__ import annotations
+
+import threading
+import time
+from collections import deque
+from concurrent.futures import Future
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from typing import Any, Callable, Mapping
+
+from jaeger_authority import redact_text
+
+from .store import GatewayStore
+from .stream import SessionEventHub
+
+RunExecutor = Callable[[str, str, int, SessionEventHub], Mapping[str, Any]]
+OWNER_SCHEDULE_PROPOSAL_ALLOWED: ContextVar[bool] = ContextVar("owner_schedule_proposal_allowed", default=False)
+
+
+@dataclass
+class _QueuedRun:
+    session_id: str
+    request_id: str
+    prompt: str
+    future: Future[Mapping[str, Any]]
+    enqueued_at: float = field(default_factory=time.time)
+    start_guard: Callable[[], bool] | None = None
+    owner_schedule_proposal_allowed: bool = False
+
+
+class RunCoordinator:
+    """Single-fiber per-session run scheduler with zero-polling doorbell wake (OpenCode pattern).
+
+    Guarantees at most one active run per session, preserves FIFO queue order,
+    mints a fresh writer generation per run on ``SessionEventHub`` so stale
+    workers can never corrupt a newer turn, and wakes immediately via a
+    Condition doorbell.
+    """
+
+    def __init__(
+        self,
+        *,
+        store: GatewayStore,
+        hub: SessionEventHub,
+        executor: RunExecutor,
+    ) -> None:
+        self._store = store
+        self._hub = hub
+        self._executor = executor
+        self._lock = threading.Lock()
+        self._doorbell = threading.Condition(self._lock)
+        self._queues: dict[str, deque[_QueuedRun]] = {}
+        self._active_sessions: set[str] = set()
+        self._closed = False
+        self._store.recover_interrupted_runs()
+        self._fiber = threading.Thread(target=self._loop, name="jaeger-run-coordinator", daemon=True)
+        self._fiber.start()
+
+    def submit(
+        self,
+        session_id: str,
+        prompt: str,
+        *,
+        request_id: str | None = None,
+        multitask_strategy: str = "enqueue",
+        start_guard: Callable[[], bool] | None = None,
+        owner_schedule_proposal_allowed: bool = False,
+    ) -> tuple[str, Future[Mapping[str, Any]]]:
+        """Admit a request idempotently with LangGraph-style multitask strategy (enqueue|reject|interrupt)."""
+        strat = (multitask_strategy or "enqueue").strip().lower()
+        with self._doorbell:
+            is_busy = session_id in self._active_sessions or bool(self._queues.get(session_id))
+            if strat == "reject" and is_busy:
+                raise RuntimeError(f"Session {session_id!r} already has an active or queued run")
+            if strat == "interrupt" and is_busy:
+                # Supersede queued work and mint a fresh event generation to fence any active worker
+                pending = self._queues.get(session_id)
+                if pending:
+                    while pending:
+                        dropped = pending.popleft()
+                        if not dropped.future.done():
+                            dropped.future.set_result({"ok": False, "verdict": "interrupted", "content": ""})
+                self._hub.open_generation(session_id)
+
+        req, is_replay = self._store.admit_request(session_id, prompt, request_id=request_id)
+        rid = req["request_id"]
+        fut: Future[Mapping[str, Any]] = Future()
+        if is_replay and req["status"] in ("completed", "failed"):
+            fut.set_result(req["result"])
+            return rid, fut
+
+        item = _QueuedRun(
+            session_id=session_id,
+            request_id=rid,
+            prompt=prompt,
+            future=fut,
+            start_guard=start_guard,
+            owner_schedule_proposal_allowed=owner_schedule_proposal_allowed,
+        )
+        with self._doorbell:
+            self._queues.setdefault(session_id, deque()).append(item)
+            self._doorbell.notify_all()
+        return rid, fut
+
+    def _pop_next_ready(self) -> _QueuedRun | None:
+        for sid, q in self._queues.items():
+            if q and sid not in self._active_sessions:
+                self._active_sessions.add(sid)
+                return q.popleft()
+        return None
+
+    def _run_item(self, item: _QueuedRun) -> None:
+        gen = self._hub.open_generation(item.session_id, request_id=item.request_id)
+        try:
+            self._store.settle_request(item.request_id, "running", {})
+            self._store.set_session_status(item.session_id, "running")
+            message_id = self._store.append_message(
+                item.session_id, "user", item.prompt, metadata={"request_id": item.request_id},
+            )
+            self._hub.publish(
+                item.session_id,
+                "run.started",
+                {"request_id": item.request_id, "generation": gen, "prompt": item.prompt,
+                 "created_at": time.time(), "message_id": message_id},
+                generation=gen,
+            )
+            # Start guard is evaluated immediately before execution: if it
+            # returns False the run settles as a normal non-complete result
+            # without invoking the model or any tools.
+            if item.start_guard is not None and not item.start_guard():
+                result = {"ok": False, "verdict": "loop_halted",
+                          "content": "Halted by start guard before execution."}
+            else:
+                token = OWNER_SCHEDULE_PROPOSAL_ALLOWED.set(item.owner_schedule_proposal_allowed)
+                try:
+                    result = dict(self._executor(item.session_id, item.prompt, gen, self._hub))
+                finally:
+                    OWNER_SCHEDULE_PROPOSAL_ALLOWED.reset(token)
+            content = str(result.get("content") or "")
+            self._store.append_message(
+                item.session_id,
+                "assistant",
+                content,
+                metadata={
+                    "request_id": item.request_id,
+                    "verdict": result.get("verdict"),
+                    "presentation": self._hub.transcript_parts(item.session_id, item.request_id, content),
+                },
+            )
+            self._store.settle_request(item.request_id, "completed", result)
+            self._store.set_session_status(item.session_id, "idle")
+            self._hub.publish(
+                item.session_id,
+                "run.completed",
+                {"request_id": item.request_id, "verdict": result.get("verdict", "complete"), "content": content},
+                generation=gen,
+            )
+            with self._doorbell:
+                self._active_sessions.discard(item.session_id)
+                self._doorbell.notify_all()
+            item.future.set_result(result)
+        except Exception as exc:  # noqa: BLE001
+            error = redact_text(f"{type(exc).__name__}: {exc}")[:1_000]
+            content = f"Run interrupted. {error}"
+            parts = self._hub.transcript_parts(item.session_id, item.request_id, content)
+            for part in parts:
+                if part["type"] == "tool" and part["status"] == "running":
+                    part.update(status="failed", error="Interrupted before a result was confirmed.")
+            self._store.append_message(
+                item.session_id, "assistant", content,
+                metadata={"request_id": item.request_id, "verdict": "failed", "presentation": parts},
+            )
+            err_payload = {"ok": False, "error": error, "presentation": parts}
+            self._store.settle_request(item.request_id, "failed", err_payload)
+            self._store.set_session_status(item.session_id, "idle")
+            try:
+                self._hub.publish(
+                    item.session_id,
+                    "run.failed",
+                    {"request_id": item.request_id, "error": error, "content": content},
+                    generation=gen,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            with self._doorbell:
+                self._active_sessions.discard(item.session_id)
+                self._doorbell.notify_all()
+            item.future.set_exception(exc)
+
+    def _loop(self) -> None:
+        while True:
+            with self._doorbell:
+                while not self._closed:
+                    item = self._pop_next_ready()
+                    if item is not None:
+                        break
+                    self._doorbell.wait(timeout=0.5)
+                else:
+                    return
+            worker = threading.Thread(target=self._run_item, args=(item,), daemon=True)
+            worker.start()
+
+    def close(self) -> None:
+        with self._doorbell:
+            self._closed = True
+            self._doorbell.notify_all()
+        self._fiber.join(timeout=2.0)
+
+
+__all__ = ["OWNER_SCHEDULE_PROPOSAL_ALLOWED", "RunCoordinator", "RunExecutor"]

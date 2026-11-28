@@ -82,7 +82,7 @@ public enum BridgeCommand: Equatable {
     // jaeger_ai/interfaces/ui NativeHost (chat/nativeHost.ts, platform/native.ts)
     case openExternal(URL)
     case openFile(URL)
-    case computerStatus
+    case computerStatus, historyForeground, historyConsent(Bool)
     case computerSettings(ComputerSettingsTarget)
     case clipboardRead
     case clipboardWrite(String)
@@ -176,6 +176,14 @@ public enum BridgeCommand: Equatable {
                   let url = BridgeFiles.validateReveal(raw, home: home, fileExists: fileExists)
             else { return .failure(.invalidPayload("path must be an existing absolute path under the home folder")) }
             return .success(.openFile(url))
+        case "history.consent":
+            guard p.count == 1, let enabled = strictBool(p["enabled"]) else {
+                return .failure(.invalidPayload("history consent requires an enabled flag"))
+            }
+            return .success(.historyConsent(enabled))
+        case "history.foreground":
+            guard p.isEmpty else { return .failure(.invalidPayload("foreground accepts no arguments")) }
+            return .success(.historyForeground)
         case "computer.status":
             guard p.isEmpty else { return .failure(.invalidPayload("computer status accepts no action fields")) }
             return .success(.computerStatus)
@@ -227,6 +235,8 @@ public enum BridgeCommand: Equatable {
         case .ttsStop: return "tts.stop"
         case .openExternal: return "open.external"
         case .openFile: return "open.file"
+        case .historyConsent: return "history.consent"
+        case .historyForeground: return "history.foreground"
         case .computerStatus: return "computer.status"
         case .computerSettings: return "computer.settings"
         case .clipboardRead: return "clipboard.read"

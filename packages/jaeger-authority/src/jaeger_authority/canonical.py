@@ -18,9 +18,11 @@ TOOL_ALIASES: Mapping[str, str] = {
     "shell_exec": "shell",
     "execute_command": "shell",
     "run_terminal_command": "shell",
+    "pty_start": "shell",
     # remote shell
     "remote_terminal": "remote_shell",
     "remote_shell": "remote_shell",
+    "remote_exec": "remote_shell",
     "ssh": "remote_shell",
     # arbitrary code execution
     "execute_code": "code_exec",
@@ -52,11 +54,13 @@ TOOL_ALIASES: Mapping[str, str] = {
 SHELL_TOOL_IDS = frozenset({"shell", "remote_shell"})
 PRIVILEGED_TOOL_IDS = frozenset({
     "shell", "remote_shell", "code_exec", "deploy", "git_push", "computer_control",
+    "pty_send", "pty_stop", "channel_send", "manage_scheduled_job",
 })
 IDENTITY_TOOL_IDS = frozenset({"set_name", "update_soul", "adjust_trait"})
 OWNER_MANAGEMENT_TOOL_IDS = frozenset({"settings_set", "session_manage", "session_organize"})
 MEMORY_WRITE_TOOL_IDS = frozenset({
     "remember", "forget", "memory", "remember_person",
+    "memory_remember", "memory_forget", "memory_sync_markdown",
     "knowledge_record_claim", "knowledge_verify_claim",
     "human_needs_add_goal", "human_needs_propose_opportunity", "human_needs_record_outcome",
 })

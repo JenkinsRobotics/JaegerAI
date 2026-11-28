@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ class ShadowCheckpointStore:
     def __init__(self, storage_dir: str | Path) -> None:
         self.storage_dir = Path(storage_dir).expanduser().resolve()
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
 
     def _repo_dir(self, workspace: str | Path) -> tuple[Path, Path]:
         ws = Path(workspace).expanduser().resolve()
@@ -40,6 +42,9 @@ class ShadowCheckpointStore:
             "GIT_DIR": str(git_dir),
             "GIT_WORK_TREE": str(ws),
             "GIT_INDEX_FILE": str(git_dir / "index"),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_AUTHOR_NAME": "Jaeger Checkpoint",
             "GIT_AUTHOR_EMAIL": "checkpoint@jaeger.local",
             "GIT_COMMITTER_NAME": "Jaeger Checkpoint",
@@ -59,7 +64,14 @@ class ShadowCheckpointStore:
         if (git_dir / "HEAD").exists():
             return
         git_dir.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "init", "--bare", str(git_dir)], capture_output=True, text=True, check=True)
+        init_env = {
+            k: v for k, v in os.environ.items()
+            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+        }
+        init_env["GIT_CONFIG_GLOBAL"] = os.devnull
+        init_env["GIT_CONFIG_SYSTEM"] = os.devnull
+        init_env["GIT_CONFIG_NOSYSTEM"] = "1"
+        subprocess.run(["git", "init", "--bare", str(git_dir)], env=init_env, capture_output=True, text=True, check=True)
         excl = git_dir / "info" / "exclude"
         excl.parent.mkdir(parents=True, exist_ok=True)
         excl.write_text(
@@ -68,20 +80,21 @@ class ShadowCheckpointStore:
         )
 
     def snapshot(self, workspace: str | Path, label: str = "checkpoint") -> Checkpoint:
-        ws, git_dir = self._repo_dir(workspace)
-        if not ws.is_dir():
-            raise ValueError(f"workspace directory does not exist: {ws}")
-        self._ensure_init(ws, git_dir)
-        self._git(ws, git_dir, ["add", "-A"])
-        tree = self._git(ws, git_dir, ["write-tree"]).stdout.strip()
-        head_proc = self._git(ws, git_dir, ["rev-parse", "--verify", "HEAD"], check=False)
-        parent_args = ["-p", head_proc.stdout.strip()] if head_proc.returncode == 0 else []
-        commit = self._git(
-            ws, git_dir, ["commit-tree", tree, *parent_args, "-m", label or "checkpoint"],
-        ).stdout.strip()
-        self._git(ws, git_dir, ["update-ref", "HEAD", commit])
-        ts = self._git(ws, git_dir, ["show", "-s", "--format=%cI", commit]).stdout.strip()
-        return Checkpoint(checkpoint_id=commit[:12], workspace=str(ws), label=label, timestamp=ts)
+        with self._lock:
+            ws, git_dir = self._repo_dir(workspace)
+            if not ws.is_dir():
+                raise ValueError(f"workspace directory does not exist: {ws}")
+            self._ensure_init(ws, git_dir)
+            self._git(ws, git_dir, ["add", "-A"])
+            tree = self._git(ws, git_dir, ["write-tree"]).stdout.strip()
+            head_proc = self._git(ws, git_dir, ["rev-parse", "--verify", "HEAD"], check=False)
+            parent_args = ["-p", head_proc.stdout.strip()] if head_proc.returncode == 0 else []
+            commit = self._git(
+                ws, git_dir, ["commit-tree", tree, *parent_args, "-m", label or "checkpoint"],
+            ).stdout.strip()
+            self._git(ws, git_dir, ["update-ref", "HEAD", commit])
+            ts = self._git(ws, git_dir, ["show", "-s", "--format=%cI", commit]).stdout.strip()
+            return Checkpoint(checkpoint_id=commit[:12], workspace=str(ws), label=label, timestamp=ts)
 
     def list_checkpoints(self, workspace: str | Path, *, limit: int = 20) -> list[Checkpoint]:
         ws, git_dir = self._repo_dir(workspace)

@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jaeger-embodiment-minecraft"
+version = "0.1.0"
+description = "Headless Mineflayer Minecraft embodiment for 24/7 idle persistence (implements EmbodimentPort)"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+where = ["src"]

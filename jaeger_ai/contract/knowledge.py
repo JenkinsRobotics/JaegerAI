@@ -1,6 +1,0 @@
-"""Managed knowledge limits, advertised by Gateway contracts to clients."""
-MANAGED_DOCUMENT_MAX_BYTES = 2_000_000
-MAX_KNOWLEDGE_DOCUMENTS = 8
-MAX_KNOWLEDGE_CONTEXT_CHARS = 32_000
-
-DOCUMENT_WRITE_WINDOW_SECONDS = 5.0

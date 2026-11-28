@@ -110,3 +110,78 @@ def test_roots_and_reconnect_policy(tmp_path):
     assert rp.can_auto_reconnect("github", strictly_read_only=True) is False
     rp.record_success("github")
     assert rp.can_auto_reconnect("github", strictly_read_only=True) is True
+
+
+def test_mcp_schema_budget_and_connection_pool():
+    from jaeger_mcp import MCPConnectionPool, enforce_mcp_schema_budget
+
+    bloated_desc = "X" * 10_000
+    tools = [
+        {"name": "small_a", "description": "ok", "input_schema": {"type": "object"}},
+        {"name": "bloated_b", "description": bloated_desc, "input_schema": {"type": "object"}},
+        {"name": "huge_c", "description": "ok", "input_schema": {"type": "object", "properties": {f"p{i}": {"type": "string"} for i in range(400)}}},
+    ]
+    accepted, report = enforce_mcp_schema_budget(tools, max_per_tool=8192, max_total=12_000)
+    names = [t["name"] for t in accepted]
+    assert "small_a" in names
+    assert "bloated_b" in names  # compacted under 8KB
+    assert "huge_c" in report.dropped_tools
+    assert report.compacted_count >= 1
+    assert report.total_bytes <= 12_000
+
+    closed: list[str] = []
+    pool = MCPConnectionPool(idle_ttl_s=10.0, closer=lambda h: closed.append(h["id"]))
+    h1 = pool.acquire("github", lambda: {"id": "conn-1"})
+    h2 = pool.acquire("github", lambda: {"id": "conn-2"})
+    assert h1 is h2
+    assert pool.active_servers() == ("github",)
+    assert pool.close_all() == 1
+    assert closed == ["conn-1"]
+
+
+def test_mcp_image_passthrough_and_ecosystem_presets(tmp_path):
+    import base64
+    from types import SimpleNamespace
+    from jaeger_mcp import build_preset_config, extract_mcp_content, list_mcp_presets
+
+    # 1x1 transparent PNG bytes
+    png_bytes = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    )
+    png_b64 = base64.b64encode(png_bytes).decode("ascii")
+
+    items = [
+        SimpleNamespace(type="text", text="Verified plate volume: 39214.6 mm3"),
+        SimpleNamespace(type="image", mimeType="image/png", data=png_b64),
+    ]
+    img_dir = tmp_path / "mcp_images"
+    output, images = extract_mcp_content(
+        items,
+        image_dir=img_dir,
+        server_name="aether_studio",
+        tool_name="cad_part_render",
+    )
+    assert "39214.6 mm3" in output
+    assert png_b64 not in output  # Never bloat LLM context with raw base64
+    assert "[MCP Image saved:" in output
+    assert len(images) == 1
+    assert images[0]["mime_type"] == "image/png"
+    assert images[0]["bytes"] == len(png_bytes)
+    saved_file = tmp_path / "mcp_images" / images[0]["path"].split("/")[-1]
+    assert saved_file.is_file() and saved_file.read_bytes() == png_bytes
+
+    # Built-in ecosystem presets: Aether Studio & REA
+    presets = list_mcp_presets()
+    ids = {p["preset_id"] for p in presets}
+    assert "aether_studio" in ids and "rea" in ids
+
+    aether_cfg = build_preset_config("aether_studio", bearer_token="aether_tok_123")
+    assert aether_cfg.transport == "streamable_http"
+    assert aether_cfg.url == "http://127.0.0.1:8780/mcp"
+    assert aether_cfg.headers["Authorization"] == "Bearer aether_tok_123"
+
+    rea_cfg = build_preset_config("rea")
+    assert rea_cfg.transport == "stdio"
+    assert rea_cfg.command == "npx"
+    assert "rea-agents" in rea_cfg.args
+

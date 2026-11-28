@@ -1,0 +1,590 @@
+From a3d265fef0e7976724636c3599fd543d1b0eb871 Mon Sep 17 00:00:00 2001
+From: shuwalker <88289370+shuwalker@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 18:51:28 -0800
+Subject: [PATCH] Preserve provider blockers across durable tasks and chat
+ recovery
+
+---
+ AGENTS.md                                     | 27 ++++--
+ .../core/test_gateway_single_terminal.py      | 95 +++++++++++++++++++
+ .../jaeger_ai/core/test_gateway_task_owner.py | 16 ++++
+ .../core/test_task_process_recovery.py        | 85 +++++++++++++++++
+ docs/PROGRESS.md                              | 88 +++++++++++++++++
+ docs/README.md                                |  1 +
+ jaeger_ai/core/gateway/server.py              | 11 +++
+ jaeger_ai/core/tasks/owner.py                 |  4 +-
+ .../interfaces/ui/src/chat/MinimalChat.tsx    |  4 +-
+ jaeger_ai/interfaces/ui/src/chat/chatUx.tsx   |  4 +-
+ jaeger_ai/interfaces/ui/src/chat/eventMap.ts  |  3 +-
+ jaeger_ai/interfaces/ui/src/chat/host.ts      |  9 +-
+ .../ui/src/chat/providerFailure.test.tsx      | 36 +++++++
+ .../interfaces/ui/src/chat/requestOutcome.ts  |  3 +-
+ 14 files changed, 368 insertions(+), 18 deletions(-)
+ create mode 100644 dev/tests/jaeger_ai/core/test_task_process_recovery.py
+ create mode 100644 docs/PROGRESS.md
+ create mode 100644 jaeger_ai/interfaces/ui/src/chat/providerFailure.test.tsx
+
+diff --git a/AGENTS.md b/AGENTS.md
+index a34662f..2d34398 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -135,16 +135,23 @@ the session store, so a test run cannot touch the operator's live database.
+ 
+ ### Current operator release path
+ 
+-Until the operator changes this policy, ordinary product changes land directly
+-on `master`; do not create a feature branch for them. A requested live change
+-is incomplete after commit or push. After focused verification, push the exact
+-commit to `origin/master` and deploy in place on the Mac Studio: every launchd
+-job runs from `~/GitHub/JaegerAI`, so `git pull` there, restart the changed
+-service with `launchctl kickstart -k gui/501/com.jenkinsrobotics.jaeger-<service>`
+-(never MCP 8792 unless asked), and rebuild the UI with
+-`python3 jaeger_ai/interfaces/ui/scripts/build-external.py`. Report completion
+-only after a live check (`/health`, a chat on 8790) on the deployed commit. The
+-old SSH deploy into `~/.jaeger/source` is archived on the Desktop.
++Operator policy updated 2026-11-18: the M1 Max Mac Studio is the dedicated
++production runtime. Development, builds, destructive tests, and experimental
++agents run on the separate development computer or in genuinely isolated
++environments. Preserve the live checkout, services, conversations, knowledge,
++configuration, credentials, and integrations.
++
++Make candidates on isolated development branches. Routine local edits, tests,
++experiments, and checkpoint commits are authorized. Do not modify, rebuild,
++install, restart, or deploy the Mac Studio runtime without separate explicit
++permission. A task to improve Jaeger does not authorize production deployment.
++No automatic promotion or push to `origin/master`.
++
++When deployment is separately authorized, verify the exact deployed revision,
++service health, and a real chat through 8790 before claiming live acceptance.
++Never restart MCP 8792 unless specifically asked. Keep one evidence-based
++development checkpoint in [`docs/PROGRESS.md`](docs/PROGRESS.md); source tests,
++artifact builds, installed identity, and live acceptance are separate claims.
+ 
+ 
+ ---
+diff --git a/dev/tests/jaeger_ai/core/test_gateway_single_terminal.py b/dev/tests/jaeger_ai/core/test_gateway_single_terminal.py
+index 246b2ec..95e7f58 100644
+--- a/dev/tests/jaeger_ai/core/test_gateway_single_terminal.py
++++ b/dev/tests/jaeger_ai/core/test_gateway_single_terminal.py
+@@ -24,6 +24,7 @@ class _StubRuntime:
+ 
+     def __init__(self, background: str = "") -> None:
+         self.background = background
++        self.identity = SimpleNamespace(entity_id="test-entity", display_name="Test Jaeger")
+         self.prepared: list[str] = []
+         self.finished: list[tuple[str, str]] = []
+ 
+@@ -101,6 +102,100 @@ async def test_a_failure_is_reported_as_a_failure_and_records_no_answer(app, mon
+     assert runtime.finished == []
+ 
+ 
++QUOTA_ERROR = (
++    "CLI backend 'grok' exited with status 1: API error (status 402 Payment Required): "
++    "personal-team-blocked:spending-limit: You have run out of credits or need a Grok subscription."
++)
++
++
++@pytest.mark.asyncio
++async def test_provider_quota_is_a_durable_owner_blocker(app, monkeypatch):
++    runtime = _StubRuntime()
++    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: runtime))
++    _agent_loop(monkeypatch, app, {"text": "", "error": QUOTA_ERROR})
++    admitted = app.store.admit_request("s", "do the work", request_id="quota")
++
++    await app._execute_turn("s", admitted["turn_id"], "do the work", request_id="quota")
++
++    [event] = _terminal_events(app)
++    result = app.store.get_request("quota")["result"]
++    assert event.event == "turn.failed"
++    assert result["error"] == QUOTA_ERROR
++    assert result["error_category"] == "quota"
++    assert result["halt_reason"] == "needs_owner"
++    assert "credits" in result["user_message"]
++    assert event.data["user_message"] == result["user_message"]
++    assert runtime.finished == []
++
++
++@pytest.mark.asyncio
++async def test_background_quota_does_not_retry_after_owner_restart(app, monkeypatch, tmp_path):
++    from jaeger_ai.core.tasks.models import TaskState
++    from jaeger_ai.core.tasks.owner import GatewayTaskOwner
++
++    runtime = _StubRuntime()
++    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: runtime))
++    calls = _agent_loop(monkeypatch, app, {"text": "", "error": QUOTA_ERROR})
++    owner = app.task_owner
++    tid = owner.submit("Create the bounded result", context={
++        "session_id": "s", "request_id": "background-quota", "source": "client",
++        "execution": {"workspace": str(tmp_path)},
++    })["task_id"]
++
++    await owner._execute(tid)
++    task = owner.store.get_task(tid)
++    assert task.state == TaskState.NEEDS_OWNER
++    assert task.retry_policy.current_retries == 0
++    assert task.payload.get("attempt", 0) == 0
++    assert len(calls) == 1
++    # Reload the real SQLite stores and exercise the scheduler repeatedly.
++    restored = GatewayTaskOwner(app)
++    for _ in range(3):
++        await restored.tick()
++    assert restored.store.get_task(tid).state == TaskState.NEEDS_OWNER
++    assert len(calls) == 1
++    assert len(app.store.get_session("s")["messages"]) == 1
++
++
++@pytest.mark.asyncio
++async def test_background_transient_failure_keeps_its_bounded_retry(app, monkeypatch, tmp_path):
++    from jaeger_ai.core.tasks.models import TaskState
++
++    runtime = _StubRuntime()
++    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: runtime))
++    _agent_loop(monkeypatch, app, {"text": "", "error": "stream disconnected"})
++    owner = app.task_owner
++    tid = owner.submit("Create the bounded result", context={
++        "session_id": "s", "request_id": "background-transient", "source": "client",
++        "execution": {"workspace": str(tmp_path)},
++    })["task_id"]
++    await owner._execute(tid)
++    task = owner.store.get_task(tid)
++    assert task.state == TaskState.QUEUED
++    assert task.retry_policy.current_retries == 1
++    assert task.next_execution is not None
++    assert "halt_reason" not in app.store.get_request(f"{tid}:0")["result"]
++
++
++@pytest.mark.asyncio
++async def test_quota_does_not_hide_an_indeterminate_effect(app, monkeypatch):
++    from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
++
++    runtime = _StubRuntime()
++    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: runtime))
++    monkeypatch.setattr(EntityRuntime, "run_has_indeterminate_effects", staticmethod(lambda _: True))
++    _agent_loop(monkeypatch, app, {"text": "", "error": QUOTA_ERROR})
++    admitted = app.store.admit_request("s", "do the work", request_id="unknown-quota")
++    app.store.bind_native("unknown-quota", native_run_id="uncertain-run", native_session=OWNER_RUN_SESSION_PREFIX + "s")
++
++    await app._execute_turn("s", admitted["turn_id"], "do the work", request_id="unknown-quota")
++
++    saved = app.store.get_request("unknown-quota")
++    assert saved["status"] == "execution_unknown"
++    assert "halt_reason" not in saved["result"]
++    assert "user_message" not in saved["result"]
++
++
+ @pytest.mark.asyncio
+ async def test_the_agent_sees_the_request_with_its_recalled_memory(app, monkeypatch):
+     runtime = _StubRuntime(background="<background>you were told: token VEGA</background>\n\n")
+diff --git a/dev/tests/jaeger_ai/core/test_gateway_task_owner.py b/dev/tests/jaeger_ai/core/test_gateway_task_owner.py
+index 8a68467..76230fc 100644
+--- a/dev/tests/jaeger_ai/core/test_gateway_task_owner.py
++++ b/dev/tests/jaeger_ai/core/test_gateway_task_owner.py
+@@ -88,6 +88,22 @@ def test_a_message_returning_does_not_complete_work(owner):
+     assert owner.verify(task, {'output':'Done'})[0] is False
+ 
+ 
++@pytest.mark.parametrize('status,expected', [
++    ('failed', TaskState.NEEDS_OWNER),
++    ('cancelled', TaskState.CANCELLED),
++    ('execution_unknown', TaskState.PAUSED),
++])
++def test_turn_card_blocker_does_not_override_cancellation_or_unknown_effects(owner, status, expected):
++    task = owner.open_turn(session_id='parent', request_id='blocked-turn', text='Build the result',
++                           strategy='work', owner='owner')
++    settled, receipt = owner.close_turn(task.task_id, {
++        'halt_reason': 'needs_owner', 'error': 'Payment Required',
++        'evidence': {'provider_error': 'quota'},
++    }, status=status)
++    assert settled.state == expected
++    assert receipt.verification == 'unverified'
++
++
+ def test_preexisting_artifact_is_not_completion(owner):
+     path=owner.store.db_path.parent/'old.txt';path.write_text('old')
+     import os
+diff --git a/dev/tests/jaeger_ai/core/test_task_process_recovery.py b/dev/tests/jaeger_ai/core/test_task_process_recovery.py
+new file mode 100644
+index 0000000..8285e58
+--- /dev/null
++++ b/dev/tests/jaeger_ai/core/test_task_process_recovery.py
+@@ -0,0 +1,85 @@
++"""Process-level acceptance of the existing task owner; no model or production services.
++
++The controlled worker runs real regression tests, persists their output, and
++exits before task settlement. A new process must recover the receipt without
++running those tests a second time. This proves recovery, not autonomous coding.
++"""
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import textwrap
++
++
++WORKER = textwrap.dedent('''
++    import asyncio, json, os, subprocess, sys
++    from pathlib import Path
++    from types import SimpleNamespace
++    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
++    from jaeger_ai.core.gateway.event_bus import GatewayEventBus
++    from jaeger_ai.core.tasks.owner import GatewayTaskOwner
++
++    root, phase = Path(sys.argv[1]), sys.argv[2]
++    store = GatewaySessionStore(root / 'gateway.sqlite3')
++    store.ensure_session('review', workspace=str(root))
++    gateway = SimpleNamespace(store=store, event_bus=GatewayEventBus(store=store),
++                              _running_tasks={}, _cancellations=SimpleNamespace(cancel=lambda rid: None))
++    owner = GatewayTaskOwner(gateway)
++    if phase == 'submit':
++        admitted = owner.submit('Verify the provider-blocker candidate for owner review', context={
++            'session_id': 'review', 'request_id': 'candidate-check', 'source': 'client',
++            'execution': {'workspace': str(root)},
++        }, artifacts=['verification.log'])
++        print(json.dumps(admitted), flush=True)
++    else:
++        tid = owner.store.list_tasks()[0].task_id
++        def start(admitted, sid, prompt):
++            if phase != 'work':
++                raise AssertionError('Recovery repeated an already completed effect')
++            with (root / 'executions.txt').open('a') as marker:
++                marker.write('executed\\n')
++            with (root / 'verification.log').open('w') as log:
++                checked = subprocess.run([
++                    sys.executable, '-B', '-m', 'pytest',
++                    'dev/tests/jaeger_ai/core/test_gateway_single_terminal.py',
++                    '-q', '-p', 'no:cacheprovider', '-k', 'quota or background_transient',
++                ], stdout=log, stderr=subprocess.STDOUT, timeout=45)
++            store.complete_request(admitted['request_id'],
++                status='completed' if checked.returncode == 0 else 'failed',
++                result={'output': 'Candidate regression tests passed'} if checked.returncode == 0
++                       else {'error': 'Candidate regression tests failed'})
++            # Deliberate crash window: request committed, task not settled/delivered.
++            os._exit(23 if checked.returncode == 0 else 24)
++        gateway._start_admitted_turn = start
++        asyncio.run(owner._execute(tid))
++        asyncio.run(owner.tick())
++        print(json.dumps({'task': owner.store.get_task(tid).to_dict(),
++                          'messages': store.get_session('review')['messages']}), flush=True)
++''')
++
++
++def test_background_verification_survives_process_exit_without_reexecution(tmp_path):
++    repo = Path(__file__).resolve().parents[4]
++    env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1', JAEGER_NO_ATTACH='1', JAEGER_NO_GUI='1')
++
++    def run(phase):
++        return subprocess.run([sys.executable, '-B', '-c', WORKER, str(tmp_path), phase],
++                              cwd=repo, env=env, text=True, capture_output=True, timeout=60)
++
++    submitted = run('submit')
++    assert submitted.returncode == 0, submitted.stderr
++    assert json.loads(submitted.stdout)['status'] == 'queued'
++    worked = run('work')
++    assert worked.returncode == 23, (worked.stdout, worked.stderr,
++        (tmp_path / 'verification.log').read_text() if (tmp_path / 'verification.log').exists() else '')
++    for _ in range(2):
++        recovered = run('recover')
++        assert recovered.returncode == 0, recovered.stderr
++        saved = json.loads(recovered.stdout)
++        assert saved['task']['state'] == 'completed_verified'
++        assert saved['task']['payload']['verification'][0]['sha256']
++        assert len(saved['messages']) == 1
++        assert saved['messages'][0]['content'] == 'Candidate regression tests passed'
++    assert (tmp_path / 'executions.txt').read_text() == 'executed\n'
++    assert 'passed' in (tmp_path / 'verification.log').read_text()
+diff --git a/docs/PROGRESS.md b/docs/PROGRESS.md
+new file mode 100644
+index 0000000..fdb915b
+--- /dev/null
++++ b/docs/PROGRESS.md
+@@ -0,0 +1,88 @@
++# Jaeger implementation progress
++
++Owner-requested durable checkpoint, 2026-11-18. Update this file from evidence;
++do not convert activity into a completion percentage. Deployment requires
++separate permission. The Mac Studio runtime is not the development workspace.
++
++## Working now — development candidate
++
++The Gateway preserves a classified provider failure in the terminal request
++receipt and SSE event. Exhausted credits become `needs_owner`; the existing
++durable task owner stops retrying, retains the original error and actionable
++diagnosis, and delivers the outcome once. A fresh owner does not restart it.
++Transient failures retain their bounded retry. Cancellation and unknown effects
++retain precedence over a provider diagnosis.
++
++The shared chat UI uses the same Gateway diagnosis for live errors and restored
++history, keeping the raw error under Details. No UI redesign or alternate
++execution path was introduced.
++
++The existing task owner passed a process-level recovery check: a controlled
++worker executed real candidate regression tests, committed the result to
++SQLite, and exited before settling the task. Two subsequent owner processes
++recovered one verified artifact and one delivery, with exactly one worker
++execution. This verifies task persistence/reconciliation with a deterministic
++test worker; it is **not** evidence of autonomous model-written fixes.
++
++## Changes made
++
++- Reuse `jaeger_agent.core.errors` at the Gateway's failure producer.
++- Honor explicit owner blockers when settling failed task cards; retain unknown
++  effect and cancellation protections.
++- Carry the human diagnosis through SSE, durable request recovery, and chat rendering.
++- Add regression and subprocess recovery coverage. Retain the existing Gateway,
++  task owner, store, scheduler, permissions, and model-routing architecture.
++- Record the owner's new production/development boundary in `AGENTS.md`.
++
++## Validation and artifacts
++
++Base: `e00600741ed11ebb0d05480f1f51eecb4eb528d9`.
++Candidate branch: `codex/autonomy-baseline`.
++Candidate commit: the commit introducing this checkpoint (`git log -1 -- docs/PROGRESS.md`).
++
++Development used an independent clone, disposable HOME/state/cache, copied UI
++dependencies, and a macOS sandbox. Explicit probes confirmed that the test
++process cannot read/write the production checkout or connect to Gateway 33418.
++Only the candidate's code was imported. No production credentials were copied.
++The installed Python dependencies were read-only; the UI build stayed external.
++
++Evidence directory beside the retained candidate: `evidence/`.
++
++- `quota-before.log`: both new regression tests failed on the original code;
++  the durable credit-blocked task incorrectly returned to `queued`.
++- `backend-final.log`: **58 passed**, including provider/task/terminal/recovery checks.
++  Two HTTP tests are explicitly excluded because their random listener ports
++  are denied by the isolation profile; they are not claimed as passing.
++- `ui-focused.log`: TypeScript passed; 30 UI checks passed, including all three
++  new diagnosis tests. One existing stop-progress expectation failed.
++- `ui-baseline.log`: that same stop-progress test fails on unchanged base source.
++- `ui-build.log`: canonical frontend production build and no-mock check passed.
++- `verify-all.log`: required `scripts/verify.sh` ran; hygiene passed, then IDE
++  tests stopped the pipeline with three sandbox-denied listener failures
++  (`EPERM`). The full pipeline is not green.
++
++No production deployment, restart, installed-app update, remote push, or provider
++switch was performed during this implementation session. The live bridge's
++read-only health query returned ready; that is not proof of inference.
++
++## Milestone status and blockers
++
++1. **Reliable chat/agent baseline: incomplete.** The prior live Grok smoke test
++   returned HTTP 402 (credits/subscription). This candidate diagnoses that failure;
++   it does not fund an account or establish a working development inference route.
++2. **Durable bounded background work: component proof obtained.** Process recovery,
++   verification artifacts, no duplicate execution, and one delivery pass with a
++   controlled worker. Full model/tool execution across a service restart remains
++   unqualified in an approved development deployment.
++3. **Research → candidate code → independent test → retained result: incomplete.**
++   Codex made this candidate; Jaeger has not yet autonomously authored it.
++4. Self-development, video drafts, and continuous multi-workflow operation remain
++   unqualified. No unattended daily job was enabled on production.
++
++## Next task
++
++Establish a successful isolated development chat/tool turn using an available,
++authorized provider, persist the receipt, and then run one bounded defect-fix
++objective through the existing durable task owner in an isolated Git branch.
++Keep the evaluator and deployment approval outside the worker's edit authority.
++Do not expand research or content automation before this works.
+diff --git a/docs/README.md b/docs/README.md
+index 212889c..db97292 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -17,6 +17,7 @@ Operator instructions live in the root [README](../README.md); contributor workf
+ | [TRUST.md](TRUST.md) | CURRENT REFERENCE | On-device trust boundaries |
+ | [EXTENSION_GUIDE.md](EXTENSION_GUIDE.md) | CURRENT AUTHORITATIVE | Public capability / provider contracts |
+ | [getting-started.md](getting-started.md) | CURRENT REFERENCE | First-run path |
++| [PROGRESS.md](PROGRESS.md) | DEVELOPMENT CHECKPOINT | Owner-requested verified progress, deployment state, blockers, and next task |
+ | [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) | CURRENT AUTHORITATIVE | Topology and ownership |
+ | [architecture/MAIN_LOOP.md](architecture/MAIN_LOOP.md) | CURRENT AUTHORITATIVE | One Gateway turn path |
+ | [architecture/STRUCTURE.md](architecture/STRUCTURE.md) | CURRENT REFERENCE | Directory map |
+diff --git a/jaeger_ai/core/gateway/server.py b/jaeger_ai/core/gateway/server.py
+index 1dd9661..6f059c5 100644
+--- a/jaeger_ai/core/gateway/server.py
++++ b/jaeger_ai/core/gateway/server.py
+@@ -6909,6 +6909,17 @@ class JaegerGatewayApp:
+                     "proactive_salience": _normalize_salience(options["proactive_salience"]),
+                 }
+             result = {"error": str(exc), "turn_id": turn_id, "status": status, **agent_fields, **proactive_fields}
++            if status == "failed":
++                # Persist the provider's actionable cause before task settlement.
++                # Otherwise the durable owner treats empty credit/invalid credentials
++                # like an ordinary failure and spends every retry on the same block.
++                from jaeger_agent.core.errors import AUTH, NOT_FOUND, QUOTA, classify_exception, friendly_message
++                category = classify_exception(exc)
++                if category in {AUTH, NOT_FOUND, QUOTA}:
++                    message = friendly_message(exc)
++                    result.update(error_category=category, halt_reason="needs_owner",
++                                  user_message=message,
++                                  evidence={"provider_error": category, "action": message})
+             if status == "completed":
+                 result = {
+                     "output": str(reply.get("text") or ""),
+diff --git a/jaeger_ai/core/tasks/owner.py b/jaeger_ai/core/tasks/owner.py
+index a66ee91..13218ed 100644
+--- a/jaeger_ai/core/tasks/owner.py
++++ b/jaeger_ai/core/tasks/owner.py
+@@ -371,12 +371,12 @@ class GatewayTaskOwner:
+                 state, error = TaskState.CANCELLED, str(result.get('error') or 'cancelled')
+             elif status == 'execution_unknown':
+                 state, error = TaskState.PAUSED, 'Execution outcome unknown; reconcile effects before retry'
+-            elif status != 'completed':
+-                state, error = TaskState.FAILED, str(result.get('error') or status or 'failed')
+             elif halt in {'needs_owner', 'blocked'}:
+                 state = TaskState.NEEDS_OWNER if halt == 'needs_owner' else TaskState.BLOCKED
+                 evidence = result.get('evidence') or result.get('output') or result
+                 error = str(result.get('error') or halt)
++            elif status != 'completed':
++                state, error = TaskState.FAILED, str(result.get('error') or status or 'failed')
+             elif result.get('error'):
+                 state, error = TaskState.FAILED, str(result['error'])
+             else:
+diff --git a/jaeger_ai/interfaces/ui/src/chat/MinimalChat.tsx b/jaeger_ai/interfaces/ui/src/chat/MinimalChat.tsx
+index 73358ef..c956a13 100644
+--- a/jaeger_ai/interfaces/ui/src/chat/MinimalChat.tsx
++++ b/jaeger_ai/interfaces/ui/src/chat/MinimalChat.tsx
+@@ -1277,7 +1277,9 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
+               <SourceChips sources={webSources(turn.parts)} onOpen={links.onOpen} />
+               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
+               {(turnErrors(turn).length > 0 || turn.state === "failed" || turn.state === "unknown") && (
+-                <ModelError details={turnErrors(turn)} onRetry={turn.message && !active ? () => send(turn.message) : undefined} />
++                <ModelError details={turnErrors(turn)}
++                  headline={turn.parts.flatMap(part => part.kind === "error" && part.headline ? [part.headline] : [])[0]}
++                  onRetry={turn.message && !active ? () => send(turn.message) : undefined} />
+               )}
+               {sessionId && turn.requestId && host instanceof WebHost && turn.state !== "pending" && session && session.turns.indexOf(turn) >= session.turns.length - 30 && (
+                 <TurnChanges sessionId={sessionId} requestId={turn.requestId} settled />
+diff --git a/jaeger_ai/interfaces/ui/src/chat/chatUx.tsx b/jaeger_ai/interfaces/ui/src/chat/chatUx.tsx
+index 36a201a..5d86c10 100644
+--- a/jaeger_ai/interfaces/ui/src/chat/chatUx.tsx
++++ b/jaeger_ai/interfaces/ui/src/chat/chatUx.tsx
+@@ -75,12 +75,12 @@ export function ThinkingRow({ startedAt, durationMs, text, live, sessionId }: {
+   );
+ }
+ 
+-export function ModelError({ details, onRetry }: { details: string[]; onRetry?: () => void }): ReactNode {
++export function ModelError({ details, headline, onRetry }: { details: string[]; headline?: string; onRetry?: () => void }): ReactNode {
+   const unique = [...new Set(details.map((item) => item.trim()).filter(Boolean))];
+   return (
+     <div className="jg-error" role="alert">
+       <div className="jg-error__row">
+-        <p className="jg-error__message">{modelErrorTitle(unique)}</p>
++        <p className="jg-error__message">{headline || modelErrorTitle(unique)}</p>
+         {onRetry && <button type="button" className="jg-error__retry" onClick={onRetry}>Retry</button>}
+       </div>
+       {unique.length > 0 && (
+diff --git a/jaeger_ai/interfaces/ui/src/chat/eventMap.ts b/jaeger_ai/interfaces/ui/src/chat/eventMap.ts
+index f2118e4..3d8795d 100644
+--- a/jaeger_ai/interfaces/ui/src/chat/eventMap.ts
++++ b/jaeger_ai/interfaces/ui/src/chat/eventMap.ts
+@@ -6,6 +6,7 @@ import { modelContext } from "./modelContext";
+  * Event names follow core/gateway/event_bus.py EVENT_TYPES. */
+ import type { GatewayEvent } from "../api/types";
+ import type { ChatPart, TurnState, ToolInvocationState } from "./host";
++import { failurePart } from "./host";
+ 
+ export interface MappedEvent {
+   parts: ChatPart[];
+@@ -125,7 +126,7 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string
+     case "turn.cancelled":
+       return { parts: [], state: "cancelled" };
+     case "turn.failed":
+-      return { parts: [{ kind: "error", message: str(p.error ?? p.message ?? "Turn failed") }], state: "failed" };
++      return { parts: [failurePart(p, "Turn failed")], state: "failed" };
+     case "notification.proactive":
+       return { parts: [{ kind: "warning", message: str(p.message ?? p.text) }] };
+     default:
+diff --git a/jaeger_ai/interfaces/ui/src/chat/host.ts b/jaeger_ai/interfaces/ui/src/chat/host.ts
+index ab8b612..7ea1b8a 100644
+--- a/jaeger_ai/interfaces/ui/src/chat/host.ts
++++ b/jaeger_ai/interfaces/ui/src/chat/host.ts
+@@ -29,7 +29,7 @@ export type ChatPart =
+   | { kind: "progress"; message: string }
+   /** Live loop position (model.started/finished); one per turn, replaced in place. */
+   | { kind: "step"; index: number; state: "running" | "done" | "failed"; model?: string }
+-  | { kind: "error"; message: string }
++  | { kind: "error"; message: string; headline?: string }
+   /** `noticeId`: a status notice that a later notice with the same id replaces in place (e.g. Stop). */
+   | { kind: "warning"; message: string; noticeId?: string }
+   /** PROPOSED addition (not yet in the frozen IDE Chat contract): an answered
+@@ -45,6 +45,13 @@ export type ChatPart =
+ 
+ export type ChatPartKind = ChatPart["kind"];
+ 
++/** Keep the Gateway's diagnosis identical in the live stream and restored history. */
++export function failurePart(result: Record<string, unknown>, fallback: string): ChatPart {
++  const headline = typeof result.user_message === "string" ? result.user_message.trim() : "";
++  return { kind: "error", message: String(result.error ?? result.message ?? result.summary ?? fallback),
++    ...(headline ? { headline } : {}) };
++}
++
+ export interface ChatAttachment {
+   name: string;
+   mimeType: string;
+diff --git a/jaeger_ai/interfaces/ui/src/chat/providerFailure.test.tsx b/jaeger_ai/interfaces/ui/src/chat/providerFailure.test.tsx
+new file mode 100644
+index 0000000..2824bc3
+--- /dev/null
++++ b/jaeger_ai/interfaces/ui/src/chat/providerFailure.test.tsx
+@@ -0,0 +1,36 @@
++import { render, screen, cleanup } from "@testing-library/react";
++import { afterEach, expect, it } from "vitest";
++import type { ChatPart } from "./host";
++import { mapEvent } from "./eventMap";
++import { requestOutcome, settleUnanswered } from "./requestOutcome";
++import { ModelError } from "./chatUx";
++
++afterEach(cleanup);
++const result = {
++  error: "CLI backend 'grok' exited: API error (status 402 Payment Required)",
++  user_message: "The model account is out of credits. Select another model or resolve billing.",
++  error_category: "quota", halt_reason: "needs_owner",
++};
++
++it("keeps the provider diagnosis and raw evidence identical in SSE and durable recovery", () => {
++  const live = mapEvent({ event: "turn.failed", payload: result });
++  const restored: ChatPart[] = [];
++  expect(requestOutcome({ request_id: "r", session_id: "s", status: "failed", result }, p => restored.push(p))).toBe("failed");
++  expect(restored).toEqual(live?.parts);
++  expect(restored).toEqual([{ kind: "error", message: result.error, headline: result.user_message }]);
++});
++
++it("restores the diagnosis after reloading an unanswered conversation without resubmitting", async () => {
++  const [turn] = await settleUnanswered([
++    { turnId: "t", requestId: "r", message: "Run the task", state: "pending", parts: [] },
++  ], async () => ({ request_id: "r", session_id: "s", status: "failed", result }));
++  expect(turn.state).toBe("failed");
++  expect(turn.parts[0]).toMatchObject({ headline: result.user_message, message: result.error });
++});
++
++it("renders the Gateway diagnosis as the headline and keeps raw evidence in Details", () => {
++  render(<ModelError details={[result.error]} headline={result.user_message} />);
++  expect(screen.getByRole("alert").querySelector(".jg-error__message")?.textContent).toBe(result.user_message);
++  expect(screen.getByText(result.error).closest("details")).not.toBeNull();
++  expect(screen.queryByText("Something went wrong with this reply.")).toBeNull();
++});
+diff --git a/jaeger_ai/interfaces/ui/src/chat/requestOutcome.ts b/jaeger_ai/interfaces/ui/src/chat/requestOutcome.ts
+index e6f9739..eabf5f2 100644
+--- a/jaeger_ai/interfaces/ui/src/chat/requestOutcome.ts
++++ b/jaeger_ai/interfaces/ui/src/chat/requestOutcome.ts
+@@ -1,6 +1,7 @@
+ /** Read-only reconciliation. Never submits, cancels or retries execution. */
+ import type { RequestSnapshot } from "../api/source";
+ import type { ChatPart, ChatTurn, TurnState } from "./host";
++import { failurePart } from "./host";
+ 
+ export function requestOutcome(row: RequestSnapshot, onPart: (part: ChatPart) => void): TurnState | undefined {
+   const states: Record<string, TurnState | undefined> = { completed: "complete", failed: "failed", cancelled: "cancelled", execution_unknown: "unknown" };
+@@ -13,7 +14,7 @@ export function requestOutcome(row: RequestSnapshot, onPart: (part: ChatPart) =>
+   // text by stable item identity and deduplicates an already-seen final.
+   if (typeof output === "string") onPart({ kind: "markdownContent", text: output, role:"final", itemId:"final" });
+   if (state === "unknown") onPart({ kind: "warning", message: "Execution outcome is unknown. This request has been preserved; it will not be resent." });
+-  if (state === "failed") onPart({ kind: "error", message: String(row.result?.error ?? row.result?.summary ?? "Request failed") });
++  if (state === "failed") onPart(failurePart(row.result ?? {}, "Request failed"));
+   return state;
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

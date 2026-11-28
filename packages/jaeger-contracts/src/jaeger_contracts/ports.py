@@ -117,6 +117,19 @@ class EventBusPort(Protocol):
     ) -> Callable[[], None]: ...
 
 
+@runtime_checkable
+class EmbodimentPort(Protocol):
+    """09-embodiment: shared physical/virtual body contract (Minecraft prototype & JP01 droid)."""
+
+    @property
+    def name(self) -> str: ...
+    def observe(self) -> Mapping[str, Any]: ...
+    def act(self, action: str, params: Mapping[str, Any] | None = None) -> Mapping[str, Any]: ...
+    def checkpoint(self) -> Mapping[str, Any]: ...
+    def pause(self, reason: str = "preempted") -> Mapping[str, Any]: ...
+    def estop(self, reason: str = "operator") -> Mapping[str, Any]: ...
+
+
 PORT_PROTOCOLS: dict[str, type] = {
     "01-models": ModelPort,
     "02-tools": ToolPort,
@@ -127,4 +140,5 @@ PORT_PROTOCOLS: dict[str, type] = {
     "06-orchestration": OrchestrationPort,
     "07-reliability": ReliabilityPort,
     "08-events": EventBusPort,
+    "09-embodiment": EmbodimentPort,
 }

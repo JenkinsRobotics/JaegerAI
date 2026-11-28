@@ -16,7 +16,7 @@ import WebKit
 import UserNotifications
 import os
 
-private let shellLogger = Logger(subsystem: "com.jenkinsrobotics.JaegerAI.uirebuild", category: "shell")
+private let shellLogger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.jenkinsrobotics.JaegerAI", category: "shell")
 
 /// Public unified-log line (NSLog arguments are redacted) + stderr.
 func shellLog(_ message: String) {
@@ -187,7 +187,12 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        false  // menu-bar app: closing the window only hides it
+        false  // closing the window hides it while keeping the Dock + menu-bar app running
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWindow()
+        return true
     }
 
     private lazy var hotkeyChoice = HotkeyConfig.resolve(
@@ -271,16 +276,19 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     private func emitVerifyReport() {
         let info = Bundle.main.infoDictionary ?? [:]
         let lsui = (info["LSUIElement"] as? Bool) == true
+        let policy = NSApp.activationPolicy()
+        let policyOK = lsui ? policy == .accessory : policy == .regular
         let chrome = window.map { NativeChrome.report($0, webView: webView) } ?? [:]
         let chromeOK = (chrome["ok"] as? Bool) == true
         let report: [String: Any] = [
-            "ok": lsui && NSApp.activationPolicy() == .accessory && (statusController?.isPresent ?? false)
+            "ok": policyOK && (statusController?.isPresent ?? false)
                 && window != nil && start.origin.host == "127.0.0.1" && chromeOK,
             "chrome": chrome,
             "bundle_id": Bundle.main.bundleIdentifier ?? NSNull(),
             "bundle_version": info["CFBundleVersion"] ?? NSNull(),
             "dev_build": ShellEnvironment.isDevBuild,
-            "menu_bar_only": lsui && NSApp.activationPolicy() == .accessory,
+            "menu_bar_only": lsui && policy == .accessory,
+            "dock_and_menubar": !lsui && policy == .regular && (statusController?.isPresent ?? false),
             "status_item_present": statusController?.isPresent ?? false,
             "window_created": window != nil,
             "window_visible": window?.isVisible ?? false,
@@ -337,7 +345,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             backing: .buffered,
             defer: false
         )
-        window.title = "Jaeger"
+        window.title = "JaegerAI"
         window.isReleasedWhenClosed = false
         window.delegate = self
         windowChrome.attach(to: window)
@@ -357,6 +365,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     func showWindow() {
         if verifyBridgeMode || snapshotMode { return }  // never show a window in the headless checks
         let window = self.window ?? makeWindow()
+        if window.isMiniaturized { window.deminiaturize(nil) }
         KeyFocus.focus(window, webView: webView, activate: true, reason: "window shown")
         bridge?.send(["type": "window.visibility", "visible": true])
         if !rulesInstalled && !verifyMode && webView?.url == nil { installRulesThenLoad() }
@@ -370,6 +379,34 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         } else {
             showWindow()
             shellLog("[shell] window shown")
+        }
+    }
+
+    /// Bring Jaeger's own window forward and route it directly to `/droid` (falling back to browser if needed).
+    func openDroidView() {
+        let base = start.origin.string
+        guard let inAppURL = URL(string: base + "/droid?host=macos") else { return }
+        if verifyBridgeMode || snapshotMode {
+            if let fallback = URL(string: base + "/droid") { NSWorkspace.shared.open(fallback) }
+            return
+        }
+        showWindow()
+        if let webView, rulesInstalled, !showingErrorPage {
+            if webView.url?.host == start.origin.host && webView.url?.port == start.origin.port {
+                webView.evaluateJavaScript(
+                    "window.history.pushState(null, '', '/droid'); window.dispatchEvent(new PopStateEvent('popstate'));"
+                ) { _, error in
+                    if error != nil {
+                        DispatchQueue.main.async {
+                            webView.load(URLRequest(url: inAppURL))
+                        }
+                    }
+                }
+            } else {
+                webView.load(URLRequest(url: inAppURL))
+            }
+        } else if let fallback = URL(string: base + "/droid") {
+            NSWorkspace.shared.open(fallback)
         }
     }
 
@@ -563,10 +600,12 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         let appMenu = NSMenu()
         let startItem = appMenu.addItem(withTitle: "Start Jaeger…", action: #selector(StatusItemController.startStack(_:)), keyEquivalent: "")
         startItem.target = statusController
+        let restartItem = appMenu.addItem(withTitle: "Restart Jaeger…", action: #selector(StatusItemController.restartStack(_:)), keyEquivalent: "")
+        restartItem.target = statusController
         let stopItem = appMenu.addItem(withTitle: "Stop Jaeger…", action: #selector(StatusItemController.stopStack(_:)), keyEquivalent: "")
         stopItem.target = statusController
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Jaeger Shell", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit JaegerAI", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         let editItem = NSMenuItem(); main.addItem(editItem)
         let edit = NSMenu(title: "Edit")
@@ -670,7 +709,10 @@ enum JaegerShellMain {
         let application = NSApplication.shared
         let delegate = JaegerShellApplication()
         application.delegate = delegate
-        application.setActivationPolicy(.accessory)
+        let headlessFlags: Set<String> = ["--verify-bridge", "--verify-lease", "--verify-lease-policy", "--snapshot"]
+        let isHeadless = CommandLine.arguments.contains { headlessFlags.contains($0) }
+        let lsui = (Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool) == true
+        application.setActivationPolicy((isHeadless || lsui) ? .accessory : .regular)
         application.run()
     }
 }

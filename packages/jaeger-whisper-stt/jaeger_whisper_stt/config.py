@@ -24,7 +24,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from jaeger_os.core.instance.setting_meta import _setting
+def _setting(group: str, *, advanced: bool = False, **extra: object) -> dict[str, object]:
+    return {"x-jaeger-group": group, "x-jaeger-advanced": advanced, **extra}
 
 
 class WhisperSTTConfig(BaseModel):
