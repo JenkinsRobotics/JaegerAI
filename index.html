@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="JaegerAI v1.0.0 — A 100% modular, local-first cognitive AI platform for 32 GB Apple Silicon. 30 Python packages, 6 React 19 UI packages, zero external daemons.">
-<meta property="og:title" content="JaegerAI v1.0.0 — Local-First Cognitive AI Platform">
-<meta property="og:description" content="30 standalone Python packages + 6 React 19 UI packages, 5-Tab Studio UI with VRM avatar, 24/7 voice presence, native macOS integrations, and fail-closed robotics embodiment.">
+<meta name="description" content="JaegerAI v1.0.1 — A 100% modular, local-first cognitive AI platform for macOS (Apple Silicon & Intel), Linux, and Windows x64. Portable Jaeger Core installer + full 32 GB Apple Silicon stack.">
+<meta property="og:title" content="JaegerAI v1.0.1 — Cross-Platform Local-First Cognitive AI Platform">
+<meta property="og:description" content="Portable Jaeger Core for macOS, Linux & Windows + 30 standalone Python packages, 6 React 19 UI packages, Authorized Task Handling, OWASP Model Risk Cards, and 24/7 voice & VRM avatar presence.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#0a0e14">
-<title>JaegerAI v1.0.0 — Local-First Cognitive AI Platform</title>
+<title>JaegerAI v1.0.1 — Cross-Platform Local-First Cognitive AI Platform</title>
 <link rel="icon" type="image/png" href="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png">
 <style>
   :root {
@@ -113,7 +113,7 @@
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   .lead {
-    font-size: clamp(16px, 2vw, 19px); color: var(--muted); max-width: 760px; margin: 0 0 30px;
+    font-size: clamp(16px, 2vw, 19px); color: var(--muted); max-width: 780px; margin: 0 0 30px;
   }
   .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 44px; }
 
@@ -150,7 +150,7 @@
     margin: 0 0 12px; font-size: clamp(26px, 3.6vw, 38px); line-height: 1.16;
     letter-spacing: -0.02em; color: var(--heading);
   }
-  .sub { color: var(--muted); max-width: 740px; margin: 0 0 36px; font-size: 16px; }
+  .sub { color: var(--muted); max-width: 760px; margin: 0 0 36px; font-size: 16px; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
   .card {
@@ -191,6 +191,7 @@
   .tier h3 { margin: 0 0 8px; color: var(--heading); font-size: 18px; }
   .tier p { margin: 0; font-size: 14.5px; color: var(--muted); }
 
+  .install-grid { display: grid; gap: 20px; }
   .terminal {
     background: #070a0f; border: 1px solid var(--border2); border-radius: var(--radius);
     overflow: hidden; box-shadow: 0 18px 48px rgba(0,0,0,0.4);
@@ -249,13 +250,13 @@
     <a class="brand" href="#">
       <img class="brand-logo" src="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png" alt="Jenkins Robotics" width="30" height="30">
       <span>JaegerAI</span>
-      <span class="version-pill">v1.0.0</span>
+      <span class="version-pill">v1.0.1</span>
     </a>
     <div class="nav-links">
       <a href="#capabilities">Capabilities</a>
       <a href="#architecture">Architecture</a>
       <a href="#memory">32 GB Budget</a>
-      <a href="#install">Quick Start</a>
+      <a href="#install">Install</a>
       <a href="#roadmap">History</a>
       <a class="btn" href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">GitHub</a>
     </div>
@@ -264,22 +265,23 @@
 
 <header class="hero">
   <div class="wrap">
-    <div class="eyebrow">Apache-2.0 · Local-First · 32 GB Apple Silicon</div>
-    <h1>A persistent, modular cognitive platform — <span class="grad">built to run 24/7 on your desk.</span></h1>
+    <div class="eyebrow">Apache-2.0 · macOS (Apple Silicon &amp; Intel) · Linux · Windows x64</div>
+    <h1>A persistent, modular cognitive platform — <span class="grad">built to run locally on your machine.</span></h1>
     <p class="lead">
       <em>Conversation is an interface to the intelligence, not its execution loop.</em>
-      JaegerAI v1.0.0 ships 30 standalone Python packages and 6 React 19 UI packages with embedded SQLite WAL and in-process <code class="inline">asyncio</code> — zero Docker, zero Redis, zero external infrastructure daemons.
+      Install browser-first <strong>Jaeger Core</strong> on macOS, Linux, or Windows x64 in one step — or deploy the full 32 GB Apple Silicon stack with 30 standalone Python packages, 6 React 19 UI packages, embedded SQLite WAL, and zero external infrastructure daemons.
     </p>
     <div class="cta-row">
-      <a class="btn primary" href="#install">Install v1.0.0</a>
+      <a class="btn primary" href="https://github.com/JenkinsRobotics/JaegerAI/releases/latest" target="_blank" rel="noopener">Download Jaeger Core v1.0.1</a>
+      <a class="btn" href="#install">Quick Start</a>
       <a class="btn" href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">View Source on GitHub</a>
       <a class="btn" href="https://github.com/JenkinsRobotics/JaegerAI/blob/master/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
     </div>
     <div class="stats">
-      <div class="stat"><div class="stat-val">30</div><div class="stat-lbl">Standalone backend packages</div></div>
-      <div class="stat"><div class="stat-val">6</div><div class="stat-lbl">React 19 + Three.js VRM UI packages</div></div>
-      <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">External infra daemons required</div></div>
-      <div class="stat"><div class="stat-val">32 GB</div><div class="stat-lbl">Unified memory 3-tier governor</div></div>
+      <div class="stat"><div class="stat-val">4 OS</div><div class="stat-lbl">CI-verified: Apple Silicon, Intel Mac, Linux &amp; Windows</div></div>
+      <div class="stat"><div class="stat-val">30 + 6</div><div class="stat-lbl">Standalone Python &amp; React 19 VRM UI packages</div></div>
+      <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">External daemons (no Docker, Redis, or Postgres)</div></div>
+      <div class="stat"><div class="stat-val">100%</div><div class="stat-lbl">Local-first state with neutral first-run profile</div></div>
     </div>
   </div>
 </header>
@@ -287,38 +289,38 @@
 <section id="capabilities">
   <div class="wrap">
     <div class="sec-tag">Capabilities</div>
-    <h2 class="h">Everything modular. Nothing bloated.</h2>
-    <p class="sub">Every capability lives in an independently testable package under <code class="inline">packages/</code> with strict AST-enforced layering and fail-closed safety.</p>
+    <h2 class="h">Everything modular. Owner-controlled by design.</h2>
+    <p class="sub">Every capability lives in an independently testable package under <code class="inline">packages/</code> with strict AST-enforced layering, fail-closed authority, and Gateway-owned permissions.</p>
     <div class="grid">
       <div class="card">
-        <h3>5-Tab Studio UI &amp; VRM Avatar</h3>
-        <p>React 19 Studio WebUI (<code class="inline">:8790</code>) with dockable 2D/3D VRM 0.x/1.0 avatar stage, Kokoro viseme lip-sync, canonical <code class="inline">avatar/v1</code> pack discovery, 2D pixel Virtual Office, and multi-track StudioTimeline.</p>
-        <div class="pill-row"><span class="pill">@jaeger/ui-avatar</span><span class="pill">@jaeger/ui-office</span><span class="pill">jaeger-avatar</span></div>
+        <h3>Portable Jaeger Core &amp; 5-Tab Studio UI</h3>
+        <p>Run the full Gateway (<code class="inline">:33418</code>) and React 19 WebUI (<code class="inline">:8790</code>) on macOS, Linux, or Windows with only Python 3.11–3.12 — bundled WebUI, neutral owner profile, 2D/3D VRM avatar stage, and Virtual Office.</p>
+        <div class="pill-row"><span class="pill">jaeger core</span><span class="pill">@jaeger/ui-avatar</span><span class="pill">@jaeger/ui-office</span></div>
       </div>
       <div class="card">
-        <h3>Model Cookbook, Roundtable &amp; Research</h3>
-        <p>Multi-modality unified-RAM fit scoring (LLM, vision, image gen, STT, TTS, embeddings), live benchmarks, parallel blind/consensus <code class="inline">ModelRoundtable</code>, and cited Markdown + HTML <code class="inline">DeepResearchEngine</code>.</p>
+        <h3>Gateway-Owned Authorized Tasks</h3>
+        <p>Model-free owner workflows (<code class="inline">/find</code>, <code class="inline">/audit</code>, <code class="inline">/connect</code>, <code class="inline">/recover</code>) with scoped grants, untrusted-origin rejection, automatic cloud refusal recovery, and saved <code class="inline">~/.ssh/config</code> &amp; Tailscale reuse.</p>
+        <div class="pill-row"><span class="pill">jaeger-gateway</span><span class="pill">jaeger-authority</span><span class="pill">jaeger-tools</span></div>
+      </div>
+      <div class="card">
+        <h3>Provider Telemetry &amp; OWASP Model Risk Cards</h3>
+        <p>Live Ollama Cloud &amp; OpenRouter balance/usage telemetry, SQLite WAL cost ledger, 18 standard industry risk flags (OWASP LLM Top 10, over-refusal, BFCL, 32 GB fit), and Cloud vs Local head-to-head evals.</p>
         <div class="pill-row"><span class="pill">jaeger-models</span><span class="pill">jaeger-orchestration</span></div>
       </div>
       <div class="card">
-        <h3>24/7 Voice Presence</h3>
-        <p>Apple Silicon MLX Kokoro TTS + Whisper STT paired with layered <code class="inline">&lt;ignore&gt;</code>/<code class="inline">&lt;reply&gt;</code> LLM ambient speech gating, self-speech echo similarity filtering, first-comma streaming TTS chunking, and barge-in.</p>
-        <div class="pill-row"><span class="pill">jaeger-realtime</span><span class="pill">jaeger-kokoro-tts</span><span class="pill">jaeger-whisper-stt</span></div>
+        <h3>24/7 Voice &amp; Living Avatar Presence</h3>
+        <p>Apple Silicon MLX Kokoro TTS + Whisper STT paired with layered <code class="inline">&lt;ignore&gt;</code>/<code class="inline">&lt;reply&gt;</code> ambient speech gating, self-speech echo filtering, <code class="inline">avatar-control/v1</code> stage link, and optional NexusUI Vita VRM shell.</p>
+        <div class="pill-row"><span class="pill">jaeger-realtime</span><span class="pill">jaeger-avatar</span><span class="pill">jaeger-kokoro-tts</span></div>
       </div>
       <div class="card">
-        <h3>Native macOS &amp; Fail-Closed Authority</h3>
-        <p>Direct Apple Mail, Calendar, Reminders, and Notes integration alongside macOS Seatbelt sandboxing, dual <code class="inline">BUILD</code>/<code class="inline">PLAN</code> execution modes, browser secret vault, and sensitive-app computer-use guards.</p>
-        <div class="pill-row"><span class="pill">jaeger-macos</span><span class="pill">jaeger-authority</span><span class="pill">jaeger-loop</span></div>
-      </div>
-      <div class="card">
-        <h3>Robotics, Droid Mode &amp; NexusUI Bridge</h3>
-        <p>Shared <code class="inline">EmbodimentPort</code> across JP01 droid hardware (clamped bracket protocol + L2 <code class="inline">EStopLatch</code>), fail-closed <code class="inline">NexusStationBridge</code> for NexusUI workbenches, and headless Mineflayer Minecraft co-op.</p>
-        <div class="pill-row"><span class="pill">jaeger-hardware</span><span class="pill">jaeger-droid</span><span class="pill">jaeger-embodiment-minecraft</span></div>
+        <h3>Native macOS &amp; Robotics Embodiment</h3>
+        <p>Direct Apple Mail, Calendar, Reminders, and Notes integration alongside macOS Seatbelt sandboxing, JP01 droid hardware (<code class="inline">EStopLatch</code>), fail-closed <code class="inline">NexusStationBridge</code>, and headless Mineflayer Minecraft co-op.</p>
+        <div class="pill-row"><span class="pill">jaeger-macos</span><span class="pill">jaeger-hardware</span><span class="pill">jaeger-droid</span></div>
       </div>
       <div class="card">
         <h3>Open Ecosystem Interop</h3>
-        <p>OpenAI-compatible <code class="inline">/v1/chat/completions</code>, zero-dependency stdlib <code class="inline">JaegerClient</code> Python SDK, 1-click MCP 2.x presets (<code class="inline">aether_studio</code>, <code class="inline">jaeger_arena</code>, <code class="inline">rea</code>), Kanban board, and Discord room guard.</p>
-        <div class="pill-row"><span class="pill">jaeger-gateway</span><span class="pill">jaeger-mcp</span><span class="pill">jaeger-channels</span></div>
+        <p>OpenAI-compatible <code class="inline">/v1/chat/completions</code>, zero-dependency stdlib <code class="inline">JaegerClient</code> Python SDK, 1-click MCP 2.x presets (<code class="inline">aether_studio</code>, <code class="inline">jaeger_arena</code>, <code class="inline">rea</code>), Deep Research, Kanban board, and Discord room guard.</p>
+        <div class="pill-row"><span class="pill">jaeger-mcp</span><span class="pill">jaeger-channels</span><span class="pill">jaeger-evals</span></div>
       </div>
     </div>
   </div>
@@ -328,13 +330,13 @@
   <div class="wrap">
     <div class="sec-tag">Architecture</div>
     <h2 class="h">Strict package layering. Zero in-repo junk.</h2>
-    <p class="sub">Standalone packages under <code class="inline">packages/jaeger-*</code> never import the app composition root. Virtualenvs live at <code class="inline">~/.jaeger/venv</code> and production UI bundles build into <code class="inline">~/.cache/jaeger/</code>.</p>
+    <p class="sub">Standalone packages under <code class="inline">packages/jaeger-*</code> never import the app composition root. Virtualenvs live outside the repo at <code class="inline">~/.jaeger/</code> and releases stage only tracked source files.</p>
     <div class="layers">
-      <div class="layer"><div class="layer-name">Core Spine &amp; Models</div><div class="layer-desc"><code>jaeger-contracts</code>, <code>jaeger-events</code>, <code>jaeger-reliability</code>, <code>jaeger-models</code> — zero-dep Protocol ports, Ollama/OpenAI/Anthropic streaming, Hardware-Fit Cookbook &amp; Roundtable.</div></div>
+      <div class="layer"><div class="layer-name">Core Spine &amp; Models</div><div class="layer-desc"><code>jaeger-contracts</code>, <code>jaeger-events</code>, <code>jaeger-reliability</code>, <code>jaeger-models</code> — zero-dep Protocol ports, Ollama/OpenAI/Anthropic streaming, provider telemetry, OWASP risk cards, Cookbook &amp; Roundtable.</div></div>
       <div class="layer"><div class="layer-name">Authority &amp; Security</div><div class="layer-desc"><code>jaeger-authority</code>, <code>jaeger-skills</code>, <code>jaeger-mcp</code>, <code>jaeger-checkpoints</code> — Seatbelt sandboxing, secret redaction, AST Skills Guard, external agent importer, live MCP 2.x.</div></div>
       <div class="layer"><div class="layer-name">Cognition &amp; Memory 2.0</div><div class="layer-desc"><code>jaeger-cognition</code>, <code>jaeger-memory</code>, <code>jaeger-loop</code>, <code>jaeger-orchestration</code> — 24/7 CognitiveLifeLoop, SQLite WAL WorldModel, BUILD/PLAN modes, Deep Research, Kanban board &amp; reminders.</div></div>
       <div class="layer"><div class="layer-name">Presence &amp; Embodiment</div><div class="layer-desc"><code>jaeger-realtime</code>, <code>jaeger-vision</code>, <code>jaeger-droid</code>, <code>jaeger-hardware</code>, <code>jaeger-embodiment-minecraft</code> — voice gate + echo filter, JP01 E-Stop latch, NexusUI bridge, Minecraft co-op.</div></div>
-      <div class="layer"><div class="layer-name">Studio UI &amp; Gateway</div><div class="layer-desc"><code>jaeger-gateway</code>, <code>jaeger-avatar</code>, <code>jaeger-macos</code>, <code>jaeger-tools</code>, <code>@jaeger/ui-*</code> — standalone aiohttp Gateway (:33418), 5-Tab Studio WebUI (:8790), native macOS shell &amp; Python SDK.</div></div>
+      <div class="layer"><div class="layer-name">Studio UI &amp; Gateway</div><div class="layer-desc"><code>jaeger-gateway</code>, <code>jaeger-avatar</code>, <code>jaeger-macos</code>, <code>jaeger-tools</code>, <code>@jaeger/ui-*</code> — standalone aiohttp Gateway (:33418), Authorized Task Engine, 5-Tab Studio WebUI (:8790), NexusUI &amp; Swift shell.</div></div>
     </div>
   </div>
 </section>
@@ -367,11 +369,27 @@
 <section id="install">
   <div class="wrap">
     <div class="sec-tag">Quick Start</div>
-    <h2 class="h">One command to install, verify, and launch.</h2>
-    <p class="sub">Everything installs cleanly into <code class="inline">~/.jaeger/venv</code> so your repository stays spotless.</p>
-    <div class="terminal">
-      <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span>zsh — JaegerAI v1.0.0</span></div>
-      <pre><span class="c"># Clone and run reproducible setup (profiles: core | business | companion | droid | full)</span>
+    <h2 class="h">Install on macOS, Linux, or Windows in minutes.</h2>
+    <p class="sub">Choose portable <strong>Jaeger Core</strong> (Python 3.11–3.12 only, zero Node.js/MLX required) or the full macOS source checkout.</p>
+    <div class="install-grid">
+      <div class="terminal">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span>Option A — Portable Jaeger Core (macOS Apple Silicon &amp; Intel · Linux · Windows x64)</span></div>
+        <pre><span class="c"># 1. Download &amp; extract jaeger-core-1.0.1.zip from GitHub Releases</span>
+<span class="c">#    https://github.com/JenkinsRobotics/JaegerAI/releases/latest</span>
+
+<span class="c"># 2. Install into ~/.jaeger/core-venv (macOS / Linux):</span>
+<span class="k">python3</span> install-core.py
+
+<span class="c">#    Or on Windows (PowerShell):</span>
+<span class="k">py</span> -3.12 install-core.py
+
+<span class="c"># 3. Run the exact launch command printed by the installer, then open:</span>
+<span class="k">http://127.0.0.1:8790</span></pre>
+      </div>
+
+      <div class="terminal">
+        <div class="term-bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span>Option B — Full macOS / Linux Source Setup (32 GB Apple Silicon Stack)</span></div>
+        <pre><span class="c"># Clone and run reproducible setup (profiles: core | business | companion | droid | full)</span>
 <span class="k">git clone</span> https://github.com/JenkinsRobotics/JaegerAI.git
 <span class="k">cd</span> JaegerAI
 <span class="k">./install.sh</span> --profile full
@@ -383,8 +401,9 @@
 <span class="k">./jaeger</span> start
 <span class="k">./jaeger</span> open
 
-<span class="c"># Run the full backend + AST layering + frontend Vitest + external Vite verification suite</span>
+<span class="c"># Run full backend + AST layering + frontend Vitest + external Vite verification</span>
 <span class="k">./jaeger</span> verify</pre>
+      </div>
     </div>
   </div>
 </section>
@@ -392,23 +411,23 @@
 <section id="roadmap">
   <div class="wrap">
     <div class="sec-tag">Release History</div>
-    <h2 class="h">From monorepo experiment to modular v1.0.0 platform.</h2>
+    <h2 class="h">From monorepo experiment to cross-platform cognitive platform.</h2>
     <p class="sub">See the complete release history in <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/master/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG.md</a>.</p>
     <div class="milestones">
-      <div class="milestone">
-        <h4>v0.9 — Split</h4>
-        <h3>Standalone repository</h3>
-        <p>Graduated out of the JROS monorepo with independent packaging, discovery-driven audio engines, and first-party WebUI foundations.</p>
-      </div>
       <div class="milestone">
         <h4>v0.13 — Qualified Loop</h4>
         <h3>Proven execution &amp; continuity</h3>
         <p>Qualified streaming cancel, gated write approvals, IDE/WebUI same-session continuity, and advisory claim locking.</p>
       </div>
+      <div class="milestone">
+        <h4>v1.0.0 — Modular Core</h4>
+        <h3>30 Python + 6 React 19 packages</h3>
+        <p>Zero external daemons, 5-Tab Studio UI + VRM avatar, Cookbook &amp; Roundtable, Deep Research, Apple apps, VoiceLLM gating, and NexusUI hardware bridge.</p>
+      </div>
       <div class="milestone live">
-        <h4>v1.0.0 — Live Now</h4>
-        <h3>100% Modular Cognitive Platform</h3>
-        <p>30 standalone backend + 6 React 19 UI packages, zero external daemons, 5-Tab Studio UI + VRM avatar, Cookbook &amp; Roundtable, Deep Research, Apple apps, VoiceLLM gating, and NexusUI hardware bridge.</p>
+        <h4>v1.0.1 — Live Now</h4>
+        <h3>Cross-Platform Core &amp; Owner Control</h3>
+        <p>CI-verified portable Core installer for Apple Silicon, Intel Mac, Linux &amp; Windows x64; public privacy hardening; Gateway Authorized Task Handling; Provider Telemetry &amp; OWASP Model Risk Cards; NexusUI Vita VRM shell.</p>
       </div>
     </div>
   </div>
@@ -419,9 +438,9 @@
     <div class="foot-brand">
       <img src="https://jenkinsrobotics.com/wp-content/uploads/2021/04/cropped-cropped-Jenkins-logo-transparent-1.png" alt="Jenkins Robotics" width="42" height="42" loading="lazy">
       <div>
-        <div class="foot-line">JaegerAI v1.0.0 · Apache-2.0</div>
+        <div class="foot-line">JaegerAI v1.0.1 · Apache-2.0</div>
         <div class="foot-sub">
-          A <a href="https://jenkinsrobotics.com" target="_blank" rel="noopener">Jenkins Robotics</a> project — local-first cognitive AI for Apple Silicon &amp; robotics.
+          A <a href="https://jenkinsrobotics.com" target="_blank" rel="noopener">Jenkins Robotics</a> project — local-first cognitive AI for desktop &amp; robotics.
         </div>
         <div class="foot-motto">&ldquo;Engineering the future, one robot at a time.&rdquo;</div>
       </div>
@@ -430,7 +449,8 @@
       <div class="foot-col">
         <div class="foot-h">Project</div>
         <a href="https://github.com/JenkinsRobotics/JaegerAI" target="_blank" rel="noopener">GitHub repo</a>
-        <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/master/README.md" target="_blank" rel="noopener">README</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerAI/releases/latest" target="_blank" rel="noopener">Latest Release</a>
+        <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/master/docs/getting-started.md" target="_blank" rel="noopener">Getting Started</a>
         <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/master/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
         <a href="https://github.com/JenkinsRobotics/JaegerAI/blob/master/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener">Attributions</a>
       </div>
