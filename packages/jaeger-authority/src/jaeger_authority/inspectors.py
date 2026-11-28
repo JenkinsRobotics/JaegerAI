@@ -252,7 +252,8 @@ class BoundaryAndSecretsInspector:
                             proposal_id=proposal.proposal_id,
                         )
                 in_ws = resolved == ws or ws in resolved.parents
-                in_tmp = str(resolved).startswith(("/tmp/", "/private/tmp/"))
+                ws_in_tmp = str(ws).startswith(("/tmp/", "/private/tmp/"))
+                in_tmp = (not ws_in_tmp) and str(resolved).startswith(("/tmp/", "/private/tmp/"))
                 in_allowed = any(
                     resolved == root or root in resolved.parents
                     for root in self._allowed_roots
