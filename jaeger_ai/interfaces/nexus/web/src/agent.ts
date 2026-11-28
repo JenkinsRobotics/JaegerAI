@@ -1,8 +1,10 @@
 // The app's server (jaeger_ai/interfaces/nexus/serve.py): the Gateway as the agent, and the Mac shell's actions.
 import type { AgentEvent } from './chat.ts';
 
+/** A face the avatar can wear (faces.py), each from its own frozen files: Jaeger's flat look (look.json) or a pack's VRM. */
+export type Face = { id: string; name: string; kind: 'flat' | 'vrm'; style?: Record<string, unknown>; card?: string; model?: string; voice?: string };
 export type Config = { name: string; title: string; suggestions: string[]; gateway: string; webui: string; company?: string;
-  face: { name: string; style?: Record<string, unknown>; card?: string } };   // Jaeger's frozen look (look.json)
+  faces: Face[]; worn: string };
 export type Health = { ready?: boolean; brain?: string; voice?: string | null; hearing?: string; why?: string; session?: string };
 export type Task = { request_id: string; title?: string; step?: string; status?: string; elapsed_s?: number };
 export type ShellStatus = {
@@ -37,6 +39,8 @@ async function ok(r: Response) {
 export const say = (text: string) => post('agent/text', { text }).then(ok);
 export const interrupt = () => post('agent/interrupt', {}).catch(() => undefined);
 export const newChat = () => post('agent/new', {}).then(ok);
+/** Wear another face: a pack's persona then rides on each message. */
+export const wear = (id: string) => post('agent/face', { id }).then(ok);
 /** A recorded clip (16 kHz 16-bit mono, base64) for the Gateway's hearing; resolves to what it heard. */
 export const hear = (pcm: string): Promise<string> => post('agent/audio', { pcm }).then(ok).then(j => j.heard ?? '');
 /** One of the Mac shell's actions (the same names the menu-bar item uses). */

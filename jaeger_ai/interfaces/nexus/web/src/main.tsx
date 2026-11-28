@@ -1,18 +1,18 @@
 // Jaeger AI's NexusUI screen, copied from Omni's, in the NexusUI app shell (app-shell/: Aether Studio's sidebar, no header).
-// Chat: the avatar (Jaeger Avatar's flat face in Jaeger's own frozen look, speaking with Jaeger Agent's Kokoro voice)
-// beside the chat, which runs on the Gateway. The other pages are the Swift app's native surfaces (INVENTORY.md).
+// Chat: the avatar (the face it wears: Jaeger Avatar's flat face in Jaeger's own frozen look, or a pack's VRM such as
+// Vita, speaking with Jaeger Agent's Kokoro voice) beside the chat, which runs on the Gateway. The other pages are the Swift app's native surfaces (INVENTORY.md).
 // `#pill` is Quick Ask.
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './aether-tokens.css';
 import './app.css';
-import { health, hear, interrupt, listen, loadConfig, newChat, pending, say, type Config, type Health } from './agent.ts';
+import { health, hear, interrupt, listen, loadConfig, newChat, pending, say, wear, type Config, type Health } from './agent.ts';
 import { attach } from './attach.ts';
 import { recordClip } from './mic.ts';
 import { empty, onEvent, sent, type AgentEvent, type Chat as ChatState } from './chat.ts';
 import { Chat } from './Chat.tsx';
 import { Settings, Shell } from './Shell.tsx';
-import { Stage } from './Stage.tsx';
+import { FacePicker, Stage } from './Stage.tsx';
 import { moodFor } from './mood.ts';
 import { voice } from './voice.ts';
 import { AppShell, type ShellSection } from './app-shell/AppShell.tsx';
@@ -38,6 +38,7 @@ function useAgent() {
     if (m) setMood(m);
     if (e.event === 'voice' && e.pcm && e.rate) {   // her reply, spoken: the mouth moves while it plays, then she rests
       speaker.play(e.pcm, e.rate);
+      if (/\[(laugh|giggle)/i.test(e.text ?? '')) setMood('laughing');   // Kokoro plays a recorded laugh for these
       void speaker.idle().then(() => setMood('neutral'));
     }
     if (e.event && !['delta', 'assistant', 'user', 'reset', 'voice'].includes(e.event))
@@ -71,15 +72,18 @@ function App() {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [h, setH] = useState<Health | null>(null);
   const [page, setPage] = useState('chat');
+  const [worn, setWorn] = useState('');
   const a = useAgent();
-  useEffect(() => { loadConfig().then(c => { setCfg(c); document.title = PILL ? 'Ask Jaeger' : c.title; }); }, []);
+  useEffect(() => { loadConfig().then(c => { setCfg(c); setWorn(c.worn); document.title = PILL ? 'Ask Jaeger' : c.title; }); }, []);
   useEffect(() => {
     const tick = () => { health().then(setH); if (!PILL) pending().then(p => { if (p.destination) setPage(p.destination.target === 'notifications' ? 'tasks' : 'chat'); }); };
     tick(); const t = setInterval(tick, 3000); return () => clearInterval(t);
   }, []);
   if (!cfg) return <div className="loading">Loading…</div>;
+  const face = cfg.faces.find(f => f.id === worn) ?? cfg.faces[0];
+  const onWear = (id: string) => { wear(id).then(() => setWorn(id), () => undefined); };
 
-  const chat = <Chat name={cfg.name} chat={a.chat} suggestions={cfg.suggestions} mic={a.mic} compact={PILL}
+  const chat = <Chat name={face.name} chat={a.chat} suggestions={cfg.suggestions} mic={a.mic} compact={PILL}
     onSend={a.send} onStop={a.stop} onNew={a.fresh} onMic={a.toggleMic} onFile={a.file} />;
   if (PILL) return <div className="pill-app"><div className="pill-orb"><span className={`dot ${a.chat.busy ? 'busy' : h?.ready ? 'ok' : ''}`} /></div>{chat}</div>;
 
@@ -98,7 +102,8 @@ function App() {
       <ol className="activity">{a.seen.length ? a.seen.map((s, i) => <li key={i}><time>{s.at}</time><b>{s.kind}</b> {s.text}</li>) : <li className="dim">Nothing yet.</li>}</ol>
     </div>
   );
-  const stage = <section className="pane stage avatar"><Stage look={cfg.face} mood={a.mood} level={speaker.level} />
+  const stage = <section className="pane stage avatar"><Stage look={face} mood={a.mood} level={speaker.level} playing={speaker.current} />
+    <FacePicker faces={cfg.faces} worn={face.id} onWear={onWear} />
     <div className="voice-line"><span className={`dot ${h?.voice && !h.voice.startsWith('no voice') ? 'ok' : ''}`} />{h?.voice ?? 'Voice: —'}</div></section>;
   const body = page === 'chat' ? <>{stage}<section className="pane">{chat}</section></>
     : <section className="pane page">{page === 'activity' ? agent : page === 'settings' ? <Settings /> : <Shell webui={cfg.webui} only={page} />}</section>;
@@ -108,7 +113,7 @@ function App() {
     <AppShell id="jaeger-ai" brand={{ name: 'Jaeger', suffix: 'AI', mark: 'jaeger-mark.svg' }} sections={SECTIONS} current={page} onSelect={setPage}
       tools={[{ id: 'webui', label: 'Main screen (WebUI)', icon: 'link', href: cfg.webui }]}
       settings={{ id: 'settings', label: 'Settings', icon: 'settings' }}
-      profile={{ name: cfg.name, detail: h?.brain ?? 'Connecting…', avatar: 'jaeger-mark.svg', connection: up }}
+      profile={{ name: face.name, detail: h?.brain ?? 'Connecting…', avatar: face.kind === 'vrm' && face.card ? face.card : 'jaeger-mark.svg', connection: up }}
       status={{ name: cfg.title, connection: up, message: h?.voice ?? '', company: cfg.company }}>
       <div className={`panes ${page === 'chat' ? 'avatar-chat' : 'one'}`}>{body}</div>
     </AppShell>

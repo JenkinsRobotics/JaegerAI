@@ -12,6 +12,18 @@ Vite screen, and a pywebview window (`--browser` serves the same screen). The lo
 tokens, Omni's screen, Jaeger Avatar's flat face renderer, and the NexusUI app shell (`web/src/app-shell/`, from
 `VisualReactpy/framework/nexusui/app_shell`: Aether Studio's sidebar and status bar, no header).
 
+**Faces (2026-11-27).** A picker on the stage switches between Jaeger's flat face and **Vita**, the anime VRM avatar.
+- Vita's pack is copied whole from Jaeger Avatar (`avatars/vita`, 0.2.2, from JaegerAvatar dev 31e8a09), including
+  its LICENSE.txt and MODEL-METADATA.json. The model is VRoid AvatarSample_F (CC0); the persona is Apache-2.0.
+- She is drawn with Jaeger Avatar's VRM renderer, copied into `web/src/vrm/`: three r187 and three-vrm 3.5.5 from npm,
+  loaded only when a VRM face is worn.
+- Her behaviour: idle motion and blinks come from the rig. Her expression follows the mood: thinking, listening, and
+  laughing when a reply has `[laugh]`. Her lips follow Jaeger Avatar's analysis of the Kokoro voice as it plays.
+- Picking her makes her character sheet (`avatar.yaml`) ride on each message as an `[In character: …]` line. The
+  chat never shows that line, and the Gateway's system prompt is untouched. Her voice is the pack's `af_heart`, the
+  same as Jaeger's.
+- `faces.py` lists the faces. Any VRM pack dropped into `avatars/` shows up in the picker.
+
 ## Run it (this Mac)
 
 1. A model the Gateway can use. The Gateway's default (`mistral-large-4:cloud` on Ollama) had no credits on
@@ -45,6 +57,7 @@ tokens, Omni's screen, Jaeger Avatar's flat face renderer, and the NexusUI app s
 | `native.py` | macOS menu-bar item (the same menus as the Swift `StatusItemController`) and the global hotkey (PyObjC) |
 | `window.py` | pywebview window plus a mic/camera grant for its own page (copied from Omni) |
 | `look.json` | Jaeger's frozen screen look. The character owns it; replace the file to change the look |
+| `faces.py`, `avatars/` | The faces to wear: Jaeger's flat look and each VRM pack (Vita), with its persona and voice; `/avatars/*` serves their files |
 | `web/` | The screen. `main.tsx` (the app shell's sidebar, avatar + chat), `Chat.tsx`, `Shell.tsx` (Status, Tasks, Droid, Mac, Settings), `Stage.tsx` + `face/` (Jaeger Avatar's flat face), `voice.ts` (plays her voice; the mouth follows its loudness), `mic.ts` (one clip per press) |
 | `INVENTORY.md` | Every Swift UI element and its counterpart here, with what was checked |
 
@@ -59,6 +72,7 @@ Measured on this Mac:
 - `python -m jaeger_ai.interfaces.nexus.shell`: deep-link rules, using the Swift JaegerDeepLinkTests cases.
 - `python -m jaeger_ai.interfaces.nexus.native`: hotkey parsing.
 - `python -m jaeger_ai.interfaces.nexus.voice`: a silent voice says why.
+- `python -m jaeger_ai.interfaces.nexus.faces`: the packs read, files stay inside `avatars/`, a persona never shows in the chat.
 - `cd web && npm test`: chat events and audio conversion (11 tests).
 - The repo's backend suite (`scripts/verify.sh backend`): 223 passed, 2 failed, neither from this app. Seatbelt only
   lets Python run from `~/.jaeger/venv` and this run used another venv; the other failure is xcodebuild log noise in
@@ -75,11 +89,17 @@ Measured on this Mac:
    system prompt.
 4. **Duplex.** Half duplex: press Mic, speak, press again; the mic stays shut while she speaks. Open-mic or quasi
    duplex (talk over her) is Jaeger Agent's `body/loop.py` `duplex()`. It needs the live mic stream, not clips.
-5. **The Swift inventory.** `INVENTORY.md` has 63 rows (the Swift app's ~70 elements, a few grouped): 22 checked, 37 built but not exercised (some
+5. **Vita, next steps.**
+   - Her performance tags (`[wave]`, `[joy]`) and the pack's sound lines are not used yet. Jaeger Avatar's `brain.js`
+     parser is the pattern to copy.
+   - A per-face Kokoro voice needs the voice worker to take a voice per `say`; today both faces use `af_heart`.
+   - Speech reads `*hums softly*` stage directions aloud. Strip those before `say`.
+   - `model.vrm` adds 14 MB to the repo.
+6. **The Swift inventory.** `INVENTORY.md` has 63 rows (the Swift app's ~70 elements, a few grouped): 22 checked, 37 built but not exercised (some
    held back on purpose because they change the Mac: stack restart, Lock Mac, Droid wake, launch at login), 4 with
    no exact equivalent. The Gateway on master has no `/v1/live/tasks`, so live tasks and their notifications are off
    in both apps.
-6. **Jaeger AI on Jaeger Agent v1.2.0, as its agent engine.** Not started, waiting for the owner's OK. Findings and
+7. **Jaeger AI on Jaeger Agent v1.2.0, as its agent engine.** Not started, waiting for the owner's OK. Findings and
    plan, in short:
    - GitHub master (dde9b24, the "clean-slate" rewrite) deleted the old diverged `packages/jaeger-agent`. The
      Gateway runs each turn on its own loop:
@@ -97,7 +117,7 @@ Measured on this Mac:
      - Third pass: Jaeger Agent's voice replaces the Gateway's whisper-cli path.
    - Conflicts to settle: two tool registries, two model routers, two memory stores, two transcripts (the Gateway
      store replays history each turn; Jaeger Agent keeps its own per session).
-7. **Upstream issues seen on master.**
+8. **Upstream issues seen on master.**
    - `scripts/setup.sh --profile core` installs a Gateway that cannot import (it needs `jaeger_business`, which is
      only in the business profile).
    - `dev/benchmark/scenarios.py` imports `jaeger_ai.main`, which master deleted.

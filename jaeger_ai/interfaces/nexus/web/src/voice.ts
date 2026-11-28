@@ -1,8 +1,23 @@
 // Her voice: each spoken sentence (an `audio` event: 16-bit PCM, base64, at `rate`) queued and played in order.
+import { analyze } from './vrm/voice.js';
+
+/** The clip playing now and how far into it, for lip sync (its track is Jaeger Avatar's voice analysis, made on first use). */
+export type Playing = { id: number; t: number; track: ReturnType<typeof analyze> };
+
 export function voice() {
-  let ctx: AudioContext | null = null, at = 0, meter: AnalyserNode | null = null;
+  let ctx: AudioContext | null = null, at = 0, meter: AnalyserNode | null = null, made = 0;
   const live = new Set<AudioBufferSourceNode>(), wave = new Float32Array(512);
+  let clips: { id: number; start: number; end: number; pcm: Float32Array; rate: number; track?: Playing['track'] }[] = [];
   return {
+    current(): Playing | null {
+      if (!ctx) return null;
+      const now = ctx.currentTime;
+      clips = clips.filter(c => c.end > now);
+      const c = clips.find(c => now >= c.start);
+      if (!c) return null;
+      c.track ??= analyze(c.pcm, c.rate);
+      return { id: c.id, t: now - c.start, track: c.track };
+    },
     level() {   // how loud she is right now (RMS), for the face's mouth
       if (!meter || !live.size) return 0;
       meter.getFloatTimeDomainData(wave);
@@ -16,7 +31,9 @@ export function voice() {
       for (let i = 0; i < n; i++) ch[i] = view.getInt16(i * 2, true) / 32768;
       const src = ctx.createBufferSource();
       src.buffer = buf; src.connect(meter!);
-      at = Math.max(at, ctx.currentTime + 0.05); src.start(at); at += buf.duration;
+      at = Math.max(at, ctx.currentTime + 0.05); src.start(at);
+      clips.push({ id: ++made, start: at, end: at + buf.duration, pcm: ch, rate });
+      at += buf.duration;
       live.add(src); src.onended = () => live.delete(src);
     },
     playing: () => live.size > 0,
@@ -26,7 +43,7 @@ export function voice() {
     },
     stop() {
       live.forEach(s => { try { s.stop(); } catch { /* already ended */ } });
-      live.clear(); at = 0;
+      live.clear(); clips = []; at = 0;
     },
   };
 }

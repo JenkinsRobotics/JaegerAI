@@ -144,3 +144,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .stage.avatar { display: grid; grid-template-rows: 1fr auto; background: #000; }
 .voice-line { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 11.5px; color: var(--aether-color-text-dim); background: var(--aether-color-bg-rail); border-top: 1px solid var(--aether-color-border-subtle); }
 .voice-line .dot { margin: 0; }
+
+/* A pack's VRM face (Vrm.tsx) fills the stage; the face picker sits over its top edge. */
+.face.vrm { display: block; overflow: hidden; }
+.vrm-box { position: absolute; inset: 0; }
+.vrm-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--aether-color-text-dim); font-size: 13px; }
+.stage.avatar { position: relative; }
+.face-picker { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; padding: 2px; z-index: 2;
+  border-radius: 999px; background: color-mix(in srgb, var(--aether-color-bg-panel) 80%, transparent); border: 1px solid var(--aether-color-border); }
+.face-picker button { border: 0; border-radius: 999px; padding: 4px 12px; background: transparent; color: var(--aether-color-text-dim); font: 500 12px var(--aether-font-family); cursor: pointer; }
+.face-picker button[aria-checked="true"] { background: var(--aether-color-accent); color: var(--aether-color-text-on-selected, #fff); }

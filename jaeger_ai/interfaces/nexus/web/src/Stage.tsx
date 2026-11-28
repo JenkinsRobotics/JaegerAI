@@ -1,14 +1,25 @@
-// The stage: the character's own face (its pack's locked screen look, `looks/screen.json`), drawn with the flat face
-// copied from Jaeger Avatar (face/). Its mood follows the agent's feeling and state; its mouth follows the voice.
-import { useEffect, useRef } from 'react';
+// The stage: the face the avatar wears, from its own frozen files (faces.py). Jaeger's flat face (its locked look,
+// look.json) is drawn with the flat face copied from Jaeger Avatar (face/); a pack's VRM (e.g. Vita) with Jaeger
+// Avatar's VRM renderer (Vrm.tsx). The mood follows the agent's feeling and state; the mouth follows the voice.
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { FACE_MOODS, FaceAnimator } from './face/eyes.js';
 import { fromPack, styledFace } from './face/styles.js';
+import type { Face as Look } from './agent.ts';
+import type { Playing } from './voice.ts';
+const Vrm = lazy(() => import('./Vrm.tsx').then(m => ({ default: m.Vrm })));   // three.js loads only when a VRM face is worn
 
-export type Look = { name: string; style?: Record<string, unknown>; card?: string };
-
-export function Stage({ look, mood, level }: { look: Look; mood: string; level: () => number }) {
+export function Stage({ look, mood, level, playing }: { look: Look; mood: string; level: () => number; playing: () => Playing | null }) {
+  if (look.kind === 'vrm' && look.model)
+    return <Suspense fallback={<div className="face"><span className="face-name">{look.name}</span></div>}><Vrm face={look} mood={mood} playing={playing} /></Suspense>;
   return look.style ? <Face look={look} mood={mood} level={level} />
     : <div className="face"><img className="card" src={look.card} alt={look.name} /><span className="face-name">{look.name}</span></div>;
+}
+
+/** Which face to wear: Jaeger's own or a pack's. */
+export function FacePicker({ faces, worn, onWear }: { faces: Look[]; worn: string; onWear: (id: string) => void }) {
+  if (faces.length < 2) return null;
+  return <div className="face-picker" role="radiogroup" aria-label="Face">{faces.map(f =>
+    <button key={f.id} type="button" role="radio" aria-checked={f.id === worn} onClick={() => onWear(f.id)}>{f.name}</button>)}</div>;
 }
 
 function Face({ look, mood, level }: { look: Look; mood: string; level: () => number }) {
