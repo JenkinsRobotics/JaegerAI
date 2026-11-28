@@ -180,5 +180,25 @@ class JaegerClient:
             {"target": target, "alias": alias, "user": user, "probe": probe},
         )
 
+    def authorized_run(self, workflow: str, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1/authorized/run", {"workflow": workflow, "params": dict(params or {})})
+
+    def authorized_grants(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/authorized/grants")
+
+    def authorized_grant_folder(self, root: str, operations: list[str] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/v1/authorized/grants", {"root": root, "operations": operations or ["find_metadata"]})
+
+    def authorized_settings(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/authorized/settings")
+
+    def set_authorized_settings(self, *, direct_chat: bool | None = None, owner_autonomy: bool | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if direct_chat is not None:
+            body["direct_chat"] = direct_chat
+        if owner_autonomy is not None:
+            body["owner_autonomy"] = owner_autonomy
+        return self._request("PUT", "/v1/authorized/settings", body)
+
 
 __all__ = ["JaegerClient", "JaegerClientError"]
