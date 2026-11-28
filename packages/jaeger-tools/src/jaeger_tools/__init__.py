@@ -1,6 +1,15 @@
 """jaeger-tools: ToolDef, ToolRegistry, ToolRouter, RwLock dispatcher, progressive discovery, EditEngines, RepoMap."""
 
-from . import aider_search_replace, arg_coercion, builtins, pty_manager, remote_exec, router, search, tool_registry, tool_schema, web_search
+from . import aider_search_replace, arg_coercion, browser_guard, builtins, evidence, pty_manager, remote_exec, router, search, tool_registry, tool_schema, web_search
+from .browser_guard import (
+    BrowserDomainPolicy,
+    BrowserJudgement,
+    BrowserRunJudge,
+    DomainCheckResult,
+    ScopedSecretVault,
+    SiteGotchasStore,
+)
+from .evidence import RetainedEvidenceStore, RetainedSummary
 from .web_search import web_search as run_web_search
 from .aider_search_replace import RelativeIndenter, search_and_replace
 from .arg_coercion import COMMON_PARAM_ALIASES, coerce_args
@@ -50,10 +59,14 @@ from .tool_schema import ToolDef, dev_mode_enabled, tool_result_failed
 
 __all__ = [
     "ApplyPatchEditor",
+    "BrowserDomainPolicy",
+    "BrowserJudgement",
+    "BrowserRunJudge",
     "COMMON_PARAM_ALIASES",
     "CatalogEntry",
     "Diagnostic",
     "DiagnosticReport",
+    "DomainCheckResult",
     "EditEngine",
     "EditOutcome",
     "ExecutionBackend",
@@ -64,9 +77,13 @@ __all__ = [
     "RemoteExecError",
     "RemoteHostConfig",
     "RemoteHostRegistry",
+    "RetainedEvidenceStore",
+    "RetainedSummary",
     "RoutedTool",
     "SSHBackend",
+    "ScopedSecretVault",
     "SearchReplaceEditor",
+    "SiteGotchasStore",
     "ToolConflict",
     "ToolDef",
     "ToolDiscoverySession",

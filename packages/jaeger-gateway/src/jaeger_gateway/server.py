@@ -69,6 +69,10 @@ def create_gateway_app(
     roundtable_runner: Callable[..., dict[str, Any]] | None = None,
     research_runner: Callable[..., dict[str, Any]] | None = None,
     research_lister: Callable[..., list[dict[str, Any]]] | None = None,
+    mode_getter: Callable[[], dict[str, Any]] | None = None,
+    mode_setter: Callable[[str], dict[str, Any]] | None = None,
+    evidence_store: Any = None,
+    agent_importer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     routing_provider: Callable[[], dict[str, Any]] | None = None,
     routing_updater: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     onboarding_provider: Callable[[], dict[str, Any]] | None = None,
@@ -692,6 +696,60 @@ def create_gateway_app(
         limit = int(request.query.get("limit") or "25")
         rows = await asyncio.to_thread(research_lister, limit)
         return web.json_response({"ok": True, "reports": rows, "count": len(rows)})
+
+    async def get_system_mode(_request: web.Request) -> web.Response:
+        if mode_getter is None:
+            return web.json_response({"ok": True, "mode": "build"})
+        return web.json_response(mode_getter())
+
+    async def set_system_mode(request: web.Request) -> web.Response:
+        if mode_setter is None:
+            return web.json_response({"ok": False, "error": "execution mode unavailable"}, status=501)
+        body = await request.json()
+        mode = str(body.get("mode") or "").strip()
+        try:
+            return web.json_response(mode_setter(mode))
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def list_evidence_route(request: web.Request) -> web.Response:
+        if evidence_store is None:
+            return web.json_response({"ok": True, "items": []})
+        limit = int(request.query.get("limit") or "20")
+        items = evidence_store.list_recent(limit=limit)
+        return web.json_response({"ok": True, "items": items, "count": len(items)})
+
+    async def inspect_evidence_route(request: web.Request) -> web.Response:
+        if evidence_store is None:
+            return web.json_response({"ok": False, "error": "evidence store unavailable"}, status=501)
+        ev_id = request.match_info["evidence_id"]
+        offset = int(request.query.get("offset") or "0")
+        limit = int(request.query.get("limit") or "4000")
+        search = request.query.get("search") or ""
+        res = evidence_store.inspect(ev_id, offset=offset, limit=limit, search=search)
+        return web.json_response(res, status=200 if res.get("ok") else 404)
+
+    async def list_importers_route(_request: web.Request) -> web.Response:
+        if agent_importer is None:
+            return web.json_response({"ok": True, "sources": [], "count": 0})
+        return web.json_response(await asyncio.to_thread(agent_importer, {"action": "discover"}))
+
+    async def run_importer_route(request: web.Request) -> web.Response:
+        if agent_importer is None:
+            return web.json_response({"ok": False, "error": "agent importer unavailable"}, status=501)
+        body = await request.json()
+        try:
+            res = await asyncio.to_thread(
+                agent_importer,
+                {
+                    "action": "import",
+                    "source": str(body.get("source") or ""),
+                    "dry_run": bool(body.get("dry_run", True)),
+                },
+            )
+            return web.json_response(res)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
     async def get_model_routing(_request: web.Request) -> web.Response:
         if routing_provider is None:
@@ -1822,6 +1880,12 @@ def create_gateway_app(
     app.router.add_post("/v1/models/roundtable", run_model_roundtable)
     app.router.add_post("/v1/research/run", run_deep_research)
     app.router.add_get("/v1/research/reports", list_research_reports_route)
+    app.router.add_get("/v1/system/mode", get_system_mode)
+    app.router.add_post("/v1/system/mode", set_system_mode)
+    app.router.add_get("/v1/evidence", list_evidence_route)
+    app.router.add_get("/v1/evidence/{evidence_id}", inspect_evidence_route)
+    app.router.add_get("/v1/skills/importers", list_importers_route)
+    app.router.add_post("/v1/skills/import", run_importer_route)
     app.router.add_get("/v1/models/routing", get_model_routing)
     app.router.add_put("/v1/models/routing", put_model_routing)
     app.router.add_get("/v1/onboarding/status", get_onboarding_status)

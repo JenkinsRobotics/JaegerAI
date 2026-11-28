@@ -1026,5 +1026,22 @@ async def test_cookbook_roundtable_research_and_apple_tools_gateway(tmp_path: Pa
             assert r_rep.status == 200
             rep_data = await r_rep.json()
             assert rep_data["ok"] is True and rep_data["reports"] == []
+
+            # Dual plan/build mode toggle
+            r_m0 = await client.get("/v1/system/mode")
+            assert (await r_m0.json())["mode"] == "build"
+            r_m1 = await client.post("/v1/system/mode", json={"mode": "plan"})
+            assert r_m1.status == 200 and (await r_m1.json())["mode"] == "plan"
+
+            # Retained evidence paging route
+            ev_sum = rt.evidence.retain("alpha\nbeta\ngamma\n" * 40, source_tool="test_dump")
+            r_ev = await client.get(f"/v1/evidence/{ev_sum.evidence_id}?offset=0&limit=200")
+            assert r_ev.status == 200
+            ev_data = await r_ev.json()
+            assert ev_data["ok"] is True and "alpha" in ev_data["text"]
+
+            # External agent importer discovery
+            r_imp = await client.get("/v1/skills/importers")
+            assert r_imp.status == 200 and (await r_imp.json())["ok"] is True
     finally:
         rt.close()
