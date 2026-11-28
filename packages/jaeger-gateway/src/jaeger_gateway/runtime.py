@@ -138,6 +138,7 @@ from jaeger_youtube.browse import BrowserWorkerClient, YouTubeBrowserSession
 from jaeger_youtube.data_api import latest_playlist_video
 
 from .auth import GatewayAuthPolicy
+from .authorized_tasks import AuthorizedGrantStore, AuthorizedTaskEngine
 from .browser_manager import BrowserWorkerManager
 from .coordinator import OWNER_SCHEDULE_PROPOSAL_ALLOWED, RunCoordinator
 from .global_events import GlobalEventBus
@@ -379,6 +380,12 @@ class ModularGatewayRuntime:
         self._supervised_browser_instance: SupervisedBrowser | None = None
         self.remote_hosts = RemoteHostRegistry(self.state_dir / "remote_hosts.json")
         self.ssh_backend = SSHBackend(self.remote_hosts)
+        self.authorized_grants = AuthorizedGrantStore(self.state_dir, default_workspace=self.workspace)
+        self.authorized_tasks = AuthorizedTaskEngine(
+            grants=self.authorized_grants,
+            remote_hosts=self.remote_hosts,
+            workspace=self.workspace,
+        )
         self.nudges = LearningNudgeTracker()
         self.mailbox = DurableMailbox(self.state_dir)
         self.subagents = SubagentOrchestrator(
@@ -2003,15 +2010,71 @@ class ModularGatewayRuntime:
                 },
                 "required": ["target"],
             },
-            lambda args: connect_remote_host(
-                self.remote_hosts,
+            lambda args: self.authorized_tasks.connect_device(
                 str(args.get("target") or ""),
                 alias=str(args.get("alias") or ""),
                 user=str(args.get("user") or ""),
                 probe=bool(args.get("probe", True)),
-            ),
+            ).to_dict(),
             read_only=False,
-            source="jaeger-tools",
+            source="jaeger-gateway",
+        )
+        _reg(
+            "find_file_metadata",
+            "Filename & metadata lookup inside owner-granted folders ONLY. Never opens files or sends file contents to any cloud model.",
+            {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Filename or substring to locate (e.g. credentials-backup.txt)"},
+                    "root": {"type": "string", "description": "Optional specific granted folder to search"},
+                    "max_results": {"type": "integer", "default": 25},
+                },
+                "required": ["filename"],
+            },
+            lambda args: self.authorized_tasks.find_file(
+                str(args.get("filename") or ""),
+                root=args.get("root"),
+                max_results=int(args.get("max_results") or 25),
+            ).to_dict(),
+            read_only=True,
+            source="jaeger-gateway",
+        )
+        _reg(
+            "credential_audit",
+            "Defensive audit of a granted project folder for accidentally committed tokens/keys. Always masks secrets and returns remediation steps; never exports raw credentials.",
+            {
+                "type": "object",
+                "properties": {
+                    "root": {"type": "string", "description": "Optional granted project folder path"},
+                    "max_files": {"type": "integer", "default": 400},
+                },
+            },
+            lambda args: self.authorized_tasks.credential_audit(
+                root=args.get("root"),
+                max_files=int(args.get("max_files") or 400),
+            ).to_dict(),
+            read_only=True,
+            source="jaeger-gateway",
+        )
+        _reg(
+            "recover_access",
+            "Check for an existing authorized connection first; if unavailable or locked out, provide official recovery paths clearly marking which options preserve data vs. erase data and exact prerequisites.",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Device or account name (e.g. MacBook, RackPC001, iPhone)"},
+                    "scenario": {"type": "string", "enum": ["auto", "forgot_passcode", "connect_remotely"], "default": "auto"},
+                    "os_hint": {"type": "string", "description": "Optional OS hint: macos, windows, ios, linux"},
+                },
+                "required": ["target"],
+            },
+            lambda args: self.authorized_tasks.recover_access(
+                str(args.get("target") or ""),
+                scenario=str(args.get("scenario") or "auto"),
+                os_hint=str(args.get("os_hint") or ""),
+            ).to_dict(),
+            read_only=True,
+            source="jaeger-gateway",
         )
         _reg(
             "tailscale_peers",
@@ -2944,8 +3007,25 @@ class ModularGatewayRuntime:
                     "When asked to turn Droid mode on/off, wake Droid, go to sleep, or park the camera, call droid_act with wake or sleep. "
                     "For YouTube audiovisual analysis, resolve a playlist's latest addition with youtube_latest_playlist_video, then call youtube_watch_video on the exact video for joint audio and motion (use youtube_analyze_video only when sampled evidence is expressly wanted). "
                     "State exact capture coverage with timestamps, stop on deterministic access errors unless an authorized local copy exists, and never substitute metadata for audiovisual evidence."
-                ) + self.nudges.consume_hint(session_id),
+                ) + self._authorized_mode_prompt_note() + self.nudges.consume_hint(session_id),
             )
+            # Direct model-free authorized slash commands (/find, /audit, /connect, /recover)
+            direct_rec = self._try_direct_authorized_command(prompt)
+            if direct_rec is not None:
+                text = direct_rec.format_chat_report()
+                hub.publish(session_id, "text.delta", {"delta": text}, generation=generation)
+                res_direct: dict[str, Any] = {
+                    "content": text,
+                    "verdict": "complete" if direct_rec.status == "verified_success" else direct_rec.status,
+                    "tool_calls": [],
+                    "authorized_task": direct_rec.to_dict(),
+                }
+                self.global_bus.publish(
+                    "chat.turn_completed",
+                    {"session_id": session_id, "verdict": res_direct["verdict"], "tool_calls": 0, "workflow": direct_rec.workflow},
+                )
+                return res_direct
+
             def previous_messages():
                 before_id = None
                 first = True
@@ -2970,6 +3050,21 @@ class ModularGatewayRuntime:
                 pre_slice_guard=lambda: bool(self.governor.snapshot().get("estop_active")),
                 history=loop.select_history(prompt, previous_messages()),
             )
+            # Cloud provider refusal recovery: treat a provider refusal as a provider decision,
+            # NOT a final verdict on a legitimate owner goal — continue locally via Gateway workflow!
+            recovered = self.authorized_tasks.recover_from_provider_refusal(
+                prompt,
+                str(result.get("content") or ""),
+                tool_calls_count=len(result.get("tool_calls") or ()),
+                origin="owner",
+            )
+            if recovered is not None:
+                report = recovered.format_chat_report()
+                hub.publish(session_id, "text.delta", {"delta": "\n\n" + report}, generation=generation)
+                result["provider_reply"] = result.get("content")
+                result["content"] = report
+                result["authorized_task"] = recovered.to_dict()
+                result["verdict"] = "complete" if recovered.status == "verified_success" else recovered.status
             self.nudges.record_turn(
                 session_id,
                 tool_calls=len(result.get("tool_calls") or ()),
@@ -2993,6 +3088,37 @@ class ModularGatewayRuntime:
 
     def _base_model(self) -> Any:
         return getattr(self.model, "active_model", self.model)
+
+    def _authorized_mode_prompt_note(self) -> str:
+        settings = self.authorized_grants.get_settings()
+        parts: list[str] = []
+        if settings.direct_chat:
+            parts.append(
+                "\nDirect Chat (enabled): Answer sensitive-but-legitimate questions (including controversial human history, "
+                "politics, or dual-use engineering) plainly with sources and zero lecturing."
+            )
+        if settings.owner_autonomy:
+            parts.append(
+                "\nOwner Autonomy (enabled): Finish routine work under the owner's existing Gateway grants using "
+                "`find_file_metadata` (never opening files just to locate them), `credential_audit` (masked findings only), "
+                "`remote_connect` (reusing saved ~/.ssh/config or Tailscale), and `recover_access` (clearly marking "
+                "data-preserving vs. data-erasing options). Never claim success without verification; distinguish "
+                "not attempted, attempted and failed, blocked by a specific prerequisite, and verified success."
+            )
+        return "".join(parts)
+
+    def _try_direct_authorized_command(self, prompt: str) -> Any:
+        raw = (prompt or "").strip()
+        if raw.startswith("/find "):
+            return self.authorized_tasks.find_file(raw[6:].strip(), origin="owner")
+        if raw == "/audit" or raw.startswith("/audit "):
+            arg = raw[6:].strip() or None
+            return self.authorized_tasks.credential_audit(root=arg, origin="owner")
+        if raw.startswith("/connect "):
+            return self.authorized_tasks.connect_device(raw[9:].strip(), origin="owner")
+        if raw.startswith("/recover "):
+            return self.authorized_tasks.recover_access(raw[9:].strip(), scenario="auto", origin="owner")
+        return None
 
     def _build_active_model(self, *, explicit_model_id: str | None = None) -> Any:
         cfg = self.routing.load()
@@ -3750,6 +3876,7 @@ class ModularGatewayRuntime:
             channel_config=self.channel_config,
             channel_ingress=self.channel_ingress,
             remote_hosts=self.remote_hosts,
+            authorized_tasks=self.authorized_tasks,
             minecraft_embodiment=self.minecraft,
             jp01_embodiment=self.jp01,
             droid_embodiment=self.droid,

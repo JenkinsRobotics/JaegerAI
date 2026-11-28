@@ -104,6 +104,7 @@ def create_gateway_app(
     channel_config: Any = None,
     channel_ingress: Any = None,
     remote_hosts: Any = None,
+    authorized_tasks: Any = None,
     minecraft_embodiment: Any = None,
     jp01_embodiment: Any = None,
     droid_embodiment: Any = None,
@@ -1624,6 +1625,97 @@ def create_gateway_app(
         except RemoteExecError as exc:
             return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
+    async def authorized_run_route(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized workflows are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        workflow = str(body.get("workflow") or "").strip()
+        params = body.get("params") if isinstance(body.get("params"), Mapping) else {}
+        origin = str(body.get("origin") or "owner")
+        rec = await asyncio.to_thread(authorized_tasks.run_workflow, workflow, params, origin=origin)
+        payload = rec.to_dict()
+        status = 200 if rec.status in ("verified_success", "ambiguous_selection", "blocked_prerequisite") else (
+            403 if rec.status == "denied_grant" else 404
+        )
+        return web.json_response(payload, status=status)
+
+    async def authorized_grants_get(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized grants are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        return web.json_response({
+            "ok": True,
+            "settings": authorized_tasks.grants.get_settings().to_dict(),
+            "folder_grants": [g.to_dict() for g in authorized_tasks.grants.list_folder_grants()],
+        })
+
+    async def authorized_grants_post(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized grants are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        root = str(body.get("root") or "").strip()
+        ops = body.get("operations") if isinstance(body.get("operations"), list) else ["find_metadata"]
+        origin = str(body.get("origin") or "owner")
+        try:
+            grant = await asyncio.to_thread(
+                authorized_tasks.grants.grant_folder,
+                root,
+                operations=[str(o) for o in ops],
+                origin=origin,
+            )
+            return web.json_response({"ok": True, "grant": grant.to_dict()})
+        except PermissionError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=403)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def authorized_grants_delete(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized grants are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        root = str(body.get("root") or "").strip()
+        removed = await asyncio.to_thread(authorized_tasks.grants.revoke_folder, root, origin=str(body.get("origin") or "owner"))
+        return web.json_response({"ok": removed, "root": root}, status=200 if removed else 404)
+
+    async def authorized_settings_get(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized settings are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        return web.json_response({"ok": True, "settings": authorized_tasks.grants.get_settings().to_dict()})
+
+    async def authorized_settings_put(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized settings are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        try:
+            updated = await asyncio.to_thread(
+                authorized_tasks.grants.update_settings,
+                direct_chat=body.get("direct_chat") if "direct_chat" in body else None,
+                owner_autonomy=body.get("owner_autonomy") if "owner_autonomy" in body else None,
+                origin=str(body.get("origin") or "owner"),
+            )
+            return web.json_response({"ok": True, "settings": updated.to_dict()})
+        except PermissionError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=403)
+
     async def upsert_remote_host(request: web.Request) -> web.Response:
         if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Remote hosts are owner-local only."}, status=403)
@@ -2240,6 +2332,12 @@ def create_gateway_app(
     app.router.add_get("/v1/remote/hosts", list_remote_hosts)
     app.router.add_get("/v1/remote/discover", discover_remote_routes_route)
     app.router.add_post("/v1/remote/connect", connect_remote_host_route)
+    app.router.add_post("/v1/authorized/run", authorized_run_route)
+    app.router.add_get("/v1/authorized/grants", authorized_grants_get)
+    app.router.add_post("/v1/authorized/grants", authorized_grants_post)
+    app.router.add_delete("/v1/authorized/grants", authorized_grants_delete)
+    app.router.add_get("/v1/authorized/settings", authorized_settings_get)
+    app.router.add_put("/v1/authorized/settings", authorized_settings_put)
     app.router.add_put("/v1/remote/hosts/{alias}", upsert_remote_host)
     app.router.add_delete("/v1/remote/hosts/{alias}", delete_remote_host)
     app.router.add_get("/v1/embodiment/status", embodiment_status)
