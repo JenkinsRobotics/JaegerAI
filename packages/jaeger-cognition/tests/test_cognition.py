@@ -85,7 +85,9 @@ async def test_cognitive_life_loop_fires_scheduled_cron_jobs_but_never_under_est
     assert runs == ["beat"]
     gov.end_owner_work()
 
-    # 4. After owner work ends, cron fires again on the next tick.
+    # 4. After owner work ends and the 10ms interval elapses, cron fires again on the next tick.
+    import asyncio
+    await asyncio.sleep(0.015)
     st4 = await mind.step_once(trigger="temporal_tick")
     assert runs == ["beat", "beat"]
     assert st4.last_action == "cron:heartbeat"

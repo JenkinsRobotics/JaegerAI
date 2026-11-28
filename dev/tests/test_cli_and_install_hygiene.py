@@ -737,9 +737,9 @@ def test_install_droid_deck_keys_generates_all_six_applets_and_enforces_safety(
             "abs 0 -306000",
         ]
 
-        # 4. Execute runners end-to-end against stub Gateway when loopback curl is permitted
+        # 4. Execute macOS .app runners end-to-end against stub Gateway when loopback curl & plutil are present
         loopback_curl_ok = False
-        if server is not None:
+        if server is not None and Path("/usr/bin/plutil").is_file():
             probe = subprocess.run(
                 ["/usr/bin/curl", "-fsS", "--max-time", "2", f"{gateway_url}/health"],
                 capture_output=True,
