@@ -91,6 +91,8 @@ def create_gateway_app(
     cognition_loop: Any = None,
     initiative_engine: Any = None,
     elevated_toggler: Callable[[bool], dict[str, Any]] | None = None,
+    execution_mode_getter: Callable[[], dict[str, Any]] | None = None,
+    execution_mode_setter: Callable[..., dict[str, Any]] | None = None,
     world_model: Any = None,
     identity_store: Any = None,
     avatar_store: Any = None,
@@ -1152,8 +1154,8 @@ def create_gateway_app(
         body = await _strict_json_object(request)
         if isinstance(body, web.Response):
             return body
-        if "elevated" in body and not _owner_local_only(request):
-            return web.json_response({"ok": False, "error": "Elevated mode toggle is owner-local only."}, status=403)
+        if ("elevated" in body or "autonomy_mode" in body) and not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Execution mode toggle is owner-local only."}, status=403)
         updated = False
         kwargs: dict[str, Any] = {}
         for k in ("enabled", "cooldown_s", "max_actions_per_hour", "active_start_hour", "active_end_hour"):
@@ -1163,7 +1165,9 @@ def create_gateway_app(
         if updated:
             initiative_engine.update_config(**kwargs)
         elevated_res: dict[str, Any] | None = None
-        if "elevated" in body and elevated_toggler is not None:
+        if "autonomy_mode" in body and execution_mode_setter is not None:
+            elevated_res = execution_mode_setter(mode=str(body["autonomy_mode"]))
+        elif "elevated" in body and elevated_toggler is not None:
             elevated_res = elevated_toggler(bool(body["elevated"]))
         triggered: dict[str, Any] | None = None
         if body.get("trigger_now"):
@@ -1181,6 +1185,25 @@ def create_gateway_app(
             **({"execution_mode": elevated_res} if elevated_res is not None else {}),
             **({"triggered": triggered} if triggered is not None else {}),
         })
+
+    async def get_execution_mode(_request: web.Request) -> web.Response:
+        if execution_mode_getter is None:
+            return web.json_response({"ok": False, "error": "execution mode unavailable"}, status=501)
+        return web.json_response(execution_mode_getter())
+
+    async def put_execution_mode(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Execution mode change requires owner-local access."}, status=403)
+        if execution_mode_setter is None:
+            return web.json_response({"ok": False, "error": "execution mode unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        mode_arg = str(body["autonomy_mode"]) if "autonomy_mode" in body else None
+        elev_arg = bool(body["elevated"]) if "elevated" in body else None
+        res = execution_mode_setter(mode=mode_arg, elevated=elev_arg)
+        status = 200 if res.get("ok", True) else 400
+        return web.json_response(res, status=status)
 
     async def post_perception(request: web.Request) -> web.Response:
         if cognition_loop is None:
@@ -2383,6 +2406,8 @@ def create_gateway_app(
     app.router.add_post("/v1/memory/goals", upsert_goal)
     app.router.add_get("/v1/memory/wiki", list_wiki_pages)
     app.router.add_post("/v1/memory/wiki", write_wiki_page)
+    app.router.add_get("/v1/execution-mode", get_execution_mode)
+    app.router.add_put("/v1/execution-mode", put_execution_mode)
     app.router.add_get("/v1/diagnostics", diagnostics)
 
     # Optional static WebUI bundle serving (SPA fallback to index.html)

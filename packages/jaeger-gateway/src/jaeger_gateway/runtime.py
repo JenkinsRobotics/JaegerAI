@@ -420,7 +420,10 @@ class ModularGatewayRuntime:
             global_stop_fn=lambda: bool(self.governor.snapshot().get("estop_active")),
             embodiment_enabled=True,
         )
-        self._elevated_mode = not portable_core and self._load_elevated_mode()
+        self._autonomy_mode = self._load_autonomy_mode()
+        if portable_core and self._autonomy_mode == AutonomyMode.FULL_ACCESS:
+            self._autonomy_mode = AutonomyMode.WORKSPACE_SANDBOX
+        self._elevated_mode = (not portable_core) and (self._autonomy_mode == AutonomyMode.FULL_ACCESS)
         if portable_core:
             self.sandbox = DisabledProcessSandbox()
         elif self._elevated_mode or sys.platform != "darwin":
@@ -432,7 +435,7 @@ class ModularGatewayRuntime:
             workspace=self.workspace,
             policy=self.policy,
             sandbox=self.sandbox,
-            autonomy_mode=AutonomyMode.FULL_ACCESS if self._elevated_mode else AutonomyMode.WORKSPACE_SANDBOX,
+            autonomy_mode=self._autonomy_mode,
         )
         register_builtin_tools(
             self.tools,
@@ -885,7 +888,7 @@ class ModularGatewayRuntime:
             workspace=effective_profile.workspace if effective_profile is not None else self.workspace,
             policy=self.policy,
             sandbox=self.sandbox,
-            autonomy_mode=AutonomyMode.FULL_ACCESS if self._elevated_mode else AutonomyMode.WORKSPACE_SANDBOX,
+            autonomy_mode=self._autonomy_mode,
         )
         read_only_child = bool(effective_profile and effective_profile.read_only_default)
         for name, spec in self.tools._tools.items():  # noqa: SLF001
@@ -1039,7 +1042,85 @@ class ModularGatewayRuntime:
     def _remote_exec(self, *, host: str, command: str, timeout_s: float = 30.0) -> dict[str, Any]:
         if self.governor.snapshot().get("estop_active"):
             raise RuntimeError("Remote SSH execution is blocked while E-Stop is active.")
-        return self.ssh_backend.run(command, host_alias=host, timeout_s=timeout_s)
+        clean_host = (host or "").strip()
+        clean_cmd = (command or "").strip()
+        if not clean_host:
+            raise ValueError("host (or alias/target) is required for remote_exec — call remote_discover to list available hosts.")
+        if not clean_cmd:
+            raise ValueError("command is required for remote_exec.")
+        return self.ssh_backend.run(clean_cmd, host_alias=clean_host, timeout_s=timeout_s)
+
+    def _gateway_restart(self, *, reason: str = "owner_requested", dry_run: bool = False, delay_s: float = 1.2) -> dict[str, Any]:
+        """Safely restart the Gateway after verifying Python syntax/imports and checkpointing SQLite WAL."""
+        if self.portable_core:
+            return {
+                "ok": False,
+                "preflight_ok": False,
+                "error": "Self-restart is disabled in Jaeger Core; restart manually from your terminal.",
+            }
+        if self.governor.snapshot().get("estop_active"):
+            raise RuntimeError("Gateway restart is blocked while E-Stop is active.")
+
+        import subprocess as _sub
+
+        preflight = _sub.run(
+            [sys.executable, "-B", "-c", "import jaeger_gateway; print('ok')"],
+            cwd=str(self.workspace) if self.workspace.is_dir() else None,
+            env={**os.environ},
+            capture_output=True,
+            text=True,
+            timeout=15.0,
+            check=False,
+        )
+        if preflight.returncode != 0:
+            err = (preflight.stderr or preflight.stdout or "import preflight failed").strip()
+            return {
+                "ok": False,
+                "preflight_ok": False,
+                "restarting": False,
+                "error": f"Pre-flight check failed; refusing to restart into broken code: {err[:400]}",
+            }
+
+        # Flush SQLite WAL so chat history and memory are safely persisted before process reload.
+        for db in (self.store, self.memory):
+            conn_fn = getattr(db, "_connect", None)
+            if callable(conn_fn):
+                try:
+                    with conn_fn() as conn:
+                        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except Exception:  # noqa: BLE001
+                    pass
+
+        if dry_run:
+            return {
+                "ok": True,
+                "preflight_ok": True,
+                "restarting": False,
+                "dry_run": True,
+                "reason": reason,
+                "pid": os.getpid(),
+                "argv": [sys.executable, *sys.argv],
+            }
+
+        clamped_delay = max(0.3, min(float(delay_s or 1.2), 10.0))
+
+        def _do_exec() -> None:
+            time.sleep(clamped_delay)
+            try:
+                os.execv(sys.executable, [sys.executable, *sys.argv])
+            except Exception:  # noqa: BLE001
+                os._exit(0)
+
+        threading.Thread(target=_do_exec, name="jaeger-self-restart", daemon=True).start()
+        return {
+            "ok": True,
+            "preflight_ok": True,
+            "restarting": True,
+            "delay_s": clamped_delay,
+            "reason": reason,
+            "pid": os.getpid(),
+            "message": f"Pre-flight passed and SQLite WAL checkpointed; restarting Gateway in {clamped_delay:.1f}s.",
+        }
 
     def _list_memory_facts(self, *, subject: str | None = None, query: str = "", limit: int = 50) -> dict[str, Any]:
         cap = max(1, min(int(limit or 50), 200))
@@ -2132,24 +2213,45 @@ class ModularGatewayRuntime:
         )
         _reg(
             "remote_exec",
-            "Run a command on an owner-allowlisted SSH host (fail-closed if unlisted or E-Stop active).",
+            "Run a command on an owner-allowlisted SSH host (fail-closed if unlisted or E-Stop active). Accepts host (or alias/target) and command.",
             {
                 "type": "object",
                 "properties": {
-                    "host": {"type": "string"},
-                    "command": {"type": "string"},
+                    "host": {"type": "string", "description": "Registered SSH host alias (e.g. from remote_discover or remote_connect)"},
+                    "alias": {"type": "string", "description": "Alias shorthand for host"},
+                    "command": {"type": "string", "description": "Shell command to run on the remote host"},
                     "timeout_s": {"type": "number", "default": 30.0},
                 },
                 "required": ["host", "command"],
             },
             lambda args: self._remote_exec(
-                host=str(args["host"]),
-                command=str(args["command"]),
+                host=str(args.get("host") or args.get("alias") or args.get("target") or ""),
+                command=str(args.get("command") or args.get("cmd") or ""),
                 timeout_s=float(args.get("timeout_s") or 30.0),
             ),
             read_only=False,
             source="jaeger-tools",
         )
+        if not self.portable_core:
+            _reg(
+                "gateway_restart",
+                "Safely restart the live JaegerAI Gateway to load updated code. Runs a Python import pre-flight check and flushes SQLite WAL first so broken code cannot brick the server; blocked while E-Stop is active.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "reason": {"type": "string", "description": "Short reason for restarting"},
+                        "dry_run": {"type": "boolean", "default": False, "description": "If true, run pre-flight check without restarting"},
+                        "delay_s": {"type": "number", "default": 1.2, "description": "Seconds to wait before reloading so the reply finishes cleanly"},
+                    },
+                },
+                lambda args: self._gateway_restart(
+                    reason=str(args.get("reason") or "owner_requested"),
+                    dry_run=bool(args.get("dry_run", False)),
+                    delay_s=float(args.get("delay_s") or 1.2),
+                ),
+                read_only=False,
+                source="jaeger-gateway",
+            )
         _reg(
             "channel_send",
             "Queue an outbound message (telegram, discord, slack, imessage, webhook, email, local_log); external channels require owner approval.",
@@ -3199,59 +3301,143 @@ class ModularGatewayRuntime:
             self._mirror_living_avatar(str(emotion))
         return live
 
-    def _load_elevated_mode(self) -> bool:
+    @staticmethod
+    def _parse_autonomy_mode(raw: str | None) -> AutonomyMode | None:
+        key = (raw or "").strip().lower()
+        mapping = {
+            "ask_on_write": AutonomyMode.ASK_ON_WRITE,
+            "ask": AutonomyMode.ASK_ON_WRITE,
+            "ask_for_approval": AutonomyMode.ASK_ON_WRITE,
+            "workspace_sandbox": AutonomyMode.WORKSPACE_SANDBOX,
+            "approve_for_me": AutonomyMode.WORKSPACE_SANDBOX,
+            "default": AutonomyMode.WORKSPACE_SANDBOX,
+            "full_access": AutonomyMode.FULL_ACCESS,
+            "full": AutonomyMode.FULL_ACCESS,
+            "elevated": AutonomyMode.FULL_ACCESS,
+        }
+        return mapping.get(key)
+
+    def _load_autonomy_mode(self) -> AutonomyMode:
         import json as _json
 
-        if _env_truthy("JAEGER_ELEVATED", False) or (os.environ.get("JAEGER_AUTONOMY_MODE") or "").strip().lower() == "full_access":
-            return True
+        env_mode = self._parse_autonomy_mode(os.environ.get("JAEGER_AUTONOMY_MODE"))
+        if env_mode is not None:
+            return env_mode
+        if _env_truthy("JAEGER_ELEVATED", False):
+            return AutonomyMode.FULL_ACCESS
         cfg_file = self.state_dir / "execution_mode.json"
         if cfg_file.is_file():
             try:
                 data = _json.loads(cfg_file.read_text(encoding="utf-8"))
-                return bool(isinstance(data, Mapping) and data.get("elevated"))
+                if isinstance(data, Mapping):
+                    parsed = self._parse_autonomy_mode(str(data.get("autonomy_mode") or ""))
+                    if parsed is not None:
+                        return parsed
+                    if data.get("elevated"):
+                        return AutonomyMode.FULL_ACCESS
             except (OSError, ValueError):
-                return False
-        return False
+                return AutonomyMode.WORKSPACE_SANDBOX
+        return AutonomyMode.WORKSPACE_SANDBOX
 
-    def _set_elevated_mode(self, enabled: bool) -> dict[str, Any]:
-        """Toggle owner-controlled Full Autonomous Elevated Mode (like IDE coding agents).
+    def _load_elevated_mode(self) -> bool:
+        return self._load_autonomy_mode() == AutonomyMode.FULL_ACCESS
 
-        Non-overridable safety invariants (E-Stop, destructive-action gate, secret-store
-        protection) ALWAYS remain active even when elevated mode is enabled.
+    def _get_execution_mode(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "autonomy_mode": self._autonomy_mode.value,
+            "elevated": self._elevated_mode,
+            "sandbox": self.sandbox.name,
+            "profile": "core" if self.portable_core else "full",
+            "modes": [
+                {
+                    "id": AutonomyMode.ASK_ON_WRITE.value,
+                    "label": "Ask for approval",
+                    "description": "Always ask before editing files, running commands, or using the internet",
+                },
+                {
+                    "id": AutonomyMode.WORKSPACE_SANDBOX.value,
+                    "label": "Approve for me",
+                    "description": "Only ask for actions outside the workspace or detected as potentially unsafe",
+                },
+                {
+                    "id": AutonomyMode.FULL_ACCESS.value,
+                    "label": "Full access",
+                    "description": "Unrestricted access to the internet, commands, and files on your computer",
+                    "disabled": self.portable_core,
+                },
+            ],
+        }
+
+    def _set_execution_mode(
+        self,
+        mode: str | None = None,
+        *,
+        elevated: bool | None = None,
+    ) -> dict[str, Any]:
+        """Set owner-controlled execution approval mode (`ask_on_write`, `workspace_sandbox`, `full_access`).
+
+        Non-overridable safety invariants (E-Stop, untrusted-origin rejection, secret-store
+        protection) ALWAYS remain active even in Full access mode.
         """
         import json as _json
 
-        if self.portable_core:
+        target: AutonomyMode | None = None
+        if mode is not None:
+            target = self._parse_autonomy_mode(mode)
+            if target is None:
+                return {
+                    "ok": False,
+                    "error": f"Unsupported autonomy_mode {mode!r}. Use ask_on_write, workspace_sandbox, or full_access.",
+                    **self._get_execution_mode(),
+                }
+        elif elevated is not None:
+            target = AutonomyMode.FULL_ACCESS if elevated else AutonomyMode.WORKSPACE_SANDBOX
+        else:
+            return self._get_execution_mode()
+
+        if self.portable_core and target == AutonomyMode.FULL_ACCESS:
             return {
-                "ok": False, "elevated": False, "sandbox": self.sandbox.name,
-                "error": "Host process execution is not enabled in Jaeger Core.",
+                "ok": False,
+                "elevated": False,
+                "autonomy_mode": self._autonomy_mode.value,
+                "sandbox": self.sandbox.name,
+                "profile": "core",
+                "error": "Full access (host process execution) is not enabled in Jaeger Core.",
             }
 
-        self._elevated_mode = bool(enabled)
+        self._autonomy_mode = target
+        self._elevated_mode = (not self.portable_core) and (target == AutonomyMode.FULL_ACCESS)
         cfg_file = self.state_dir / "execution_mode.json"
         cfg_file.write_text(
-            _json.dumps({"elevated": self._elevated_mode, "updated_at": time.time()}, indent=2) + "\n",
+            _json.dumps(
+                {
+                    "autonomy_mode": self._autonomy_mode.value,
+                    "elevated": self._elevated_mode,
+                    "updated_at": time.time(),
+                },
+                indent=2,
+            ) + "\n",
             encoding="utf-8",
         )
-        self.sandbox = (
-            UnconfinedSandbox()
-            if (self._elevated_mode or sys.platform != "darwin")
-            else MacOsSeatbeltSandbox()
-        )
-        self.tools._sandbox = self.sandbox  # noqa: SLF001
-        self.tools._autonomy_mode = (  # noqa: SLF001
-            AutonomyMode.FULL_ACCESS if self._elevated_mode else AutonomyMode.WORKSPACE_SANDBOX
-        )
-        self.tools.register_shell_tool(
-            allow_network=self._elevated_mode,
-            timeout_s=120.0 if self._elevated_mode else 45.0,
-        )
-        self.pty._sandbox = self.sandbox  # noqa: SLF001
-        return {
-            "elevated": self._elevated_mode,
-            "autonomy_mode": self.tools._autonomy_mode.value,  # noqa: SLF001
-            "sandbox": self.sandbox.name,
-        }
+        if not self.portable_core:
+            self.sandbox = (
+                UnconfinedSandbox()
+                if (self._elevated_mode or sys.platform != "darwin")
+                else MacOsSeatbeltSandbox()
+            )
+            self.tools._sandbox = self.sandbox  # noqa: SLF001
+            self.tools.register_shell_tool(
+                allow_network=self._elevated_mode,
+                timeout_s=120.0 if self._elevated_mode else 45.0,
+            )
+            if self.pty is not None:
+                self.pty._sandbox = self.sandbox  # noqa: SLF001
+        self.tools._autonomy_mode = self._autonomy_mode  # noqa: SLF001
+        return self._get_execution_mode()
+
+    def _set_elevated_mode(self, enabled: bool) -> dict[str, Any]:
+        return self._set_execution_mode(elevated=bool(enabled))
 
     def _runtime_info(self) -> dict[str, Any]:
         base = self._base_model()
@@ -3269,6 +3455,7 @@ class ModularGatewayRuntime:
             "model": getattr(base, "model_id", base.name),
             "profile": "core" if self.portable_core else "full",
             "routing": self.routing.load().to_dict(),
+            "autonomy_mode": self._autonomy_mode.value,
             "elevated": self._elevated_mode,
             "sandbox": self.sandbox.name,
             "workspace": str(self.workspace),
@@ -3889,6 +4076,8 @@ class ModularGatewayRuntime:
             cognition_loop=self.cognition,
             initiative_engine=self.initiative,
             elevated_toggler=self._set_elevated_mode,
+            execution_mode_getter=self._get_execution_mode,
+            execution_mode_setter=self._set_execution_mode,
             world_model=self.world,
             identity_store=self.identity,
             avatar_store=self.avatars,

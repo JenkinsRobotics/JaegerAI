@@ -1045,3 +1045,71 @@ async def test_cookbook_roundtable_research_and_apple_tools_gateway(tmp_path: Pa
             assert r_imp.status == 200 and (await r_imp.json())["ok"] is True
     finally:
         rt.close()
+
+
+@pytest.mark.asyncio
+async def test_execution_mode_3way_picker_remote_exec_aliases_and_safe_restart(tmp_path: Path) -> None:
+    from jaeger_gateway import ModularGatewayRuntime
+
+    rt = ModularGatewayRuntime(state_dir=tmp_path / "state", workspace=tmp_path / "ws")
+    try:
+        # 1. remote_exec accepts host, alias, or target (no raw KeyError: 'host')
+        called: list[tuple[str, str]] = []
+        rt.ssh_backend.run = lambda cmd, *, host_alias, timeout_s=30.0: (  # type: ignore[method-assign]
+            called.append((host_alias, cmd)) or {"ok": True, "stdout": "ok\n"}
+        )
+        r1 = rt._remote_exec(host="rack-pc-lan", command="hostname")
+        assert r1["ok"] is True
+        tool_spec = rt.tools._tools["remote_exec"]  # noqa: SLF001
+        r2 = tool_spec.handler({"alias": "rack-pc-lan", "command": "uptime"})
+        r3 = tool_spec.handler({"target": "rack-pc-overlay", "cmd": "whoami"})
+        assert r2.ok is True and r3.ok is True
+        assert called == [
+            ("rack-pc-lan", "hostname"),
+            ("rack-pc-lan", "uptime"),
+            ("rack-pc-overlay", "whoami"),
+        ]
+
+        # 2. gateway_restart runs import pre-flight check safely in dry_run and blocks during E-Stop
+        dry = rt._gateway_restart(reason="unit_test", dry_run=True)
+        assert dry["ok"] is True and dry["preflight_ok"] is True and dry["restarting"] is False
+        rt.governor.trigger_estop("test")
+        with pytest.raises(RuntimeError, match="E-Stop"):
+            rt._gateway_restart(reason="unit_test", dry_run=True)
+        rt.governor.release_estop()
+
+        # 3. GET/PUT /v1/execution-mode switches cleanly across all 3 modes & persists
+        app = rt.build_app(serve_ui=False)
+        async with TestClient(TestServer(app)) as client:
+            r_get = await client.get("/v1/execution-mode")
+            assert r_get.status == 200
+            assert (await r_get.json())["autonomy_mode"] == "workspace_sandbox"
+
+            for mode_id, expected_elev in (
+                ("ask_on_write", False),
+                ("full_access", True),
+                ("workspace_sandbox", False),
+            ):
+                r_put = await client.put("/v1/execution-mode", json={"autonomy_mode": mode_id})
+                assert r_put.status == 200
+                body = await r_put.json()
+                assert body["ok"] is True
+                assert body["autonomy_mode"] == mode_id
+                assert body["elevated"] is expected_elev
+
+        # Persisted to execution_mode.json
+        rt._set_execution_mode("ask_on_write")
+        assert rt._load_autonomy_mode().value == "ask_on_write"
+    finally:
+        rt.close()
+
+    # 4. Portable Core allows ask_on_write / workspace_sandbox but blocks full_access
+    core_rt = ModularGatewayRuntime(state_dir=tmp_path / "core_state", workspace=tmp_path / "ws", portable_core=True)
+    try:
+        ok_ask = core_rt._set_execution_mode("ask_on_write")
+        assert ok_ask["ok"] is True and ok_ask["autonomy_mode"] == "ask_on_write"
+        blocked = core_rt._set_execution_mode("full_access")
+        assert blocked["ok"] is False and blocked["elevated"] is False
+        assert "gateway_restart" not in core_rt.tools._tools  # noqa: SLF001
+    finally:
+        core_rt.close()

@@ -30,12 +30,44 @@ import { characterLibrary, type LibraryCharacter } from "./characters";
 
 interface GatewayRuntimeSnapshot {
   model?: string;
+  profile?: string;
+  autonomy_mode?: "ask_on_write" | "workspace_sandbox" | "full_access";
+  elevated?: boolean;
+  sandbox?: string;
   tools_count?: number;
   uptime_s?: number;
   all_green?: boolean;
   workspace?: string;
   state_dir?: string;
 }
+
+type ApprovalModeId = "ask_on_write" | "workspace_sandbox" | "full_access";
+
+const APPROVAL_MODES: ReadonlyArray<{
+  id: ApprovalModeId;
+  label: string;
+  description: string;
+  icon: string;
+}> = [
+  {
+    id: "ask_on_write",
+    label: "Ask for approval",
+    description: "Always ask to edit files, run commands, and use the internet",
+    icon: "✋",
+  },
+  {
+    id: "workspace_sandbox",
+    label: "Approve for me",
+    description: "Only ask for actions detected as potentially unsafe",
+    icon: "🛡️",
+  },
+  {
+    id: "full_access",
+    label: "Full access",
+    description: "Unrestricted access to the internet and any file on your computer",
+    icon: "⚠️",
+  },
+];
 
 interface ResourceSnapshot {
   host_total_gb?: number;
@@ -271,6 +303,11 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const [decidingApproval, setDecidingApproval] = useState<string>();
 
   const [health, setHealth] = useState<GatewayRuntimeSnapshot>({});
+  const [approvalMode, setApprovalMode] = useState<ApprovalModeId>("workspace_sandbox");
+  const [approvalMenuOpen, setApprovalMenuOpen] = useState(false);
+  const [approvalModeBusy, setApprovalModeBusy] = useState(false);
+  const [approvalModeError, setApprovalModeError] = useState("");
+  const approvalMenuRef = useRef<HTMLDivElement | null>(null);
   const [resources, setResources] = useState<ResourceSnapshot>({});
   const [cognition, setCognition] = useState<CognitionSnapshot>({});
   const [avatarRec, setAvatarRec] = useState<AvatarRecord>({});
@@ -380,9 +417,62 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
       fetchJson(`${baseUrl}/v1/avatars/jaeger`),
     ]);
     setHealth(rHealth);
+    if (rHealth.autonomy_mode === "ask_on_write" || rHealth.autonomy_mode === "workspace_sandbox" || rHealth.autonomy_mode === "full_access") {
+      setApprovalMode(rHealth.autonomy_mode);
+    } else if (typeof rHealth.elevated === "boolean") {
+      setApprovalMode(rHealth.elevated ? "full_access" : "workspace_sandbox");
+    }
     if (rRes.resources) setResources(rRes.resources);
     if (rCog.cognition) setCognition(rCog.cognition);
     if (rAva.avatar) setAvatarRec(rAva as AvatarRecord);
+  };
+
+  useEffect(() => {
+    if (!approvalMenuOpen) return;
+    const onDown = (event: MouseEvent) => {
+      if (approvalMenuRef.current && !approvalMenuRef.current.contains(event.target as Node)) {
+        setApprovalMenuOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setApprovalMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [approvalMenuOpen]);
+
+  const selectApprovalMode = async (nextMode: ApprovalModeId) => {
+    setApprovalModeBusy(true);
+    setApprovalModeError("");
+    try {
+      const resp = await fetch(`${baseUrl}/v1/execution-mode`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autonomy_mode: nextMode }),
+      });
+      const data = (await resp.json().catch(() => ({}))) as Record<string, any>;
+      if (!resp.ok || data.ok === false) {
+        setApprovalModeError(String(data.error || `Failed to switch approval mode (${resp.status})`));
+        return;
+      }
+      const applied = (data.autonomy_mode || nextMode) as ApprovalModeId;
+      setApprovalMode(applied);
+      setHealth((prev) => ({
+        ...prev,
+        autonomy_mode: applied,
+        elevated: Boolean(data.elevated),
+        sandbox: typeof data.sandbox === "string" ? data.sandbox : prev.sandbox,
+      }));
+      setApprovalMenuOpen(false);
+    } catch (err) {
+      setApprovalModeError(err instanceof Error ? err.message : "Failed to update approval mode");
+    } finally {
+      setApprovalModeBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -1756,6 +1846,58 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                   {sending ? "Running..." : "Send"}
                 </button>
               </form>
+              <div className="jg-composer-meta">
+                <div className="jg-approval-picker" ref={approvalMenuRef}>
+                  <button
+                    type="button"
+                    className={`jg-approval-trigger ${approvalMode === "full_access" ? "is-full-access" : ""}`}
+                    aria-haspopup="menu"
+                    aria-expanded={approvalMenuOpen}
+                    aria-label="Approval mode"
+                    disabled={approvalModeBusy}
+                    onClick={() => setApprovalMenuOpen((open) => !open)}
+                  >
+                    <span aria-hidden="true">
+                      {(APPROVAL_MODES.find((m) => m.id === approvalMode) ?? APPROVAL_MODES[1]).icon}
+                    </span>
+                    <span>{(APPROVAL_MODES.find((m) => m.id === approvalMode) ?? APPROVAL_MODES[1]).label}</span>
+                    <span className="jg-approval-caret" aria-hidden="true">▾</span>
+                  </button>
+                  {approvalMenuOpen && (
+                    <div className="jg-approval-popover" role="menu" aria-label="How should Jaeger actions be approved?">
+                      <div className="jg-approval-popover-head">
+                        <span>How should Jaeger actions be approved?</span>
+                      </div>
+                      {APPROVAL_MODES.map((opt) => {
+                        const selected = approvalMode === opt.id;
+                        const coreDisabled = health.profile === "core" && opt.id === "full_access";
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={selected}
+                            disabled={approvalModeBusy || coreDisabled}
+                            className={`jg-approval-option ${selected ? "is-selected" : ""} ${opt.id === "full_access" ? "is-warn" : ""}`}
+                            onClick={() => void selectApprovalMode(opt.id)}
+                          >
+                            <span className="jg-approval-option-icon" aria-hidden="true">{opt.icon}</span>
+                            <span className="jg-approval-option-copy">
+                              <strong>{opt.label}</strong>
+                              <small>{coreDisabled ? "Disabled in portable Jaeger Core profile" : opt.description}</small>
+                            </span>
+                            <span className="jg-approval-option-check" aria-hidden="true">{selected ? "✓" : ""}</span>
+                          </button>
+                        );
+                      })}
+                      {approvalModeError && <div className="jg-approval-error">{approvalModeError}</div>}
+                    </div>
+                  )}
+                </div>
+                {(health.model || activeModel) && (
+                  <span className="jg-composer-model">{health.model || activeModel}</span>
+                )}
+              </div>
             </div>
 
             </div>

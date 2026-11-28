@@ -147,6 +147,41 @@ describe("100% Modular @jaeger/ui-* Frontend Stack", () => {
     render(<JaegerApp />);
     expect(screen.getByTestId("jaeger-modular-app")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Chat" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approval mode" })).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("@jaeger/ui-features: switches approval mode via composer popover and PUT /v1/execution-mode", async () => {
+    window.localStorage.clear();
+    const calls: Array<{ url: string; method: string; body?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method || "GET";
+        calls.push({ url, method, body: typeof init?.body === "string" ? init.body : undefined });
+        if (url.includes("/v1/execution-mode") && method === "PUT") {
+          const parsed = JSON.parse(String(init?.body || "{}"));
+          return {
+            ok: true,
+            json: async () => ({ ok: true, autonomy_mode: parsed.autonomy_mode, elevated: parsed.autonomy_mode === "full_access" }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({ sessions: [], tools: [], workflows: [], facts: [], models: [], all_green: true, autonomy_mode: "workspace_sandbox" }),
+        };
+      }),
+    );
+    render(<JaegerApp />);
+    fireEvent.click(screen.getByRole("button", { name: "Approval mode" }));
+    expect(screen.getByText("How should Jaeger actions be approved?")).toBeTruthy();
+    expect(screen.getByText("Ask for approval")).toBeTruthy();
+    expect(screen.getByText("Full access")).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Full access/i }));
+    await vi.waitFor(() => {
+      expect(calls.some((c) => c.url.includes("/v1/execution-mode") && c.method === "PUT" && c.body?.includes("full_access"))).toBe(true);
+    });
     vi.unstubAllGlobals();
   });
 
