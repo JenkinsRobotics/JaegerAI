@@ -51,7 +51,14 @@ from jaeger_droid import HostDroidEmbodiment
 from jaeger_embodiment_minecraft import MinecraftEmbodiment, MinecraftSkillLibrary
 from jaeger_events import EventBus
 from jaeger_hardware import JP01Embodiment
-from jaeger_loop import AgentLoop, LearningNudgeTracker, TurnContext
+from jaeger_loop import (
+    PLAN_MODE_SYSTEM_NOTE,
+    AgentLoop,
+    AgentMode,
+    LearningNudgeTracker,
+    PlanModeMiddleware,
+    TurnContext,
+)
 from jaeger_mcp import (
     LiveMCPManager,
     MCPServerConfig,
@@ -91,10 +98,19 @@ from jaeger_orchestration import (
 )
 from jaeger_realtime import RealtimeVoiceSession
 from jaeger_reliability import ReliabilityEngine
-from jaeger_skills import WorkspaceSkillStore, ensure_starter_skills, scan_skill
+from jaeger_skills import (
+    WorkspaceSkillStore,
+    discover_external_agents,
+    ensure_starter_skills,
+    import_external_agent,
+    scan_skill,
+)
 from jaeger_tools import (
+    BrowserRunJudge,
     PtySessionManager,
     RemoteHostRegistry,
+    RetainedEvidenceStore,
+    SiteGotchasStore,
     SSHBackend,
     ToolRegistry,
     ToolSpec,
@@ -270,6 +286,10 @@ class ModularGatewayRuntime:
         self.memory = SqliteStateMemory(self.state_dir)
         self.learning = PersistentLearningStore(self.state_dir)
         self.wiki = LocalWikiStore(self.state_dir / "wiki")
+        self.evidence = RetainedEvidenceStore(self.state_dir / "evidence")
+        self.site_gotchas = SiteGotchasStore(self.state_dir / "browser_gotchas.json")
+        self.browser_judge = BrowserRunJudge(gotchas_store=self.site_gotchas)
+        self._agent_mode = AgentMode.BUILD
         self.workflows = WorkflowEngine(self.state_dir / "workflows.sqlite3")
         self.dry_run = DryRunSimulator()
         self.governor = ResourceGovernor(memory_cap_gb=24.0, idle_cooldown_s=60.0)
@@ -2105,6 +2125,103 @@ class ModularGatewayRuntime:
             read_only=False,
             source="jaeger-orchestration",
         )
+        _reg(
+            "inspect_evidence",
+            "Page through or search an oversized retained tool output by evidence_id (ev_...) without overflowing context. Read-only.",
+            {
+                "type": "object",
+                "properties": {
+                    "evidence_id": {"type": "string"},
+                    "offset": {"type": "integer", "default": 0, "minimum": 0},
+                    "limit": {"type": "integer", "default": 4000, "minimum": 200, "maximum": 16000},
+                    "search": {"type": "string", "default": ""},
+                },
+                "required": ["evidence_id"],
+            },
+            lambda args: self.evidence.inspect(
+                str(args["evidence_id"]),
+                offset=int(args.get("offset") or 0),
+                limit=int(args.get("limit") or 4000),
+                search=str(args.get("search") or ""),
+            ),
+            read_only=True,
+            source="jaeger-tools",
+        )
+        _reg(
+            "browser_gotchas",
+            "Read or record reusable per-domain browser site gotchas (cookie banners, rate limits, CAPTCHA gates).",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "record", "judge"]},
+                    "domain": {"type": "string"},
+                    "lessons": {"type": "array", "items": {"type": "string"}},
+                    "task": {"type": "string"},
+                    "trace_text": {"type": "string"},
+                },
+                "required": ["action", "domain"],
+            },
+            lambda args: self._browser_gotchas_tool(args),
+            read_only=False,
+            source="jaeger-tools",
+        )
+        _reg(
+            "import_external_agent",
+            "Discover or import SOUL.md, MEMORY.md, USER.md, and security-scanned SKILL.md files from Claude Code, Codex, Cursor, or OpenClaw (defaults to dry_run=true).",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["discover", "import"], "default": "discover"},
+                    "source": {"type": "string", "enum": ["claude-code", "codex", "cursor", "openclaw"]},
+                    "dry_run": {"type": "boolean", "default": True},
+                },
+            },
+            lambda args: self._import_external_agent_tool(args),
+            read_only=False,
+            source="jaeger-skills",
+        )
+
+    def _browser_gotchas_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "list").strip().lower()
+        domain = str(args.get("domain") or "").strip()
+        if act == "list":
+            lessons = self.site_gotchas.list_for_domain(domain)
+            return {"ok": True, "domain": domain, "lessons": lessons, "count": len(lessons)}
+        if act == "record":
+            raw_lessons = args.get("lessons") if isinstance(args.get("lessons"), list) else []
+            saved = self.site_gotchas.record(domain, [str(x) for x in raw_lessons])
+            return {"ok": True, "domain": domain, "lessons": saved, "count": len(saved)}
+        if act == "judge":
+            res = self.browser_judge.evaluate(
+                task=str(args.get("task") or "browser task"),
+                url=domain if "://" in domain else f"https://{domain}",
+                trace_text=str(args.get("trace_text") or ""),
+            )
+            return {"ok": True, "judgement": res.to_dict()}
+        raise ValueError(f"unsupported browser_gotchas action: {act!r}")
+
+    def _import_external_agent_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "discover").strip().lower()
+        if act == "discover":
+            found = discover_external_agents()
+            return {"ok": True, "sources": found, "count": len(found)}
+        if act == "import":
+            source = str(args.get("source") or "").strip()
+            dry_run = bool(args.get("dry_run", True))
+            return import_external_agent(
+                source,
+                target_state_dir=self.state_dir,
+                dry_run=dry_run,
+            ).to_dict()
+        raise ValueError(f"unsupported import_external_agent action: {act!r}")
+
+    def _get_agent_mode(self) -> dict[str, Any]:
+        return {"ok": True, "mode": self._agent_mode.value}
+
+    def _set_agent_mode(self, mode: str) -> dict[str, Any]:
+        self._agent_mode = AgentMode.parse(mode)
+        self.global_bus.publish("system.mode_changed", {"mode": self._agent_mode.value})
+        return {"ok": True, "mode": self._agent_mode.value}
 
     def _apple_calendar_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
         from jaeger_macos import create_calendar_event, list_calendars, list_upcoming_events
@@ -2384,9 +2501,17 @@ class ModularGatewayRuntime:
                 memory=self.memory,
                 reliability=self.reliability,
                 events=self.events,
-                middlewares=[_SseLoopMiddleware(session_id, generation, hub, global_bus=self.global_bus)],
+                middlewares=[
+                    PlanModeMiddleware(
+                        is_read_only=self.tools.is_read_only,
+                        mode_getter=lambda: self._agent_mode,
+                    ),
+                    _SseLoopMiddleware(session_id, generation, hub, global_bus=self.global_bus),
+                ],
                 session_id=session_id,
                 system_prompt=self.identity.compile_system_prompt() + "\n" + self._awareness_brief() + (
+                    ("\n" + PLAN_MODE_SYSTEM_NOTE) if self._agent_mode == AgentMode.PLAN else ""
+                ) + (
                     "\nConversation & tone: Talk naturally and directly like a trusted partner—match the user's length and register. "
                     "Skip repetitive boilerplate openers (e.g. 'Honest answer:', 'with one honest caveat', 'I have to be straight with you') "
                     "and formal '## Progress report' templates unless the user asks for a structured report or a long task stops mid-way. "
@@ -3170,6 +3295,10 @@ class ModularGatewayRuntime:
             roundtable_runner=self._run_roundtable,
             research_runner=self._run_deep_research,
             research_lister=self._list_research_reports,
+            mode_getter=self._get_agent_mode,
+            mode_setter=self._set_agent_mode,
+            evidence_store=self.evidence,
+            agent_importer=self._import_external_agent_tool,
             routing_provider=self._get_routing,
             routing_updater=self._update_routing,
             onboarding_provider=self._onboarding_status,

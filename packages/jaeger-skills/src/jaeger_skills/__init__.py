@@ -1,6 +1,13 @@
 """jaeger-skills — Standalone skill frontmatter, security scanner, AST audit, linter & 3-way merge."""
 
-from . import skill_linter, skills_ast_audit, skills_guard
+from . import importer, skill_linter, skills_ast_audit, skills_guard
+from .importer import (
+    KNOWN_AGENT_SOURCES,
+    AgentImportReport,
+    ImportPlanItem,
+    discover_external_agents,
+    import_external_agent,
+)
 from .merge import MergedText, merge_skill_markdown, merge_text
 from .skill_linter import LintFinding, lint_skill
 from .skills_ast_audit import ast_scan_path, format_ast_report
@@ -24,6 +31,9 @@ from .starter_pack import STARTER_SKILLS, ensure_starter_skills
 from .workspace import SkillExistsError, SkillStoreError, WorkspaceSkillStore
 
 __all__ = [
+    "AgentImportReport",
+    "ImportPlanItem",
+    "KNOWN_AGENT_SOURCES",
     "LintFinding",
     "MAX_SKILL_BYTES",
     "MergedText",
@@ -37,9 +47,12 @@ __all__ = [
     "WorkspaceSkillStore",
     "ast_scan_path",
     "clean_skill_name",
+    "discover_external_agents",
     "ensure_starter_skills",
     "format_ast_report",
     "format_scan_report",
+    "import_external_agent",
+    "importer",
     "lint_skill",
     "merge_skill_markdown",
     "merge_text",
