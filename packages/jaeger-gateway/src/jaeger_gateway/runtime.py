@@ -124,6 +124,8 @@ from jaeger_tools import (
     SSHBackend,
     ToolRegistry,
     ToolSpec,
+    connect_remote_host,
+    discover_remote_routes,
     discover_tailscale_peers,
     register_builtin_tools,
     register_tailscale_peer,
@@ -1981,6 +1983,37 @@ class ModularGatewayRuntime:
             source="jaeger-tools",
         )
         _reg(
+            "remote_discover",
+            "Discover ALL authorized remote connection routes on this Mac: remote_hosts.json, saved ~/.ssh/config profiles (e.g. rack-pc-lan), and active Tailscale peers. Read-only, zero private keys exposed.",
+            {"type": "object", "properties": {}},
+            lambda _args: discover_remote_routes(self.remote_hosts),
+            read_only=True,
+            source="jaeger-tools",
+        )
+        _reg(
+            "remote_connect",
+            "One-step R2-D2 connect to an owner machine (e.g. 'rack pc', 'rack-pc-lan', 'RackPCExample'): checks remote_hosts.json, reuses saved ~/.ssh/config profiles via OS SSH auth, or registers a verified Tailscale peer, and verifies live hostname.",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Natural name, SSH alias, or Tailscale peer (e.g. 'rack pc', 'rack-pc-lan', 'RackPCExample')"},
+                    "alias": {"type": "string", "description": "Optional alias to save in remote_hosts.json"},
+                    "user": {"type": "string", "description": "Optional SSH username override"},
+                    "probe": {"type": "boolean", "default": True},
+                },
+                "required": ["target"],
+            },
+            lambda args: connect_remote_host(
+                self.remote_hosts,
+                str(args.get("target") or ""),
+                alias=str(args.get("alias") or ""),
+                user=str(args.get("user") or ""),
+                probe=bool(args.get("probe", True)),
+            ),
+            read_only=False,
+            source="jaeger-tools",
+        )
+        _reg(
             "tailscale_peers",
             "Discover all computers on the owner's active Tailscale network (hostname, IP, OS, online status). Read-only.",
             {"type": "object", "properties": {}},
@@ -2903,8 +2936,9 @@ class ModularGatewayRuntime:
                     "\nTask boundaries, indexing & Tailscale remote devices: Treat one-off constraints from earlier messages (such as 'no shell/git for this edit') as scoped ONLY to that specific task; "
                     "never carry temporary turn restrictions into unrelated later topics or claim shell/tools are 'off-limits this session'. Only E-Stop, approval gates, sandbox boundaries, and explicit standing owner rules persist. "
                     "Be action-first: when the owner asks you to index folders on this Mac (e.g. ~/Documents, ~/Desktop, ~/GitHub), call `index_workspace` and `search_workspace` directly instead of refusing. "
-                    "When the owner asks you to connect to another one of their computers (such as a rack PC or laptop), Tailscale is the owner's trust boundary: first call `tailscale_peers` to inspect their tailnet, call `tailscale_connect` to register the verified peer into remote_hosts.json and test SSH automatically, and then use `remote_exec` to handle the rest. If the machine is not on Tailscale yet or SSH isn't enabled yet, tell the owner in one line to add it to Tailscale or run the exact 1-line setup command from `tailscale_connect` — never make a non-coder hand-edit JSON files. "
-                    "Use your real live tools: `execute_code` for quick Python checks, `index_workspace`/`search_workspace` for FTS5 file search, `tailscale_peers`/`tailscale_connect`/`remote_hosts`/`remote_exec` for Tailscale-verified machines, `minecraft_status`/`minecraft_act` for live Minecraft, and `web_search`/`web_fetch` for online research. "
+                    "When the owner asks you to connect to another one of their computers (such as a rack PC or laptop), do NOT stop just because remote_hosts.json is empty: first call `remote_connect` (or `remote_discover`), which automatically checks existing saved `~/.ssh/config` profiles on this Mac (such as `rack-pc-lan`, authenticating out-of-band via OpenSSH without exposing private keys) AND active Tailscale peers, verifies the live hostname, registers the host, and enables `remote_exec` immediately. Only ask the owner to add the machine to Tailscale or run the exact 1-line SSH setup command if neither a saved SSH profile nor a Tailscale peer is reachable yet — never make a non-coder hand-edit JSON files. "
+                    "When anything stops a task, name the exact source plainly: model refusal, Jaeger approval/policy, macOS permission, or host unreachable. "
+                    "Use your real live tools: `execute_code` for quick Python checks, `index_workspace`/`search_workspace` for FTS5 file search, `remote_discover`/`remote_connect`/`tailscale_peers`/`tailscale_connect`/`remote_exec` for authorized remote machines, `minecraft_status`/`minecraft_act` for live Minecraft, and `web_search`/`web_fetch` for online research. "
                     "Inspect available tools and do safe independent work before declaring a blocker, ask before ambiguous destructive steps, and distinguish editing source files on disk from rebuilding/restarting the live Gateway or WebUI bundle."
                     "\nHardware & media: When asked what you see, call droid_look first. "
                     "When asked to turn Droid mode on/off, wake Droid, go to sleep, or park the camera, call droid_act with wake or sleep. "

@@ -170,5 +170,15 @@ class JaegerClient:
     def model_eval(self, models: list[str], *, timeout_s: float = 180.0) -> dict[str, Any]:
         return self._request("POST", "/v1/models/eval", {"models": models}, timeout_s=timeout_s)
 
+    def remote_discover(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/remote/discover")
+
+    def remote_connect(self, target: str, *, alias: str = "", user: str = "", probe: bool = True) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/remote/connect",
+            {"target": target, "alias": alias, "user": user, "probe": probe},
+        )
+
 
 __all__ = ["JaegerClient", "JaegerClientError"]

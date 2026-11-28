@@ -1591,6 +1591,39 @@ def create_gateway_app(
             return web.json_response({"ok": True, "hosts": []})
         return web.json_response({"ok": True, "hosts": remote_hosts.list_public()})
 
+    async def discover_remote_routes_route(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Remote discovery is owner-local only."}, status=403)
+        if remote_hosts is None:
+            return web.json_response({"ok": False, "error": "remote hosts unavailable"}, status=501)
+        from jaeger_tools import discover_remote_routes
+        return web.json_response(await asyncio.to_thread(discover_remote_routes, remote_hosts))
+
+    async def connect_remote_host_route(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Remote connect is owner-local only."}, status=403)
+        if remote_hosts is None:
+            return web.json_response({"ok": False, "error": "remote hosts unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        target = str(body.get("target") or "").strip()
+        if not target:
+            return web.json_response({"ok": False, "error": "target is required"}, status=400)
+        from jaeger_tools import RemoteExecError, connect_remote_host
+        try:
+            res = await asyncio.to_thread(
+                connect_remote_host,
+                remote_hosts,
+                target,
+                alias=str(body.get("alias") or ""),
+                user=str(body.get("user") or ""),
+                probe=bool(body.get("probe", True)),
+            )
+            return web.json_response(res, status=200 if res.get("ok") else 404)
+        except RemoteExecError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
     async def upsert_remote_host(request: web.Request) -> web.Response:
         if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Remote hosts are owner-local only."}, status=403)
@@ -2205,6 +2238,8 @@ def create_gateway_app(
     app.router.add_post("/v1/channels/inbound", channels_inbound)
     app.router.add_post("/v1/sessions/{session_id}/channel-reply", channels_reply)
     app.router.add_get("/v1/remote/hosts", list_remote_hosts)
+    app.router.add_get("/v1/remote/discover", discover_remote_routes_route)
+    app.router.add_post("/v1/remote/connect", connect_remote_host_route)
     app.router.add_put("/v1/remote/hosts/{alias}", upsert_remote_host)
     app.router.add_delete("/v1/remote/hosts/{alias}", delete_remote_host)
     app.router.add_get("/v1/embodiment/status", embodiment_status)
