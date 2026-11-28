@@ -3,6 +3,30 @@
 JaegerAI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## 1.0.0 — 2026-11-27 — 100% modular local-first cognitive platform
+
+JaegerAI 1.0.0 completes the ground-up modularization into **30 standalone backend packages** and **6 standalone React 19 UI packages** (`packages/`), engineered for 24/7 operation on a single 32 GB Apple Silicon machine with **zero external infrastructure daemons** (pure embedded SQLite WAL + in-process `asyncio`).
+
+### Architecture & Platform Core
+- **Strict standalone layering:** Every `packages/jaeger-*` package is independently testable and forbidden from importing `jaeger_ai`, `jaeger_agent`, or `jaeger_os` (enforced by AST tests in `dev/tests/test_package_layering.py`).
+- **Zero in-repo runtime junk:** External virtualenv (`~/.jaeger/venv`), external Vite UI bundle (`~/.cache/jaeger/ui-rebuild-mainscreen/dist`), and external Python bytecode cache (`PYTHONDONTWRITEBYTECODE=1`).
+- **One-command reproducible install & CLI:** `./install.sh --profile full`, `./jaeger doctor`, `./jaeger status`, `./jaeger start`, `./jaeger open`, `./jaeger ask`, interactive streaming TUI (`./jaeger`), and `./jaeger verify`.
+- **32 GB Unified Memory discipline:** 3-tier `ResourceGovernor` (`OWNER_WORK > AWARENESS_SAFETY > IDLE_LIFE`), max 1 heavy model resident at a time, and hard-pruned camera frame buffers.
+
+### Cognition, Tools, Models & Security
+- **Hardware-Fit Model Cookbook & Roundtable (`jaeger-models`):** Multi-modality (`llm`, `vision`, `image_gen`, `stt`, `tts`, `embedding`) unified-RAM scoring, what-if simulator, live latency/tok-s benchmarking, and parallel blind/consensus `ModelRoundtable`.
+- **Deep Research (`jaeger-orchestration`):** Multi-step query planning, SSRF-safe web source extraction, and cited Markdown + Visual HTML reports saved to `~/.jaeger/reports/`.
+- **Dual `BUILD` / `PLAN` execution modes (`jaeger-loop`):** Read-only `PLAN` mode middleware that blocks mutating tools until switched back to `BUILD`.
+- **Browser guard, retained evidence & external importer (`jaeger-tools`, `jaeger-skills`):** Domain allow/block & IP guard, domain-scoped `<secret:name>` vault, reusable site gotchas, `ev_<hash>` paginated evidence handles, and safe dry-run external agent skill importer.
+- **Kanban Task Board & One-Shot Reminders (`jaeger-orchestration`):** Embedded SQLite WAL Kanban board (`backlog` → `done`) and natural `in_minutes` / `at_iso` reminders drained automatically in the cognitive heartbeat.
+- **Native macOS integrations (`jaeger-macos`):** Apple Mail, Calendar, Reminders, and Notes (serialized over `appleevents_lock`) plus sensitive-app computer-use deny-list and 4-stage audit logging.
+
+### Presence, Studio UI & Ecosystem Interop
+- **24/7 Voice Presence (`jaeger-realtime`, `jaeger-kokoro-tts`, `jaeger-whisper-stt`):** VoiceLLM layered `<ignore>`/`<reply>` LLM ambient speech gate, self-speech acoustic echo similarity filter, Whisper hallucination drop, first-comma streaming TTS chunking, natural technical speech normalization, mutual farewell detection, and full-duplex barge-in.
+- **5-Tab Studio UI & VRM Avatar (`@jaeger/ui-*`, `jaeger-avatar`):** Canonical `avatar/v1` pack discovery, 2D/3D VRM 0.x/1.0 avatar stage with Kokoro viseme lip-sync, 2D pixel Virtual Office, OpenReel multi-track `StudioTimeline`, and OpenCode Patchmark streaming Markdown.
+- **Embodiment & Hardware (`jaeger-hardware`, `jaeger-droid`, `jaeger-embodiment-minecraft`):** JP01 bracket protocol + fail-closed L2 `EStopLatch`, fail-closed `NexusStationBridge` for NexusUI hardware workbenches (respecting E-Stop and single-operator locks), Droid Mode, and headless Mineflayer Minecraft co-op.
+- **Ecosystem Compatibility (`jaeger-gateway`, `jaeger-mcp`, `jaeger-channels`):** OpenAI-compatible `POST /v1/chat/completions` (streaming & non-streaming), zero-dependency stdlib `JaegerClient` Python SDK, 1-click MCP presets (`aether_studio`, `jaeger_arena`, `rea`), and Discord ambient room buffering with bot-loop protection.
+
 ## 0.13.0 — 2026-09-27 — the one execution path is proven
 
 - Qualified P0-1 through P0-4 against a live configured provider: resident ReAct turn execution and restart continuity; live streaming Stop/cancel with a terminal receipt; gated `write_file` approval with an independently verified file effect and a denial path proving no mutation; and the WebUI client-surface runtime path with approval, steering, and immediate next-turn admission.
