@@ -79,7 +79,18 @@ class MinecraftEmbodiment:
             "last_action": "idle",
             "last_error": "",
             "ticks": 0,
+            "modes": {
+                "self_preservation": {"enabled": True},
+                "auto_eat": {"enabled": True},
+                "self_defense": {"enabled": True},
+                "unstuck": {"enabled": True},
+                "follow_player": {"enabled": False, "target": None, "distance": 3},
+                "guard_area": {"enabled": False, "anchor": None, "radius": 10},
+            },
+            "nearby_players": [],
+            "chat_inbox": [],
         }
+        self._last_chat_id = 0
         self._init_db()
         self._restore_latest_checkpoint()
         # Never claim connected across a process restart until re-verified.
@@ -93,16 +104,76 @@ class MinecraftEmbodiment:
 
     def _init_db(self) -> None:
         with self._lock, self._connect() as conn:
-            conn.execute(
+            conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS mc_checkpoints (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     reason TEXT NOT NULL,
                     state_json TEXT NOT NULL,
                     created_at REAL NOT NULL
-                )
+                );
+                CREATE TABLE IF NOT EXISTS mc_waypoints (
+                    name TEXT PRIMARY KEY,
+                    x INTEGER NOT NULL,
+                    y INTEGER NOT NULL,
+                    z INTEGER NOT NULL,
+                    notes TEXT NOT NULL DEFAULT '',
+                    updated_at REAL NOT NULL
+                );
                 """
             )
+
+    def save_location(
+        self,
+        name: str,
+        *,
+        x: int | None = None,
+        y: int | None = None,
+        z: int | None = None,
+        notes: str = "",
+    ) -> dict[str, Any]:
+        clean = str(name or "").strip().lower()
+        if not clean:
+            return {"ok": False, "error": "Waypoint name is required"}
+        with self._lock:
+            pos = dict(self._state.get("position") or {"x": 0, "y": 64, "z": 0})
+            wx = int(pos["x"] if x is None else x)
+            wy = int(pos["y"] if y is None else y)
+            wz = int(pos["z"] if z is None else z)
+            now = time.time()
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO mc_waypoints (name, x, y, z, notes, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (clean, wx, wy, wz, str(notes or "")[:200], now),
+                )
+        return {
+            "ok": True,
+            "waypoint": {"name": clean, "x": wx, "y": wy, "z": wz, "notes": str(notes or "")[:200], "updated_at": now},
+        }
+
+    def list_locations(self) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT name, x, y, z, notes, updated_at FROM mc_waypoints ORDER BY name ASC"
+            ).fetchall()
+        return [
+            {"name": r[0], "x": int(r[1]), "y": int(r[2]), "z": int(r[3]), "notes": r[4], "updated_at": float(r[5])}
+            for r in rows
+        ]
+
+    def get_location(self, name: str) -> dict[str, Any] | None:
+        clean = str(name or "").strip().lower()
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT name, x, y, z, notes, updated_at FROM mc_waypoints WHERE name = ?",
+                (clean,),
+            ).fetchone()
+        if not row:
+            return None
+        return {"name": row[0], "x": int(row[1]), "y": int(row[2]), "z": int(row[3]), "notes": row[4], "updated_at": float(row[5])}
 
     def _restore_latest_checkpoint(self) -> None:
         with self._lock, self._connect() as conn:
@@ -142,6 +213,17 @@ class MinecraftEmbodiment:
             "estimated_ram_mb": 150,
             "gpu_mb": 0,
         }
+
+    def _bridge_get(self, path: str, *, timeout: float = 10.0) -> Any:
+        url = f"http://{self._bridge_host}:{self._bridge_port}{path}"
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw.strip() else {}
 
     def _bridge_post(self, path: str, payload: Mapping[str, Any], *, timeout: float = 30.0) -> Any:
         url = f"http://{self._bridge_host}:{self._bridge_port}{path}"
@@ -322,6 +404,112 @@ class MinecraftEmbodiment:
                 "bridge": self.bridge_info(),
             }
 
+    def get_radar(self, *, radius: int = 8) -> dict[str, Any]:
+        """Fetch a lightweight 0-GPU live top-down terrain/entity/player radar slice."""
+        with self._lock:
+            live = bool(self._state.get("connected"))
+            snap = dict(self._state)
+        if not live:
+            return {
+                "ok": True,
+                "connected": False,
+                "radius": max(4, min(int(radius), 10)),
+                "bot": {
+                    "username": self._username,
+                    **(snap.get("position") or {"x": 0, "y": 64, "z": 0}),
+                    "health": snap.get("health", 20.0),
+                    "food": snap.get("food", 20.0),
+                    "biome": snap.get("biome", ""),
+                },
+                "grid": [],
+                "entities": [],
+                "nearby_players": list(snap.get("nearby_players") or []),
+                "inventory": dict(snap.get("inventory") or {}),
+                "modes": dict(snap.get("modes") or {}),
+                "chat_inbox": list(snap.get("chat_inbox") or [])[-10:],
+            }
+        try:
+            r = max(4, min(int(radius), 10))
+            data = self._bridge_get(f"/radar?radius={r}", timeout=6.0)
+            if isinstance(data, dict):
+                with self._lock:
+                    if isinstance(data.get("nearby_players"), list):
+                        self._state["nearby_players"] = data["nearby_players"]
+                    if isinstance(data.get("modes"), dict):
+                        self._state["modes"] = data["modes"]
+                    if isinstance(data.get("inventory"), dict):
+                        self._state["inventory"] = data["inventory"]
+                    if isinstance(data.get("bot"), dict):
+                        b = data["bot"]
+                        self._state["position"] = {"x": int(b.get("x", 0)), "y": int(b.get("y", 64)), "z": int(b.get("z", 0))}
+                        if "health" in b:
+                            self._state["health"] = float(b["health"])
+                        if "food" in b:
+                            self._state["food"] = float(b["food"])
+                return data
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            return {"ok": False, "connected": False, "error": str(exc)[:200]}
+        return {"ok": False, "connected": False, "error": "empty_radar"}
+
+    def poll_chat_inbox(self, *, since_id: int | None = None) -> dict[str, Any]:
+        """Poll inbound player chat messages & nearby players from the live Mineflayer bridge."""
+        with self._lock:
+            live = bool(self._state.get("connected"))
+            cursor = self._last_chat_id if since_id is None else int(since_id)
+        if not live:
+            with self._lock:
+                return {
+                    "ok": True,
+                    "live": False,
+                    "last_id": self._last_chat_id,
+                    "messages": list(self._state.get("chat_inbox") or []),
+                    "nearby_players": list(self._state.get("nearby_players") or []),
+                }
+        try:
+            data = self._bridge_get(f"/chat-inbox?since_id={cursor}", timeout=8.0)
+            msgs = list(data.get("messages") or [])
+            players = list(data.get("nearby_players") or [])
+            last_id = int(data.get("last_id") or cursor)
+            with self._lock:
+                self._last_chat_id = max(self._last_chat_id, last_id)
+                self._state["nearby_players"] = players
+                if msgs:
+                    inbox = list(self._state.get("chat_inbox") or []) + msgs
+                    self._state["chat_inbox"] = inbox[-30:]
+            return {
+                "ok": True,
+                "live": True,
+                "last_id": last_id,
+                "messages": msgs,
+                "nearby_players": players,
+            }
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            return {"ok": False, "live": True, "error": str(exc)[:240], "messages": [], "nearby_players": []}
+
+    def _run_coop_bridge(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            res = self._bridge_post("/coop", payload, timeout=45.0)
+            with self._lock:
+                if res.get("observation") is not None:
+                    self._ingest_observation(res["observation"])
+                if isinstance(res.get("modes"), dict) and isinstance(res["modes"].get("modes"), dict):
+                    self._state["modes"] = res["modes"]["modes"]
+                if isinstance(res.get("nearby_players"), list):
+                    self._state["nearby_players"] = res["nearby_players"]
+                self._state["last_error"] = "" if res.get("ok") else str(res.get("summary") or res.get("error") or "")
+            return {
+                "ok": bool(res.get("ok")),
+                "live": True,
+                "summary": str(res.get("summary") or ""),
+                "nearby_players": res.get("nearby_players") or [],
+                "modes": self._state.get("modes") or {},
+                "state": dict(self._state),
+            }
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+            with self._lock:
+                self._state["last_error"] = str(exc)[:240]
+            return {"ok": False, "live": True, "error": str(exc)[:240]}
+
     def act(self, action: str, params: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
         p = dict(params or {})
         if action == "connect":
@@ -334,6 +522,47 @@ class MinecraftEmbodiment:
             return self.disconnect()
         if action == "step":
             return self.run_step(str(p.get("code") or ""), programs=str(p.get("programs") or ""))
+        if action == "read_chat":
+            since = int(p["since_id"]) if p.get("since_id") is not None else None
+            return self.poll_chat_inbox(since_id=since)
+        if action == "save_location":
+            return self.save_location(
+                str(p.get("name") or p.get("location") or ""),
+                x=int(p["x"]) if p.get("x") is not None else None,
+                y=int(p["y"]) if p.get("y") is not None else None,
+                z=int(p["z"]) if p.get("z") is not None else None,
+                notes=str(p.get("notes") or ""),
+            )
+        if action == "list_locations":
+            locs = self.list_locations()
+            return {"ok": True, "locations": locs, "count": len(locs)}
+        if action == "goto_location":
+            loc = self.get_location(str(p.get("name") or p.get("location") or ""))
+            if loc is None:
+                return {"ok": False, "error": f"Unknown waypoint: {p.get('name') or p.get('location')}"}
+            return self.act("move_to", {"x": loc["x"], "y": loc["y"], "z": loc["z"]})
+        if action == "join_guide":
+            if _tcp_open(self._bridge_host, self._bridge_port, timeout=0.25):
+                try:
+                    return self._bridge_get(f"/join-guide?java_port={self._mc_port}&bedrock_port={int(p.get('bedrock_port') or 19132)}", timeout=5.0)
+                except Exception:  # noqa: BLE001
+                    pass
+            return {
+                "ok": True,
+                "guide": {
+                    "java": {"address": f"{self._mc_host}:{self._mc_port}"},
+                    "bedrock": {"port": int(p.get("bedrock_port") or 19132)},
+                },
+                "available_blueprints": ["shelter", "monument", "farm", "town_hall"],
+            }
+        if action == "lan_broadcast":
+            enabled = bool(p.get("enabled", True))
+            if _tcp_open(self._bridge_host, self._bridge_port, timeout=0.25):
+                try:
+                    return self._bridge_post("/lan-broadcast", {**p, "enabled": enabled}, timeout=5.0)
+                except Exception as exc:  # noqa: BLE001
+                    return {"ok": False, "error": str(exc)[:200]}
+            return {"ok": False, "error": "mineflayer_bridge_not_running"}
 
         with self._lock:
             if self._estop_latched:
@@ -345,6 +574,27 @@ class MinecraftEmbodiment:
             self._state["last_action"] = action
 
         if live:
+            if action == "set_mode":
+                mode_name = str(p.get("mode") or "").strip()
+                enabled = bool(p.get("enabled", True))
+                body: dict[str, Any] = {"mode": mode_name, "enabled": enabled}
+                if p.get("player") or p.get("target"):
+                    body["target"] = str(p.get("player") or p.get("target"))
+                if p.get("distance") is not None:
+                    body["distance"] = int(p["distance"])
+                try:
+                    res = self._bridge_post("/modes", body, timeout=10.0)
+                    with self._lock:
+                        if isinstance(res.get("modes"), dict):
+                            self._state["modes"] = res["modes"]
+                    return {"ok": bool(res.get("ok")), "live": True, "modes": self._state.get("modes"), "state": dict(self._state)}
+                except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+                    return {"ok": False, "live": True, "error": str(exc)[:240]}
+            if action in (
+                "follow_player", "go_to_player", "give_to_player", "eat", "go_to_bed",
+                "nearby_players", "stop_actions", "guard_area", "build_blueprint",
+            ):
+                return self._run_coop_bridge({**p, "action": action})
             if action == "move_to":
                 pos = dict(self._state.get("position") or {"x": 0, "y": 64, "z": 0})
                 x = int(p.get("x", pos["x"]))
@@ -356,13 +606,11 @@ class MinecraftEmbodiment:
                 msg = json.dumps(str(p["message"])[:200])
                 return self.run_step(f"bot.chat({msg});")
             if action == "gather" and p.get("item"):
-                item = json.dumps(str(p["item"]))
-                cnt = max(1, min(int(p.get("count", 1)), 16))
-                js = (
-                    f"const blk = bot.findBlock({{matching: b => b && b.name && b.name.includes({item}), maxDistance: 32}});"
-                    f"if (blk) {{ await bot.collectBlock.collect(blk, {{count: {cnt}}}); }}"
-                )
-                return self.run_step(js)
+                return self._run_coop_bridge({
+                    "action": "collect_blocks",
+                    "item": str(p["item"]),
+                    "count": max(1, min(int(p.get("count", 1)), 16)),
+                })
             if action == "idle_tick":
                 # Gentle autonomous exploration step around current coordinates
                 pos = self._state.get("position") or {"x": 0, "y": 64, "z": 0}
@@ -376,6 +624,40 @@ class MinecraftEmbodiment:
         with self._lock:
             if action == "set_goal" and p.get("goal"):
                 self._state["active_goal"] = str(p["goal"])
+            elif action == "set_mode" and p.get("mode"):
+                modes = dict(self._state.get("modes") or {})
+                mname = str(p["mode"]).strip()
+                entry = dict(modes.get(mname) or {})
+                entry["enabled"] = bool(p.get("enabled", True))
+                if p.get("player") or p.get("target"):
+                    entry["target"] = str(p.get("player") or p.get("target"))
+                if p.get("distance") is not None:
+                    entry["distance"] = int(p["distance"])
+                modes[mname] = entry
+                self._state["modes"] = modes
+            elif action == "follow_player":
+                target = str(p.get("player") or p.get("username") or "").strip()
+                modes = dict(self._state.get("modes") or {})
+                modes["follow_player"] = {"enabled": True, "target": target or None, "distance": int(p.get("distance") or 3)}
+                self._state["modes"] = modes
+            elif action == "guard_area":
+                pos = dict(self._state.get("position") or {"x": 0, "y": 64, "z": 0})
+                anchor = {
+                    "x": int(p.get("x", pos["x"])),
+                    "y": int(p.get("y", pos["y"])),
+                    "z": int(p.get("z", pos["z"])),
+                }
+                modes = dict(self._state.get("modes") or {})
+                modes["guard_area"] = {"enabled": True, "anchor": anchor, "radius": int(p.get("radius") or 10)}
+                modes["follow_player"] = {"enabled": False, "target": None, "distance": 3}
+                self._state["modes"] = modes
+            elif action == "stop_actions":
+                modes = dict(self._state.get("modes") or {})
+                modes["follow_player"] = {"enabled": False, "target": None, "distance": 3}
+                modes["guard_area"] = {"enabled": False, "anchor": None, "radius": 10}
+                self._state["modes"] = modes
+            elif action == "eat":
+                self._state["food"] = 20.0
             elif action == "move_to":
                 pos = dict(self._state.get("position") or {"x": 0, "y": 64, "z": 0})
                 for axis in ("x", "y", "z"):

@@ -19,7 +19,9 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator, Mapping
+from typing import Any, AsyncIterator, Callable, Mapping
+
+from .reflex import DroidReflexController
 
 PARK_PAN_DEG: float = 0.0
 PARK_TILT_DEG: float = -85.0
@@ -133,6 +135,9 @@ class HostDroidEmbodiment:
         vision_buffer: Any = None,
         world_model: Any = None,
         probe_on_init: bool = False,
+        on_reflex_event: Callable[[str, Mapping[str, Any]], None] | None = None,
+        auto_park_enabled: bool = True,
+        idle_park_s: float = 600.0,
     ) -> None:
         self._lock = threading.RLock()
         self._vision = vision_buffer
@@ -148,6 +153,14 @@ class HostDroidEmbodiment:
         self._last_capture_at = 0.0
         self._action_count = 0
         self._last_track_move_at = 0.0
+        self.reflex = DroidReflexController(
+            is_awake=lambda: not self._sleeping,
+            is_estop=lambda: self._estop_latched,
+            sleep_fn=lambda: self.sleep(reason="idle_auto_park"),
+            on_event=on_reflex_event,
+            auto_park_enabled=auto_park_enabled,
+            idle_park_s=idle_park_s,
+        )
         if probe_on_init:
             self.sync_hardware_state()
 
@@ -274,6 +287,7 @@ class HostDroidEmbodiment:
                 "voice_enrolled": self._voice_enrolled(),
                 "action_count": self._action_count,
                 "last_capture_at": self._last_capture_at,
+                "reflex": self.reflex.status(),
             }
 
     def sleep(self, reason: str = "operator") -> dict[str, Any]:
@@ -310,6 +324,7 @@ class HostDroidEmbodiment:
             self._sleeping = False
             self._paused = False
             self._action_count += 1
+            self.reflex.touch(f"wake:{reason}")
             self._pose.update({"pan_deg": 0.0, "tilt_deg": 0.0, "zoom": 1.0})
             hw_dispatched = self._dispatch_gimbal_hw(pan=0.0, tilt=0.0, zoom=1.0, reset=True)
             return {
@@ -470,6 +485,7 @@ class HostDroidEmbodiment:
             if action == "look_at":
                 self._paused = False
                 self._action_count += 1
+                self.reflex.touch("look_at")
                 pan = max(-145.0, min(145.0, float(p.get("pan_deg", self._pose["pan_deg"]))))
                 tilt = max(-90.0, min(90.0, float(p.get("tilt_deg", self._pose["tilt_deg"]))))
                 zoom = max(1.0, min(4.0, float(p.get("zoom", self._pose["zoom"]))))

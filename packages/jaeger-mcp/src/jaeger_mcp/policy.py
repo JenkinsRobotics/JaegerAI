@@ -68,7 +68,7 @@ def agent_tool_name(server: str, tool: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", f"mcp__{server}__{tool}")[:64]
 
 
-def redact_secrets(value: Any, secrets: set[str]) -> Any:
+def redact_secrets(value: Any, secrets: set[str] | None = None) -> Any:
     """Recursively scrub known credential strings from tool outputs/errors."""
     if not secrets:
         return value

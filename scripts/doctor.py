@@ -46,7 +46,7 @@ OPTIONAL_MODULES = (
 )
 
 
-def _probe_http(url: str, timeout: float = 1.5) -> dict[str, Any]:
+def _probe_http(url: str, timeout: float = 4.0) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
             return {"ok": resp.status == 200, "status": resp.status, "data": json.loads(resp.read().decode("utf-8"))}
@@ -81,8 +81,9 @@ def run_doctor(*, json_output: bool = False) -> int:
     }
 
     gw_port = int(os.environ.get("JAEGER_GATEWAY_PORT") or "33418")
-    gw = _probe_http(f"http://127.0.0.1:{gw_port}/health")
-    res = _probe_http(f"http://127.0.0.1:{gw_port}/v1/system/resources")
+    gw = _probe_http(f"http://127.0.0.1:{gw_port}/health", timeout=4.0)
+    res = _probe_http(f"http://127.0.0.1:{gw_port}/v1/system/resources", timeout=4.0)
+    gateway_live = bool(gw["ok"] or res["ok"])
     ui_dist = Path.home() / ".cache" / "jaeger" / "ui-rebuild-mainscreen" / "dist" / "index.html"
 
     report = {
@@ -92,7 +93,7 @@ def run_doctor(*, json_output: bool = False) -> int:
         "optional_packages_installed": installed_optional,
         "tools": tools,
         "ui_bundle_built": ui_dist.is_file(),
-        "gateway_live": gw["ok"],
+        "gateway_live": gateway_live,
         "resources": res.get("data", {}).get("resources", {}) if res["ok"] else {},
     }
 
@@ -108,16 +109,19 @@ def run_doctor(*, json_output: bool = False) -> int:
             f"whisper={tools['whisper_cli']} ollama={tools['ollama_cli']}"
         )
         print(f"WebUI:    {'Built' if report['ui_bundle_built'] else 'Not built yet'}")
-        if gw["ok"]:
+        if gateway_live:
             r = report["resources"]
             ram_str = (
                 f" | RAM {r.get('host_available_gb', '?')}/{r.get('host_total_gb', '?')} GB free"
                 if r
                 else ""
             )
-            print(f"Gateway:  LIVE on :{gw_port} (pid={gw['data'].get('pid')}){ram_str}")
+            pid = gw.get("data", {}).get("pid", "?") if gw["ok"] else "?"
+            print(f"Gateway:  LIVE on :{gw_port} (pid={pid}){ram_str}")
         else:
-            print(f"Gateway:  Not running on :{gw_port}")
+            err = gw.get("error") or res.get("error") or ""
+            suffix = f" ({err})" if err else ""
+            print(f"Gateway:  Not running on :{gw_port}{suffix}")
     return 0 if report["ok"] else 1
 
 

@@ -1,0 +1,31 @@
+Third-Party Notices for jaeger-embodiment-minecraft
+===================================================
+
+This package incorporates and adapts MIT-licensed components from the following
+open-source projects:
+
+1. MineDojo / Voyager (MIT License)
+   - Repository: https://github.com/MineDojo/Voyager
+   - Adapted into: `control_primitives/` and `mineflayer/` observation/bridge base.
+
+2. geekan / MetaGPT (MIT License)
+   - Repository: https://github.com/geekan/MetaGPT
+   - Adapted into: `mineflayer/index.js` headless Express HTTP bridge structure.
+
+3. mindcraft-bots / mindcraft (MIT License)
+   - Repository: https://github.com/mindcraft-bots/mindcraft
+   - Copyright (c) 2024 Kolby Nottingham & Max White (Mindcraft contributors)
+   - Adapted into: `mineflayer/lib/coopModes.js` (survival reflex modes:
+     self_preservation, auto_eat, self_defense, unstuck, follow_player, guard_area)
+     and `mineflayer/lib/coopActions.js` (co-op companion actions: followPlayer,
+     goToPlayer, giveToPlayer, eatFood, goToBed, collectBlocks, stopActions).
+
+4. JenkinsRobotics / ares-minecraft (MIT License)
+   - Repository: https://github.com/JenkinsRobotics/ares-minecraft
+   - Adapted into: `mineflayer/lib/blueprints.js` (deterministic structure builder),
+     `mineflayer/lib/lanBroadcaster.js` (RakNet UDP 19132 Bedrock/PS5/iPad LAN
+     discovery & multi-platform join guide), and named waypoints + guard mode.
+
+All third-party code above is used under the MIT License. Permission is hereby
+granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files, subject to inclusion of the above notices.

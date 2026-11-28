@@ -82,6 +82,10 @@ class ToolRegistry:
     def get_spec(self, tool_name: str) -> ToolSpec | None:
         return self._tools.get(tool_name)
 
+    def is_read_only(self, tool_name: str) -> bool:
+        spec = self._tools.get(tool_name)
+        return bool(spec.read_only) if spec is not None else False
+
     def list_tools(self, *, query: str | None = None, limit: int = 64) -> Sequence[Mapping[str, Any]]:
         available = [t for t in self._tools.values() if t.is_available()]
         if query:

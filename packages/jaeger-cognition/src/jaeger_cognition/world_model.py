@@ -225,5 +225,78 @@ class WorldModelStore:
             for r in rows
         ]
 
+    def build_awareness_brief(
+        self,
+        *,
+        governor: Mapping[str, Any] | None = None,
+        droid: Mapping[str, Any] | None = None,
+        minecraft: Mapping[str, Any] | None = None,
+        goals: list[Mapping[str, Any]] | None = None,
+        recent_actions: list[Mapping[str, Any]] | None = None,
+        pending_approvals: int = 0,
+        active_subagents: int = 0,
+        max_chars: int = 950,
+    ) -> str:
+        """Synthesize a compact (~220-token) live self-awareness snapshot for prompt injection."""
+        lines: list[str] = ["[Live Self-Awareness Snapshot]"]
+        gov = dict(governor or {})
+        if gov:
+            avail = gov.get("host_available_gb")
+            ram_str = f"{avail:.1f}GB free" if isinstance(avail, (int, float)) else "ram=unknown"
+            estop = "LATCHED" if gov.get("estop_active") else "clear"
+            idle = str(gov.get("idle_life_status") or ("enabled" if gov.get("idle_life_enabled") else "paused"))
+            lines.append(
+                f"- Host: {ram_str}, E-Stop={estop}, idle-life={idle}, "
+                f"pending_approvals={int(pending_approvals)}, active_subagents={int(active_subagents)}"
+            )
+
+        if droid:
+            awake = bool(droid.get("awake"))
+            pose = droid.get("pose") or {}
+            track = "tracking" if pose.get("tracking") else "static"
+            reflex = droid.get("reflex") or {}
+            auto_park = f", auto_park={reflex.get('idle_park_s')}s" if reflex.get("auto_park_enabled") else ""
+            lines.append(f"- Droid Body: {'awake' if awake else 'asleep/parked'} ({track}{auto_park})")
+
+        if minecraft:
+            mc_state = minecraft.get("state") or minecraft
+            if mc_state.get("connected"):
+                pos = mc_state.get("position") or {}
+                biome = str(mc_state.get("biome") or "overworld")
+                hp = mc_state.get("health", 20)
+                food = mc_state.get("food", 20)
+                players = [str(p.get("username") or "") for p in (mc_state.get("nearby_players") or []) if p.get("username")]
+                p_str = f", players={','.join(players[:4])}" if players else ""
+                follow = ((mc_state.get("modes") or {}).get("follow_player") or {})
+                f_str = f", following={follow.get('target')}" if follow.get("enabled") and follow.get("target") else ""
+                lines.append(
+                    f"- Minecraft Body: LIVE @ ({pos.get('x', 0)},{pos.get('y', 64)},{pos.get('z', 0)}) "
+                    f"{biome}, hp={hp:.0f}/20 food={food:.0f}/20{p_str}{f_str}"
+                )
+            else:
+                goal_txt = str(mc_state.get("active_goal") or "").strip()[:70]
+                lines.append(f"- Minecraft Body: standby" + (f" (goal: {goal_txt})" if goal_txt else ""))
+
+        if goals:
+            top = "; ".join(f"[{g.get('domain', 'general')}] {str(g.get('title') or '')[:55]}" for g in goals[:3])
+            lines.append(f"- Active Goals ({len(goals)}): {top}")
+
+        if recent_actions:
+            act = recent_actions[0]
+            lines.append(f"- Latest Autonomous Action: [{act.get('kind', 'auto')}] {str(act.get('summary') or '')[:110]}")
+
+        percs = self.recent_perceptions(limit=4)
+        if percs:
+            p_summaries: list[str] = []
+            for ev in percs[:3]:
+                summary = str(ev.payload.get("summary") or ev.payload.get("message") or ev.kind)[:75]
+                p_summaries.append(f"{ev.modality}/{ev.kind}: {summary}")
+            lines.append(f"- Recent Perceptions: {' | '.join(p_summaries)}")
+
+        brief = "\n".join(lines)
+        if len(brief) > max_chars:
+            return brief[: max_chars - 3].rstrip() + "..."
+        return brief
+
 
 __all__ = ["PerceptionEvent", "WorldFact", "WorldModelStore"]

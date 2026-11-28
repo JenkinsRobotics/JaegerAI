@@ -16,11 +16,13 @@ import {
   type StudioClip,
 } from "@jaeger/ui-kit";
 import { AvatarStage, type VisemeFrame } from "@jaeger/ui-avatar";
+import { OfficeWorkspace } from "@jaeger/ui-office";
 import "./unifiedShell.css";
 import { AwakeningWizard } from "./AwakeningWizard";
 import { ConversationTimeline, type ConversationTopic } from "./ConversationTimeline";
 import { DroidVoice } from "./DroidVoice";
 import { MindAutonomyPanel } from "./MindAutonomyPanel";
+import { ReturnBriefingBanner } from "./ReturnBriefingBanner";
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import { ResearchPage } from "./ResearchPage";
 import { ToolsPage } from "./ToolsPage";
@@ -279,8 +281,6 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const [workflows, setWorkflows] = useState<WorkflowRow[]>([]);
   const [episodes, setEpisodes] = useState<Array<{ episode_id: string; title: string; stage: string; assigned_role: string; owner_approved: boolean; timeline_clips: StudioClip[] }>>([]);
   const [newEpTitle, setNewEpTitle] = useState("");
-  const [teamRoles, setTeamRoles] = useState<Array<{ role_id: string; title: string; mission: string; default_model: string }>>([]);
-  const [budgets, setBudgets] = useState<{ daily_cap_usd?: number; daily_spent_usd?: number; daily_remaining_usd?: number }>({});
   const [dryRunResult, setDryRunResult] = useState<string>("");
   const [dryRunBusy, setDryRunBusy] = useState(false);
 
@@ -311,6 +311,7 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const [droidPose, setDroidPose] = useState<{ pan_deg?: number; tilt_deg?: number; zoom?: number; tracking?: boolean }>({});
   const [droidSleeping, setDroidSleeping] = useState(false);
   const [droidVoiceEnrolled, setDroidVoiceEnrolled] = useState<boolean | null>(null);
+  const [droidAutoPark, setDroidAutoPark] = useState<{ enabled: boolean; idle_park_s: number }>({ enabled: true, idle_park_s: 600 });
   const [droidCameraState, setDroidCameraState] = useState("ready");
   const [droidStatusMsg, setDroidStatusMsg] = useState("");
   const [droidBusy, setDroidBusy] = useState(false);
@@ -318,6 +319,10 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
   const droidEpochRef = useRef(0);
   const [mcpNewName, setMcpNewName] = useState("");
   const [mcpNewUrl, setMcpNewUrl] = useState("");
+  const [mcpAetherUrl, setMcpAetherUrl] = useState("http://127.0.0.1:8780/mcp");
+  const [mcpAetherToken, setMcpAetherToken] = useState("");
+  const [mcpPresetBusy, setMcpPresetBusy] = useState("");
+  const [mcpNotice, setMcpNotice] = useState("");
   const [mediaArchive, setMediaArchive] = useState<Array<{ asset_id: string; kind: string; scene_description: string; source_path: string; is_reconstructed: boolean }>>([]);
 
   const transportRef = useRef<HttpSseTransport | null>(null);
@@ -617,11 +622,6 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
       void fetchJson(`${baseUrl}/v1/skills`).then((d) => setSkills(d.skills ?? []));
     } else if (dest === "integrations") {
       void fetchJson(`${baseUrl}/v1/mcp/servers`).then((d) => setMcpServers(d.servers ?? []));
-    } else if (dest === "office") {
-      void fetchJson(`${baseUrl}/v1/business/team`).then((d) => {
-        if (Array.isArray(d.team)) setTeamRoles(d.team);
-        if (d.budgets) setBudgets(d.budgets);
-      });
     } else if (dest === "tasks") {
       void fetchJson(`${baseUrl}/v1/workflows`).then((d) => setWorkflows(d.workflows ?? []));
     } else if (dest === "youtube" || dest === "studio") {
@@ -665,6 +665,12 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
     }
     if (typeof d.voice_enrolled === "boolean") {
       setDroidVoiceEnrolled(d.voice_enrolled);
+    }
+    if (d.reflex && typeof d.reflex === "object") {
+      setDroidAutoPark({
+        enabled: Boolean(d.reflex.auto_park_enabled),
+        idle_park_s: Number(d.reflex.idle_park_s || 600),
+      });
     }
     if (typeof d.estop_active === "boolean") {
       setResources((prev) => (prev.estop_active === d.estop_active ? prev : { ...prev, estop_active: d.estop_active }));
@@ -1469,6 +1475,34 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                 {droidVoiceEnrolled !== null && (
                   <span className="jg-pill">Voice ID: {droidVoiceEnrolled ? "Enrolled" : "Not enrolled"}</span>
                 )}
+                <button
+                  type="button"
+                  className="jg-pill"
+                  style={{ cursor: "pointer" }}
+                  title="Privacy reflex: automatically park camera when idle"
+                  onClick={async () => {
+                    const nextEnabled = !droidAutoPark.enabled;
+                    try {
+                      const r = await fetch(`${baseUrl}/v1/droid/reflex`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ auto_park_enabled: nextEnabled }),
+                      });
+                      const d = await r.json();
+                      if (d.ok && d.reflex) {
+                        setDroidAutoPark({
+                          enabled: Boolean(d.reflex.auto_park_enabled),
+                          idle_park_s: Number(d.reflex.idle_park_s || 600),
+                        });
+                        setDroidStatusMsg(nextEnabled ? `Privacy auto-park enabled (${Math.round((d.reflex.idle_park_s || 600) / 60)}m idle).` : "Privacy auto-park paused.");
+                      }
+                    } catch {
+                      setDroidStatusMsg("Could not update Droid auto-park reflex.");
+                    }
+                  }}
+                >
+                  Auto-Park: {droidAutoPark.enabled ? `${Math.round(droidAutoPark.idle_park_s / 60)}m` : "OFF"}
+                </button>
               </div>
               {droidVoiceEnrolled === false && (
                 <div className="jg-muted" role="status" style={{ fontSize: 12.5 }}>
@@ -1583,6 +1617,16 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                 visibleTopicId={visibleTopicId}
                 busy={loadingOlder} onJump={jumpToTopic} onResume={resumeTopic} onLatest={jumpToLatest} />
             <div className="jg-chat-column">
+              {dest === "chat" && (
+                <ReturnBriefingBanner
+                  baseUrl={baseUrl}
+                  onOpenOffice={() => setDest("office")}
+                  onOpenApprovals={() => {
+                    setRightSidebarTab("mind");
+                    setRightSidebarOpen(true);
+                  }}
+                />
+              )}
               <div
                 className="jg-content"
                 ref={viewportRef}
@@ -1890,30 +1934,12 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         )}
 
         {dest === "office" && (
-          <div className="jg-content jg-workspace-page">
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                <h3 style={{ margin: 0 }}>Autonomous Business Team Roles</h3>
-                {budgets.daily_cap_usd !== undefined && (
-                  <span className="jg-pill">
-                    Daily Budget: ${budgets.daily_spent_usd?.toFixed(2) ?? "0.00"} / ${budgets.daily_cap_usd.toFixed(2)}
-                  </span>
-                )}
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10 }}>
-                {teamRoles.length === 0 && <p className="jg-muted">No team roles returned by the Gateway.</p>}
-                {teamRoles.map((role) => (
-                  <div key={role.role_id} className="jg-card">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <strong>{role.title}</strong>
-                      <span className="jg-pill">{role.default_model}</span>
-                    </div>
-                    <p className="jg-muted" style={{ marginBottom: 0 }}>{role.mission}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <OfficeWorkspace
+            baseUrl={baseUrl}
+            onOpenChat={() => setDest("chat")}
+            onOpenWorkflows={() => setDest("tasks")}
+            onOpenDroid={() => setDest("droid")}
+          />
         )}
 
         {dest === "tools" && <ToolsPage baseUrl={baseUrl} />}
@@ -1937,10 +1963,120 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
         )}
 
         {dest === "integrations" && (
-          <div className="jg-content jg-workspace-page">
+          <div className="jg-content jg-workspace-page" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div className="jg-card">
+                <h4 style={{ marginTop: 0, marginBottom: 8 }}>One-Click Ecosystem MCP Presets</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
+                  <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <strong>Aether Studio &amp; Aether-CAD</strong>
+                      <span className="jg-pill">streamable_http</span>
+                    </div>
+                    <div className="jg-muted" style={{ fontSize: 12 }}>
+                      17 CAD part/assembly tools + viewport PNG visual inspection (`:8780`).
+                    </div>
+                    <input
+                      className="jg-input"
+                      aria-label="Aether Studio MCP URL"
+                      placeholder="http://127.0.0.1:8780/mcp"
+                      value={mcpAetherUrl}
+                      onChange={(e) => setMcpAetherUrl(e.target.value)}
+                    />
+                    <input
+                      className="jg-input"
+                      type="password"
+                      aria-label="Aether Studio Bearer Token"
+                      placeholder="Agent Connection Bearer Token (optional)"
+                      value={mcpAetherToken}
+                      onChange={(e) => setMcpAetherToken(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="jg-btn jg-btn-primary"
+                      disabled={mcpPresetBusy !== ""}
+                      onClick={async () => {
+                        setMcpPresetBusy("aether_studio");
+                        setMcpNotice("");
+                        try {
+                          const r = await fetch(`${baseUrl}/v1/mcp/servers`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              preset: "aether_studio",
+                              url: mcpAetherUrl.trim() || "http://127.0.0.1:8780/mcp",
+                              bearer_token: mcpAetherToken.trim() || undefined,
+                              connect: true,
+                            }),
+                          });
+                          const d = await r.json();
+                          if (r.ok) {
+                            setMcpServers(d.servers ?? []);
+                            setMcpAetherToken("");
+                            setMcpNotice("Saved Aether Studio MCP preset.");
+                          } else {
+                            setMcpNotice(d.error || "Could not add Aether Studio preset.");
+                          }
+                        } catch {
+                          setMcpNotice("Gateway unreachable.");
+                        } finally {
+                          setMcpPresetBusy("");
+                        }
+                      }}
+                    >
+                      {mcpPresetBusy === "aether_studio" ? "Connecting…" : "Connect Aether Studio"}
+                    </button>
+                  </div>
+
+                  <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <strong>REA (Reverse Engineer Anything)</strong>
+                      <span className="jg-pill">stdio</span>
+                    </div>
+                    <div className="jg-muted" style={{ fontSize: 12 }}>
+                      Bridges Ghidra, Hopper, JADX, Electron &amp; APK binary analysis via <code>npx -y rea-agents mcp</code>.
+                    </div>
+                    <button
+                      type="button"
+                      className="jg-btn"
+                      style={{ marginTop: "auto" }}
+                      disabled={mcpPresetBusy !== ""}
+                      onClick={async () => {
+                        setMcpPresetBusy("rea");
+                        setMcpNotice("");
+                        try {
+                          const r = await fetch(`${baseUrl}/v1/mcp/servers`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ preset: "rea", connect: true }),
+                          });
+                          const d = await r.json();
+                          if (r.ok) {
+                            setMcpServers(d.servers ?? []);
+                            setMcpNotice("Saved REA MCP preset.");
+                          } else {
+                            setMcpNotice(d.error || "Could not add REA preset.");
+                          }
+                        } catch {
+                          setMcpNotice("Gateway unreachable.");
+                        } finally {
+                          setMcpPresetBusy("");
+                        }
+                      }}
+                    >
+                      {mcpPresetBusy === "rea" ? "Connecting…" : "Connect REA"}
+                    </button>
+                  </div>
+                </div>
+                {mcpNotice && (
+                  <div className="jg-muted" role="status" style={{ fontSize: 12, marginTop: 8 }}>
+                    {mcpNotice}
+                  </div>
+                )}
+              </div>
+
               <div className="jg-card">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <h4 style={{ margin: 0 }}>Live MCP Servers (Aether / Resolve / Blender)</h4>
+                  <h4 style={{ margin: 0 }}>Live MCP Servers (Aether / REA / Resolve / Blender)</h4>
                   <button
                     type="button"
                     className="jg-btn-ghost"
@@ -1977,9 +2113,22 @@ export function JaegerApp({ baseUrl = "" }: JaegerAppProps) {
                   <div className="jg-muted">No external MCP servers configured in ~/.jaeger/mcp_servers.json yet.</div>
                 ) : (
                   mcpServers.map((m) => (
-                    <div key={m.name} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--jg-border-subtle)" }}>
+                    <div key={m.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--jg-border-subtle)" }}>
                       <span>{m.name} ({m.transport})</span>
-                      <span className="jg-pill">{m.connected ? `Connected (${m.tools_count})` : "Offline"}</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span className="jg-pill">{m.connected ? `Connected (${m.tools_count})` : "Offline"}</span>
+                        <button
+                          type="button"
+                          className="jg-btn-ghost"
+                          style={{ fontSize: 11.5 }}
+                          onClick={async () => {
+                            const r = await fetch(`${baseUrl}/v1/mcp/servers/${encodeURIComponent(m.name)}`, { method: "DELETE" });
+                            if (r.ok) setMcpServers((await r.json()).servers ?? []);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}

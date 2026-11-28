@@ -8,6 +8,7 @@ exclude = [
     "packages/jaeger-ui-sdk",
     "packages/jaeger-ui-kit",
     "packages/jaeger-ui-avatar",
+    "packages/jaeger-ui-office",
     "packages/jaeger-ui-features",
 ]
 
@@ -48,7 +49,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jaeger-ai"
-description = "JaegerAI: Persistent, local-first modular AI platform (29 standalone Python + 5 React 19 packages)"
+description = "JaegerAI: Persistent, local-first modular AI platform (30 standalone backend + 6 React 19 UI packages)"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dynamic = ["version"]
@@ -78,3 +79,4 @@ namespaces = true
 # Golden Rule #1: zero in-repo runtime junk — never create .pytest_cache in the repo root
 # (dev/tests/test_ci_hygiene.py forbids it).
 addopts = "-p no:cacheprovider"
+asyncio_default_fixture_loop_scope = "function"

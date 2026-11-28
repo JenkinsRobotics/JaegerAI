@@ -977,3 +977,71 @@ async def test_serve_modular_gateway_splits_webui_host_and_private_policy(
 
     assert started_sites == [("127.0.0.1", 43418, True), ("0.0.0.0", 48790, True)]
     assert captured_auths == [(False, False), (True, True)]
+
+
+@pytest.mark.asyncio
+async def test_cookbook_roundtable_research_and_apple_tools_gateway(tmp_path: Path) -> None:
+    from aiohttp.test_utils import TestClient, TestServer
+    from jaeger_gateway.runtime import ModularGatewayRuntime
+    from jaeger_models import ReplayModel
+
+    rt = ModularGatewayRuntime(state_dir=tmp_path / "state", workspace=tmp_path)
+    rt.model = ReplayModel(
+        [
+            {"content": "Aluminum 6061 is ideal."},
+            {"content": "Consensus: Aluminum 6061."},
+        ],
+        model_id="local/test-model",
+    )
+    try:
+        names = {t["name"] for t in rt.tools.list_tools(limit=200)}
+        for expected in (
+            "apple_calendar",
+            "apple_reminders",
+            "apple_notes",
+            "model_cookbook",
+            "model_roundtable",
+            "deep_research",
+        ):
+            assert expected in names, f"missing tool {expected}"
+
+        app = rt.build_app(serve_ui=False)
+        async with TestClient(TestServer(app)) as client:
+            r_cb = await client.get("/v1/models/cookbook?ram_gb=32&modality=llm")
+            assert r_cb.status == 200
+            cb_data = await r_cb.json()
+            assert cb_data["ok"] is True and cb_data["count"] >= 4
+            assert cb_data["hardware"]["total_ram_gb"] == 32.0
+
+            r_rt = await client.post(
+                "/v1/models/roundtable",
+                json={"prompt": "Best chassis alloy?", "blind": True, "consensus": True},
+            )
+            assert r_rt.status == 200
+            rt_data = await r_rt.json()
+            assert rt_data["ok"] is True and rt_data["blind"] is True
+            assert len(rt_data["responses"]) == 1
+
+            r_rep = await client.get("/v1/research/reports")
+            assert r_rep.status == 200
+            rep_data = await r_rep.json()
+            assert rep_data["ok"] is True and rep_data["reports"] == []
+
+            # Dual plan/build mode toggle
+            r_m0 = await client.get("/v1/system/mode")
+            assert (await r_m0.json())["mode"] == "build"
+            r_m1 = await client.post("/v1/system/mode", json={"mode": "plan"})
+            assert r_m1.status == 200 and (await r_m1.json())["mode"] == "plan"
+
+            # Retained evidence paging route
+            ev_sum = rt.evidence.retain("alpha\nbeta\ngamma\n" * 40, source_tool="test_dump")
+            r_ev = await client.get(f"/v1/evidence/{ev_sum.evidence_id}?offset=0&limit=200")
+            assert r_ev.status == 200
+            ev_data = await r_ev.json()
+            assert ev_data["ok"] is True and "alpha" in ev_data["text"]
+
+            # External agent importer discovery
+            r_imp = await client.get("/v1/skills/importers")
+            assert r_imp.status == 200 and (await r_imp.json())["ok"] is True
+    finally:
+        rt.close()

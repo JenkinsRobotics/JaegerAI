@@ -204,3 +204,112 @@ def test_builtin_web_fetch_429_and_macos_mail_contract(tmp_path: Path, monkeypat
         assert "Work: INBOX" in mail_res.output
         assert captured == {"timeout_seconds": 20.0, "target": "mail"}
 
+
+def test_tailscale_peer_discovery_and_verified_host_registration(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    from jaeger_tools import RemoteHostRegistry, discover_tailscale_peers, register_tailscale_peer
+
+    fake_status = json.dumps({
+        "BackendState": "Running",
+        "Self": {"HostName": "MacStudio", "DNSName": "macstudio.tail.ts.net.", "TailscaleIPs": ["100.64.0.20"], "OS": "macOS"},
+        "Peer": {
+            "k1": {"HostName": "RackPCExample", "DNSName": "rackpcexample.tail.ts.net.", "TailscaleIPs": ["100.64.0.21"], "OS": "windows", "Online": True},
+            "k2": {"HostName": "LabPi", "DNSName": "labpi.tail.ts.net.", "TailscaleIPs": ["100.64.1.9"], "OS": "linux", "Online": False},
+        },
+    })
+
+    def fake_runner_ssh_closed(argv, **kwargs):
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=fake_status, stderr="")
+        return subprocess.CompletedProcess(argv, 255, stdout="", stderr="Connection refused")
+
+    disc = discover_tailscale_peers(tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_closed)
+    assert disc["ok"] is True
+    assert disc["online_count"] == 1 and disc["total_count"] == 2
+    assert disc["peers"][0]["hostname"] == "RackPCExample"
+
+    reg = RemoteHostRegistry(tmp_path / "remote_hosts.json")
+    # Non-Tailscale IP is rejected (Tailscale is the sole trust boundary)
+    denied = register_tailscale_peer(reg, "192.168.1.99", tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_closed)
+    assert denied["ok"] is False and "Tailscale" in denied["error"]
+
+    # Substring "rack" uniquely matches RackPCExample, writes remote_hosts.json, and gives Windows OpenSSH hint
+    res = register_tailscale_peer(reg, "rack", user="matthew", tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_closed)
+    assert res["ok"] is True
+    assert res["registered"]["alias"] == "rackpcexample"
+    assert res["registered"]["hostname"] == "100.64.0.21"
+    assert res["ssh_probe"]["reachable"] is False
+    assert "OpenSSH.Server" in res["ssh_probe"]["setup_hint"]
+
+    # When SSH responds, probe succeeds cleanly
+    def fake_runner_ssh_ok(argv, **kwargs):
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=fake_status, stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="JAEGER_SSH_OK\n", stderr="")
+
+    ok_res = register_tailscale_peer(reg, "RackPCExample", tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_ok)
+    assert ok_res["ok"] is True and ok_res["ssh_probe"]["reachable"] is True
+
+
+def test_remote_connect_reuses_ssh_config_profile_when_allowlist_starts_empty(tmp_path: Path) -> None:
+    import subprocess
+    from jaeger_tools import RemoteHostRegistry, connect_remote_host, discover_ssh_config_hosts
+
+    ssh_cfg = tmp_path / "ssh_config"
+    ssh_cfg.write_text(
+        "\n".join([
+            "Host *",
+            "  ServerAliveInterval 60",
+            "",
+            "Host rack-pc-lan",
+            "  HostName 10.0.0.20",
+            "  User matthew",
+            "  IdentityFile ~/.ssh/id_ed25519",
+            "",
+            "Host rack-pc-overlay",
+            "  HostName 100.64.0.21",
+            "  User matthew",
+        ]),
+        encoding="utf-8",
+    )
+
+    disc = discover_ssh_config_hosts(ssh_cfg)
+    assert disc["ok"] is True
+    aliases = [h["alias"] for h in disc["hosts"]]
+    assert aliases == ["rack-pc-lan", "rack-pc-overlay"]
+    # Never exposes IdentityFile or key contents
+    assert all("identity_file" not in h for h in disc["hosts"])
+
+    # Acceptance test: remote_hosts.json starts EMPTY, user asks for "my rack pc"
+    reg = RemoteHostRegistry(tmp_path / "remote_hosts.json")
+    assert reg.list_public() == []
+
+    seen_argvs: list[list[str]] = []
+
+    def fake_ssh_runner(argv, **kwargs):
+        seen_argvs.append(list(argv))
+        if "rack-pc-lan" in argv and "hostname" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="RackPCExample\n", stderr="")
+        return subprocess.CompletedProcess(argv, 255, stdout="", stderr="unreachable")
+
+    res = connect_remote_host(
+        reg,
+        "my rack pc",
+        ssh_config_path=ssh_cfg,
+        tailscale_bin="/nonexistent/tailscale",
+        runner=fake_ssh_runner,
+    )
+    assert res["ok"] is True
+    assert res["connected"] is True
+    assert res["via"] == "ssh_config:rack-pc-lan"
+    assert res["remote_hostname"] == "RackPCExample"
+    assert res["ready_for_remote_exec"] is True
+    # Registered cleanly in remote_hosts.json without copying private keys
+    saved = reg.list_public()
+    assert len(saved) == 1
+    assert saved[0]["alias"] == "rack-pc-lan"
+    assert saved[0]["hostname"] == "rack-pc-lan"
+    assert saved[0]["identity_file"] == ""
+    assert any("ClearAllForwardings=yes" in a for a in seen_argvs[0])
+

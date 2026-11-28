@@ -17,8 +17,14 @@ from typing import Any, Mapping
 
 from aiohttp import web
 
-from jaeger_authority import MacOsSeatbeltSandbox, PolicyEngine, UnconfinedSandbox, redact_text
-from jaeger_avatar import AvatarLink, AvatarStore
+from jaeger_authority import (
+    MacOsSeatbeltSandbox,
+    PolicyEngine,
+    UnconfinedSandbox,
+    evaluate_cloud_egress,
+    redact_text,
+)
+from jaeger_avatar import AvatarLink, AvatarStore, discover_avatar_packs
 from jaeger_business import BusinessStore
 from jaeger_channels import (
     ChannelConfigStore,
@@ -32,47 +38,98 @@ from jaeger_channels import (
     build_slack_adapter,
     build_telegram_adapter,
 )
-from jaeger_cognition import CharacterOverlay, CognitiveLifeLoop, IdentityStore, InitiativeEngine, WorldModelStore
+from jaeger_cognition import (
+    CharacterOverlay,
+    CognitiveLifeLoop,
+    IdentityStore,
+    InitiativeEngine,
+    PostTaskReflector,
+    WorldModelStore,
+)
 from jaeger_contracts import AutonomyMode, SandboxProfile, ToolResult
 from jaeger_droid import HostDroidEmbodiment
 from jaeger_embodiment_minecraft import MinecraftEmbodiment, MinecraftSkillLibrary
 from jaeger_events import EventBus
-from jaeger_hardware import JP01Embodiment
-from jaeger_loop import AgentLoop, LearningNudgeTracker, TurnContext
+from jaeger_hardware import JP01Embodiment, NexusStationBridge, build_jp01_telemetry_channels
+from jaeger_loop import (
+    PLAN_MODE_SYSTEM_NOTE,
+    AgentLoop,
+    AgentMode,
+    LearningNudgeTracker,
+    PlanModeMiddleware,
+    TurnContext,
+)
 from jaeger_mcp import (
     LiveMCPManager,
     MCPServerConfig,
+    build_preset_config,
+    list_mcp_presets,
     load_mcp_server_configs,
     remove_mcp_server_config,
     save_mcp_server_config,
 )
-from jaeger_memory import PersistentLearningStore, SqliteStateMemory, export_memory_markdown, sync_memory_markdown
+from jaeger_memory import (
+    LocalWikiStore,
+    PersistentLearningStore,
+    SqliteStateMemory,
+    export_memory_markdown,
+    sync_memory_markdown,
+)
 from jaeger_models import (
+    RISK_FLAG_CATALOG,
     ConversationCacheMarkStore,
+    EvalCandidate,
     HybridRoutingStore,
+    ModelEvalSuite,
+    ModelRoundtable,
+    ModelUsageLedger,
     OllamaModel,
+    RoundtableParticipant,
     StickyFallbackModel,
     bind_stream_sink,
     build_default_model,
+    build_static_risk_card,
+    estimate_model_pricing,
+    fetch_ollama_cloud_telemetry,
+    fetch_openrouter_telemetry,
+    recommend_models,
 )
 from jaeger_orchestration import (
+    DeepResearchEngine,
     DryRunSimulator,
     DurableMailbox,
+    KanbanBoard,
+    OneShotReminderStore,
     PriorityTier,
     ResourceGovernor,
     SubagentOrchestrator,
     WorkflowEngine,
+    list_research_reports,
 )
 from jaeger_realtime import RealtimeVoiceSession
 from jaeger_reliability import ReliabilityEngine
-from jaeger_skills import WorkspaceSkillStore, ensure_starter_skills, scan_skill
+from jaeger_skills import (
+    WorkspaceSkillStore,
+    discover_external_agents,
+    ensure_starter_skills,
+    import_external_agent,
+    scan_skill,
+)
 from jaeger_tools import (
+    BrowserRunJudge,
     PtySessionManager,
     RemoteHostRegistry,
+    RetainedEvidenceStore,
+    SiteGotchasStore,
     SSHBackend,
     ToolRegistry,
     ToolSpec,
+    connect_remote_host,
+    discover_remote_routes,
+    discover_tailscale_peers,
     register_builtin_tools,
+    register_tailscale_peer,
+    web_search,
 )
 from jaeger_vision import RollingFrameBuffer
 from jaeger_youtube import MediaArchiveStore, YouTubeStudioStore, search_public_videos
@@ -81,8 +138,10 @@ from jaeger_youtube.browse import BrowserWorkerClient, YouTubeBrowserSession
 from jaeger_youtube.data_api import latest_playlist_video
 
 from .auth import GatewayAuthPolicy
+from .authorized_tasks import AuthorizedGrantStore, AuthorizedTaskEngine
 from .browser_manager import BrowserWorkerManager
 from .coordinator import OWNER_SCHEDULE_PROPOSAL_ALLOWED, RunCoordinator
+from .global_events import GlobalEventBus
 from .server import create_gateway_app
 from .store import MAIN_CHAT_SESSION_ID, GatewayStore
 from .supervised_browser import SupervisedBrowser
@@ -103,12 +162,19 @@ def _env_truthy(name: str, default: bool = False) -> bool:
 
 
 class _SseLoopMiddleware:
-    """Bridges AgentLoop model/tool events live into SessionEventHub SSE frames."""
+    """Bridges AgentLoop model/tool events live into SessionEventHub & GlobalEventBus SSE frames."""
 
-    def __init__(self, session_id: str, generation: int, hub: SessionEventHub) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        generation: int,
+        hub: SessionEventHub,
+        global_bus: GlobalEventBus | None = None,
+    ) -> None:
         self._session_id = session_id
         self._generation = generation
         self._hub = hub
+        self._global_bus = global_bus
 
     def on_model_call(self, ctx: TurnContext, call_next: Any) -> Mapping[str, Any]:
         streamed_any = False
@@ -155,6 +221,11 @@ class _SseLoopMiddleware:
             {"call_id": call_id, "tool": tool_name, "arguments": dict(arguments), "step": ctx.step},
             generation=self._generation,
         )
+        if self._global_bus is not None:
+            self._global_bus.publish(
+                "office.tool_started",
+                {"session_id": self._session_id, "call_id": call_id, "tool": tool_name, "step": ctx.step},
+            )
         if tool_name in {
             "supervised_browser",
             "propose_scheduled_job",
@@ -184,6 +255,17 @@ class _SseLoopMiddleware:
             },
             generation=self._generation,
         )
+        if self._global_bus is not None:
+            self._global_bus.publish(
+                "office.tool_finished",
+                {
+                    "session_id": self._session_id,
+                    "call_id": call_id,
+                    "tool": tool_name,
+                    "ok": bool(res.ok),
+                    "duration_ms": duration_ms,
+                },
+            )
         return res
 
 
@@ -214,8 +296,17 @@ class ModularGatewayRuntime:
 
         self.tool_workspace = ToolWorkspace(self.workspace)
         self.events = EventBus()
+        self.global_bus = GlobalEventBus()
+        self._last_mc_chat_reply_at = 0.0
         self.memory = SqliteStateMemory(self.state_dir)
         self.learning = PersistentLearningStore(self.state_dir)
+        self.wiki = LocalWikiStore(self.state_dir / "wiki")
+        self.evidence = RetainedEvidenceStore(self.state_dir / "evidence")
+        self.site_gotchas = SiteGotchasStore(self.state_dir / "browser_gotchas.json")
+        self.browser_judge = BrowserRunJudge(gotchas_store=self.site_gotchas)
+        self.board = KanbanBoard(self.state_dir / "board.sqlite3")
+        self.reminders = OneShotReminderStore(self.state_dir / "board.sqlite3")
+        self._agent_mode = AgentMode.BUILD
         self.workflows = WorkflowEngine(self.state_dir / "workflows.sqlite3")
         self.dry_run = DryRunSimulator()
         self.governor = ResourceGovernor(memory_cap_gb=24.0, idle_cooldown_s=60.0)
@@ -224,6 +315,7 @@ class ModularGatewayRuntime:
         self.avatars = AvatarStore(self.state_dir)
         self.avatar_link = AvatarLink(state_dir=self.state_dir)
         self.routing = HybridRoutingStore(self.state_dir)
+        self.model_ledger = ModelUsageLedger(self.state_dir / "model_telemetry.sqlite3")
         try:
             ensure_starter_skills(self.state_dir / "skills")
         except Exception:  # noqa: BLE001
@@ -242,7 +334,12 @@ class ModularGatewayRuntime:
         self.jp01 = JP01Embodiment(dry_run=True)
         self.voice_presence = RealtimeVoiceSession()
         self.vision = RollingFrameBuffer(max_frames=6, max_total_mb=24.0)
-        self.droid = HostDroidEmbodiment(vision_buffer=self.vision, world_model=self.world, probe_on_init=False)
+        self.droid = HostDroidEmbodiment(
+            vision_buffer=self.vision,
+            world_model=self.world,
+            probe_on_init=False,
+            on_reflex_event=self._on_droid_reflex_event,
+        )
         self.governor.register_idle_preempt_hook(lambda reason: self.minecraft.pause(reason=reason))
         self.cognition = CognitiveLifeLoop(
             world=self.world,
@@ -252,6 +349,14 @@ class ModularGatewayRuntime:
         )
         self.cognition.register_idle_life_handler("minecraft", lambda _snap: self.minecraft.act("idle_tick"))
         self.store = GatewayStore(self.state_dir / "modular_gateway.sqlite3")
+        self.reflector = PostTaskReflector(
+            learning_store=self.learning,
+            world_model=self.world,
+            skill_saver=lambda name, md: WorkspaceSkillStore(self.workspace).save(name=name, markdown=md),
+            memory_sync=self._sync_memory_md,
+            event_publisher=self.global_bus.publish,
+            is_estop=lambda: bool(self.governor.snapshot().get("estop_active")),
+        )
         self.initiative = InitiativeEngine(
             self.state_dir,
             goal_provider=lambda: [g.to_dict() for g in self.learning.list_goals(status="active")],
@@ -263,6 +368,7 @@ class ModularGatewayRuntime:
             max_actions_per_hour=4,
         )
         self.cognition.register_proactive_handler("scheduler_heartbeat", self._cognition_heartbeat)
+        self.cognition.register_proactive_handler("minecraft_chat_bridge", self._poll_minecraft_chat_tick)
         self.cognition.register_proactive_handler("autonomous_initiative", self.initiative.evaluate_tick)
         self.hub = SessionEventHub(save_tool_receipt=self.store.save_tool_receipt)
         self.reliability = ReliabilityEngine(
@@ -274,6 +380,12 @@ class ModularGatewayRuntime:
         self._supervised_browser_instance: SupervisedBrowser | None = None
         self.remote_hosts = RemoteHostRegistry(self.state_dir / "remote_hosts.json")
         self.ssh_backend = SSHBackend(self.remote_hosts)
+        self.authorized_grants = AuthorizedGrantStore(self.state_dir, default_workspace=self.workspace)
+        self.authorized_tasks = AuthorizedTaskEngine(
+            grants=self.authorized_grants,
+            remote_hosts=self.remote_hosts,
+            workspace=self.workspace,
+        )
         self.nudges = LearningNudgeTracker()
         self.mailbox = DurableMailbox(self.state_dir)
         self.subagents = SubagentOrchestrator(
@@ -287,6 +399,10 @@ class ModularGatewayRuntime:
 
         safe_read_roots = (
             self.state_dir / "offload",
+            self.state_dir / "reports",
+            self.state_dir / "venv",
+            self.state_dir / "MEMORY.md",
+            self.state_dir / "USER.md",
             self.state_dir / "instances" / "truth" / "logs" / "tool_results",
         )
         self.policy = PolicyEngine(
@@ -321,7 +437,7 @@ class ModularGatewayRuntime:
         self.cache_health = ConversationCacheMarkStore()
         self._mcp_config_path = self.state_dir / "mcp_servers.json"
         mcp_configs = load_mcp_server_configs(self._mcp_config_path)
-        self.mcp = LiveMCPManager(mcp_configs)
+        self.mcp = LiveMCPManager(mcp_configs, image_dir=self.state_dir / "offload" / "mcp_images")
         if mcp_configs:
             try:
                 self.mcp.register_into_registry(self.tools)
@@ -415,6 +531,7 @@ class ModularGatewayRuntime:
                 poll_cids = [str(c).strip() for c in (dc_cfg.get("channel_ids") or ()) if str(c).strip()]
                 if dc_bot and poll_cids and bool(dc_cfg.get("poll_inbound", True)):
                     allowed_u = {str(u).strip() for u in (dc_cfg.get("allowed_user_ids") or ()) if str(u).strip()}
+                    mentions = [str(m).strip() for m in (dc_cfg.get("mention_tokens") or ()) if str(m).strip()]
                     self.channel_ingress.register_poller(
                         "discord",
                         DiscordChannelPoller(
@@ -424,6 +541,7 @@ class ModularGatewayRuntime:
                             allowed_user_ids=allowed_u or None,
                             auto_reply_owner=bool(dc_cfg.get("auto_reply_owner", False)),
                             api_base=dc_base,
+                            mention_tokens=mentions or None,
                         ),
                     )
             except Exception:  # noqa: BLE001
@@ -503,7 +621,15 @@ class ModularGatewayRuntime:
             )
 
     def _cognition_heartbeat(self, _ctx: dict[str, Any]) -> dict[str, Any]:
-        """Lightweight proactive cognitive tick updating scheduler & channel awareness."""
+        """Lightweight proactive cognitive tick updating scheduler, reminders & channel awareness."""
+        for rem in self.reminders.claim_due():
+            self.global_bus.publish("reminder.fired", rem.to_dict())
+            self.world.record_perception(
+                modality="reminder",
+                kind="oneshot_due",
+                payload={"summary": f"Reminder due: {rem.message[:160]}", **rem.to_dict()},
+                salience=0.9,
+            )
         pending = len(self.store.list_scheduled_jobs(MAIN_CHAT_SESSION_ID, status="pending"))
         self.world.observe(
             domain="system",
@@ -566,10 +692,119 @@ class ModularGatewayRuntime:
                     return {"acted": False}
             else:
                 return {"acted": False}
+        # Poll inbound player chat so Jaeger reacts naturally in co-op worlds
+        chat_res = self._poll_minecraft_chat_tick({"source": "initiative"})
+        if chat_res.get("acted"):
+            return chat_res
+        # Skip wandering if actively following a teammate in co-op mode
+        follow_cfg = ((state.get("modes") or {}).get("follow_player") or {})
+        if follow_cfg.get("enabled"):
+            return {"acted": False}
         step = self.minecraft.act("idle_tick")
         if step.get("ok") and step.get("live"):
             self.minecraft.checkpoint(reason="autonomous_step")
+            self.global_bus.publish("minecraft.step", {"position": step["state"].get("position")})
             return {"acted": True, "summary": str(step.get("summary") or f"Minecraft tick {step['state']['ticks']}")}
+        return {"acted": False}
+
+    def _on_droid_reflex_event(self, event: str, payload: Mapping[str, Any]) -> None:
+        self.world.record_perception(
+            modality="hardware",
+            kind=event,
+            payload={"summary": f"Droid reflex: {event}", **dict(payload)},
+            salience=0.7,
+        )
+        self.global_bus.publish(event, dict(payload))
+
+    def _poll_minecraft_chat_tick(self, _ctx: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Lightweight 15s co-op bridge: reacts to inbound Minecraft player chat via reflexes or LLM."""
+        if self.governor.snapshot().get("estop_active"):
+            return {"acted": False}
+        mc_state = self.minecraft.observe().get("state") or {}
+        if not mc_state.get("connected"):
+            return {"acted": False}
+        inbox = self.minecraft.poll_chat_inbox()
+        msgs = list(inbox.get("messages") or [])
+        if not msgs:
+            return {"acted": False}
+        latest = msgs[-1]
+        sender = str(latest.get("username") or "player")
+        text = str(latest.get("message") or "").strip()
+        if not text:
+            return {"acted": False}
+        return self._handle_minecraft_chat_message(sender, text)
+
+    def _handle_minecraft_chat_message(self, sender: str, text: str) -> dict[str, Any]:
+        """Handle one inbound Minecraft player chat message (instant reflex or freeform LLM reply)."""
+        self.world.record_perception(
+            modality="minecraft",
+            kind="chat",
+            payload={"summary": f"[MC Chat] {sender}: {text[:160]}", "username": sender, "message": text},
+            salience=0.85,
+        )
+        self.world.observe(
+            domain="embodiment",
+            key="minecraft_last_chat",
+            value={"username": sender, "message": text[:200], "timestamp": time.time()},
+            source="jaeger-embodiment-minecraft",
+        )
+        self.global_bus.publish("minecraft.chat", {"username": sender, "message": text[:200]})
+        low = text.lower()
+        if "follow" in low:
+            self.minecraft.act("follow_player", {"player": sender, "distance": 3})
+            self.minecraft.act("chat", {"message": f"On my way, {sender}! Following you now."})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: started following"}
+        if "come" in low or "over here" in low:
+            self.minecraft.act("go_to_player", {"player": sender, "distance": 3})
+            self.minecraft.act("chat", {"message": f"Coming over to you, {sender}!"})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: moved to player"}
+        if "stop" in low or "stay" in low:
+            self.minecraft.act("stop_actions", {})
+            self.minecraft.act("chat", {"message": f"Got it {sender}, holding position."})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: stopped actions"}
+        if "guard" in low:
+            self.minecraft.act("guard_area", {"radius": 10})
+            self.minecraft.act("chat", {"message": f"Copy that {sender}, guarding this area!"})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: guarding area"}
+        if "sleep" in low or "bed" in low:
+            res = self.minecraft.act("go_to_bed", {})
+            reply = str(res.get("summary") or "Looking for a bed!")[:160]
+            self.minecraft.act("chat", {"message": reply})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: bed check"}
+        if "eat" in low:
+            res = self.minecraft.act("eat", {})
+            reply = str(res.get("summary") or "Checking food...")[:160]
+            self.minecraft.act("chat", {"message": reply})
+            return {"acted": True, "summary": f"Co-op chat from {sender}: eat check"}
+
+        # Freeform conversational co-op reply via Jaeger's real model (rate-limited)
+        now = time.time()
+        if now - self._last_mc_chat_reply_at < 5.0:
+            return {"acted": False, "reason": "cooldown"}
+        self._last_mc_chat_reply_at = now
+        try:
+            model = self._background_model()
+            ident = self.identity.get().to_dict()
+            ai_name = str(ident.get("ai_name") or "Jaeger")
+            sys_prompt = (
+                f"You are {ai_name} playing Minecraft co-op right now alongside {sender}. "
+                "Reply in ONE natural, friendly, concise sentence (under 150 characters, no markdown). "
+                + self._awareness_brief()
+            )
+            resp = model.generate(
+                messages=[
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": f"{sender} said in Minecraft chat: {text}"},
+                ],
+                tools=(),
+            )
+            reply_text = " ".join(str(resp.get("content") or "").split())[:175].strip()
+            if reply_text:
+                self.minecraft.act("chat", {"message": reply_text})
+                self.global_bus.publish("minecraft.reply", {"to": sender, "message": reply_text})
+                return {"acted": True, "summary": f"Replied in MC chat to {sender}: {reply_text}"}
+        except Exception:  # noqa: BLE001
+            pass
         return {"acted": False}
 
     def _autonomous_maintenance_step(self, _payload: dict[str, Any]) -> dict[str, Any]:
@@ -695,6 +930,10 @@ class ModularGatewayRuntime:
             "task": clean_task[:240],
             "started_at": time.time(),
         }
+        self.global_bus.publish(
+            "subagent.spawned",
+            {"agent_id": agent_id, "role": clean_role, "read_only": bool(read_only), "task": clean_task[:120]},
+        )
         if not wait:
             return {"agent_id": agent_id, "role": clean_role, "status": "running"}
         res = self.subagents.await_result(agent_id, timeout=max(1.0, min(float(timeout_s), 180.0)))
@@ -989,6 +1228,24 @@ class ModularGatewayRuntime:
             source="jaeger-droid",
         )
         _reg(
+            "inspect_image",
+            "Visually inspect a saved PNG/JPEG/WebP image file (e.g. an Aether-CAD viewport render saved by MCP) using Jaeger's local vision model.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "prompt": {"type": "string", "default": "Describe what you see accurately, including geometry, labels, and any visual defects."},
+                },
+                "required": ["path"],
+            },
+            lambda args: self._inspect_saved_image(
+                path=str(args["path"]),
+                prompt=str(args.get("prompt") or "Describe what you see accurately."),
+            ),
+            read_only=True,
+            source="jaeger-vision",
+        )
+        _reg(
             "droid_capture",
             "Capture a single live frame from the connected host camera into the bounded RollingFrameBuffer and WorldModel.",
             {
@@ -1037,15 +1294,36 @@ class ModularGatewayRuntime:
         )
         _reg(
             "minecraft_act",
-            "Control Jaeger's headless Minecraft embodiment (connect, disconnect, set_goal, move_to, gather, chat, step, checkpoint, pause).",
+            "Control Jaeger's headless Minecraft embodiment including Mindcraft & ARES co-op actions "
+            "(connect, disconnect, set_goal, move_to, gather, chat, read_chat, nearby_players, "
+            "follow_player, go_to_player, give_to_player, eat, go_to_bed, guard_area, build_blueprint, "
+            "save_location, list_locations, goto_location, join_guide, lan_broadcast, set_mode, stop_actions, step, checkpoint, pause).",
             {
                 "type": "object",
                 "properties": {
-                    "action": {"type": "string", "enum": ["connect", "disconnect", "set_goal", "move_to", "gather", "chat", "step", "checkpoint", "pause"]},
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "connect", "disconnect", "set_goal", "move_to", "gather", "chat",
+                            "read_chat", "nearby_players", "follow_player", "go_to_player",
+                            "give_to_player", "eat", "go_to_bed", "guard_area", "build_blueprint",
+                            "save_location", "list_locations", "goto_location", "join_guide",
+                            "lan_broadcast", "set_mode", "stop_actions", "step", "checkpoint", "pause",
+                        ],
+                    },
                     "goal": {"type": "string"},
                     "host": {"type": "string"},
                     "port": {"type": "integer"},
+                    "bedrock_port": {"type": "integer"},
                     "username": {"type": "string"},
+                    "player": {"type": "string"},
+                    "name": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "blueprint": {"type": "string", "enum": ["shelter", "monument", "farm", "town_hall"]},
+                    "radius": {"type": "integer"},
+                    "distance": {"type": "integer"},
+                    "mode": {"type": "string", "enum": ["self_preservation", "auto_eat", "self_defense", "unstuck", "follow_player", "guard_area"]},
+                    "enabled": {"type": "boolean"},
                     "message": {"type": "string"},
                     "code": {"type": "string"},
                     "x": {"type": "integer"},
@@ -1053,6 +1331,7 @@ class ModularGatewayRuntime:
                     "z": {"type": "integer"},
                     "item": {"type": "string"},
                     "count": {"type": "integer"},
+                    "since_id": {"type": "integer"},
                     "reason": {"type": "string"},
                 },
                 "required": ["action"],
@@ -1068,6 +1347,60 @@ class ModularGatewayRuntime:
             ),
             read_only=False,
             source="jaeger-embodiment-minecraft",
+        )
+        _reg(
+            "wiki_knowledge",
+            "Browse, search, read, or write pages in Jaeger's private-safe local Markdown Knowledge Wiki (entities, concepts, comparisons, queries, notes).",
+            {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["browse", "search", "read", "write"]},
+                    "section": {"type": "string", "enum": ["entities", "concepts", "comparisons", "queries", "notes"]},
+                    "path": {"type": "string"},
+                    "name": {"type": "string"},
+                    "content": {"type": "string"},
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "default": 10},
+                },
+                "required": ["mode"],
+            },
+            lambda args: (
+                {"pages": self.wiki.browse(section=args.get("section"))}
+                if args["mode"] == "browse"
+                else (
+                    {"results": self.wiki.search(str(args.get("query") or ""), limit=int(args.get("limit") or 10))}
+                    if args["mode"] == "search"
+                    else (
+                        self.wiki.read_page(str(args.get("path") or ""))
+                        if args["mode"] == "read"
+                        else self.wiki.write_page(
+                            section=str(args.get("section") or "notes"),
+                            name=str(args.get("name") or "note"),
+                            content=str(args.get("content") or ""),
+                        )
+                    )
+                )
+            ),
+            read_only=False,
+            source="jaeger-memory",
+        )
+        _reg(
+            "privacy_classify",
+            "Deterministically classify content sensitivity (public/personal/private/sensitive/secret) and whether cloud egress is allowed.",
+            {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string"},
+                    "local_only_mode": {"type": "boolean", "default": False},
+                },
+                "required": ["content"],
+            },
+            lambda args: evaluate_cloud_egress(
+                str(args["content"]),
+                local_only_mode=bool(args.get("local_only_mode", False)),
+            ).to_dict(),
+            read_only=True,
+            source="jaeger-authority",
         )
         _reg(
             "jp01_act",
@@ -1317,7 +1650,7 @@ class ModularGatewayRuntime:
         )
         _reg(
             "search_workspace_skills",
-            "Search saved workspace skills by keyword. Read-only.",
+            "Search the unified skill index (both workspace SKILL.md and verified Minecraft Voyager skills) by keyword. Read-only.",
             {
                 "type": "object",
                 "properties": {
@@ -1326,15 +1659,10 @@ class ModularGatewayRuntime:
                 },
                 "required": ["query"],
             },
-            lambda args: {
-                "results": [
-                    {"name": s.name, "description": s.description, "path": s.path}
-                    for s in _workspace_skills().search(
-                        query=str(args["query"]),
-                        limit=int(args.get("limit") or 5),
-                    )
-                ]
-            },
+            lambda args: self._search_unified_skills(
+                query=str(args["query"]),
+                limit=int(args.get("limit") or 5),
+            ),
             read_only=True,
             source="jaeger-skills",
         )
@@ -1430,7 +1758,7 @@ class ModularGatewayRuntime:
                 },
             },
             lambda args: self.store.index_directory(
-                str(args["root"]) if args.get("root") else str(self.workspace),
+                str(Path(str(args["root"])).expanduser()) if args.get("root") else str(self.workspace),
                 max_files=int(args.get("max_files") or 2000),
                 max_file_bytes=int(args.get("max_file_bytes") or 262144),
             ),
@@ -1662,6 +1990,128 @@ class ModularGatewayRuntime:
             source="jaeger-tools",
         )
         _reg(
+            "remote_discover",
+            "Discover ALL authorized remote connection routes on this Mac: remote_hosts.json, saved ~/.ssh/config profiles (e.g. rack-pc-lan), and active Tailscale peers. Read-only, zero private keys exposed.",
+            {"type": "object", "properties": {}},
+            lambda _args: discover_remote_routes(self.remote_hosts),
+            read_only=True,
+            source="jaeger-tools",
+        )
+        _reg(
+            "remote_connect",
+            "One-step R2-D2 connect to an owner machine (e.g. 'rack pc', 'rack-pc-lan', 'RackPCExample'): checks remote_hosts.json, reuses saved ~/.ssh/config profiles via OS SSH auth, or registers a verified Tailscale peer, and verifies live hostname.",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Natural name, SSH alias, or Tailscale peer (e.g. 'rack pc', 'rack-pc-lan', 'RackPCExample')"},
+                    "alias": {"type": "string", "description": "Optional alias to save in remote_hosts.json"},
+                    "user": {"type": "string", "description": "Optional SSH username override"},
+                    "probe": {"type": "boolean", "default": True},
+                },
+                "required": ["target"],
+            },
+            lambda args: self.authorized_tasks.connect_device(
+                str(args.get("target") or ""),
+                alias=str(args.get("alias") or ""),
+                user=str(args.get("user") or ""),
+                probe=bool(args.get("probe", True)),
+            ).to_dict(),
+            read_only=False,
+            source="jaeger-gateway",
+        )
+        _reg(
+            "find_file_metadata",
+            "Filename & metadata lookup inside owner-granted folders ONLY. Never opens files or sends file contents to any cloud model.",
+            {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Filename or substring to locate (e.g. credentials-backup.txt)"},
+                    "root": {"type": "string", "description": "Optional specific granted folder to search"},
+                    "max_results": {"type": "integer", "default": 25},
+                },
+                "required": ["filename"],
+            },
+            lambda args: self.authorized_tasks.find_file(
+                str(args.get("filename") or ""),
+                root=args.get("root"),
+                max_results=int(args.get("max_results") or 25),
+            ).to_dict(),
+            read_only=True,
+            source="jaeger-gateway",
+        )
+        _reg(
+            "credential_audit",
+            "Defensive audit of a granted project folder for accidentally committed tokens/keys. Always masks secrets and returns remediation steps; never exports raw credentials.",
+            {
+                "type": "object",
+                "properties": {
+                    "root": {"type": "string", "description": "Optional granted project folder path"},
+                    "max_files": {"type": "integer", "default": 400},
+                },
+            },
+            lambda args: self.authorized_tasks.credential_audit(
+                root=args.get("root"),
+                max_files=int(args.get("max_files") or 400),
+            ).to_dict(),
+            read_only=True,
+            source="jaeger-gateway",
+        )
+        _reg(
+            "recover_access",
+            "Check for an existing authorized connection first; if unavailable or locked out, provide official recovery paths clearly marking which options preserve data vs. erase data and exact prerequisites.",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Device or account name (e.g. MacBook, RackPCExample, iPhone)"},
+                    "scenario": {"type": "string", "enum": ["auto", "forgot_passcode", "connect_remotely"], "default": "auto"},
+                    "os_hint": {"type": "string", "description": "Optional OS hint: macos, windows, ios, linux"},
+                },
+                "required": ["target"],
+            },
+            lambda args: self.authorized_tasks.recover_access(
+                str(args.get("target") or ""),
+                scenario=str(args.get("scenario") or "auto"),
+                os_hint=str(args.get("os_hint") or ""),
+            ).to_dict(),
+            read_only=True,
+            source="jaeger-gateway",
+        )
+        _reg(
+            "tailscale_peers",
+            "Discover all computers on the owner's active Tailscale network (hostname, IP, OS, online status). Read-only.",
+            {"type": "object", "properties": {}},
+            lambda _args: discover_tailscale_peers(),
+            read_only=True,
+            source="jaeger-tools",
+        )
+        _reg(
+            "tailscale_connect",
+            "Register a verified Tailscale peer into remote_hosts.json and probe SSH connectivity (returns exact 1-line setup command if SSH isn't enabled yet).",
+            {
+                "type": "object",
+                "properties": {
+                    "peer": {"type": "string", "description": "Tailscale hostname, DNS name, or IP (e.g. RackPCExample)"},
+                    "alias": {"type": "string", "description": "Optional short alias for remote_exec"},
+                    "user": {"type": "string", "description": "Optional SSH username"},
+                    "port": {"type": "integer", "default": 22},
+                    "identity_file": {"type": "string", "description": "Optional SSH private key path"},
+                    "probe": {"type": "boolean", "default": True},
+                },
+                "required": ["peer"],
+            },
+            lambda args: register_tailscale_peer(
+                self.remote_hosts,
+                str(args.get("peer") or ""),
+                alias=str(args.get("alias") or ""),
+                user=str(args.get("user") or ""),
+                port=int(args.get("port") or 22),
+                identity_file=str(args.get("identity_file") or ""),
+                probe=bool(args.get("probe", True)),
+            ),
+            read_only=False,
+            source="jaeger-tools",
+        )
+        _reg(
             "remote_exec",
             "Run a command on an owner-allowlisted SSH host (fail-closed if unlisted or E-Stop active).",
             {
@@ -1704,6 +2154,710 @@ class ModularGatewayRuntime:
             read_only=False,
             source="jaeger-channels",
         )
+        _reg(
+            "apple_calendar",
+            "Native macOS Calendar.app integration: list calendars, list upcoming events, or create an event.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list_calendars", "list_events", "create_event"]},
+                    "days": {"type": "integer", "default": 7, "minimum": 1, "maximum": 90},
+                    "calendar_name": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "start_iso": {"type": "string"},
+                    "end_iso": {"type": "string"},
+                    "duration_minutes": {"type": "integer", "default": 60},
+                    "location": {"type": "string"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._apple_calendar_tool(args),
+            read_only=False,
+            source="jaeger-macos",
+        )
+        _reg(
+            "apple_reminders",
+            "Native macOS Reminders.app integration: list reminder lists, list open reminders, create, or complete a reminder.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list_lists", "list", "create", "complete"]},
+                    "list_name": {"type": "string"},
+                    "title": {"type": "string"},
+                    "due_iso": {"type": "string"},
+                    "notes": {"type": "string"},
+                    "include_completed": {"type": "boolean", "default": False},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._apple_reminders_tool(args),
+            read_only=False,
+            source="jaeger-macos",
+        )
+        _reg(
+            "apple_notes",
+            "Native macOS Notes.app integration: list folders, search notes, read a note, or create a note.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list_folders", "search", "read", "create"]},
+                    "query": {"type": "string"},
+                    "folder_name": {"type": "string"},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "limit": {"type": "integer", "default": 20},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._apple_notes_tool(args),
+            read_only=False,
+            source="jaeger-macos",
+        )
+        _reg(
+            "model_cookbook",
+            "Hardware-fit local model Cookbook across LLMs, Vision, Image Gen, STT, TTS, and Embeddings (with optional what-if RAM simulation).",
+            {
+                "type": "object",
+                "properties": {
+                    "modality": {
+                        "type": "string",
+                        "enum": ["all", "llm", "vision", "image_gen", "stt", "tts", "embedding"],
+                        "default": "all",
+                    },
+                    "what_if_ram_gb": {"type": "number"},
+                    "include_unfit": {"type": "boolean", "default": True},
+                },
+            },
+            lambda args: self._cookbook_info(
+                modality=str(args.get("modality") or "all"),
+                host_ram_gb=float(args["what_if_ram_gb"]) if args.get("what_if_ram_gb") is not None else None,
+                include_unfit=bool(args.get("include_unfit", True)),
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "model_roundtable",
+            "Compare multiple models side-by-side (optional blind A/B mode, peer critique, and unified consensus synthesis).",
+            {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string"},
+                    "models": {"type": "array", "items": {"type": "string"}},
+                    "blind": {"type": "boolean", "default": False},
+                    "critique_round": {"type": "boolean", "default": False},
+                    "consensus": {"type": "boolean", "default": True},
+                },
+                "required": ["prompt"],
+            },
+            lambda args: self._run_roundtable(
+                prompt=str(args["prompt"]),
+                models=list(args.get("models") or ()),
+                blind=bool(args.get("blind", False)),
+                critique_round=bool(args.get("critique_round", False)),
+                consensus=bool(args.get("consensus", True)),
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "model_telemetry",
+            "Inspect live provider balances (Ollama Cloud / OpenRouter), per-model pricing per MTok, 7-day SQLite usage/cost burn ledger, and rate-limit headroom. Read-only.",
+            {
+                "type": "object",
+                "properties": {
+                    "window_days": {"type": "number", "default": 7.0},
+                    "include_live_providers": {"type": "boolean", "default": True},
+                    "include_openrouter_catalog": {"type": "boolean", "default": False},
+                },
+            },
+            lambda args: self._model_telemetry_info(
+                window_days=float(args.get("window_days") or 7.0),
+                include_live_providers=bool(args.get("include_live_providers", True)),
+                include_openrouter_catalog=bool(args.get("include_openrouter_catalog", False)),
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "model_risk_cards",
+            "Inspect industry-standard OWASP LLM Top 10, refusal-calibration, cost, data-residency, and trust-zone risk flags detected for all installed cloud & local models (or a specific model). Read-only.",
+            {
+                "type": "object",
+                "properties": {
+                    "model_id": {"type": "string", "description": "Optional specific model ID to inspect"},
+                },
+            },
+            lambda args: self._model_risk_cards(
+                model_id=str(args.get("model_id") or "").strip() or None,
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "model_eval_compare",
+            "Run defensive Cloud vs. Local evaluation suite (OWASP IPI/secret/agency probes, BFCL JSON accuracy, XSTest/OR-Bench false-refusal & tone calibration, sycophancy, latency & cost) and persist updated risk cards.",
+            {
+                "type": "object",
+                "properties": {
+                    "models": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+            lambda args: self._run_model_eval(
+                models=list(args.get("models") or ()),
+            ),
+            read_only=True,
+            source="jaeger-models",
+        )
+        _reg(
+            "deep_research",
+            "Run autonomous multi-step web research (sub-queries, safe page reading, cited Markdown + Visual HTML report saved to ~/.jaeger/reports/).",
+            {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string"},
+                    "max_queries": {"type": "integer", "default": 3, "minimum": 1, "maximum": 5},
+                    "max_sources": {"type": "integer", "default": 6, "minimum": 1, "maximum": 12},
+                    "fetch_pages": {"type": "boolean", "default": True},
+                },
+                "required": ["topic"],
+            },
+            lambda args: self._run_deep_research(
+                topic=str(args["topic"]),
+                max_queries=int(args.get("max_queries") or 3),
+                max_sources=int(args.get("max_sources") or 6),
+                fetch_pages=bool(args.get("fetch_pages", True)),
+            ),
+            read_only=False,
+            source="jaeger-orchestration",
+        )
+        _reg(
+            "inspect_evidence",
+            "Page through or search an oversized retained tool output by evidence_id (ev_...) without overflowing context. Read-only.",
+            {
+                "type": "object",
+                "properties": {
+                    "evidence_id": {"type": "string"},
+                    "offset": {"type": "integer", "default": 0, "minimum": 0},
+                    "limit": {"type": "integer", "default": 4000, "minimum": 200, "maximum": 16000},
+                    "search": {"type": "string", "default": ""},
+                },
+                "required": ["evidence_id"],
+            },
+            lambda args: self.evidence.inspect(
+                str(args["evidence_id"]),
+                offset=int(args.get("offset") or 0),
+                limit=int(args.get("limit") or 4000),
+                search=str(args.get("search") or ""),
+            ),
+            read_only=True,
+            source="jaeger-tools",
+        )
+        _reg(
+            "browser_gotchas",
+            "Read or record reusable per-domain browser site gotchas (cookie banners, rate limits, CAPTCHA gates).",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "record", "judge"]},
+                    "domain": {"type": "string"},
+                    "lessons": {"type": "array", "items": {"type": "string"}},
+                    "task": {"type": "string"},
+                    "trace_text": {"type": "string"},
+                },
+                "required": ["action", "domain"],
+            },
+            lambda args: self._browser_gotchas_tool(args),
+            read_only=False,
+            source="jaeger-tools",
+        )
+        _reg(
+            "import_external_agent",
+            "Discover or import SOUL.md, MEMORY.md, USER.md, and security-scanned SKILL.md files from Claude Code, Codex, Cursor, or OpenClaw (defaults to dry_run=true).",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["discover", "import"], "default": "discover"},
+                    "source": {"type": "string", "enum": ["claude-code", "codex", "cursor", "openclaw"]},
+                    "dry_run": {"type": "boolean", "default": True},
+                },
+            },
+            lambda args: self._import_external_agent_tool(args),
+            read_only=False,
+            source="jaeger-skills",
+        )
+        _reg(
+            "task_board",
+            "Manage Jaeger's Kanban task board (backlog/todo/in_progress/review/done) for multi-step work.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["summary", "markdown", "create", "move", "delete"]},
+                    "title": {"type": "string"},
+                    "card_id": {"type": "string"},
+                    "column": {"type": "string", "enum": ["backlog", "todo", "in_progress", "review", "done"]},
+                    "priority": {"type": "integer", "default": 2, "minimum": 1, "maximum": 4},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                    "notes": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._task_board_tool(args),
+            read_only=False,
+            source="jaeger-orchestration",
+        )
+        _reg(
+            "quick_reminder",
+            "Native one-shot reminders without cron math: schedule with in_minutes or at_iso, list pending, or cancel.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["schedule", "list", "cancel"]},
+                    "message": {"type": "string"},
+                    "in_minutes": {"type": "number"},
+                    "at_iso": {"type": "string"},
+                    "reminder_id": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._quick_reminder_tool(args),
+            read_only=False,
+            source="jaeger-orchestration",
+        )
+        _reg(
+            "avatar_packs",
+            "Discover installed canonical avatar/v1 packs across ~/.jaeger, JaegerAvatar, and Omni V2. Read-only.",
+            {"type": "object", "properties": {}},
+            lambda _args: self._avatar_packs_info(),
+            read_only=True,
+            source="jaeger-avatar",
+        )
+        _reg(
+            "nexus_telemetry",
+            "Inspect live NexusUI hardware workbench stations (info, snapshot, layouts) or export JP01 channels. Read-only.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["info", "snapshot", "layouts", "jp01_channels"]},
+                    "station_url": {"type": "string", "default": "http://127.0.0.1:8000"},
+                    "allow_remote": {"type": "boolean", "default": False},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._nexus_telemetry_tool(args),
+            read_only=True,
+            source="jaeger-hardware",
+        )
+        _reg(
+            "nexus_control",
+            "Send a fail-closed channel write or command to a NexusUI hardware station (requires E-Stop clear, allow_write=true, and free operator lock).",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["write_channel", "run_command"]},
+                    "station_url": {"type": "string", "default": "http://127.0.0.1:8000"},
+                    "channel": {"type": "string"},
+                    "value": {},
+                    "command": {"type": "string"},
+                    "args": {"type": "object"},
+                    "allow_write": {"type": "boolean", "default": False},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._nexus_control_tool(args),
+            read_only=False,
+            source="jaeger-hardware",
+        )
+
+    def _task_board_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "summary").strip().lower()
+        if act == "summary":
+            return self.board.summary()
+        if act == "markdown":
+            return {"ok": True, "markdown": self.board.render_markdown()}
+        if act == "create":
+            card = self.board.create_card(
+                str(args.get("title") or ""),
+                column=str(args.get("column") or "todo"),
+                priority=int(args.get("priority") or 2),
+                tags=args.get("tags") if isinstance(args.get("tags"), list) else (),
+                notes=str(args.get("notes") or ""),
+            )
+            return {"ok": True, "card": card.to_dict()}
+        if act == "move":
+            card = self.board.move_card(
+                str(args.get("card_id") or ""),
+                str(args.get("column") or "in_progress"),
+                notes=str(args["notes"]) if args.get("notes") is not None else None,
+            )
+            return {"ok": True, "card": card.to_dict()}
+        if act == "delete":
+            return {"ok": self.board.delete_card(str(args.get("card_id") or ""))}
+        raise ValueError(f"unsupported task_board action: {act!r}")
+
+    def _quick_reminder_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "list").strip().lower()
+        if act == "list":
+            rows = [r.to_dict() for r in self.reminders.list_reminders(status="pending")]
+            return {"ok": True, "reminders": rows, "count": len(rows)}
+        if act == "schedule":
+            rem = self.reminders.schedule(
+                str(args.get("message") or ""),
+                in_minutes=float(args["in_minutes"]) if args.get("in_minutes") is not None else None,
+                at_iso=str(args["at_iso"]) if args.get("at_iso") else None,
+            )
+            return {"ok": True, "reminder": rem.to_dict()}
+        if act == "cancel":
+            return {"ok": self.reminders.cancel(str(args.get("reminder_id") or ""))}
+        raise ValueError(f"unsupported quick_reminder action: {act!r}")
+
+    def _avatar_packs_info(self) -> dict[str, Any]:
+        packs = [p.to_dict() for p in discover_avatar_packs(state_dir=self.state_dir)]
+        return {"ok": True, "packs": packs, "count": len(packs)}
+
+    def _nexus_telemetry_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "jp01_channels").strip().lower()
+        if act == "jp01_channels":
+            return {"ok": True, **build_jp01_telemetry_channels(self.jp01.observe())}
+        url = str(args.get("station_url") or "http://127.0.0.1:8000").strip()
+        allow_remote = bool(args.get("allow_remote", False))
+        bridge = NexusStationBridge(
+            url,
+            estop_latch=self.jp01.latch,
+            read_only=True,
+            allow_remote=allow_remote,
+        )
+        if act == "info":
+            return bridge.get_info()
+        if act == "layouts":
+            return bridge.list_layouts()
+        if act == "snapshot":
+            return {"ok": True, **bridge.snapshot().to_dict()}
+        raise ValueError(f"unsupported nexus_telemetry action: {act!r}")
+
+    def _nexus_control_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "").strip().lower()
+        url = str(args.get("station_url") or "http://127.0.0.1:8000").strip()
+        allow_write = bool(args.get("allow_write", False))
+        bridge = NexusStationBridge(
+            url,
+            estop_latch=self.jp01.latch,
+            read_only=True,
+            allow_remote=False,
+        )
+        if act == "write_channel":
+            return bridge.write_channel(
+                str(args.get("channel") or ""),
+                args.get("value"),
+                allow_write=allow_write,
+                force_claim=False,
+            )
+        if act == "run_command":
+            cmd_args = args.get("args") if isinstance(args.get("args"), Mapping) else {}
+            return bridge.run_command(
+                str(args.get("command") or ""),
+                cmd_args,
+                allow_write=allow_write,
+                force_claim=False,
+            )
+        raise ValueError(f"unsupported nexus_control action: {act!r}")
+
+    def _browser_gotchas_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "list").strip().lower()
+        domain = str(args.get("domain") or "").strip()
+        if act == "list":
+            lessons = self.site_gotchas.list_for_domain(domain)
+            return {"ok": True, "domain": domain, "lessons": lessons, "count": len(lessons)}
+        if act == "record":
+            raw_lessons = args.get("lessons") if isinstance(args.get("lessons"), list) else []
+            saved = self.site_gotchas.record(domain, [str(x) for x in raw_lessons])
+            return {"ok": True, "domain": domain, "lessons": saved, "count": len(saved)}
+        if act == "judge":
+            res = self.browser_judge.evaluate(
+                task=str(args.get("task") or "browser task"),
+                url=domain if "://" in domain else f"https://{domain}",
+                trace_text=str(args.get("trace_text") or ""),
+            )
+            return {"ok": True, "judgement": res.to_dict()}
+        raise ValueError(f"unsupported browser_gotchas action: {act!r}")
+
+    def _import_external_agent_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "discover").strip().lower()
+        if act == "discover":
+            found = discover_external_agents()
+            return {"ok": True, "sources": found, "count": len(found)}
+        if act == "import":
+            source = str(args.get("source") or "").strip()
+            dry_run = bool(args.get("dry_run", True))
+            return import_external_agent(
+                source,
+                target_state_dir=self.state_dir,
+                dry_run=dry_run,
+            ).to_dict()
+        raise ValueError(f"unsupported import_external_agent action: {act!r}")
+
+    def _get_agent_mode(self) -> dict[str, Any]:
+        return {"ok": True, "mode": self._agent_mode.value}
+
+    def _set_agent_mode(self, mode: str) -> dict[str, Any]:
+        self._agent_mode = AgentMode.parse(mode)
+        self.global_bus.publish("system.mode_changed", {"mode": self._agent_mode.value})
+        return {"ok": True, "mode": self._agent_mode.value}
+
+    def _apple_calendar_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        from jaeger_macos import create_calendar_event, list_calendars, list_upcoming_events
+
+        act = str(args.get("action") or "").strip().lower()
+        if act == "list_calendars":
+            return list_calendars()
+        if act == "list_events":
+            return list_upcoming_events(
+                days=int(args.get("days") or 7),
+                calendar_name=str(args["calendar_name"]) if args.get("calendar_name") else None,
+            )
+        if act == "create_event":
+            return create_calendar_event(
+                summary=str(args.get("summary") or ""),
+                start_iso=str(args.get("start_iso") or ""),
+                end_iso=str(args["end_iso"]) if args.get("end_iso") else None,
+                duration_minutes=int(args.get("duration_minutes") or 60),
+                calendar_name=str(args["calendar_name"]) if args.get("calendar_name") else None,
+                location=str(args.get("location") or ""),
+                notes=str(args.get("notes") or ""),
+            )
+        raise ValueError(f"unsupported apple_calendar action: {act!r}")
+
+    def _apple_reminders_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        from jaeger_macos import complete_reminder, create_reminder, list_reminder_lists, list_reminders
+
+        act = str(args.get("action") or "").strip().lower()
+        if act == "list_lists":
+            return list_reminder_lists()
+        if act == "list":
+            return list_reminders(
+                list_name=str(args["list_name"]) if args.get("list_name") else None,
+                include_completed=bool(args.get("include_completed", False)),
+            )
+        if act == "create":
+            return create_reminder(
+                title=str(args.get("title") or ""),
+                list_name=str(args["list_name"]) if args.get("list_name") else None,
+                due_iso=str(args["due_iso"]) if args.get("due_iso") else None,
+                notes=str(args.get("notes") or ""),
+            )
+        if act == "complete":
+            return complete_reminder(
+                title=str(args.get("title") or ""),
+                list_name=str(args["list_name"]) if args.get("list_name") else None,
+            )
+        raise ValueError(f"unsupported apple_reminders action: {act!r}")
+
+    def _apple_notes_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        from jaeger_macos import create_note, list_note_folders, read_note, search_notes
+
+        act = str(args.get("action") or "").strip().lower()
+        if act == "list_folders":
+            return list_note_folders()
+        if act == "search":
+            return search_notes(
+                query=str(args.get("query") or ""),
+                folder_name=str(args["folder_name"]) if args.get("folder_name") else None,
+                limit=int(args.get("limit") or 20),
+            )
+        if act == "read":
+            return read_note(
+                title=str(args.get("title") or ""),
+                folder_name=str(args["folder_name"]) if args.get("folder_name") else None,
+            )
+        if act == "create":
+            return create_note(
+                title=str(args.get("title") or ""),
+                body=str(args.get("body") or ""),
+                folder_name=str(args.get("folder_name") or "Notes"),
+            )
+        raise ValueError(f"unsupported apple_notes action: {act!r}")
+
+    def _cookbook_info(
+        self,
+        *,
+        modality: str = "all",
+        host_ram_gb: float | None = None,
+        include_unfit: bool = True,
+    ) -> dict[str, Any]:
+        installed: list[str] = []
+        base = self._base_model()
+        if isinstance(base, OllamaModel):
+            try:
+                installed = [str(m.get("id") or "") for m in base.list_models() if m.get("id")]
+            except Exception:  # noqa: BLE001
+                installed = []
+        return recommend_models(
+            modality=modality,
+            host_ram_gb=host_ram_gb,
+            installed_names=installed,
+            include_unfit=include_unfit,
+        )
+
+    def _run_roundtable(
+        self,
+        *,
+        prompt: str,
+        models: list[str] | None = None,
+        blind: bool = False,
+        critique_round: bool = False,
+        consensus: bool = True,
+    ) -> dict[str, Any]:
+        requested = [str(m).strip() for m in (models or ()) if str(m).strip()][:5]
+        participants: list[RoundtableParticipant] = []
+        if not requested:
+            cfg = self.routing.load()
+            active = self._base_model()
+            participants.append(
+                RoundtableParticipant(
+                    name=str(getattr(active, "model_id", active.name)),
+                    model=active,
+                )
+            )
+            if cfg.fallback and cfg.fallback != participants[0].name:
+                participants.append(
+                    RoundtableParticipant(name=cfg.fallback, model=build_default_model(model=cfg.fallback))
+                )
+        else:
+            for mid in requested:
+                participants.append(RoundtableParticipant(name=mid, model=build_default_model(model=mid)))
+        rt = ModelRoundtable(participants, synthesizer=self._base_model())
+        return rt.run(
+            prompt,
+            blind=blind,
+            critique_round=critique_round,
+            consensus=consensus,
+        ).to_dict()
+
+    def _installed_model_entries(self) -> list[dict[str, Any]]:
+        base = self._base_model()
+        if isinstance(base, OllamaModel):
+            try:
+                return list(base.list_models())
+            except Exception:  # noqa: BLE001
+                return []
+        mid = str(getattr(base, "model_id", base.name))
+        return [{"id": mid, "provider": getattr(base, "name", "model"), "size": None}]
+
+    def _model_telemetry_info(
+        self,
+        *,
+        window_days: float = 7.0,
+        include_live_providers: bool = True,
+        include_openrouter_catalog: bool = False,
+    ) -> dict[str, Any]:
+        entries = self._installed_model_entries()
+        catalog = [
+            estimate_model_pricing(
+                str(m.get("id") or ""),
+                provider=str(m.get("provider") or ""),
+                size_bytes=m.get("size") if isinstance(m.get("size"), int) else None,
+            ).to_dict()
+            for m in entries
+            if m.get("id")
+        ]
+        providers: dict[str, Any] = {}
+        if include_live_providers:
+            providers["ollama_cloud"] = fetch_ollama_cloud_telemetry(
+                usage_range=f"{max(1, int(round(window_days)))}d"
+            )
+            if include_openrouter_catalog or os.environ.get("OPENROUTER_API_KEY"):
+                providers["openrouter"] = fetch_openrouter_telemetry(
+                    include_catalog=include_openrouter_catalog,
+                )
+        return {
+            "ok": True,
+            "active_model": str(getattr(self._base_model(), "model_id", self._base_model().name)),
+            "ledger": self.model_ledger.summarize(window_days=window_days),
+            "installed_pricing": catalog,
+            "providers": providers,
+        }
+
+    def _model_risk_cards(self, *, model_id: str | None = None) -> dict[str, Any]:
+        stored = {c["model_id"]: c for c in self.model_ledger.list_risk_cards() if c.get("model_id")}
+        entries = self._installed_model_entries()
+        cards: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for entry in entries:
+            mid = str(entry.get("id") or "").strip()
+            if not mid or (model_id and mid != model_id):
+                continue
+            seen.add(mid)
+            if mid in stored:
+                cards.append(stored[mid])
+            else:
+                cards.append(
+                    build_static_risk_card(
+                        mid,
+                        provider=str(entry.get("provider") or ""),
+                        size_bytes=entry.get("size") if isinstance(entry.get("size"), int) else None,
+                    ).to_dict()
+                )
+        if model_id and model_id not in seen:
+            cards.append(stored.get(model_id) or build_static_risk_card(model_id).to_dict())
+        return {
+            "ok": True,
+            "count": len(cards),
+            "cards": cards,
+            "flag_catalog": {k: v.to_dict() for k, v in RISK_FLAG_CATALOG.items()},
+        }
+
+    def _run_model_eval(self, *, models: list[str] | None = None) -> dict[str, Any]:
+        entries_by_id = {
+            str(e.get("id") or ""): e
+            for e in self._installed_model_entries()
+            if e.get("id")
+        }
+        requested = [str(m).strip() for m in (models or ()) if str(m).strip()][:5]
+        if not requested:
+            active = self._base_model()
+            requested = [str(getattr(active, "model_id", active.name))]
+        candidates: list[EvalCandidate] = []
+        for mid in requested:
+            entry = entries_by_id.get(mid, {})
+            candidates.append(
+                EvalCandidate(
+                    model_id=mid,
+                    model=build_default_model(model=mid),
+                    provider=str(entry.get("provider") or ""),
+                    size_bytes=entry.get("size") if isinstance(entry.get("size"), int) else None,
+                )
+            )
+        suite = ModelEvalSuite(ledger=self.model_ledger)
+        return suite.compare(candidates)
+
+    def _run_deep_research(
+        self,
+        *,
+        topic: str,
+        max_queries: int = 3,
+        max_sources: int = 6,
+        fetch_pages: bool = True,
+    ) -> dict[str, Any]:
+        engine = DeepResearchEngine(
+            search_fn=lambda q, lim: web_search(q, limit=lim),
+            model=self._base_model(),
+            reports_dir=self.state_dir / "reports",
+        )
+        rep = engine.run(
+            topic,
+            max_queries=max_queries,
+            max_sources=max_sources,
+            fetch_pages=fetch_pages,
+        )
+        self.global_bus.publish(
+            "research.completed",
+            {"report_id": rep.report_id, "topic": rep.topic[:120], "sources": len(rep.sources)},
+        )
+        return rep.to_dict(include_html=False)
+
+    def _list_research_reports(self, limit: int = 25) -> list[dict[str, Any]]:
+        return list_research_reports(self.state_dir / "reports", limit=limit)
 
     def _droid_act(self, action: str, args: Mapping[str, Any]) -> dict[str, Any]:
         if action in ("sleep", "park", "camera_off"):
@@ -1826,23 +2980,52 @@ class ModularGatewayRuntime:
                 memory=self.memory,
                 reliability=self.reliability,
                 events=self.events,
-                middlewares=[_SseLoopMiddleware(session_id, generation, hub)],
+                middlewares=[
+                    PlanModeMiddleware(
+                        is_read_only=self.tools.is_read_only,
+                        mode_getter=lambda: self._agent_mode,
+                    ),
+                    _SseLoopMiddleware(session_id, generation, hub, global_bus=self.global_bus),
+                ],
                 session_id=session_id,
-                system_prompt=self.identity.compile_system_prompt() + (
+                system_prompt=self.identity.compile_system_prompt() + "\n" + self._awareness_brief() + (
+                    ("\n" + PLAN_MODE_SYSTEM_NOTE) if self._agent_mode == AgentMode.PLAN else ""
+                ) + (
                     "\nConversation & tone: Talk naturally and directly like a trusted partner—match the user's length and register. "
+                    "Never preach, lecture, scold, or deliver corporate-HR ethics speeches. If something is genuinely unavailable or blocked by a hard limit, state the plain technical fact in one short, neutral sentence and immediately offer the working path. "
                     "Skip repetitive boilerplate openers (e.g. 'Honest answer:', 'with one honest caveat', 'I have to be straight with you') "
                     "and formal '## Progress report' templates unless the user asks for a structured report or a long task stops mid-way. "
                     "For ambiguous one-word prompts like 'Go', ask what they want before running tools."
-                    "\nTask boundaries & live state: Treat one-off constraints from earlier messages (such as 'no shell/git for this edit') as scoped ONLY to that specific task; "
+                    "\nTask boundaries, indexing & Tailscale remote devices: Treat one-off constraints from earlier messages (such as 'no shell/git for this edit') as scoped ONLY to that specific task; "
                     "never carry temporary turn restrictions into unrelated later topics or claim shell/tools are 'off-limits this session'. Only E-Stop, approval gates, sandbox boundaries, and explicit standing owner rules persist. "
-                    "Use your real live tools: `execute_code` for quick Python checks (instead of leaving throwaway scripts in the repo), `index_workspace`/`search_workspace` for FTS5 file search, `remote_hosts`/`remote_exec` for owner-allowlisted remote machines (such as a rack PC), `minecraft_status`/`minecraft_act` for live Minecraft, and `web_search`/`web_fetch` for online research. "
+                    "Be action-first: when the owner asks you to index folders on this Mac (e.g. ~/Documents, ~/Desktop, ~/GitHub), call `index_workspace` and `search_workspace` directly instead of refusing. "
+                    "When the owner asks you to connect to another one of their computers (such as a rack PC or laptop), do NOT stop just because remote_hosts.json is empty: first call `remote_connect` (or `remote_discover`), which automatically checks existing saved `~/.ssh/config` profiles on this Mac (such as `rack-pc-lan`, authenticating out-of-band via OpenSSH without exposing private keys) AND active Tailscale peers, verifies the live hostname, registers the host, and enables `remote_exec` immediately. Only ask the owner to add the machine to Tailscale or run the exact 1-line SSH setup command if neither a saved SSH profile nor a Tailscale peer is reachable yet — never make a non-coder hand-edit JSON files. "
+                    "When anything stops a task, name the exact source plainly: model refusal, Jaeger approval/policy, macOS permission, or host unreachable. "
+                    "Use your real live tools: `execute_code` for quick Python checks, `index_workspace`/`search_workspace` for FTS5 file search, `remote_discover`/`remote_connect`/`tailscale_peers`/`tailscale_connect`/`remote_exec` for authorized remote machines, `minecraft_status`/`minecraft_act` for live Minecraft, and `web_search`/`web_fetch` for online research. "
                     "Inspect available tools and do safe independent work before declaring a blocker, ask before ambiguous destructive steps, and distinguish editing source files on disk from rebuilding/restarting the live Gateway or WebUI bundle."
                     "\nHardware & media: When asked what you see, call droid_look first. "
                     "When asked to turn Droid mode on/off, wake Droid, go to sleep, or park the camera, call droid_act with wake or sleep. "
                     "For YouTube audiovisual analysis, resolve a playlist's latest addition with youtube_latest_playlist_video, then call youtube_watch_video on the exact video for joint audio and motion (use youtube_analyze_video only when sampled evidence is expressly wanted). "
                     "State exact capture coverage with timestamps, stop on deterministic access errors unless an authorized local copy exists, and never substitute metadata for audiovisual evidence."
-                ) + self.nudges.consume_hint(session_id),
+                ) + self._authorized_mode_prompt_note() + self.nudges.consume_hint(session_id),
             )
+            # Direct model-free authorized slash commands (/find, /audit, /connect, /recover)
+            direct_rec = self._try_direct_authorized_command(prompt)
+            if direct_rec is not None:
+                text = direct_rec.format_chat_report()
+                hub.publish(session_id, "text.delta", {"delta": text}, generation=generation)
+                res_direct: dict[str, Any] = {
+                    "content": text,
+                    "verdict": "complete" if direct_rec.status == "verified_success" else direct_rec.status,
+                    "tool_calls": [],
+                    "authorized_task": direct_rec.to_dict(),
+                }
+                self.global_bus.publish(
+                    "chat.turn_completed",
+                    {"session_id": session_id, "verdict": res_direct["verdict"], "tool_calls": 0, "workflow": direct_rec.workflow},
+                )
+                return res_direct
+
             def previous_messages():
                 before_id = None
                 first = True
@@ -1867,10 +3050,35 @@ class ModularGatewayRuntime:
                 pre_slice_guard=lambda: bool(self.governor.snapshot().get("estop_active")),
                 history=loop.select_history(prompt, previous_messages()),
             )
+            # Cloud provider refusal recovery: treat a provider refusal as a provider decision,
+            # NOT a final verdict on a legitimate owner goal — continue locally via Gateway workflow!
+            recovered = self.authorized_tasks.recover_from_provider_refusal(
+                prompt,
+                str(result.get("content") or ""),
+                tool_calls_count=len(result.get("tool_calls") or ()),
+                origin="owner",
+            )
+            if recovered is not None:
+                report = recovered.format_chat_report()
+                hub.publish(session_id, "text.delta", {"delta": "\n\n" + report}, generation=generation)
+                result["provider_reply"] = result.get("content")
+                result["content"] = report
+                result["authorized_task"] = recovered.to_dict()
+                result["verdict"] = "complete" if recovered.status == "verified_success" else recovered.status
             self.nudges.record_turn(
                 session_id,
                 tool_calls=len(result.get("tool_calls") or ()),
                 verdict=str(result.get("verdict") or ""),
+            )
+            self.reflector.schedule_reflection(
+                prompt=prompt,
+                result=result,
+                session_id=session_id,
+                source="owner_turn",
+            )
+            self.global_bus.publish(
+                "chat.turn_completed",
+                {"session_id": session_id, "verdict": str(result.get("verdict") or ""), "tool_calls": len(result.get("tool_calls") or ())},
             )
             return result
         finally:
@@ -1880,6 +3088,37 @@ class ModularGatewayRuntime:
 
     def _base_model(self) -> Any:
         return getattr(self.model, "active_model", self.model)
+
+    def _authorized_mode_prompt_note(self) -> str:
+        settings = self.authorized_grants.get_settings()
+        parts: list[str] = []
+        if settings.direct_chat:
+            parts.append(
+                "\nDirect Chat (enabled): Answer sensitive-but-legitimate questions (including controversial human history, "
+                "politics, or dual-use engineering) plainly with sources and zero lecturing."
+            )
+        if settings.owner_autonomy:
+            parts.append(
+                "\nOwner Autonomy (enabled): Finish routine work under the owner's existing Gateway grants using "
+                "`find_file_metadata` (never opening files just to locate them), `credential_audit` (masked findings only), "
+                "`remote_connect` (reusing saved ~/.ssh/config or Tailscale), and `recover_access` (clearly marking "
+                "data-preserving vs. data-erasing options). Never claim success without verification; distinguish "
+                "not attempted, attempted and failed, blocked by a specific prerequisite, and verified success."
+            )
+        return "".join(parts)
+
+    def _try_direct_authorized_command(self, prompt: str) -> Any:
+        raw = (prompt or "").strip()
+        if raw.startswith("/find "):
+            return self.authorized_tasks.find_file(raw[6:].strip(), origin="owner")
+        if raw == "/audit" or raw.startswith("/audit "):
+            arg = raw[6:].strip() or None
+            return self.authorized_tasks.credential_audit(root=arg, origin="owner")
+        if raw.startswith("/connect "):
+            return self.authorized_tasks.connect_device(raw[9:].strip(), origin="owner")
+        if raw.startswith("/recover "):
+            return self.authorized_tasks.recover_access(raw[9:].strip(), scenario="auto", origin="owner")
+        return None
 
     def _build_active_model(self, *, explicit_model_id: str | None = None) -> Any:
         cfg = self.routing.load()
@@ -1919,6 +3158,10 @@ class ModularGatewayRuntime:
             state=str(st.get("mode") or "observing"),
         )
         self._mirror_living_avatar(emotion)
+        self.global_bus.publish(
+            "cognition.state",
+            {"mode": str(st.get("mode") or "observing"), "emotion": emotion, "focus": str(st.get("focus") or "")[:100]},
+        )
 
     def _express_avatar(
         self,
@@ -1987,7 +3230,16 @@ class ModularGatewayRuntime:
 
     def _runtime_info(self) -> dict[str, Any]:
         base = self._base_model()
-        ollama_probe = base.probe() if isinstance(base, OllamaModel) else {"ok": True}
+        now = time.monotonic()
+        cached_at, cached_probe = getattr(self, "_ollama_probe_cache", (0.0, None))
+        if isinstance(base, OllamaModel):
+            if cached_probe is not None and (now - cached_at) < 15.0:
+                ollama_probe = cached_probe
+            else:
+                ollama_probe = base.probe()
+                self._ollama_probe_cache = (now, ollama_probe)
+        else:
+            ollama_probe = {"ok": True}
         return {
             "model": getattr(base, "model_id", base.name),
             "routing": self.routing.load().to_dict(),
@@ -2163,13 +3415,57 @@ class ModularGatewayRuntime:
             "autonomy": self.initiative.status(),
         }
 
+    def _awareness_brief(self) -> str:
+        """Build a compact (~220 token) live self-awareness snapshot for prompt injection."""
+        active_subs = sum(
+            1
+            for aid in list(self._subagent_meta.keys())[-12:]
+            if (fut := self.subagents._futures.get(aid)) is not None and not fut.done()  # noqa: SLF001
+        )
+        return self.world.build_awareness_brief(
+            governor=self.governor.snapshot(),
+            droid=self.droid.observe(),
+            minecraft=self.minecraft.observe(),
+            goals=[g.to_dict() for g in self.learning.list_goals(status="active")[:4]],
+            recent_actions=self.initiative.list_actions(limit=3),
+            pending_approvals=len(self.store.list_pending_approvals()),
+            active_subagents=active_subs,
+        )
+
+    def _awareness_state(self) -> dict[str, Any]:
+        return {
+            "brief": self._awareness_brief(),
+            "recent_reflections": self.reflector.recent(limit=10),
+            "droid_reflex": self.droid.reflex.status(),
+            "world_perceptions": [p.to_dict() for p in self.world.recent_perceptions(limit=10)],
+            "global_event_seq": self.global_bus.latest_seq(),
+        }
+
+    def _search_unified_skills(self, *, query: str, limit: int = 5) -> dict[str, Any]:
+        ws_hits = [
+            {"name": s.name, "description": s.description, "path": s.path, "source": "workspace"}
+            for s in WorkspaceSkillStore(self.workspace).search(query=query, limit=limit)
+        ]
+        mc_hits = [
+            {
+                "name": s.name,
+                "description": s.description,
+                "path": f"minecraft://{s.name}",
+                "source": "minecraft",
+                "verified_runs": s.verified_runs,
+            }
+            for s in self.minecraft_skills.retrieve(query, top_k=max(1, limit))
+        ]
+        combined = (ws_hits + mc_hits)[: max(1, min(int(limit), 50))]
+        return {"results": combined, "count": len(combined)}
+
     def _discover_skills(self) -> list[dict[str, Any]]:
         skills_dirs = [
-            self.state_dir / "skills",
-            self.workspace / "skills",
+            ("state", self.state_dir / "skills"),
+            ("workspace", self.workspace / "skills"),
         ]
         found: list[dict[str, Any]] = []
-        for root in skills_dirs:
+        for source_label, root in skills_dirs:
             if not root.is_dir():
                 continue
             for md in sorted(root.rglob("SKILL.md"))[:100]:
@@ -2181,29 +3477,98 @@ class ModularGatewayRuntime:
                 found.append({
                     "name": md.parent.name,
                     "path": str(md),
+                    "source": source_label,
                     "security_verdict": verdict,
                 })
+        for mc_skill in self.minecraft_skills.list_skills()[:50]:
+            found.append({
+                "name": mc_skill.name,
+                "path": f"minecraft://{mc_skill.name}",
+                "source": "minecraft",
+                "description": mc_skill.description,
+                "security_verdict": "verified_local",
+            })
         return found
 
+    def _inspect_saved_image(self, *, path: str, prompt: str) -> dict[str, Any]:
+        """Inspect a saved image under workspace or state_dir/offload with the local vision model."""
+        import base64
+        import json
+        from urllib.request import Request, urlopen
+
+        target = Path(path).expanduser().resolve()
+        allowed_roots = (self.workspace.resolve(), (self.state_dir / "offload").resolve())
+        if not any(target == r or r in target.parents for r in allowed_roots):
+            raise PermissionError("Image path must live inside workspace or ~/.jaeger/offload/")
+        if not target.is_file():
+            raise FileNotFoundError(f"Image file not found: {target}")
+        raw_bytes = target.read_bytes()
+        if len(raw_bytes) > 10 * 1024 * 1024:
+            raise ValueError("Image exceeds 10 MiB limit.")
+
+        model = self.routing.load().vision or "qwen3-vl:8b-instruct"
+        with self._video_model_lock:
+            acquired, reason = self.governor.acquire_heavy_model(
+                model, tier=PriorityTier.OWNER_WORK, owner_tag="image-inspect", estimated_gb=8.0,
+            )
+            if not acquired:
+                raise RuntimeError(f"Local vision model slot unavailable: {reason}.")
+            try:
+                payload = {
+                    "model": model,
+                    "prompt": prompt[:500],
+                    "stream": False,
+                    "images": [base64.b64encode(raw_bytes).decode("ascii")],
+                }
+                req = Request(
+                    "http://127.0.0.1:11434/api/generate",
+                    data=json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urlopen(req, timeout=60) as response:
+                    answer = str(json.load(response).get("response") or "").strip()
+                if not answer:
+                    raise RuntimeError("Local vision model returned no description.")
+                return {"ok": True, "path": str(target), "model": model, "observation": answer}
+            finally:
+                self.governor.release_heavy_model(model)
+
     def _upsert_mcp_server(self, spec: Mapping[str, Any], *, connect: bool = True) -> list[dict[str, Any]]:
-        name = str(spec.get("name") or "").strip()
-        if not name:
-            raise ValueError("MCP server name is required")
-        url = str(spec.get("url") or "").strip()
-        cmd = str(spec.get("command") or "").strip()
-        transport = str(spec.get("transport") or ("streamable_http" if url else "stdio")).strip().lower()
-        cfg = MCPServerConfig(
-            name=name,
-            transport=transport,
-            command=cmd,
-            args=tuple(str(a) for a in (spec.get("args") or ())),
-            env={str(k): str(v) for k, v in (spec.get("env") or {}).items()},
-            url=url,
-            headers={str(k): str(v) for k, v in (spec.get("headers") or {}).items()},
-            timeout_s=float(spec.get("timeout_s") or 30.0),
-            enabled=bool(spec.get("enabled", True)),
-            sandbox_workspace=str(spec.get("sandbox_workspace") or ""),
-        )
+        preset_id = str(spec.get("preset") or "").strip()
+        if preset_id:
+            cfg = build_preset_config(
+                preset_id,
+                url=str(spec["url"]).strip() if spec.get("url") else None,
+                bearer_token=str(spec.get("bearer_token") or "") or None,
+                command=str(spec["command"]).strip() if spec.get("command") else None,
+                args=list(spec["args"]) if isinstance(spec.get("args"), list) else None,
+                headers={str(k): str(v) for k, v in (spec.get("headers") or {}).items()} or None,
+                name=str(spec.get("name") or "").strip() or None,
+                timeout_s=float(spec.get("timeout_s") or 30.0),
+            )
+        else:
+            name = str(spec.get("name") or "").strip()
+            if not name:
+                raise ValueError("MCP server name is required")
+            url = str(spec.get("url") or "").strip()
+            cmd = str(spec.get("command") or "").strip()
+            transport = str(spec.get("transport") or ("streamable_http" if url else "stdio")).strip().lower()
+            headers = {str(k): str(v) for k, v in (spec.get("headers") or {}).items()}
+            tok = str(spec.get("bearer_token") or "").strip()
+            if tok and "Authorization" not in headers:
+                headers["Authorization"] = tok if tok.lower().startswith("bearer ") else f"Bearer {tok}"
+            cfg = MCPServerConfig(
+                name=name,
+                transport=transport,
+                command=cmd,
+                args=tuple(str(a) for a in (spec.get("args") or ())),
+                env={str(k): str(v) for k, v in (spec.get("env") or {}).items()},
+                url=url,
+                headers=headers,
+                timeout_s=float(spec.get("timeout_s") or 30.0),
+                enabled=bool(spec.get("enabled", True)),
+                sandbox_workspace=str(spec.get("sandbox_workspace") or ""),
+            )
         configs = save_mcp_server_config(self._mcp_config_path, cfg)
         if connect:
             return self.mcp.reload(configs, registry=self.tools)
@@ -2217,6 +3582,244 @@ class ModularGatewayRuntime:
     def _reload_mcp_servers(self) -> list[dict[str, Any]]:
         configs = load_mcp_server_configs(self._mcp_config_path)
         return self.mcp.reload(configs, registry=self.tools)
+
+    def _office_state(self) -> dict[str, Any]:
+        """Assemble live Virtual Office snapshot from real Gateway, Subagent, Business, and Embodiment state."""
+        now = time.time()
+        ident = self.identity.get().to_dict()
+        ai_name = str(ident.get("ai_name") or "Jaeger")
+        base = self._base_model()
+        active_model = str(getattr(base, "model_id", base.name))
+        gov = self.governor.snapshot()
+        estop_active = bool(gov.get("estop_active"))
+        active_owner_runs = int(gov.get("active_owner_runs") or 0)
+        cog = self.cognition.state.to_dict() if hasattr(self.cognition, "state") else {}
+        init_status = self.initiative.status() if hasattr(self.initiative, "status") else {}
+        autonomy_enabled = bool((init_status.get("config") or {}).get("enabled", True))
+        pending_approvals = self.store.list_pending_approvals()
+        pending_count = len(pending_approvals)
+
+        # Inspect recent main-session hub events for live tool activity & feed
+        recent_events = self.hub.replay_after(MAIN_CHAT_SESSION_ID)[-25:]
+        active_tool = ""
+        open_tools: dict[str, str] = {}
+        feed: list[dict[str, Any]] = []
+        for ev in recent_events:
+            etype = str(ev.get("event") or "")
+            payload = ev.get("payload") or {}
+            tname = str(payload.get("tool") or "")
+            cid = str(payload.get("call_id") or ev.get("seq") or "")
+            if etype == "tool.started" and tname:
+                open_tools[cid] = tname
+            elif etype in ("tool.completed", "tool.failed"):
+                open_tools.pop(cid, None)
+                feed.append({
+                    "id": f"ev-{ev.get('seq')}",
+                    "timestamp": now,
+                    "agentName": ai_name,
+                    "kind": "tool",
+                    "summary": f"{'Finished' if etype == 'tool.completed' else 'Failed'} `{tname or 'tool'}`",
+                })
+        if open_tools:
+            active_tool = list(open_tools.values())[-1]
+
+        read_tools = {
+            "read_file", "list_files", "grep_files", "web_search", "web_fetch",
+            "search_workspace", "memory_recall", "minecraft_status", "droid_capture",
+            "business_team", "search_workspace_skills", "load_workspace_skill",
+        }
+        primary_activity = "idle"
+        primary_status = f"Standing by ({cog.get('mode') or 'ready'})"
+        primary_task = str(cog.get("focus") or active_model)
+        if estop_active:
+            primary_activity = "estop"
+            primary_status = "E-Stop latched"
+        elif pending_count > 0:
+            primary_activity = "waiting_approval"
+            primary_status = f"Waiting on {pending_count} approval(s)"
+        elif active_owner_runs > 0:
+            if active_tool:
+                primary_activity = "reading" if active_tool in read_tools else "typing"
+                primary_status = f"Running {active_tool}"
+            else:
+                primary_activity = "thinking"
+                primary_status = "Thinking through owner request"
+        elif str(cog.get("mode") or "") in ("acting", "exploring", "thinking"):
+            primary_activity = "thinking"
+            primary_status = f"Autonomous: {cog.get('mode')}"
+
+        agents: list[dict[str, Any]] = [{
+            "id": "jaeger",
+            "name": ai_name,
+            "role": "Primary Autonomous Mind",
+            "kind": "primary",
+            "zone": "command",
+            "activity": primary_activity,
+            "statusLabel": primary_status,
+            "currentTool": active_tool or None,
+            "currentTask": primary_task[:120] if primary_task else None,
+            "model": active_model,
+            "accentColor": "#22d3ee",
+            "paletteIndex": 0,
+            "seatId": "seat-command",
+            "updatedAt": now,
+        }]
+
+        # Live spawned subagents (Engineering / Subagent Pod)
+        subagent_seats = ["seat-eng-3", "seat-eng-4", "seat-eng-2"]
+        active_subagents = 0
+        for aid, meta in list(self._subagent_meta.items())[-12:]:
+            fut = self.subagents._futures.get(aid)  # noqa: SLF001
+            running = bool(fut is not None and not fut.done())
+            if not running:
+                continue
+            seat = subagent_seats[active_subagents % len(subagent_seats)]
+            active_subagents += 1
+            read_only = bool(meta.get("read_only"))
+            role = str(meta.get("role") or "subagent")
+            task = str(meta.get("task") or "")
+            agents.append({
+                "id": f"sub_{aid}",
+                "name": f"{role.title()} #{active_subagents}",
+                "role": f"Subagent ({'Read-Only' if read_only else 'Worker'})",
+                "kind": "subagent",
+                "zone": "engineering",
+                "activity": "estop" if estop_active else ("reading" if read_only else "typing"),
+                "statusLabel": "Researching" if read_only else "Executing delegated task",
+                "currentTask": task[:120],
+                "model": active_model,
+                "accentColor": "#4ade80",
+                "paletteIndex": 4,
+                "seatId": seat,
+                "updatedAt": float(meta.get("started_at") or now),
+            })
+
+        # 8-role autonomous studio & business team
+        role_layout: dict[str, tuple[str, str, str, int]] = {
+            "producer": ("studio", "seat-studio-1", "#f59e0b", 1),
+            "editor": ("studio", "seat-studio-2", "#fb7185", 2),
+            "scriptwriter": ("studio", "seat-studio-3", "#a78bfa", 3),
+            "designer": ("studio", "seat-studio-4", "#f472b6", 5),
+            "engineer": ("engineering", "seat-eng-1", "#38bdf8", 0),
+            "researcher": ("research", "seat-res-1", "#60a5fa", 6),
+            "ops": ("research", "seat-res-2", "#34d399", 4),
+            "publisher": ("research", "seat-res-3", "#fbbf24", 7),
+        }
+        episodes = [e.to_dict() for e in self.youtube.list_episodes()]
+        projects = [p.to_dict() for p in self.business.list_projects()]
+        active_workflows = [
+            w for w in (r.to_dict() for r in self.workflows.list_runs(limit=20))
+            if str(w.get("status") or "") in ("running", "awaiting_approval", "pending")
+        ]
+        role_tasks: dict[str, tuple[str, str]] = {}
+        for ep in episodes:
+            assigned = str(ep.get("assigned_role") or "")
+            stage = str(ep.get("stage") or "")
+            if assigned and stage != "published":
+                role_tasks[assigned] = (f"Episode: {ep.get('title')} ({stage})", "typing" if stage in ("editing", "scripting") else "reading")
+        for proj in projects:
+            owner_role = str(proj.get("owner_role") or "")
+            if owner_role and owner_role not in role_tasks:
+                role_tasks[owner_role] = (f"Project: {proj.get('name')} ({proj.get('stage')})", "reading")
+        if active_workflows and "ops" not in role_tasks:
+            wf = active_workflows[0]
+            role_tasks["ops"] = (
+                f"Workflow: {wf.get('name') or wf.get('run_id')}",
+                "waiting_approval" if wf.get("status") == "awaiting_approval" else "typing",
+            )
+
+        for role in self.business.list_team():
+            rid = str(role.get("role_id") or "")
+            zone, seat_id, color, pal = role_layout.get(rid, ("research", "seat-res-1", "#94a3b8", 6))
+            task_info = role_tasks.get(rid)
+            if estop_active:
+                act, label, task = "estop", "E-Stop paused", None
+            elif task_info:
+                task, act = task_info
+                label = "Active on studio work" if act != "waiting_approval" else "Awaiting owner approval"
+            else:
+                act = "coffee" if rid in ("publisher", "designer") else "idle"
+                label = "Break lounge" if act == "coffee" else "Ready for assignment"
+                task = str(role.get("mission") or "")[:110]
+            agents.append({
+                "id": f"role_{rid}",
+                "name": str(role.get("title") or rid.title()),
+                "role": rid.replace("_", " ").title(),
+                "kind": "team",
+                "zone": zone,
+                "activity": act,
+                "statusLabel": label,
+                "currentTask": task,
+                "model": str(role.get("default_model") or active_model),
+                "accentColor": color,
+                "paletteIndex": pal,
+                "seatId": seat_id,
+                "updatedAt": now,
+            })
+
+        # Embodiment Ops (Minecraft + Droid)
+        mc_obs = self.minecraft.observe()
+        mc_state = mc_obs.get("state") or {}
+        mc_connected = bool(mc_state.get("connected"))
+        mc_pos = mc_state.get("position") or {"x": 0, "y": 64, "z": 0}
+        mc_biome = str(mc_state.get("biome") or "").strip()
+        mc_summary = (
+            f"Connected @ ({mc_pos.get('x', 0)}, {mc_pos.get('y', 64)}, {mc_pos.get('z', 0)})"
+            + (f" • {mc_biome}" if mc_biome else "")
+            if mc_connected
+            else "Standby"
+        )
+        droid_obs = self.droid.observe()
+        droid_awake = bool(droid_obs.get("awake"))
+        emb_activity = "estop" if estop_active else ("typing" if mc_connected else ("reading" if droid_awake else "coffee"))
+        emb_status = (
+            "E-Stop halted"
+            if estop_active
+            else (
+                f"Minecraft live: {mc_summary}"
+                if mc_connected
+                else ("Droid awake & observing" if droid_awake else "Droid parked • MC standby")
+            )
+        )
+        agents.append({
+            "id": "embodiment_ops",
+            "name": "Embodiment Ops",
+            "role": "Minecraft & Droid",
+            "kind": "embodiment",
+            "zone": "research",
+            "activity": emb_activity,
+            "statusLabel": emb_status,
+            "currentTask": str(mc_state.get("active_goal") or "Ready for co-op & physical presence")[:120],
+            "accentColor": "#34d399",
+            "paletteIndex": 2,
+            "seatId": "seat-res-4",
+            "updatedAt": now,
+        })
+
+        # Combine recent autonomous initiative actions into the live feed
+        for act_item in self.initiative.list_actions(limit=8):
+            feed.append({
+                "id": f"init-{act_item.get('action_id') or act_item.get('created_at')}",
+                "timestamp": float(act_item.get("created_at") or now),
+                "agentName": ai_name,
+                "kind": "autonomy",
+                "summary": f"[{act_item.get('kind', 'auto')}] {str(act_item.get('summary') or '')[:140]}",
+            })
+        feed.sort(key=lambda item: float(item.get("timestamp") or 0), reverse=True)
+
+        return {
+            "agents": agents,
+            "activityFeed": feed[:12],
+            "budgets": self.business.budget_summary(),
+            "pendingApprovals": pending_count,
+            "activeSubagents": active_subagents,
+            "estopActive": estop_active,
+            "autonomyEnabled": autonomy_enabled,
+            "minecraftConnected": mc_connected,
+            "minecraftSummary": mc_summary,
+            "droidAwake": droid_awake,
+            "updatedAt": now,
+        }
 
     def build_app(
         self,
@@ -2234,6 +3837,21 @@ class ModularGatewayRuntime:
             tool_workspace=self.tool_workspace,
             models_provider=self._models_info,
             model_selector=self._select_model,
+            cookbook_provider=self._cookbook_info,
+            roundtable_runner=self._run_roundtable,
+            model_telemetry_provider=self._model_telemetry_info,
+            model_risk_provider=self._model_risk_cards,
+            model_eval_runner=self._run_model_eval,
+            research_runner=self._run_deep_research,
+            research_lister=self._list_research_reports,
+            mode_getter=self._get_agent_mode,
+            mode_setter=self._set_agent_mode,
+            evidence_store=self.evidence,
+            agent_importer=self._import_external_agent_tool,
+            kanban_board=self.board,
+            reminder_store=self.reminders,
+            avatar_packs_provider=self._avatar_packs_info,
+            nexus_provider=self._nexus_telemetry_tool,
             routing_provider=self._get_routing,
             routing_updater=self._update_routing,
             onboarding_provider=self._onboarding_status,
@@ -2249,12 +3867,16 @@ class ModularGatewayRuntime:
             identity_store=self.identity,
             avatar_store=self.avatars,
             business_store=self.business,
+            office_provider=self._office_state,
+            global_bus=self.global_bus,
+            awareness_provider=self._awareness_state,
             youtube_store=self.youtube,
             media_archive=self.media_archive,
             channel_hub=self.channels,
             channel_config=self.channel_config,
             channel_ingress=self.channel_ingress,
             remote_hosts=self.remote_hosts,
+            authorized_tasks=self.authorized_tasks,
             minecraft_embodiment=self.minecraft,
             jp01_embodiment=self.jp01,
             droid_embodiment=self.droid,
@@ -2262,6 +3884,7 @@ class ModularGatewayRuntime:
             vision_buffer=self.vision,
             memory_store=self.memory,
             learning_store=self.learning,
+            wiki_store=self.wiki,
             skills_provider=self._discover_skills,
             mcp_provider=self.mcp.list_servers_health,
             mcp_upsert=self._upsert_mcp_server,
@@ -2280,6 +3903,8 @@ class ModularGatewayRuntime:
             self.pty.close_all()
         if getattr(self, "browser_manager", None) is not None:
             self.browser_manager.close()
+        if getattr(self, "droid", None) is not None and getattr(self.droid, "reflex", None) is not None:
+            self.droid.reflex.stop()
         if getattr(self, "minecraft", None) is not None:
             self.minecraft.close()
         if getattr(self, "subagents", None) is not None:
@@ -2308,6 +3933,7 @@ async def serve_modular_gateway(
     # Sync physical Droid peripherals & gimbal pose truthfully on live boot (never during unit tests).
     try:
         runtime.droid.refresh_devices()
+        runtime.droid.reflex.start()
     except Exception:  # noqa: BLE001
         pass
 

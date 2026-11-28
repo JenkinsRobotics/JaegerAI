@@ -582,11 +582,91 @@ def _cmd_minecraft(args: list[str]) -> int:
         res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "set_goal", "params": {"goal": " ".join(args[1:])}})
         print(json.dumps(res, indent=2))
         return 0
+    if sub == "follow" and len(args) >= 2:
+        dist = int(args[2]) if len(args) >= 3 and args[2].isdigit() else 3
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "follow_player", "params": {"player": args[1], "distance": dist}}, timeout=30.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "come" and len(args) >= 2:
+        dist = int(args[2]) if len(args) >= 3 and args[2].isdigit() else 3
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "go_to_player", "params": {"player": args[1], "distance": dist}}, timeout=45.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "give" and len(args) >= 3:
+        cnt = int(args[3]) if len(args) >= 4 and args[3].isdigit() else 1
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "give_to_player", "params": {"player": args[1], "item": args[2], "count": cnt}}, timeout=45.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "eat":
+        item = args[1] if len(args) >= 2 else ""
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "eat", "params": {"item": item}}, timeout=20.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "sleep":
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "go_to_bed", "params": {}}, timeout=30.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "stop":
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "stop_actions", "params": {}}, timeout=15.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "mode" and len(args) >= 3:
+        enabled = args[2].lower() in ("on", "true", "1", "yes")
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "set_mode", "params": {"mode": args[1], "enabled": enabled}}, timeout=15.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "chat" and len(args) >= 2:
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "chat", "params": {"message": " ".join(args[1:])}}, timeout=20.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "inbox":
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "read_chat", "params": {}}, timeout=15.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "players":
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "nearby_players", "params": {}}, timeout=15.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "save" and len(args) >= 2:
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "save_location", "params": {"name": args[1], "notes": " ".join(args[2:])}}, timeout=15.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "places":
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "list_locations", "params": {}}, timeout=15.0)
+        print(json.dumps(res, indent=2))
+        return 0
+    if sub == "goto" and len(args) >= 2:
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "goto_location", "params": {"name": args[1]}}, timeout=45.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "guard":
+        radius = int(args[1]) if len(args) >= 2 and args[1].isdigit() else 10
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "guard_area", "params": {"radius": radius}}, timeout=20.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "build" and len(args) >= 2:
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "build_blueprint", "params": {"blueprint": args[1]}}, timeout=60.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
+    if sub == "join":
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "join_guide", "params": {}}, timeout=15.0)
+        print(json.dumps(res, indent=2))
+        return 0
+    if sub == "lan" and len(args) >= 2:
+        enabled = args[1].lower() in ("on", "true", "1", "yes")
+        res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "lan_broadcast", "params": {"enabled": enabled}}, timeout=15.0)
+        print(json.dumps(res, indent=2))
+        return 0 if res.get("ok") else 1
     if sub == "step" and len(args) >= 2:
         res = _api_json("POST", "/v1/embodiment/minecraft/act", {"action": "step", "params": {"code": " ".join(args[1:])}}, timeout=60.0)
         print(json.dumps(res, indent=2))
         return 0 if res.get("ok") else 1
-    print("Usage: ./jaeger minecraft [status | connect [host] [port] | disconnect | goal \"<goal>\" | step \"<js>\"]")
+    print(
+        "Usage: ./jaeger minecraft [status | connect [host] [port] | disconnect | goal \"<goal>\" | "
+        "follow <player> [dist] | come <player> | give <player> <item> [count] | eat [item] | "
+        "sleep | guard [radius] | build <shelter|monument|farm|town_hall> | save <name> | places | "
+        "goto <name> | join | lan <on|off> | stop | mode <name> <on|off> | chat \"<msg>\" | inbox | players | step \"<js>\"]"
+    )
     return 2
 
 

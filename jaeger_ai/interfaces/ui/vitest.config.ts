@@ -25,6 +25,7 @@ export default defineConfig({
       { find: /^@jaeger\/ui-sdk$/, replacement: here("../../../packages/jaeger-ui-sdk/src/index.ts") },
       { find: /^@jaeger\/ui-kit$/, replacement: here("../../../packages/jaeger-ui-kit/src/index.ts") },
       { find: /^@jaeger\/ui-avatar$/, replacement: here("../../../packages/jaeger-ui-avatar/src/index.ts") },
+      { find: /^@jaeger\/ui-office$/, replacement: here("../../../packages/jaeger-ui-office/src/index.ts") },
       { find: /^@jaeger\/ui-features$/, replacement: here("../../../packages/jaeger-ui-features/src/index.ts") },
       { find: /^react\/jsx-runtime$/, replacement: here("./node_modules/react/jsx-runtime.js") },
       { find: /^react\/jsx-dev-runtime$/, replacement: here("./node_modules/react/jsx-dev-runtime.js") },
