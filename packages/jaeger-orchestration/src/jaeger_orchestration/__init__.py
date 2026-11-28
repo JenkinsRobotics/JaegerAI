@@ -1,5 +1,12 @@
 """jaeger-orchestration: Pregel DAG, durable WorkflowEngine, subagents, mailboxes, auth, scoped vars & cron."""
 
+from .board import (
+    KANBAN_COLUMNS,
+    BoardCard,
+    KanbanBoard,
+    OneShotReminder,
+    OneShotReminderStore,
+)
 from .cron_expr import (
     CronExpressionError,
     CronSchedule,
@@ -53,6 +60,7 @@ from .workflow import (
 
 __all__ = [
     "AttemptFencedQueue",
+    "BoardCard",
     "Command",
     "CronExpressionError",
     "CronJob",
@@ -62,6 +70,10 @@ __all__ = [
     "DurableMailbox",
     "FencedJob",
     "GraphInterrupt",
+    "KANBAN_COLUMNS",
+    "KanbanBoard",
+    "OneShotReminder",
+    "OneShotReminderStore",
     "PregelGraph",
     "PregelRunResult",
     "ResearchReport",

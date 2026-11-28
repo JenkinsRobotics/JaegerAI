@@ -7,6 +7,12 @@ from .living_link import (
     avatar_app_serving,
     launch_avatar_app,
 )
+from .packs import (
+    AvatarPackInfo,
+    default_pack_search_dirs,
+    discover_avatar_packs,
+    inspect_avatar_pack,
+)
 from .store import (
     BUDGETS,
     EMOTIONS,
@@ -23,6 +29,7 @@ from .store import (
 __all__ = [
     "AvatarError",
     "AvatarLink",
+    "AvatarPackInfo",
     "AvatarStore",
     "BUDGETS",
     "DEFAULT_AVATAR_PORT",
@@ -33,7 +40,10 @@ __all__ = [
     "avatar_app_serving",
     "budget_report",
     "build_viseme_timeline",
+    "default_pack_search_dirs",
+    "discover_avatar_packs",
     "inspect_avatar_bytes",
+    "inspect_avatar_pack",
     "inspect_glb_bytes",
     "launch_avatar_app",
 ]

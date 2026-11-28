@@ -24,7 +24,7 @@ from jaeger_authority import (
     evaluate_cloud_egress,
     redact_text,
 )
-from jaeger_avatar import AvatarLink, AvatarStore
+from jaeger_avatar import AvatarLink, AvatarStore, discover_avatar_packs
 from jaeger_business import BusinessStore
 from jaeger_channels import (
     ChannelConfigStore,
@@ -90,6 +90,8 @@ from jaeger_orchestration import (
     DeepResearchEngine,
     DryRunSimulator,
     DurableMailbox,
+    KanbanBoard,
+    OneShotReminderStore,
     PriorityTier,
     ResourceGovernor,
     SubagentOrchestrator,
@@ -289,6 +291,8 @@ class ModularGatewayRuntime:
         self.evidence = RetainedEvidenceStore(self.state_dir / "evidence")
         self.site_gotchas = SiteGotchasStore(self.state_dir / "browser_gotchas.json")
         self.browser_judge = BrowserRunJudge(gotchas_store=self.site_gotchas)
+        self.board = KanbanBoard(self.state_dir / "board.sqlite3")
+        self.reminders = OneShotReminderStore(self.state_dir / "board.sqlite3")
         self._agent_mode = AgentMode.BUILD
         self.workflows = WorkflowEngine(self.state_dir / "workflows.sqlite3")
         self.dry_run = DryRunSimulator()
@@ -593,7 +597,15 @@ class ModularGatewayRuntime:
             )
 
     def _cognition_heartbeat(self, _ctx: dict[str, Any]) -> dict[str, Any]:
-        """Lightweight proactive cognitive tick updating scheduler & channel awareness."""
+        """Lightweight proactive cognitive tick updating scheduler, reminders & channel awareness."""
+        for rem in self.reminders.claim_due():
+            self.global_bus.publish("reminder.fired", rem.to_dict())
+            self.world.record_perception(
+                modality="reminder",
+                kind="oneshot_due",
+                payload={"summary": f"Reminder due: {rem.message[:160]}", **rem.to_dict()},
+                salience=0.9,
+            )
         pending = len(self.store.list_scheduled_jobs(MAIN_CHAT_SESSION_ID, status="pending"))
         self.world.observe(
             domain="system",
@@ -2180,6 +2192,98 @@ class ModularGatewayRuntime:
             read_only=False,
             source="jaeger-skills",
         )
+        _reg(
+            "task_board",
+            "Manage Jaeger's Kanban task board (backlog/todo/in_progress/review/done) for multi-step work.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["summary", "markdown", "create", "move", "delete"]},
+                    "title": {"type": "string"},
+                    "card_id": {"type": "string"},
+                    "column": {"type": "string", "enum": ["backlog", "todo", "in_progress", "review", "done"]},
+                    "priority": {"type": "integer", "default": 2, "minimum": 1, "maximum": 4},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                    "notes": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._task_board_tool(args),
+            read_only=False,
+            source="jaeger-orchestration",
+        )
+        _reg(
+            "quick_reminder",
+            "Native one-shot reminders without cron math: schedule with in_minutes or at_iso, list pending, or cancel.",
+            {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["schedule", "list", "cancel"]},
+                    "message": {"type": "string"},
+                    "in_minutes": {"type": "number"},
+                    "at_iso": {"type": "string"},
+                    "reminder_id": {"type": "string"},
+                },
+                "required": ["action"],
+            },
+            lambda args: self._quick_reminder_tool(args),
+            read_only=False,
+            source="jaeger-orchestration",
+        )
+        _reg(
+            "avatar_packs",
+            "Discover installed canonical avatar/v1 packs across ~/.jaeger, JaegerAvatar, and Omni V2. Read-only.",
+            {"type": "object", "properties": {}},
+            lambda _args: self._avatar_packs_info(),
+            read_only=True,
+            source="jaeger-avatar",
+        )
+
+    def _task_board_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "summary").strip().lower()
+        if act == "summary":
+            return self.board.summary()
+        if act == "markdown":
+            return {"ok": True, "markdown": self.board.render_markdown()}
+        if act == "create":
+            card = self.board.create_card(
+                str(args.get("title") or ""),
+                column=str(args.get("column") or "todo"),
+                priority=int(args.get("priority") or 2),
+                tags=args.get("tags") if isinstance(args.get("tags"), list) else (),
+                notes=str(args.get("notes") or ""),
+            )
+            return {"ok": True, "card": card.to_dict()}
+        if act == "move":
+            card = self.board.move_card(
+                str(args.get("card_id") or ""),
+                str(args.get("column") or "in_progress"),
+                notes=str(args["notes"]) if args.get("notes") is not None else None,
+            )
+            return {"ok": True, "card": card.to_dict()}
+        if act == "delete":
+            return {"ok": self.board.delete_card(str(args.get("card_id") or ""))}
+        raise ValueError(f"unsupported task_board action: {act!r}")
+
+    def _quick_reminder_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        act = str(args.get("action") or "list").strip().lower()
+        if act == "list":
+            rows = [r.to_dict() for r in self.reminders.list_reminders(status="pending")]
+            return {"ok": True, "reminders": rows, "count": len(rows)}
+        if act == "schedule":
+            rem = self.reminders.schedule(
+                str(args.get("message") or ""),
+                in_minutes=float(args["in_minutes"]) if args.get("in_minutes") is not None else None,
+                at_iso=str(args["at_iso"]) if args.get("at_iso") else None,
+            )
+            return {"ok": True, "reminder": rem.to_dict()}
+        if act == "cancel":
+            return {"ok": self.reminders.cancel(str(args.get("reminder_id") or ""))}
+        raise ValueError(f"unsupported quick_reminder action: {act!r}")
+
+    def _avatar_packs_info(self) -> dict[str, Any]:
+        packs = [p.to_dict() for p in discover_avatar_packs(state_dir=self.state_dir)]
+        return {"ok": True, "packs": packs, "count": len(packs)}
 
     def _browser_gotchas_tool(self, args: Mapping[str, Any]) -> dict[str, Any]:
         act = str(args.get("action") or "list").strip().lower()
@@ -3299,6 +3403,9 @@ class ModularGatewayRuntime:
             mode_setter=self._set_agent_mode,
             evidence_store=self.evidence,
             agent_importer=self._import_external_agent_tool,
+            kanban_board=self.board,
+            reminder_store=self.reminders,
+            avatar_packs_provider=self._avatar_packs_info,
             routing_provider=self._get_routing,
             routing_updater=self._update_routing,
             onboarding_provider=self._onboarding_status,
