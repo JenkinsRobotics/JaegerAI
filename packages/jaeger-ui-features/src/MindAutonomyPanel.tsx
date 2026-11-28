@@ -66,6 +66,7 @@ export function MindAutonomyPanel({
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const [autonomy, setAutonomy] = useState<AutonomyStatus>({});
   const [actions, setActions] = useState<InitiativeAction[]>([]);
+  const [reflections, setReflections] = useState<Array<{ reason?: string; skill_captured?: string; tools_used?: string[] }>>([]);
   const [minecraft, setMinecraft] = useState<MinecraftStatus>({});
   const [mcGoalDraft, setMcGoalDraft] = useState("");
   const [busyAction, setBusyAction] = useState("");
@@ -81,23 +82,40 @@ export function MindAutonomyPanel({
         return {};
       }
     };
-    const [br, act, emb] = await Promise.all([
+    const [br, act, emb, aw] = await Promise.all([
       safeGet("/v1/cognition/briefing"),
       safeGet("/v1/cognition/actions?limit=8"),
       safeGet("/v1/embodiment/status"),
+      safeGet("/v1/cognition/awareness"),
     ]);
     if (typeof br.summary === "string") setBriefingSummary(br.summary);
     if (typeof br.pending_approvals_count === "number") setPendingApprovals(br.pending_approvals_count);
     if (act.status) setAutonomy(act.status as AutonomyStatus);
     if (Array.isArray(act.actions)) setActions(act.actions as InitiativeAction[]);
     if (emb.minecraft) setMinecraft(emb.minecraft as MinecraftStatus);
+    if (Array.isArray(aw.recent_reflections)) setReflections(aw.recent_reflections);
   }, [baseUrl]);
 
   useEffect(() => {
     void loadLiveMind();
-    const timer = window.setInterval(() => void loadLiveMind(), 10000);
-    return () => window.clearInterval(timer);
-  }, [loadLiveMind]);
+    let es: EventSource | null = null;
+    if (typeof EventSource === "function") {
+      try {
+        es = new EventSource(`${baseUrl}/v1/events/global`);
+        const onChange = () => void loadLiveMind();
+        for (const ev of ["cognition.reflection", "cognition.state", "minecraft.changed", "minecraft.step", "droid.changed", "droid.auto_parked"]) {
+          es.addEventListener(ev, onChange);
+        }
+      } catch {
+        es = null;
+      }
+    }
+    const timer = window.setInterval(() => void loadLiveMind(), es ? 20000 : 10000);
+    return () => {
+      window.clearInterval(timer);
+      if (es) es.close();
+    };
+  }, [baseUrl, loadLiveMind]);
 
   const toggleAutonomy = async () => {
     const nextEnabled = !(autonomy.config?.enabled ?? true);
@@ -283,6 +301,20 @@ export function MindAutonomyPanel({
           <button type="button" className="jg-btn-ghost" onClick={onOpenGoals}>Goals</button>
         </div>
       </div>
+
+      {reflections.length > 0 && (
+        <div className="jg-card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <strong style={{ fontSize: 13 }}>Self-Improvement Reflections</strong>
+          {reflections.slice(0, 4).map((ref, idx) => (
+            <div key={idx} style={{ fontSize: 12, paddingTop: 4, borderTop: "1px solid var(--jg-border-subtle)" }}>
+              <span className="jg-pill">{ref.skill_captured ? `skill:${ref.skill_captured}` : (ref.reason || "learned")}</span>{" "}
+              <span className="jg-muted">
+                {(ref.tools_used ?? []).slice(0, 4).join(", ") || "workflow"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

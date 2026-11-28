@@ -1,11 +1,25 @@
 """jaeger-orchestration: Pregel DAG, durable WorkflowEngine, subagents, mailboxes, auth, scoped vars & cron."""
 
+from .board import (
+    KANBAN_COLUMNS,
+    BoardCard,
+    KanbanBoard,
+    OneShotReminder,
+    OneShotReminderStore,
+)
 from .cron_expr import (
     CronExpressionError,
     CronSchedule,
     next_cron_time,
     parse_cron,
     validate_cron,
+)
+from .deep_research import (
+    DeepResearchEngine,
+    ResearchReport,
+    ResearchSource,
+    list_research_reports,
+    safe_fetch_text,
 )
 from .dry_run import DryRunReport, DryRunSimulator, SimulatedStep
 from .governor import HeavyModelLease, PriorityTier, ResourceGovernor
@@ -46,16 +60,24 @@ from .workflow import (
 
 __all__ = [
     "AttemptFencedQueue",
+    "BoardCard",
     "Command",
     "CronExpressionError",
     "CronJob",
     "CronSchedule",
     "CronScheduler",
+    "DeepResearchEngine",
     "DurableMailbox",
     "FencedJob",
     "GraphInterrupt",
+    "KANBAN_COLUMNS",
+    "KanbanBoard",
+    "OneShotReminder",
+    "OneShotReminderStore",
     "PregelGraph",
     "PregelRunResult",
+    "ResearchReport",
+    "ResearchSource",
     "RunAuthorization",
     "ScopedVariables",
     "Send",
@@ -72,7 +94,9 @@ __all__ = [
     "current_authorization",
     "interrupt",
     "intersect_sandbox_profiles",
+    "list_research_reports",
     "next_cron_time",
     "parse_cron",
+    "safe_fetch_text",
     "validate_cron",
 ]

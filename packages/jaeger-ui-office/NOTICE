@@ -1,0 +1,9 @@
+JaegerAI Virtual Office (@jaeger/ui-office)
+
+Portions of the tile-map BFS pathfinder, character state machine, Matrix spawn/despawn
+effect, speech/permission/heart pixel bubbles, and 2D Canvas office rendering architecture
+are adapted from pixel-agents-hq/pixel-agents:
+
+  Copyright (c) 2026 Pablo De Lucca
+  Licensed under the MIT License
+  https://github.com/pixel-agents-hq/pixel-agents

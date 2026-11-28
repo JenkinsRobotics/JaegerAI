@@ -55,6 +55,7 @@ from .store import (
     deterministic_resource_id,
     estimate_tokens,
 )
+from .wiki import LocalWikiStore, WIKI_SECTIONS, WikiStoreError
 
 __all__ = [
     "ContextBudget",
@@ -65,10 +66,13 @@ __all__ = [
     "DIGEST_PREFIX",
     "DIGEST_TAG",
     "GitCheckpointManager",
+    "LocalWikiStore",
     "RegexTimeoutError",
     "SqliteStateMemory",
     "ToolOutputOffloader",
     "TrimResult",
+    "WIKI_SECTIONS",
+    "WikiStoreError",
     "choose_boundary",
     "close_dangling_tool_calls",
     "compact_agent",

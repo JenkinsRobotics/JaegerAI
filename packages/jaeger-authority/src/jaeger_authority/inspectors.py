@@ -41,7 +41,7 @@ _JAEGER_DENIED_FILENAMES = frozenset({
 })
 _PROTECTED_WORKSPACE_SEGMENTS = (".git/hooks", ".git/config", ".jaeger")
 _SENSITIVE_SHELL_RE = re.compile(
-    r"(?:~|\$HOME|/Users/[^/\s]+|/home/[^/\s]+)/\.(?:ssh|aws|gnupg|kube|jaeger)\b"
+    r"(?:~|\$HOME|/Users/[^/\s]+|/home/[^/\s]+)/\.(?:ssh|aws|gnupg|kube|jaeger(?!/venv(?:/|\b)))\b"
     r"|(?:/etc/(?:passwd|shadow|sudoers))"
     r"|(?:\.git/(?:hooks|config)\b)",
     re.IGNORECASE,
@@ -252,7 +252,8 @@ class BoundaryAndSecretsInspector:
                             proposal_id=proposal.proposal_id,
                         )
                 in_ws = resolved == ws or ws in resolved.parents
-                in_tmp = str(resolved).startswith(("/tmp/", "/private/tmp/"))
+                ws_in_tmp = str(ws).startswith(("/tmp/", "/private/tmp/"))
+                in_tmp = (not ws_in_tmp) and str(resolved).startswith(("/tmp/", "/private/tmp/"))
                 in_allowed = any(
                     resolved == root or root in resolved.parents
                     for root in self._allowed_roots

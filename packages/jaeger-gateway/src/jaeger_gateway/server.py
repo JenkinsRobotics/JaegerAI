@@ -10,11 +10,12 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from aiohttp import web
 from jaeger_avatar import AvatarError, build_viseme_timeline
 from jaeger_cognition import CharacterOverlay
+from jaeger_mcp import list_mcp_presets
 from jaeger_youtube import export_episode_to_otio, plan_phased_research, probe_youtube_toolchain
 
 from .auth import GatewayAuthPolicy, _is_valid_local_host, _is_valid_ts_net_host
@@ -64,6 +65,21 @@ def create_gateway_app(
     tool_workspace: ToolWorkspace | None = None,
     models_provider: Callable[[], dict[str, Any]] | None = None,
     model_selector: Callable[[str], dict[str, Any]] | None = None,
+    cookbook_provider: Callable[..., dict[str, Any]] | None = None,
+    roundtable_runner: Callable[..., dict[str, Any]] | None = None,
+    model_telemetry_provider: Callable[..., dict[str, Any]] | None = None,
+    model_risk_provider: Callable[..., dict[str, Any]] | None = None,
+    model_eval_runner: Callable[..., dict[str, Any]] | None = None,
+    research_runner: Callable[..., dict[str, Any]] | None = None,
+    research_lister: Callable[..., list[dict[str, Any]]] | None = None,
+    mode_getter: Callable[[], dict[str, Any]] | None = None,
+    mode_setter: Callable[[str], dict[str, Any]] | None = None,
+    evidence_store: Any = None,
+    agent_importer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    kanban_board: Any = None,
+    reminder_store: Any = None,
+    avatar_packs_provider: Callable[[], dict[str, Any]] | None = None,
+    nexus_provider: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
     routing_provider: Callable[[], dict[str, Any]] | None = None,
     routing_updater: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     onboarding_provider: Callable[[], dict[str, Any]] | None = None,
@@ -79,12 +95,16 @@ def create_gateway_app(
     identity_store: Any = None,
     avatar_store: Any = None,
     business_store: Any = None,
+    office_provider: Callable[[], dict[str, Any]] | None = None,
+    global_bus: Any = None,
+    awareness_provider: Callable[[], dict[str, Any]] | None = None,
     youtube_store: Any = None,
     media_archive: Any = None,
     channel_hub: Any = None,
     channel_config: Any = None,
     channel_ingress: Any = None,
     remote_hosts: Any = None,
+    authorized_tasks: Any = None,
     minecraft_embodiment: Any = None,
     jp01_embodiment: Any = None,
     droid_embodiment: Any = None,
@@ -92,6 +112,7 @@ def create_gateway_app(
     vision_buffer: Any = None,
     memory_store: Any = None,
     learning_store: Any = None,
+    wiki_store: Any = None,
     skills_provider: Callable[[], list[dict[str, Any]]] | None = None,
     mcp_provider: Callable[[], list[dict[str, Any]]] | None = None,
     mcp_upsert: Callable[..., list[dict[str, Any]]] | None = None,
@@ -158,7 +179,7 @@ def create_gateway_app(
     app = web.Application(middlewares=[auth_middleware])
 
     async def health(_request: web.Request) -> web.Response:
-        extra = runtime_info() if runtime_info is not None else {}
+        extra = await asyncio.to_thread(runtime_info) if runtime_info is not None else {}
         return web.json_response({
             "ok": True,
             "status": "ok",
@@ -603,7 +624,109 @@ def create_gateway_app(
 
     async def list_models(_request: web.Request) -> web.Response:
         info = models_provider() if models_provider is not None else {"active": "", "models": []}
-        return web.json_response({"ok": True, **info})
+        active = str(info.get("active") or "")
+        raw_models = list(info.get("models") or [])
+        openai_data: list[dict[str, Any]] = [
+            {"id": "jaeger", "object": "model", "owned_by": "jaeger", "default": True}
+        ]
+        seen_ids = {"jaeger"}
+        for m in raw_models:
+            mid = str(m.get("id") or "").strip() if isinstance(m, dict) else ""
+            if mid and mid not in seen_ids:
+                seen_ids.add(mid)
+                openai_data.append({
+                    "id": f"jaeger/{mid}",
+                    "object": "model",
+                    "owned_by": str(m.get("provider") or "local"),
+                    "default": mid == active,
+                })
+        return web.json_response({"ok": True, "object": "list", "data": openai_data, "default": "jaeger", **info})
+
+    async def openai_chat_completions(request: web.Request) -> web.StreamResponse:
+        """OpenAI-compatible /v1/chat/completions endpoint for jaeger-chat (VS Code) & SDKs."""
+        body = await request.json()
+        messages = body.get("messages")
+        if not isinstance(messages, list) or not messages:
+            return web.json_response({"error": {"message": "messages list is required", "type": "invalid_request_error"}}, status=400)
+        prompt = ""
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and str(msg.get("role") or "") == "user":
+                content = msg.get("content")
+                if isinstance(content, str):
+                    prompt = content.strip()
+                elif isinstance(content, list):
+                    prompt = " ".join(
+                        str(p.get("text") or "") for p in content if isinstance(p, dict) and p.get("type") == "text"
+                    ).strip()
+                if prompt:
+                    break
+        if not prompt:
+            return web.json_response({"error": {"message": "non-empty user message is required", "type": "invalid_request_error"}}, status=400)
+
+        req_sid = (request.headers.get("X-Jaeger-Session-Id") or "").strip()
+        if req_sid and store.get_session(req_sid) is not None:
+            sid = req_sid
+        else:
+            sid = store.main_chat_session()["session_id"]
+
+        model_name = str(body.get("model") or "jaeger")
+        want_stream = bool(body.get("stream", False))
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        created = int(time.time())
+
+        _, fut = coordinator.submit(
+            sid,
+            prompt,
+            owner_schedule_proposal_allowed=_owner_local_only(request),
+        )
+        outcome = await asyncio.to_thread(fut.result, 180.0)
+        reply_text = str(outcome.get("content") or "")
+
+        if not want_stream:
+            return web.json_response({
+                "id": completion_id,
+                "object": "chat.completion",
+                "created": created,
+                "model": model_name,
+                "session_id": sid,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": reply_text},
+                        "finish_reason": "stop",
+                    }
+                ],
+            })
+
+        resp = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Jaeger-Session-Id": sid,
+            },
+        )
+        await resp.prepare(request)
+        chunk1 = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model_name,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": reply_text}, "finish_reason": None}],
+        }
+        chunk2 = {
+            "id": completion_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model_name,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        await resp.write(f"data: {json.dumps(chunk1)}\n\n".encode("utf-8"))
+        await resp.write(f"data: {json.dumps(chunk2)}\n\n".encode("utf-8"))
+        await resp.write(b"data: [DONE]\n\n")
+        await resp.write_eof()
+        return resp
 
     async def select_model(request: web.Request) -> web.Response:
         if model_selector is None:
@@ -613,6 +736,270 @@ def create_gateway_app(
         if not model_id:
             return web.json_response({"ok": False, "error": "model is required"}, status=400)
         return web.json_response({"ok": True, **model_selector(model_id)})
+
+    async def get_model_cookbook(request: web.Request) -> web.Response:
+        if cookbook_provider is None:
+            return web.json_response({"ok": False, "error": "model cookbook unavailable"}, status=501)
+        modality = (request.query.get("modality") or "all").strip().lower()
+        ram_raw = (request.query.get("ram_gb") or "").strip()
+        host_ram: float | None = None
+        if ram_raw:
+            try:
+                host_ram = float(ram_raw)
+            except ValueError:
+                return web.json_response({"ok": False, "error": "invalid ram_gb"}, status=400)
+        include_unfit = (request.query.get("include_unfit") or "true").strip().lower() not in ("0", "false", "no")
+        try:
+            payload = await asyncio.to_thread(
+                cookbook_provider,
+                modality=modality,
+                host_ram_gb=host_ram,
+                include_unfit=include_unfit,
+            )
+            return web.json_response(payload)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def run_model_roundtable(request: web.Request) -> web.Response:
+        if roundtable_runner is None:
+            return web.json_response({"ok": False, "error": "roundtable unavailable"}, status=501)
+        body = await request.json()
+        prompt = str(body.get("prompt") or "").strip()
+        if not prompt:
+            return web.json_response({"ok": False, "error": "prompt is required"}, status=400)
+        models = body.get("models") if isinstance(body.get("models"), list) else []
+        try:
+            res = await asyncio.to_thread(
+                roundtable_runner,
+                prompt=prompt,
+                models=[str(m) for m in models],
+                blind=bool(body.get("blind", False)),
+                critique_round=bool(body.get("critique_round", False)),
+                consensus=bool(body.get("consensus", True)),
+            )
+            return web.json_response(res)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def get_model_telemetry(request: web.Request) -> web.Response:
+        if model_telemetry_provider is None:
+            return web.json_response({"ok": False, "error": "model telemetry unavailable"}, status=501)
+        try:
+            window_days = float(request.query.get("window_days") or "7")
+        except ValueError:
+            return web.json_response({"ok": False, "error": "invalid window_days"}, status=400)
+        include_live = (request.query.get("live") or "true").strip().lower() not in ("0", "false", "no")
+        include_or = (request.query.get("openrouter_catalog") or "false").strip().lower() in ("1", "true", "yes")
+        payload = await asyncio.to_thread(
+            model_telemetry_provider,
+            window_days=window_days,
+            include_live_providers=include_live,
+            include_openrouter_catalog=include_or,
+        )
+        return web.json_response(payload)
+
+    async def get_model_risk_cards(request: web.Request) -> web.Response:
+        if model_risk_provider is None:
+            return web.json_response({"ok": False, "error": "model risk cards unavailable"}, status=501)
+        mid = (request.query.get("model") or "").strip() or None
+        payload = await asyncio.to_thread(model_risk_provider, model_id=mid)
+        return web.json_response(payload)
+
+    async def run_model_eval(request: web.Request) -> web.Response:
+        if model_eval_runner is None:
+            return web.json_response({"ok": False, "error": "model eval suite unavailable"}, status=501)
+        body = await request.json()
+        models = body.get("models") if isinstance(body.get("models"), list) else []
+        try:
+            res = await asyncio.to_thread(model_eval_runner, models=[str(m) for m in models])
+            return web.json_response(res)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def run_deep_research(request: web.Request) -> web.Response:
+        if research_runner is None:
+            return web.json_response({"ok": False, "error": "deep research unavailable"}, status=501)
+        body = await request.json()
+        topic = str(body.get("topic") or "").strip()
+        if not topic:
+            return web.json_response({"ok": False, "error": "topic is required"}, status=400)
+        try:
+            res = await asyncio.to_thread(
+                research_runner,
+                topic=topic,
+                max_queries=int(body.get("max_queries") or 3),
+                max_sources=int(body.get("max_sources") or 6),
+                fetch_pages=bool(body.get("fetch_pages", True)),
+            )
+            return web.json_response(res)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def list_research_reports_route(request: web.Request) -> web.Response:
+        if research_lister is None:
+            return web.json_response({"ok": True, "reports": []})
+        limit = int(request.query.get("limit") or "25")
+        rows = await asyncio.to_thread(research_lister, limit)
+        return web.json_response({"ok": True, "reports": rows, "count": len(rows)})
+
+    async def get_system_mode(_request: web.Request) -> web.Response:
+        if mode_getter is None:
+            return web.json_response({"ok": True, "mode": "build"})
+        return web.json_response(mode_getter())
+
+    async def set_system_mode(request: web.Request) -> web.Response:
+        if mode_setter is None:
+            return web.json_response({"ok": False, "error": "execution mode unavailable"}, status=501)
+        body = await request.json()
+        mode = str(body.get("mode") or "").strip()
+        try:
+            return web.json_response(mode_setter(mode))
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def list_evidence_route(request: web.Request) -> web.Response:
+        if evidence_store is None:
+            return web.json_response({"ok": True, "items": []})
+        limit = int(request.query.get("limit") or "20")
+        items = evidence_store.list_recent(limit=limit)
+        return web.json_response({"ok": True, "items": items, "count": len(items)})
+
+    async def inspect_evidence_route(request: web.Request) -> web.Response:
+        if evidence_store is None:
+            return web.json_response({"ok": False, "error": "evidence store unavailable"}, status=501)
+        ev_id = request.match_info["evidence_id"]
+        offset = int(request.query.get("offset") or "0")
+        limit = int(request.query.get("limit") or "4000")
+        search = request.query.get("search") or ""
+        res = evidence_store.inspect(ev_id, offset=offset, limit=limit, search=search)
+        return web.json_response(res, status=200 if res.get("ok") else 404)
+
+    async def list_importers_route(_request: web.Request) -> web.Response:
+        if agent_importer is None:
+            return web.json_response({"ok": True, "sources": [], "count": 0})
+        return web.json_response(await asyncio.to_thread(agent_importer, {"action": "discover"}))
+
+    async def run_importer_route(request: web.Request) -> web.Response:
+        if agent_importer is None:
+            return web.json_response({"ok": False, "error": "agent importer unavailable"}, status=501)
+        body = await request.json()
+        try:
+            res = await asyncio.to_thread(
+                agent_importer,
+                {
+                    "action": "import",
+                    "source": str(body.get("source") or ""),
+                    "dry_run": bool(body.get("dry_run", True)),
+                },
+            )
+            return web.json_response(res)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def get_avatar_packs(_request: web.Request) -> web.Response:
+        if avatar_packs_provider is None:
+            return web.json_response({"ok": True, "packs": [], "count": 0})
+        return web.json_response(await asyncio.to_thread(avatar_packs_provider))
+
+    async def get_nexus_jp01_channels(_request: web.Request) -> web.Response:
+        if nexus_provider is None:
+            return web.json_response({"ok": False, "error": "nexus bridge unavailable"}, status=501)
+        return web.json_response(await asyncio.to_thread(nexus_provider, {"action": "jp01_channels"}))
+
+    async def get_nexus_info(request: web.Request) -> web.Response:
+        if nexus_provider is None:
+            return web.json_response({"ok": False, "error": "nexus bridge unavailable"}, status=501)
+        url = request.query.get("station_url") or "http://127.0.0.1:8000"
+        try:
+            return web.json_response(await asyncio.to_thread(nexus_provider, {"action": "info", "station_url": url}))
+        except (PermissionError, ValueError) as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": str(exc), "station_url": url}, status=502)
+
+    async def get_nexus_snapshot(request: web.Request) -> web.Response:
+        if nexus_provider is None:
+            return web.json_response({"ok": False, "error": "nexus bridge unavailable"}, status=501)
+        url = request.query.get("station_url") or "http://127.0.0.1:8000"
+        try:
+            return web.json_response(await asyncio.to_thread(nexus_provider, {"action": "snapshot", "station_url": url}))
+        except (PermissionError, ValueError) as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": str(exc), "station_url": url}, status=502)
+
+    async def get_board(_request: web.Request) -> web.Response:
+        if kanban_board is None:
+            return web.json_response({"ok": True, "columns": {}, "counts": {}, "total": 0})
+        return web.json_response(kanban_board.summary())
+
+    async def create_board_card(request: web.Request) -> web.Response:
+        if kanban_board is None:
+            return web.json_response({"ok": False, "error": "board unavailable"}, status=501)
+        body = await request.json()
+        try:
+            card = kanban_board.create_card(
+                str(body.get("title") or ""),
+                column=str(body.get("column") or "todo"),
+                priority=int(body.get("priority") or 2),
+                tags=body.get("tags") if isinstance(body.get("tags"), list) else (),
+                notes=str(body.get("notes") or ""),
+            )
+            return web.json_response({"ok": True, "card": card.to_dict()}, status=201)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def move_board_card(request: web.Request) -> web.Response:
+        if kanban_board is None:
+            return web.json_response({"ok": False, "error": "board unavailable"}, status=501)
+        cid = request.match_info["card_id"]
+        body = await request.json()
+        try:
+            card = kanban_board.move_card(
+                cid,
+                str(body.get("column") or "in_progress"),
+                notes=str(body["notes"]) if body.get("notes") is not None else None,
+            )
+            return web.json_response({"ok": True, "card": card.to_dict()})
+        except KeyError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=404)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def delete_board_card(request: web.Request) -> web.Response:
+        if kanban_board is None:
+            return web.json_response({"ok": False, "error": "board unavailable"}, status=501)
+        cid = request.match_info["card_id"]
+        ok = kanban_board.delete_card(cid)
+        return web.json_response({"ok": ok, "deleted": cid}, status=200 if ok else 404)
+
+    async def list_reminders_route(request: web.Request) -> web.Response:
+        if reminder_store is None:
+            return web.json_response({"ok": True, "reminders": [], "count": 0})
+        status_filter = request.query.get("status", "pending") or None
+        rows = [r.to_dict() for r in reminder_store.list_reminders(status=status_filter)]
+        return web.json_response({"ok": True, "reminders": rows, "count": len(rows)})
+
+    async def create_reminder_route(request: web.Request) -> web.Response:
+        if reminder_store is None:
+            return web.json_response({"ok": False, "error": "reminders unavailable"}, status=501)
+        body = await request.json()
+        try:
+            rem = reminder_store.schedule(
+                str(body.get("message") or ""),
+                in_minutes=float(body["in_minutes"]) if body.get("in_minutes") is not None else None,
+                at_iso=str(body["at_iso"]) if body.get("at_iso") else None,
+            )
+            return web.json_response({"ok": True, "reminder": rem.to_dict()}, status=201)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def cancel_reminder_route(request: web.Request) -> web.Response:
+        if reminder_store is None:
+            return web.json_response({"ok": False, "error": "reminders unavailable"}, status=501)
+        rid = request.match_info["reminder_id"]
+        ok = reminder_store.cancel(rid)
+        return web.json_response({"ok": ok, "cancelled": rid}, status=200 if ok else 404)
 
     async def get_model_routing(_request: web.Request) -> web.Response:
         if routing_provider is None:
@@ -655,7 +1042,11 @@ def create_gateway_app(
 
     async def list_mcp_servers(_request: web.Request) -> web.Response:
         items = mcp_provider() if mcp_provider is not None else []
-        return web.json_response({"ok": True, "servers": items, "count": len(items)})
+        return web.json_response({"ok": True, "servers": items, "count": len(items), "presets": list_mcp_presets()})
+
+    async def get_mcp_presets(_request: web.Request) -> web.Response:
+        presets = list_mcp_presets()
+        return web.json_response({"ok": True, "presets": presets, "count": len(presets)})
 
     async def list_workflows(request: web.Request) -> web.Response:
         if workflows_engine is None:
@@ -881,6 +1272,102 @@ def create_gateway_app(
         path, mime = hit
         return web.FileResponse(path, headers={"Content-Type": mime})
 
+    def _emit_global(event: str, payload: Mapping[str, Any] | None = None) -> None:
+        if global_bus is not None:
+            try:
+                global_bus.publish(event, dict(payload or {}))
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def stream_global_events(request: web.Request) -> web.StreamResponse:
+        if global_bus is None:
+            return web.json_response({"ok": False, "error": "global event bus unavailable"}, status=501)
+        raw_after = request.headers.get("Last-Event-ID") or request.query.get("after_seq") or "0"
+        try:
+            after_seq = max(0, int(raw_after))
+        except ValueError:
+            after_seq = 0
+
+        resp = web.StreamResponse(
+            status=200,
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await resp.prepare(request)
+        queue, _ = global_bus.subscribe()
+        try:
+            if after_seq > 0:
+                for ev in global_bus.recent(after_seq=after_seq, limit=40):
+                    frame = format_sse(event=str(ev["event"]), data=ev["payload"], seq=int(ev["seq"]))
+                    await resp.write(frame.encode("utf-8"))
+            else:
+                hello = format_sse(
+                    event="global.connected",
+                    data={"seq": global_bus.latest_seq(), "timestamp": time.time()},
+                    seq=global_bus.latest_seq(),
+                )
+                await resp.write(hello.encode("utf-8"))
+            while True:
+                try:
+                    ev = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    frame = format_sse(event=str(ev["event"]), data=ev["payload"], seq=int(ev["seq"]))
+                    await resp.write(frame.encode("utf-8"))
+                except asyncio.TimeoutError:
+                    await resp.write(b": keepalive\n\n")
+        except (ConnectionResetError, asyncio.CancelledError, OSError):
+            pass
+        finally:
+            global_bus.unsubscribe(queue)
+        return resp
+
+    async def list_recent_global_events(request: web.Request) -> web.Response:
+        if global_bus is None:
+            return web.json_response({"ok": True, "events": [], "latest_seq": 0})
+        try:
+            after_seq = max(0, int(request.query.get("after_seq") or "0"))
+            limit = max(1, min(int(request.query.get("limit") or "40"), 120))
+        except ValueError:
+            after_seq, limit = 0, 40
+        return web.json_response({
+            "ok": True,
+            "latest_seq": global_bus.latest_seq(),
+            "events": global_bus.recent(after_seq=after_seq, limit=limit),
+        })
+
+    async def get_cognition_awareness(_request: web.Request) -> web.Response:
+        if awareness_provider is not None:
+            return web.json_response({"ok": True, **awareness_provider()})
+        return web.json_response({
+            "ok": True,
+            "brief": "",
+            "recent_reflections": [],
+            "droid_reflex": droid_embodiment.reflex.status() if droid_embodiment is not None and hasattr(droid_embodiment, "reflex") else None,
+            "world_perceptions": [],
+            "global_event_seq": global_bus.latest_seq() if global_bus is not None else 0,
+        })
+
+    async def get_office_state(_request: web.Request) -> web.Response:
+        if office_provider is not None:
+            return web.json_response({"ok": True, **office_provider()})
+        now = time.time()
+        return web.json_response({
+            "ok": True,
+            "agents": [],
+            "activityFeed": [],
+            "budgets": business_store.budget_summary() if business_store is not None else {},
+            "pendingApprovals": len(store.list_pending_approvals()),
+            "activeSubagents": 0,
+            "estopActive": bool(governor.snapshot().get("estop_active")) if governor is not None else False,
+            "autonomyEnabled": bool(initiative_engine.status().get("config", {}).get("enabled", True)) if initiative_engine is not None else False,
+            "minecraftConnected": False,
+            "droidAwake": False,
+            "updatedAt": now,
+        })
+
     async def get_business_team(_request: web.Request) -> web.Response:
         if business_store is None:
             return web.json_response({"ok": True, "team": [], "budgets": {}})
@@ -1105,6 +1592,130 @@ def create_gateway_app(
             return web.json_response({"ok": True, "hosts": []})
         return web.json_response({"ok": True, "hosts": remote_hosts.list_public()})
 
+    async def discover_remote_routes_route(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Remote discovery is owner-local only."}, status=403)
+        if remote_hosts is None:
+            return web.json_response({"ok": False, "error": "remote hosts unavailable"}, status=501)
+        from jaeger_tools import discover_remote_routes
+        return web.json_response(await asyncio.to_thread(discover_remote_routes, remote_hosts))
+
+    async def connect_remote_host_route(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Remote connect is owner-local only."}, status=403)
+        if remote_hosts is None:
+            return web.json_response({"ok": False, "error": "remote hosts unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        target = str(body.get("target") or "").strip()
+        if not target:
+            return web.json_response({"ok": False, "error": "target is required"}, status=400)
+        from jaeger_tools import RemoteExecError, connect_remote_host
+        try:
+            res = await asyncio.to_thread(
+                connect_remote_host,
+                remote_hosts,
+                target,
+                alias=str(body.get("alias") or ""),
+                user=str(body.get("user") or ""),
+                probe=bool(body.get("probe", True)),
+            )
+            return web.json_response(res, status=200 if res.get("ok") else 404)
+        except RemoteExecError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def authorized_run_route(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized workflows are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        workflow = str(body.get("workflow") or "").strip()
+        params = body.get("params") if isinstance(body.get("params"), Mapping) else {}
+        origin = str(body.get("origin") or "owner")
+        rec = await asyncio.to_thread(authorized_tasks.run_workflow, workflow, params, origin=origin)
+        payload = rec.to_dict()
+        status = 200 if rec.status in ("verified_success", "ambiguous_selection", "blocked_prerequisite") else (
+            403 if rec.status == "denied_grant" else 404
+        )
+        return web.json_response(payload, status=status)
+
+    async def authorized_grants_get(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized grants are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        return web.json_response({
+            "ok": True,
+            "settings": authorized_tasks.grants.get_settings().to_dict(),
+            "folder_grants": [g.to_dict() for g in authorized_tasks.grants.list_folder_grants()],
+        })
+
+    async def authorized_grants_post(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized grants are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        root = str(body.get("root") or "").strip()
+        ops = body.get("operations") if isinstance(body.get("operations"), list) else ["find_metadata"]
+        origin = str(body.get("origin") or "owner")
+        try:
+            grant = await asyncio.to_thread(
+                authorized_tasks.grants.grant_folder,
+                root,
+                operations=[str(o) for o in ops],
+                origin=origin,
+            )
+            return web.json_response({"ok": True, "grant": grant.to_dict()})
+        except PermissionError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=403)
+        except ValueError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    async def authorized_grants_delete(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized grants are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        root = str(body.get("root") or "").strip()
+        removed = await asyncio.to_thread(authorized_tasks.grants.revoke_folder, root, origin=str(body.get("origin") or "owner"))
+        return web.json_response({"ok": removed, "root": root}, status=200 if removed else 404)
+
+    async def authorized_settings_get(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized settings are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        return web.json_response({"ok": True, "settings": authorized_tasks.grants.get_settings().to_dict()})
+
+    async def authorized_settings_put(request: web.Request) -> web.Response:
+        if not _owner_local_only(request):
+            return web.json_response({"ok": False, "error": "Authorized settings are owner-local only."}, status=403)
+        if authorized_tasks is None:
+            return web.json_response({"ok": False, "error": "authorized task engine unavailable"}, status=501)
+        body = await _strict_json_object(request)
+        if isinstance(body, web.Response):
+            return body
+        try:
+            updated = await asyncio.to_thread(
+                authorized_tasks.grants.update_settings,
+                direct_chat=body.get("direct_chat") if "direct_chat" in body else None,
+                owner_autonomy=body.get("owner_autonomy") if "owner_autonomy" in body else None,
+                origin=str(body.get("origin") or "owner"),
+            )
+            return web.json_response({"ok": True, "settings": updated.to_dict()})
+        except PermissionError as exc:
+            return web.json_response({"ok": False, "error": str(exc)}, status=403)
+
     async def upsert_remote_host(request: web.Request) -> web.Response:
         if not _owner_local_only(request):
             return web.json_response({"ok": False, "error": "Remote hosts are owner-local only."}, status=403)
@@ -1200,9 +1811,42 @@ def create_gateway_app(
                     status=409,
                 )
             res = await asyncio.to_thread(emb.act, action, params)
+            _emit_global("droid.changed", {"action": action, "ok": bool(res.get("ok"))})
         else:
             res = emb.act(action, params)
+            if target == "minecraft":
+                _emit_global("minecraft.changed", {"action": action, "ok": bool(res.get("ok"))})
         return web.json_response(dict(res), status=200 if res.get("ok") else 409)
+
+    async def minecraft_radar(request: web.Request) -> web.Response:
+        if minecraft_embodiment is None:
+            return web.json_response({"ok": False, "error": "minecraft embodiment unavailable"}, status=501)
+        try:
+            radius = max(4, min(int(request.query.get("radius") or "8"), 10))
+        except ValueError:
+            radius = 8
+        data = await asyncio.to_thread(minecraft_embodiment.get_radar, radius=radius)
+        return web.json_response(data)
+
+    async def get_droid_reflex(_request: web.Request) -> web.Response:
+        if droid_embodiment is None or not hasattr(droid_embodiment, "reflex"):
+            return web.json_response({"ok": False, "error": "droid reflex unavailable"}, status=501)
+        return web.json_response({"ok": True, "reflex": droid_embodiment.reflex.status()})
+
+    async def post_droid_reflex(request: web.Request) -> web.Response:
+        if not _is_owner_actor(request):
+            return web.json_response({"ok": False, "error": "Droid reflex settings require owner access."}, status=403)
+        if droid_embodiment is None or not hasattr(droid_embodiment, "reflex"):
+            return web.json_response({"ok": False, "error": "droid reflex unavailable"}, status=501)
+        body = await _optional_json_body(request)
+        if body.get("touch"):
+            droid_embodiment.reflex.touch(str(body.get("reason") or "owner_ping"))
+        updated = droid_embodiment.reflex.update_config(
+            auto_park_enabled=bool(body["auto_park_enabled"]) if "auto_park_enabled" in body else None,
+            idle_park_s=float(body["idle_park_s"]) if "idle_park_s" in body else None,
+        )
+        _emit_global("droid.reflex_updated", updated)
+        return web.json_response({"ok": True, "reflex": updated})
 
     async def get_identity(_request: web.Request) -> web.Response:
         if identity_store is None:
@@ -1280,6 +1924,7 @@ def create_gateway_app(
         body = await _optional_json_body(request)
         reason = str(body.get("reason") or "operator")
         res = await asyncio.to_thread(droid_embodiment.sleep, reason=reason)
+        _emit_global("droid.changed", {"action": "sleep", "awake": False, "reason": reason})
         return web.json_response(dict(res), status=200)
 
     async def droid_wake(request: web.Request) -> web.Response:
@@ -1301,6 +1946,7 @@ def create_gateway_app(
         body = await _optional_json_body(request)
         reason = str(body.get("reason") or "operator")
         res = await asyncio.to_thread(droid_embodiment.wake, reason=reason)
+        _emit_global("droid.changed", {"action": "wake", "awake": bool(res.get("awake"))})
         return web.json_response(dict(res), status=200 if res.get("ok") else 409)
 
     async def droid_devices(request: web.Request) -> web.Response:
@@ -1343,6 +1989,10 @@ def create_gateway_app(
                 intent = detect_voice_intent(str(result.get("transcript") or ""))
                 if intent:
                     result = {**result, "intent": intent}
+            if droid_embodiment is not None and hasattr(droid_embodiment, "reflex"):
+                droid_embodiment.reflex.touch("voice_clip")
+            if isinstance(result, dict) and result.get("transcript"):
+                _emit_global("droid.voice_heard", {"transcript": str(result.get("transcript") or "")[:120]})
             return web.json_response(result)
 
     camera_preview_lock = asyncio.Lock()
@@ -1466,6 +2116,38 @@ def create_gateway_app(
         removed = learning_store.forget(eid, cascade=cascade)
         return web.json_response({"ok": True, "removed": removed, "count": len(removed)})
 
+    async def list_wiki_pages(request: web.Request) -> web.Response:
+        if wiki_store is None:
+            return web.json_response({"ok": True, "pages": []})
+        path = (request.query.get("path") or "").strip()
+        if path:
+            try:
+                page = wiki_store.read_page(path)
+                return web.json_response({"ok": True, "page": page})
+            except Exception as exc:  # noqa: BLE001
+                return web.json_response({"ok": False, "error": str(exc)}, status=404)
+        q = (request.query.get("q") or "").strip()
+        if q:
+            hits = wiki_store.search(q, limit=int(request.query.get("limit", "15")))
+            return web.json_response({"ok": True, "results": hits, "count": len(hits)})
+        section = (request.query.get("section") or "").strip() or None
+        pages = wiki_store.browse(section=section)
+        return web.json_response({"ok": True, "pages": pages, "count": len(pages)})
+
+    async def write_wiki_page(request: web.Request) -> web.Response:
+        if wiki_store is None:
+            return web.json_response({"ok": False, "error": "wiki store unavailable"}, status=501)
+        body = await request.json()
+        try:
+            saved = wiki_store.write_page(
+                section=str(body.get("section") or "notes"),
+                name=str(body.get("name") or ""),
+                content=str(body.get("content") or ""),
+            )
+            return web.json_response({"ok": True, "page": saved}, status=201)
+        except Exception as exc:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
     async def list_goals(request: web.Request) -> web.Response:
         if learning_store is None:
             return web.json_response({"ok": True, "goals": []})
@@ -1560,6 +2242,8 @@ def create_gateway_app(
     app.router.add_get("/v1/sessions/{session_id}/job-series/{series_id}", get_job_series)
     app.router.add_patch("/v1/sessions/{session_id}/job-series/{series_id}", update_job_series)
     app.router.add_get("/v1/sessions/{session_id}/events", stream_events)
+    app.router.add_get("/v1/sessions/{session_id}/stream", stream_events)
+    app.router.add_post("/v1/chat/completions", openai_chat_completions)
     app.router.add_get("/v1/approvals", list_approvals)
     app.router.add_post("/v1/approvals/{approval_id}/resolve", resolve_approval)
     app.router.add_get("/v1/tools", list_tools)
@@ -1568,12 +2252,37 @@ def create_gateway_app(
     app.router.add_put("/v1/tools/source", tool_source)
     app.router.add_get("/v1/models", list_models)
     app.router.add_post("/v1/models/select", select_model)
+    app.router.add_get("/v1/models/cookbook", get_model_cookbook)
+    app.router.add_post("/v1/models/roundtable", run_model_roundtable)
+    app.router.add_get("/v1/models/telemetry", get_model_telemetry)
+    app.router.add_get("/v1/models/risk-cards", get_model_risk_cards)
+    app.router.add_post("/v1/models/eval", run_model_eval)
+    app.router.add_post("/v1/research/run", run_deep_research)
+    app.router.add_get("/v1/research/reports", list_research_reports_route)
+    app.router.add_get("/v1/system/mode", get_system_mode)
+    app.router.add_post("/v1/system/mode", set_system_mode)
+    app.router.add_get("/v1/evidence", list_evidence_route)
+    app.router.add_get("/v1/evidence/{evidence_id}", inspect_evidence_route)
+    app.router.add_get("/v1/skills/importers", list_importers_route)
+    app.router.add_post("/v1/skills/import", run_importer_route)
+    app.router.add_get("/v1/avatars/packs", get_avatar_packs)
+    app.router.add_get("/v1/hardware/nexus/jp01-channels", get_nexus_jp01_channels)
+    app.router.add_get("/v1/hardware/nexus/info", get_nexus_info)
+    app.router.add_get("/v1/hardware/nexus/snapshot", get_nexus_snapshot)
+    app.router.add_get("/v1/board", get_board)
+    app.router.add_post("/v1/board/cards", create_board_card)
+    app.router.add_post("/v1/board/cards/{card_id}/move", move_board_card)
+    app.router.add_delete("/v1/board/cards/{card_id}", delete_board_card)
+    app.router.add_get("/v1/reminders", list_reminders_route)
+    app.router.add_post("/v1/reminders", create_reminder_route)
+    app.router.add_delete("/v1/reminders/{reminder_id}", cancel_reminder_route)
     app.router.add_get("/v1/models/routing", get_model_routing)
     app.router.add_put("/v1/models/routing", put_model_routing)
     app.router.add_get("/v1/onboarding/status", get_onboarding_status)
     app.router.add_post("/v1/onboarding/complete", post_onboarding_complete)
     app.router.add_get("/v1/skills", list_skills)
     app.router.add_get("/v1/mcp/servers", list_mcp_servers)
+    app.router.add_get("/v1/mcp/presets", get_mcp_presets)
     app.router.add_post("/v1/mcp/servers", upsert_mcp_server)
     app.router.add_delete("/v1/mcp/servers/{name}", delete_mcp_server)
     app.router.add_post("/v1/mcp/reload", reload_mcp_servers)
@@ -1599,6 +2308,10 @@ def create_gateway_app(
     app.router.add_put("/v1/avatars/{agent_id}", put_avatar)
     app.router.add_put("/v1/avatars/{agent_id}/live", put_avatar_live)
     app.router.add_get("/v1/avatars/{agent_id}/visemes", get_avatar_visemes)
+    app.router.add_get("/v1/events/global", stream_global_events)
+    app.router.add_get("/v1/events/recent", list_recent_global_events)
+    app.router.add_get("/v1/cognition/awareness", get_cognition_awareness)
+    app.router.add_get("/v1/office/state", get_office_state)
     app.router.add_get("/v1/business/team", get_business_team)
     app.router.add_post("/v1/business/projects", create_business_project)
     app.router.add_post("/v1/business/spend", record_business_spend)
@@ -1617,17 +2330,28 @@ def create_gateway_app(
     app.router.add_post("/v1/channels/inbound", channels_inbound)
     app.router.add_post("/v1/sessions/{session_id}/channel-reply", channels_reply)
     app.router.add_get("/v1/remote/hosts", list_remote_hosts)
+    app.router.add_get("/v1/remote/discover", discover_remote_routes_route)
+    app.router.add_post("/v1/remote/connect", connect_remote_host_route)
+    app.router.add_post("/v1/authorized/run", authorized_run_route)
+    app.router.add_get("/v1/authorized/grants", authorized_grants_get)
+    app.router.add_post("/v1/authorized/grants", authorized_grants_post)
+    app.router.add_delete("/v1/authorized/grants", authorized_grants_delete)
+    app.router.add_get("/v1/authorized/settings", authorized_settings_get)
+    app.router.add_put("/v1/authorized/settings", authorized_settings_put)
     app.router.add_put("/v1/remote/hosts/{alias}", upsert_remote_host)
     app.router.add_delete("/v1/remote/hosts/{alias}", delete_remote_host)
     app.router.add_get("/v1/embodiment/status", embodiment_status)
     app.router.add_post("/v1/embodiment/{body}/act", embodiment_act)
     app.router.add_get("/v1/droid/status", droid_status)
+    app.router.add_get("/v1/droid/reflex", get_droid_reflex)
+    app.router.add_post("/v1/droid/reflex", post_droid_reflex)
     app.router.add_post("/v1/droid/sleep", droid_sleep)
     app.router.add_post("/v1/droid/wake", droid_wake)
     app.router.add_get("/v1/droid/devices", droid_devices)
     app.router.add_post("/v1/droid/capture", droid_capture)
     app.router.add_post("/v1/droid/transcribe", droid_transcribe)
     app.router.add_get("/v1/droid/camera-stream", droid_camera_stream, allow_head=False)
+    app.router.add_get("/v1/embodiment/minecraft/radar", minecraft_radar)
     app.router.add_post("/v1/embodiment/minecraft/checkpoint", minecraft_checkpoint)
     app.router.add_post("/v1/presence/voice/hear", presence_voice_hear)
 
@@ -1657,6 +2381,8 @@ def create_gateway_app(
     app.router.add_delete("/v1/memory/learning/{entry_id}", forget_learning)
     app.router.add_get("/v1/memory/goals", list_goals)
     app.router.add_post("/v1/memory/goals", upsert_goal)
+    app.router.add_get("/v1/memory/wiki", list_wiki_pages)
+    app.router.add_post("/v1/memory/wiki", write_wiki_page)
     app.router.add_get("/v1/diagnostics", diagnostics)
 
     # Optional static WebUI bundle serving (SPA fallback to index.html)

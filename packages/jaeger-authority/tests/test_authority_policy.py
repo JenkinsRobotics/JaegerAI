@@ -310,3 +310,24 @@ def test_multiline_quoted_python_and_git_ignore_set_not_false_positive(tmp_path:
     real_git = 'python3 -c "from pathlib import Path; (Path(\'.git\') / \'config\').write_text(\'pwn\')"'
     v_git = engine.evaluate(ActionProposal("shell", {"command": real_git}, workspace=tmp_path))
     assert v_git.decision == DecisionKind.DENY
+
+
+def test_jaeger_venv_shell_execution_allowed_while_secrets_remain_denied(tmp_path: Path) -> None:
+    engine = PolicyEngine()
+    # Jaeger's canonical venv (~/.jaeger/venv) must be runnable in shell (matching Seatbelt sandbox.py)
+    for cmd in (
+        "~/.jaeger/venv/bin/python -c 'print(1)'",
+        "~/.jaeger/venv/bin/pytest -q packages/jaeger-avatar/tests",
+        "$HOME/.jaeger/venv/bin/python --version",
+    ):
+        v = engine.evaluate(ActionProposal("shell", {"command": cmd}, workspace=tmp_path))
+        assert v.decision == DecisionKind.ALLOW, f"Expected venv command allowed: {cmd} -> {v}"
+
+    # Secrets and SQLite stores under ~/.jaeger MUST remain strictly DENIED
+    for bad in (
+        "cat ~/.jaeger/secrets.env",
+        "sqlite3 ~/.jaeger/gateway_sessions.sqlite3 .tables",
+        "cat ~/.ssh/id_rsa",
+    ):
+        v = engine.evaluate(ActionProposal("shell", {"command": bad}, workspace=tmp_path))
+        assert v.decision == DecisionKind.DENY, f"Expected DENY for {bad} -> {v}"
