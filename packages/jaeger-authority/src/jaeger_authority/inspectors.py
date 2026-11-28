@@ -41,7 +41,7 @@ _JAEGER_DENIED_FILENAMES = frozenset({
 })
 _PROTECTED_WORKSPACE_SEGMENTS = (".git/hooks", ".git/config", ".jaeger")
 _SENSITIVE_SHELL_RE = re.compile(
-    r"(?:~|\$HOME|/Users/[^/\s]+|/home/[^/\s]+)/\.(?:ssh|aws|gnupg|kube|jaeger)\b"
+    r"(?:~|\$HOME|/Users/[^/\s]+|/home/[^/\s]+)/\.(?:ssh|aws|gnupg|kube|jaeger(?!/venv(?:/|\b)))\b"
     r"|(?:/etc/(?:passwd|shadow|sudoers))"
     r"|(?:\.git/(?:hooks|config)\b)",
     re.IGNORECASE,

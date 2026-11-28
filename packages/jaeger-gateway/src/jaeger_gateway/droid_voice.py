@@ -80,6 +80,8 @@ def transcribe_clip(audio: bytes, *, enroll: bool = False) -> dict[str, str]:
             )
             segments = json.loads(report.with_suffix(".json").read_text())["transcription"]
             transcript = " ".join(segment["text"].strip() for segment in segments).replace("[BLANK_AUDIO]", "").strip()
+            if not transcript or re.fullmatch(r"[\[\(\*♪].*[\]\)\*♪]", transcript):
+                return {"transcript": "", "notice": "Silence or non-speech audio ignored."}
             intent = detect_voice_intent(transcript)
             result: dict[str, str] = {"transcript": transcript}
             if intent:

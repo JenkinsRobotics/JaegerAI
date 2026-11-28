@@ -1,7 +1,9 @@
-"""Pluggable ExecutionBackend protocol and opt-in allowlisted SSHBackend.
+"""Pluggable ExecutionBackend protocol, opt-in allowlisted SSHBackend & Tailscale discovery.
 
 Respects JaegerAI Golden Rules:
 - Zero hardcoded user IPs, hostnames, or credentials (config lives in `<state_dir>/remote_hosts.json`).
+- Tailscale-first trust boundary: `discover_tailscale_peers` and `register_tailscale_peer`
+  only admit machines verified to be on the owner's active Tailscale tailnet.
 - Fail-closed: only explicitly enabled hosts in the owner allowlist can be targeted.
 - Non-interactive (`BatchMode=yes`), bounded timeouts, strict input validation, and
   automatic secret redaction on command outputs.
@@ -12,10 +14,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 try:
     from jaeger_authority import redact_text
@@ -30,12 +33,24 @@ __all__ = [
     "RemoteHostConfig",
     "RemoteHostRegistry",
     "SSHBackend",
+    "TailscalePeer",
+    "discover_tailscale_peers",
+    "find_tailscale_bin",
+    "probe_tailscale_ssh",
+    "register_tailscale_peer",
+    "ssh_setup_hint",
 ]
 
 _ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$")
 _USER_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$")
 _VALID_STRICT_MODES = frozenset({"yes", "accept-new"})
+_TAILSCALE_CANDIDATES = (
+    "/opt/homebrew/bin/tailscale",
+    "/usr/local/bin/tailscale",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    "/usr/bin/tailscale",
+)
 
 
 class RemoteExecError(RuntimeError):
@@ -46,6 +61,314 @@ class ExecutionBackend(Protocol):
     """Minimal pluggable execution backend interface (local, SSH, container, etc.)."""
 
     def run(self, command: str, *, timeout_s: float = 30.0) -> dict[str, Any]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class TailscalePeer:
+    """One device discovered on the owner's active Tailscale tailnet."""
+
+    hostname: str
+    dns_name: str
+    tailscale_ip: str
+    os_name: str
+    online: bool
+    has_ssh_host_keys: bool = False
+    is_self: bool = False
+
+    def suggested_alias(self) -> str:
+        raw = re.sub(r"[^A-Za-z0-9._-]+", "-", (self.hostname or self.tailscale_ip).strip()).strip("-._")
+        if not raw or not _ALIAS_RE.match(raw):
+            raw = f"ts-{self.tailscale_ip.replace('.', '-')}"
+        return raw[:48].lower()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hostname": self.hostname,
+            "dns_name": self.dns_name,
+            "tailscale_ip": self.tailscale_ip,
+            "os": self.os_name,
+            "online": self.online,
+            "has_ssh_host_keys": self.has_ssh_host_keys,
+            "is_self": self.is_self,
+            "suggested_alias": self.suggested_alias(),
+        }
+
+
+def find_tailscale_bin() -> str | None:
+    """Locate the local ``tailscale`` CLI binary on PATH or standard macOS/Linux paths."""
+    found = shutil.which("tailscale")
+    if found:
+        return found
+    for cand in _TAILSCALE_CANDIDATES:
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
+def _parse_tailscale_peer(raw: Mapping[str, Any], *, is_self: bool = False) -> TailscalePeer | None:
+    ips = [str(ip).strip() for ip in (raw.get("TailscaleIPs") or ()) if str(ip).strip()]
+    ipv4 = next((ip for ip in ips if "." in ip), ips[0] if ips else "")
+    if not ipv4:
+        return None
+    hostname = str(raw.get("HostName") or "").strip() or ipv4
+    dns_name = str(raw.get("DNSName") or "").strip().rstrip(".")
+    os_name = str(raw.get("OS") or "").strip()
+    online = bool(raw.get("Online", is_self))
+    ssh_keys = raw.get("sshHostKeys") or raw.get("SSHHostKeys") or []
+    return TailscalePeer(
+        hostname=hostname,
+        dns_name=dns_name,
+        tailscale_ip=ipv4,
+        os_name=os_name,
+        online=online,
+        has_ssh_host_keys=bool(ssh_keys),
+        is_self=is_self,
+    )
+
+
+def discover_tailscale_peers(
+    *,
+    tailscale_bin: str | None = None,
+    timeout_s: float = 8.0,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> dict[str, Any]:
+    """Discover machines on the owner's active Tailscale tailnet via ``tailscale status --json``."""
+    binary = tailscale_bin or find_tailscale_bin()
+    if not binary:
+        return {
+            "ok": False,
+            "error": "Tailscale CLI not found on this machine. Install/sign into Tailscale first.",
+            "self": None,
+            "peers": [],
+        }
+    exec_fn = runner or subprocess.run
+    try:
+        proc = exec_fn(
+            [binary, "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=max(2.0, min(float(timeout_s), 20.0)),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "error": f"tailscale status failed: {exc}", "self": None, "peers": []}
+    if proc.returncode != 0:
+        err = redact_text((proc.stderr or proc.stdout or "").strip())[:400]
+        return {
+            "ok": False,
+            "error": err or f"tailscale status exited {proc.returncode}",
+            "self": None,
+            "peers": [],
+        }
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        return {"ok": False, "error": f"invalid tailscale status JSON: {exc}", "self": None, "peers": []}
+
+    self_peer = _parse_tailscale_peer(payload.get("Self") or {}, is_self=True) if isinstance(payload.get("Self"), Mapping) else None
+    peers: list[TailscalePeer] = []
+    raw_peers = payload.get("Peer")
+    if isinstance(raw_peers, Mapping):
+        for entry in raw_peers.values():
+            if not isinstance(entry, Mapping):
+                continue
+            parsed = _parse_tailscale_peer(entry, is_self=False)
+            if parsed is not None:
+                peers.append(parsed)
+    peers.sort(key=lambda p: (not p.online, p.hostname.lower()))
+    return {
+        "ok": True,
+        "backend_state": str(payload.get("BackendState") or ""),
+        "self": self_peer.to_dict() if self_peer else None,
+        "peers": [p.to_dict() for p in peers],
+        "online_count": sum(1 for p in peers if p.online),
+        "total_count": len(peers),
+    }
+
+
+def ssh_setup_hint(os_name: str, *, tailscale_ip: str = "", hostname: str = "") -> str:
+    """Return a concise, single-step OS command to enable SSH/Tailscale SSH on the target machine."""
+    low = (os_name or "").strip().lower()
+    target = hostname or tailscale_ip or "the target computer"
+    if "win" in low:
+        return (
+            f"On {target} (PowerShell as Administrator), enable OpenSSH Server once: "
+            "Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; "
+            "Start-Service sshd; Set-Service -Name sshd -StartupType Automatic"
+        )
+    if "mac" in low or "darwin" in low:
+        return (
+            f"On {target}, enable Tailscale SSH once with `tailscale set --ssh` "
+            "(or turn on System Settings -> General -> Sharing -> Remote Login)."
+        )
+    return f"On {target}, enable Tailscale SSH once with `sudo tailscale set --ssh`."
+
+
+def probe_tailscale_ssh(
+    hostname: str,
+    *,
+    user: str = "",
+    port: int = 22,
+    identity_file: str = "",
+    os_name: str = "",
+    ssh_bin: str = "ssh",
+    timeout_s: float = 8.0,
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> dict[str, Any]:
+    """Run a non-interactive SSH connectivity check (BatchMode=yes) against a Tailscale peer."""
+    if not _HOST_RE.match(hostname):
+        raise RemoteExecError(f"Invalid hostname {hostname!r}")
+    if user and not _USER_RE.match(user):
+        raise RemoteExecError(f"Invalid SSH user {user!r}")
+    argv = [
+        ssh_bin,
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=5",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-p", str(int(port)),
+    ]
+    if identity_file:
+        argv.extend(["-i", str(Path(identity_file).expanduser())])
+    target = f"{user}@{hostname}" if user else hostname
+    argv.extend(["--", target, "echo JAEGER_SSH_OK"])
+    exec_fn = runner or subprocess.run
+    try:
+        proc = exec_fn(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=max(2.0, min(float(timeout_s), 20.0)),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "reachable": False,
+            "target": target,
+            "error": redact_text(str(exc))[:400],
+            "setup_hint": ssh_setup_hint(os_name, tailscale_ip=hostname),
+        }
+    out = redact_text((proc.stdout or "").strip())
+    err = redact_text((proc.stderr or "").strip())
+    ok = proc.returncode == 0 and "JAEGER_SSH_OK" in out
+    res: dict[str, Any] = {
+        "reachable": ok,
+        "target": target,
+        "returncode": proc.returncode,
+        "stdout": out[:500],
+        "stderr": err[:500],
+    }
+    if not ok:
+        res["setup_hint"] = ssh_setup_hint(os_name, tailscale_ip=hostname)
+    return res
+
+
+def register_tailscale_peer(
+    registry: "RemoteHostRegistry",
+    peer_query: str,
+    *,
+    alias: str = "",
+    user: str = "",
+    port: int = 22,
+    identity_file: str = "",
+    probe: bool = True,
+    tailscale_bin: str | None = None,
+    ssh_bin: str = "ssh",
+    runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+) -> dict[str, Any]:
+    """Verify *peer_query* exists on the owner's Tailscale tailnet, register it, and probe SSH.
+
+    Enforces Tailscale as the owner's sole remote-trust boundary: unknown/external hosts
+    not present on the active tailnet are rejected.
+    """
+    q = (peer_query or "").strip()
+    if not q:
+        raise RemoteExecError("peer hostname, DNS name, or Tailscale IP is required")
+    discovered = discover_tailscale_peers(tailscale_bin=tailscale_bin, runner=runner)
+    if not discovered.get("ok"):
+        return {
+            "ok": False,
+            "error": discovered.get("error") or "Unable to inspect Tailscale tailnet",
+        }
+    q_low = q.lower()
+    matched: dict[str, Any] | None = None
+    for peer in discovered.get("peers") or ():
+        candidates = {
+            str(peer.get("hostname") or "").lower(),
+            str(peer.get("dns_name") or "").lower(),
+            str(peer.get("tailscale_ip") or "").lower(),
+            str(peer.get("suggested_alias") or "").lower(),
+        }
+        if q_low in candidates:
+            matched = peer
+            break
+    if matched is None:
+        # Substring fallback if unique among tailnet peers (e.g. "rack" -> "RackPCExample")
+        partials = [
+            p for p in (discovered.get("peers") or ())
+            if q_low in str(p.get("hostname") or "").lower()
+            or q_low in str(p.get("dns_name") or "").lower()
+        ]
+        if len(partials) == 1:
+            matched = partials[0]
+        elif len(partials) > 1:
+            names = [p.get("hostname") for p in partials]
+            return {
+                "ok": False,
+                "error": f"Ambiguous Tailscale peer {q!r}; matches: {names}. Specify the exact hostname or IP.",
+                "matches": partials,
+            }
+    if matched is None:
+        return {
+            "ok": False,
+            "error": (
+                f"No device matching {q!r} found on your Tailscale network. "
+                "Add that computer to your Tailscale account first, then ask me to connect again."
+            ),
+            "available_peers": [
+                {"hostname": p.get("hostname"), "tailscale_ip": p.get("tailscale_ip"), "online": p.get("online"), "os": p.get("os")}
+                for p in (discovered.get("peers") or ())
+            ],
+        }
+
+    chosen_alias = (alias or str(matched.get("suggested_alias") or "")).strip().lower()
+    target_ip = str(matched["tailscale_ip"])
+    os_name = str(matched.get("os") or "")
+    notes = f"Tailscale peer {matched.get('hostname')} ({os_name or 'unknown OS'})"
+    cfg = RemoteHostConfig(
+        alias=chosen_alias,
+        hostname=target_ip,
+        user=(user or "").strip(),
+        port=int(port or 22),
+        identity_file=(identity_file or "").strip(),
+        strict_host_key="accept-new",
+        enabled=True,
+        notes=notes[:240],
+    )
+    saved = registry.upsert(cfg)
+    result: dict[str, Any] = {
+        "ok": True,
+        "registered": saved.to_public_dict(),
+        "peer": matched,
+        "registry_path": str(registry.path),
+    }
+    if probe:
+        if not matched.get("online"):
+            result["ssh_probe"] = {
+                "reachable": False,
+                "error": f"{matched.get('hostname')} is currently offline on Tailscale.",
+                "setup_hint": f"Power on {matched.get('hostname')} and make sure Tailscale is connected.",
+            }
+        else:
+            result["ssh_probe"] = probe_tailscale_ssh(
+                target_ip,
+                user=saved.user,
+                port=saved.port,
+                identity_file=saved.identity_file,
+                os_name=os_name,
+                ssh_bin=ssh_bin,
+                runner=runner,
+            )
+    return result
 
 
 @dataclass(frozen=True, slots=True)

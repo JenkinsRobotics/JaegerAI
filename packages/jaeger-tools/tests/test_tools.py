@@ -204,3 +204,50 @@ def test_builtin_web_fetch_429_and_macos_mail_contract(tmp_path: Path, monkeypat
         assert "Work: INBOX" in mail_res.output
         assert captured == {"timeout_seconds": 20.0, "target": "mail"}
 
+
+def test_tailscale_peer_discovery_and_verified_host_registration(tmp_path: Path) -> None:
+    import json
+    import subprocess
+    from jaeger_tools import RemoteHostRegistry, discover_tailscale_peers, register_tailscale_peer
+
+    fake_status = json.dumps({
+        "BackendState": "Running",
+        "Self": {"HostName": "MacStudio", "DNSName": "macstudio.tail.ts.net.", "TailscaleIPs": ["100.64.0.20"], "OS": "macOS"},
+        "Peer": {
+            "k1": {"HostName": "RackPCExample", "DNSName": "rackpcexample.tail.ts.net.", "TailscaleIPs": ["100.64.0.21"], "OS": "windows", "Online": True},
+            "k2": {"HostName": "LabPi", "DNSName": "labpi.tail.ts.net.", "TailscaleIPs": ["100.64.1.9"], "OS": "linux", "Online": False},
+        },
+    })
+
+    def fake_runner_ssh_closed(argv, **kwargs):
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=fake_status, stderr="")
+        return subprocess.CompletedProcess(argv, 255, stdout="", stderr="Connection refused")
+
+    disc = discover_tailscale_peers(tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_closed)
+    assert disc["ok"] is True
+    assert disc["online_count"] == 1 and disc["total_count"] == 2
+    assert disc["peers"][0]["hostname"] == "RackPCExample"
+
+    reg = RemoteHostRegistry(tmp_path / "remote_hosts.json")
+    # Non-Tailscale IP is rejected (Tailscale is the sole trust boundary)
+    denied = register_tailscale_peer(reg, "192.168.1.99", tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_closed)
+    assert denied["ok"] is False and "Tailscale" in denied["error"]
+
+    # Substring "rack" uniquely matches RackPCExample, writes remote_hosts.json, and gives Windows OpenSSH hint
+    res = register_tailscale_peer(reg, "rack", user="matthew", tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_closed)
+    assert res["ok"] is True
+    assert res["registered"]["alias"] == "rackpcexample"
+    assert res["registered"]["hostname"] == "100.64.0.21"
+    assert res["ssh_probe"]["reachable"] is False
+    assert "OpenSSH.Server" in res["ssh_probe"]["setup_hint"]
+
+    # When SSH responds, probe succeeds cleanly
+    def fake_runner_ssh_ok(argv, **kwargs):
+        if "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout=fake_status, stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout="JAEGER_SSH_OK\n", stderr="")
+
+    ok_res = register_tailscale_peer(reg, "RackPCExample", tailscale_bin="/usr/bin/tailscale", runner=fake_runner_ssh_ok)
+    assert ok_res["ok"] is True and ok_res["ssh_probe"]["reachable"] is True
+

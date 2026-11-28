@@ -116,7 +116,9 @@ from jaeger_tools import (
     SSHBackend,
     ToolRegistry,
     ToolSpec,
+    discover_tailscale_peers,
     register_builtin_tools,
+    register_tailscale_peer,
     web_search,
 )
 from jaeger_vision import RollingFrameBuffer
@@ -379,6 +381,10 @@ class ModularGatewayRuntime:
 
         safe_read_roots = (
             self.state_dir / "offload",
+            self.state_dir / "reports",
+            self.state_dir / "venv",
+            self.state_dir / "MEMORY.md",
+            self.state_dir / "USER.md",
             self.state_dir / "instances" / "truth" / "logs" / "tool_results",
         )
         self.policy = PolicyEngine(
@@ -1734,7 +1740,7 @@ class ModularGatewayRuntime:
                 },
             },
             lambda args: self.store.index_directory(
-                str(args["root"]) if args.get("root") else str(self.workspace),
+                str(Path(str(args["root"])).expanduser()) if args.get("root") else str(self.workspace),
                 max_files=int(args.get("max_files") or 2000),
                 max_file_bytes=int(args.get("max_file_bytes") or 262144),
             ),
@@ -1963,6 +1969,41 @@ class ModularGatewayRuntime:
             {"type": "object", "properties": {}},
             lambda _args: {"hosts": self.remote_hosts.list_public()},
             read_only=True,
+            source="jaeger-tools",
+        )
+        _reg(
+            "tailscale_peers",
+            "Discover all computers on the owner's active Tailscale network (hostname, IP, OS, online status). Read-only.",
+            {"type": "object", "properties": {}},
+            lambda _args: discover_tailscale_peers(),
+            read_only=True,
+            source="jaeger-tools",
+        )
+        _reg(
+            "tailscale_connect",
+            "Register a verified Tailscale peer into remote_hosts.json and probe SSH connectivity (returns exact 1-line setup command if SSH isn't enabled yet).",
+            {
+                "type": "object",
+                "properties": {
+                    "peer": {"type": "string", "description": "Tailscale hostname, DNS name, or IP (e.g. RackPCExample)"},
+                    "alias": {"type": "string", "description": "Optional short alias for remote_exec"},
+                    "user": {"type": "string", "description": "Optional SSH username"},
+                    "port": {"type": "integer", "default": 22},
+                    "identity_file": {"type": "string", "description": "Optional SSH private key path"},
+                    "probe": {"type": "boolean", "default": True},
+                },
+                "required": ["peer"],
+            },
+            lambda args: register_tailscale_peer(
+                self.remote_hosts,
+                str(args.get("peer") or ""),
+                alias=str(args.get("alias") or ""),
+                user=str(args.get("user") or ""),
+                port=int(args.get("port") or 22),
+                identity_file=str(args.get("identity_file") or ""),
+                probe=bool(args.get("probe", True)),
+            ),
+            read_only=False,
             source="jaeger-tools",
         )
         _reg(
@@ -2700,12 +2741,15 @@ class ModularGatewayRuntime:
                     ("\n" + PLAN_MODE_SYSTEM_NOTE) if self._agent_mode == AgentMode.PLAN else ""
                 ) + (
                     "\nConversation & tone: Talk naturally and directly like a trusted partner—match the user's length and register. "
+                    "Never preach, lecture, scold, or deliver corporate-HR ethics speeches. If something is genuinely unavailable or blocked by a hard limit, state the plain technical fact in one short, neutral sentence and immediately offer the working path. "
                     "Skip repetitive boilerplate openers (e.g. 'Honest answer:', 'with one honest caveat', 'I have to be straight with you') "
                     "and formal '## Progress report' templates unless the user asks for a structured report or a long task stops mid-way. "
                     "For ambiguous one-word prompts like 'Go', ask what they want before running tools."
-                    "\nTask boundaries & live state: Treat one-off constraints from earlier messages (such as 'no shell/git for this edit') as scoped ONLY to that specific task; "
+                    "\nTask boundaries, indexing & Tailscale remote devices: Treat one-off constraints from earlier messages (such as 'no shell/git for this edit') as scoped ONLY to that specific task; "
                     "never carry temporary turn restrictions into unrelated later topics or claim shell/tools are 'off-limits this session'. Only E-Stop, approval gates, sandbox boundaries, and explicit standing owner rules persist. "
-                    "Use your real live tools: `execute_code` for quick Python checks (instead of leaving throwaway scripts in the repo), `index_workspace`/`search_workspace` for FTS5 file search, `remote_hosts`/`remote_exec` for owner-allowlisted remote machines (such as a rack PC), `minecraft_status`/`minecraft_act` for live Minecraft, and `web_search`/`web_fetch` for online research. "
+                    "Be action-first: when the owner asks you to index folders on this Mac (e.g. ~/Documents, ~/Desktop, ~/GitHub), call `index_workspace` and `search_workspace` directly instead of refusing. "
+                    "When the owner asks you to connect to another one of their computers (such as a rack PC or laptop), Tailscale is the owner's trust boundary: first call `tailscale_peers` to inspect their tailnet, call `tailscale_connect` to register the verified peer into remote_hosts.json and test SSH automatically, and then use `remote_exec` to handle the rest. If the machine is not on Tailscale yet or SSH isn't enabled yet, tell the owner in one line to add it to Tailscale or run the exact 1-line setup command from `tailscale_connect` — never make a non-coder hand-edit JSON files. "
+                    "Use your real live tools: `execute_code` for quick Python checks, `index_workspace`/`search_workspace` for FTS5 file search, `tailscale_peers`/`tailscale_connect`/`remote_hosts`/`remote_exec` for Tailscale-verified machines, `minecraft_status`/`minecraft_act` for live Minecraft, and `web_search`/`web_fetch` for online research. "
                     "Inspect available tools and do safe independent work before declaring a blocker, ask before ambiguous destructive steps, and distinguish editing source files on disk from rebuilding/restarting the live Gateway or WebUI bundle."
                     "\nHardware & media: When asked what you see, call droid_look first. "
                     "When asked to turn Droid mode on/off, wake Droid, go to sleep, or park the camera, call droid_act with wake or sleep. "
